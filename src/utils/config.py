@@ -78,11 +78,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _override_from_env(config: dict) -> None:
-    """Override LLM config entries from environment variables."""
-    provider = os.getenv("LLM_PROVIDER")
-    if provider:
-        config.setdefault("llm", {})["provider"] = provider
-
+    """Override config entries from environment variables."""
     log_level = os.getenv("LOG_LEVEL")
     if log_level:
         config.setdefault("output", {})["log_level"] = log_level

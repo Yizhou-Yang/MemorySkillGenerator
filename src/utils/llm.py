@@ -1,7 +1,7 @@
 """
 Unified LLM API wrapper.
 
-Provides a single interface for calling DeepSeek / HunYuan and other
+Provides a single interface for calling DeepSeek and other
 OpenAI-compatible APIs, with built-in retry, token counting, and logging.
 """
 
@@ -19,23 +19,14 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 class LLMClient:
     """Unified LLM API client."""
 
-    # Per-provider default settings
-    PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
-        "deepseek": {
-            "api_key_env": "DEEPSEEK_API_KEY",
-            "base_url_env": "DEEPSEEK_BASE_URL",
-            "base_url_default": "https://api.deepseek.com/v1",
-            "model_env": "DEEPSEEK_MODEL",
-            "model_default": "deepseek-chat",
-        },
-        "hunyuan": {
-            "api_key_env": "HUNYUAN_API_KEY",
-            "base_url_env": "HUNYUAN_BASE_URL",
-            "base_url_default": "https://api.hunyuan.cloud.tencent.com/v1",
-            "model_env": "HUNYUAN_MODEL",
-            "model_default": "hunyuan-turbo",
-        },
-    }
+    # Default API settings for DeepSeek.
+    # Official API: https://platform.deepseek.com/api_keys
+    # Models: deepseek-chat (V3), deepseek-reasoner (R1)
+    API_KEY_ENV = "DEEPSEEK_API_KEY"
+    BASE_URL_ENV = "DEEPSEEK_BASE_URL"
+    BASE_URL_DEFAULT = "https://api.deepseek.com/v1"
+    MODEL_ENV = "DEEPSEEK_MODEL"
+    MODEL_DEFAULT = "deepseek-chat"
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """
@@ -45,28 +36,21 @@ class LLMClient:
             config: LLM config dict from the ``llm`` section of configs/default.yaml.
         """
         config = config or {}
-        self.provider: str = config.get(
-            "provider", os.getenv("LLM_PROVIDER", "deepseek")
-        )
         self.temperature: float = config.get("temperature", 0.7)
         self.max_tokens: int = config.get("max_tokens", 4096)
         self.timeout: int = config.get("timeout", 120)
         self.max_retries: int = config.get("max_retries", 3)
 
-        # Resolve provider-specific API settings
-        defaults = self.PROVIDER_DEFAULTS.get(
-            self.provider, self.PROVIDER_DEFAULTS["deepseek"]
-        )
-
-        api_key = os.getenv(defaults["api_key_env"], "")
-        base_url = os.getenv(defaults["base_url_env"], defaults["base_url_default"])
+        # Resolve API settings from env vars, falling back to defaults
+        api_key = os.getenv(self.API_KEY_ENV, "")
+        base_url = os.getenv(self.BASE_URL_ENV, self.BASE_URL_DEFAULT)
         self.model: str = config.get(
-            "model", os.getenv(defaults["model_env"], defaults["model_default"])
+            "model", os.getenv(self.MODEL_ENV, self.MODEL_DEFAULT)
         )
 
         if not api_key:
             logger.warning(
-                f"{defaults['api_key_env']} is not set — LLM calls will fail. "
+                f"{self.API_KEY_ENV} is not set — LLM calls will fail. "
                 f"Please configure it in the .env file."
             )
 
@@ -80,9 +64,7 @@ class LLMClient:
         self._total_calls: int = 0
         self._total_tokens: int = 0
 
-        logger.info(
-            f"LLM client initialised: provider={self.provider}, model={self.model}"
-        )
+        logger.info(f"LLM client initialised: model={self.model}")
 
     @retry(
         stop=stop_after_attempt(3),
