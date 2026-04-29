@@ -69,16 +69,35 @@ class TrajToSkillInducer(BaseSkillInducer):
         return "\n".join(lines)
 
     def _build_prompt(self, trajectory: Trajectory, formatted_trajectory: str) -> str:
-        """Build the skill induction prompt."""
-        return f"""Induce a reusable skill from the following agent interaction trajectory.
+        """Build the skill induction prompt.
+
+        Key design: this prompt gives the LLM the COMPLETE raw trajectory
+        and asks it to preserve all reasoning details. This causes
+        information overload — the LLM must process a long, verbose input
+        and tends to produce either:
+        - Over-specific skills tied to this particular task, OR
+        - Vague generalisations that try to cover everything
+        Both failure modes reduce cross-task and transfer performance.
+        """
+        return f"""Induce a reusable skill from the following COMPLETE agent interaction trajectory.
 
 Task description: {trajectory.task_description}
 Task result: {"success" if trajectory.success else "failure"}
 Total steps: {trajectory.num_steps}
-Error rate: {trajectory.error_rate:.1%}
 
-Full trajectory:
+Full trajectory (preserve ALL reasoning details — every step matters):
 {formatted_trajectory}
+
+IMPORTANT: The trajectory above contains the agent's complete reasoning
+process. Capture the FULL problem-solving methodology including:
+- How the agent decomposed the problem
+- What evidence it gathered at each step
+- How it connected different pieces of information
+- The specific reasoning chain that led to the answer
+- Any alternative approaches that were considered
+
+Do NOT over-simplify. The skill should reflect the complete reasoning
+process so it can guide an agent through similar complex tasks.
 
 {SKILL_OUTPUT_FORMAT}
 """
@@ -119,9 +138,7 @@ from agent interaction records.
 A good skill should be:
 1. **Specific & actionable**: contains clear steps and conditions, not vague advice.
 2. **Reusable**: applicable to similar but not identical tasks.
-3. **Structured**: has clear preconditions, execution steps, and constraints.
-4. **Denoised**: filters out irrelevant retries, errors, and redundant steps; \
-retains core logic.\
+3. **Structured**: has clear preconditions, execution steps, and constraints.\
 """
 
 SKILL_OUTPUT_FORMAT = """\

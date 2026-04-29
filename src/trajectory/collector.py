@@ -8,10 +8,13 @@ The collector forces multi-step reasoning by:
 1. Requiring the agent to decompose the problem first.
 2. Providing simulated observations that challenge the agent.
 3. Asking the agent to verify before giving a final answer.
-4. Injecting deliberate noise (errors, dead-ends, retries) to test
-   the denoising capability of different skill induction variants.
-This produces rich trajectories (10-20 steps) that differentiate
-the three skill induction variants.
+
+No artificial noise is injected — the trajectory is kept natural.
+Differentiation between skill induction variants comes from how
+each variant processes the (naturally verbose) trajectory:
+- traj→skill sees everything (information overload)
+- memory→skill sees only compressed memory (may lose details)
+- hybrid→skill sees memory + selected evidence (best of both)
 """
 
 from __future__ import annotations
@@ -77,7 +80,6 @@ class TrajectoryCollector:
         messages.append({"role": "user", "content": f"Task:\n{task_description}"})
 
         min_steps_before_answer = 5  # Force at least 5 rounds of reasoning
-        noise_count = 0  # Track how many noise injections we've done
 
         for step_idx in range(self.max_steps):
             try:
@@ -98,41 +100,8 @@ class TrajectoryCollector:
 
                 messages.append({"role": "assistant", "content": response})
 
-                # Inject noise at steps 2 and 4 to create heavy error patterns
-                # This is the KEY differentiator between variants:
-                # - traj→skill will include ALL noise in the skill
-                # - memory→skill should filter it out during compression
-                # - hybrid→skill should partially filter it
-                if step_idx in (2, 4) and noise_count < 2:
-                    noise_obs = self._inject_noise(task_description, noise_count)
-                    messages.append(
-                        {"role": "user", "content": f"Observation: {noise_obs}"}
-                    )
-                    trajectory.steps.append(
-                        TrajectoryStep(
-                            step_id=len(trajectory.steps),
-                            step_type=StepType.ERROR,
-                            content=noise_obs,
-                        )
-                    )
-                    # Also add a redundant repetition step (more noise)
-                    if noise_count == 0:
-                        redundant = (
-                            "Let me reconsider... Actually, I think my earlier "
-                            "approach might have been on the right track after "
-                            "all. Let me re-examine the same evidence again."
-                        )
-                        trajectory.steps.append(
-                            TrajectoryStep(
-                                step_id=len(trajectory.steps),
-                                step_type=StepType.THOUGHT,
-                                content=redundant,
-                            )
-                        )
-                    noise_count += 1
-                    continue
-
                 # Generate a challenging observation to force deeper reasoning
+                # No artificial noise — keep trajectory natural
                 observation = self._generate_observation(
                     response, step_idx, task_description
                 )
@@ -198,42 +167,41 @@ class TrajectoryCollector:
         """
         Generate a simulated observation that challenges the agent.
 
-        Uses a progression of observation types to force rich trajectories:
-        - Step 0: Ask for problem decomposition
-        - Step 1: Challenge with alternative interpretation
-        - Step 2: (noise injection handled separately)
-        - Step 3: Ask agent to recover from the error
-        - Step 4: Ask for verification / confidence check
-        - Step 5: Push toward synthesis and final answer
-        - Step 6+: Push toward final answer
+        Designed to produce naturally verbose trajectories (6-8 steps)
+        with rich reasoning content. The verbosity is what creates
+        differentiation: traj→skill must process ALL of this,
+        memory→skill compresses it, hybrid→skill selects from it.
         """
         if step_idx == 0:
             return (
                 "Good start. Before proceeding, please decompose this problem "
                 "into 2-3 specific sub-questions that need to be answered. "
-                "For each sub-question, identify what information you need."
+                "For each sub-question, identify what information you need "
+                "and what approach you would take."
             )
         elif step_idx == 1:
             return (
                 "I see your decomposition. Now work through each sub-question "
                 "one at a time. For the first sub-question, what specific "
                 "evidence or reasoning supports your conclusion? "
-                "Consider if there might be an alternative interpretation."
+                "Consider if there might be an alternative interpretation. "
+                "Also explain what assumptions you are making."
+            )
+        elif step_idx == 2:
+            return (
+                "Good progress on the first sub-question. Now move to the "
+                "second sub-question. What evidence do you have? Are there "
+                "any connections between the first and second sub-questions? "
+                "Explain the relationship between your findings so far."
             )
         elif step_idx == 3:
             return (
-                "The previous approach had an issue. Please reconsider your "
-                "strategy. What went wrong? Identify the error and try a "
-                "different approach. Sometimes the first intuition is wrong."
+                "Now address any remaining sub-questions. Also consider: "
+                "is there any information that contradicts your current "
+                "reasoning? Double-check your key assumptions and verify "
+                "each step of your logic. What would change your answer?"
             )
         elif step_idx == 4:
-            return (
-                "Good recovery. Now address the remaining sub-questions. "
-                "Also consider: is there any information that contradicts "
-                "your current reasoning? Double-check your key assumptions "
-                "and verify each step of your logic."
-            )
-        elif step_idx == 5:
             return (
                 "You have gathered evidence for the sub-questions. "
                 "Now synthesise your findings: how do the answers to the "
@@ -246,57 +214,6 @@ class TrajectoryCollector:
                 "Please provide your final answer now. "
                 "Format: Answer: [your answer]"
             )
-
-    def _inject_noise(self, task_description: str, noise_count: int = 0) -> str:
-        """
-        Inject deliberate noise into the trajectory.
-
-        Different noise types at different injection points:
-        - noise_count=0 (step 2): logical error / wrong assumption
-        - noise_count=1 (step 4): dead-end / distractor confusion
-
-        This creates error/dead-end patterns that test the denoising
-        capability of different skill induction variants:
-        - traj_to_skill will include this noise in the skill (bad)
-        - memory_to_skill should filter it out during compression (good)
-        - hybrid_to_skill should partially filter it (medium)
-        """
-        if noise_count == 0:
-            # First noise: logical error
-            templates = [
-                (
-                    "ERROR: The previous reasoning contains a logical flaw. "
-                    "You assumed a connection that doesn't exist in the given "
-                    "information. Specifically, you may have confused correlation "
-                    "with causation. Please re-examine your evidence carefully "
-                    "and identify which assumption was incorrect."
-                ),
-                (
-                    "CORRECTION: An earlier step produced an incorrect "
-                    "intermediate result. This is a common pitfall — the error "
-                    "propagated through subsequent reasoning. Go back to the "
-                    "point of error and redo the calculation or inference."
-                ),
-            ]
-        else:
-            # Second noise: dead-end / distractor
-            templates = [
-                (
-                    "WARNING: Your approach is heading toward a dead end. "
-                    "The information you're relying on may be from a distractor "
-                    "paragraph, not a supporting fact. Step back and reconsider "
-                    "which sources are actually relevant to the question. "
-                    "HINT: Try a completely different decomposition strategy."
-                ),
-                (
-                    "RETRY NEEDED: Your intermediate conclusion appears to "
-                    "contradict known facts. This often happens when key details "
-                    "are overlooked. Re-read the relevant context and look for "
-                    "details you may have missed on the first pass. "
-                    "Consider whether you're solving the right sub-problem."
-                ),
-            ]
-        return random.choice(templates)
 
     def _parse_response(
         self, response: str, base_step_id: int

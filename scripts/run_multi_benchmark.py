@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """
-SkillForge multi-benchmark experiment runner (v4).
+SkillForge multi-benchmark experiment runner (v6).
 
-Key design for statistical significance:
+Key design for statistical significance (NO artificial noise):
 1. No-skill baseline: control group to prove skill value.
 2. N=10 per benchmark: sufficient for statistical significance.
-3. Heavy noise injection: 2-3 error/dead-end steps per trajectory.
-4. Cross-benchmark transfer: HotpotQA skills → MuSiQue tasks (the real test).
+3. Natural trajectories: no noise injection — differentiation comes
+   from how each variant processes the naturally verbose trajectory.
+4. Cross-benchmark transfer: HotpotQA skills → MuSiQue tasks.
 5. Fine-grained quality: 5-dimension strict rubric.
-6. Separate Self / Cross / Transfer metrics for clear differentiation.
+6. Separate Self / Cross / Transfer metrics.
 
-Transfer pairs (designed to maximise strategy differentiation):
+Core hypothesis (why hybrid should win — Evidence-as-Filter v6):
+- traj→skill: sees the FULL verbose trajectory → information overload
+  → produces over-specific or vague skills → low Cross/Transfer
+- memory→skill: sees ONLY compressed memory → clean but uses ALL
+  memories indiscriminately (including low-value ones) → medium Cross
+- hybrid→skill (v6): uses trajectory to FILTER and RANK memories,
+  then induces skill from ONLY the best memories → memory-level
+  abstraction + better memory selection → highest Cross/Transfer
+
+Transfer pairs:
 - HotpotQA skills → MuSiQue tasks (multi-hop → harder multi-hop)
 - GSM8K skills → TriviaQA tasks (math → factoid, should fail)
 - TriviaQA skills → HotpotQA tasks (single-hop → multi-hop, partial)
-
-Hypothesis:
-- traj→skill: high Self, low Cross/Transfer (overfits to source task noise)
-- memory→skill: medium Self, high Cross/Transfer (denoised, generic)
-- hybrid→skill: high Self, highest Cross/Transfer (best of both worlds)
 """
 
 from __future__ import annotations
@@ -354,8 +359,8 @@ def print_results_table(
     lines.append("")
     lines.append("=" * 130)
     lines.append(
-        "SkillForge Experiment Results — v4 "
-        "(baseline + noise + transfer + fine-grained quality)"
+        "SkillForge Experiment Results — v6 "
+        "(baseline + Evidence-as-Filter hybrid + transfer)"
     )
     lines.append("=" * 130)
     lines.append("")
@@ -469,7 +474,7 @@ def print_results_table(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="SkillForge Multi-Benchmark Experiment v4"
+        description="SkillForge Multi-Benchmark Experiment v6"
     )
     parser.add_argument(
         "--benchmarks",
@@ -498,21 +503,21 @@ def main() -> None:
     config = load_config(args.config)
     setup_logger(config.get("output", {}).get("log_level", "INFO"))
 
-    logger.info("SkillForge Multi-Benchmark Experiment v4")
+    logger.info("SkillForge Multi-Benchmark Experiment v6")
     logger.info(f"  Benchmarks: {benchmarks}")
     logger.info(f"  Samples per benchmark: {num_samples}")
     logger.info(f"  Variants: {VARIANTS} + no_skill_baseline")
     logger.info(f"  Transfer pairs: {TRANSFER_PAIRS}")
     logger.info(
-        f"  Optimizations: heavy noise, cross-benchmark transfer, "
-        f"fine-grained quality, baseline"
+        f"  Design: natural trajectories (no noise), Evidence-as-Filter "
+        f"hybrid, cross-benchmark transfer"
     )
 
     llm_client = LLMClient(config.get("llm", {}))
 
     experiment_dir = (
         Path(config.get("output", {}).get("experiment_dir", "./experiments"))
-        / "multi_benchmark_v4"
+        / "multi_benchmark_v6"
     )
     experiment_dir.mkdir(parents=True, exist_ok=True)
 

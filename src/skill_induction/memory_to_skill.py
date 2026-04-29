@@ -77,10 +77,18 @@ class MemoryToSkillInducer(BaseSkillInducer):
         return "\n".join(lines)
 
     def _build_prompt(self, trajectory: Trajectory, formatted_memory: str) -> str:
-        """Build the skill induction prompt."""
-        return f"""Induce a reusable skill from the following structured memories.
+        """Build the skill induction prompt.
 
-These memories were extracted from an agent interaction trajectory.
+        Key design: this prompt gives the LLM ONLY compressed memory entries
+        (no raw trajectory). The LLM must work with pre-structured,
+        categorised knowledge. This produces clean, well-structured skills
+        but may miss concrete operational details that were lost during
+        memory compression.
+        """
+        return f"""Induce a reusable skill STRICTLY from the following structured memories.
+
+These memories were extracted and compressed from an agent interaction trajectory.
+You have NO access to the original trajectory — work only with what is provided.
 
 Task description: {trajectory.task_description}
 Task result: {"success" if trajectory.success else "failure"}
@@ -88,10 +96,16 @@ Task result: {"success" if trajectory.success else "failure"}
 Structured memories:
 {formatted_memory}
 
-Notes:
-- The memories have been compressed and structured; leverage their categories and scores.
-- Prioritise memories with high specificity scores.
-- Integrate related memories into coherent skill steps.
+STRICT RULES:
+1. Use ONLY the information present in the memories above.
+2. Do NOT invent or speculate about details not in the memories.
+3. Prioritise memories with high specificity (>= 0.7) and importance (>= 0.6).
+4. Discard any memory that is vague or generic (specificity < 0.4).
+5. The skill should be CONCISE — focus on the essential methodology.
+6. Integrate related memories into coherent, reusable procedure steps.
+
+The resulting skill should be a clean, generic methodology that can
+guide an agent through SIMILAR (not identical) tasks.
 
 {SKILL_OUTPUT_FORMAT}
 """

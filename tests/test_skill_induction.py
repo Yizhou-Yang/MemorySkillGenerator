@@ -210,20 +210,28 @@ class TestMemoryToSkillInducer:
 
 
 class TestHybridToSkillInducer:
-    """Tests for HybridToSkillInducer with mock LLM (two LLM calls)."""
+    """Tests for HybridToSkillInducer with mock LLM (two LLM calls).
+
+    v6 Evidence-as-Filter: first call validates/ranks memories,
+    second call induces skill from filtered memories only.
+    """
 
     def test_induce_basic(self):
-        evidence_response = json.dumps({
-            "evidence_pairs": [
+        validation_response = json.dumps({
+            "validated_memories": [
                 {
-                    "memory": "Multi-hop questions need evidence combination",
-                    "evidence_steps": [0, 1, 2],
-                    "evidence_summary": "Agent analysed, searched, and found facts",
+                    "memory_index": 0,
+                    "content": "Multi-hop questions need evidence combination",
+                    "category": "procedure",
+                    "evidence_strength": "strong",
+                    "generalizability": "high",
+                    "importance_for_similar_tasks": 0.9,
+                    "reasoning": "Directly supported by trajectory steps",
                 },
             ]
         })
         mock_llm = MagicMock()
-        mock_llm.chat_json.side_effect = [evidence_response, VALID_SKILL_RESPONSE]
+        mock_llm.chat_json.side_effect = [validation_response, VALID_SKILL_RESPONSE]
 
         inducer = HybridToSkillInducer(mock_llm)
         traj = _make_trajectory()
@@ -243,17 +251,17 @@ class TestHybridToSkillInducer:
         with pytest.raises(ValueError, match="requires structured memory"):
             inducer.induce(trajectory=traj, memory=None)
 
-    def test_induce_evidence_retrieval_fallback(self):
-        # Evidence retrieval returns invalid JSON -> fallback
+    def test_induce_validation_fallback(self):
+        # Validation returns invalid JSON -> fallback uses all memories
         mock_llm = MagicMock()
-        mock_llm.chat_json.side_effect = ["invalid evidence json", VALID_SKILL_RESPONSE]
+        mock_llm.chat_json.side_effect = ["invalid validation json", VALID_SKILL_RESPONSE]
 
         inducer = HybridToSkillInducer(mock_llm)
         traj = _make_trajectory()
         memory = _make_memory_store()
         skill = inducer.induce(trajectory=traj, memory=memory)
 
-        # Should still produce a skill (evidence fallback is handled)
+        # Should still produce a skill (validation fallback is handled)
         assert isinstance(skill, Skill)
         assert mock_llm.chat_json.call_count == 2
 
