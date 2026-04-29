@@ -35,7 +35,7 @@ class TestLoadConfig:
 
     def test_load_mvp_config(self):
         config = load_config("mvp_locomo")
-        assert config["benchmark"]["name"] == "locomo"
+        assert config["benchmark"]["name"] == "hotpotqa"
         assert config["memory"]["framework"] == "mem0"
 
     def test_project_root(self):

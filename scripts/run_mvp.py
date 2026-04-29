@@ -23,6 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from loguru import logger
 
+from benchmarks.loader import BenchmarkLoader
 from src.evaluation.evaluator import SkillEvaluator
 from src.memory.compressor import create_compressor
 from src.models import SkillEvalResult, TransformVariant
@@ -81,9 +82,8 @@ def main() -> None:
     experiment_dir.mkdir(parents=True, exist_ok=True)
 
     # ===== Load benchmark tasks =====
-    # TODO: Integrate the real benchmark dataset loader
-    # Using sample tasks in the MVP phase
-    tasks = _load_sample_tasks()
+    benchmark_loader = BenchmarkLoader(config.get("benchmark", {}))
+    tasks = benchmark_loader.load()
     logger.info(f"Loaded {len(tasks)} tasks")
 
     # ===== Pipeline execution =====
@@ -152,42 +152,6 @@ def main() -> None:
 
     logger.info(f"\nExperiment complete! Results saved to: {experiment_dir}")
     logger.info(f"LLM call statistics: {llm_client.stats}")
-
-
-def _load_sample_tasks() -> list[dict]:
-    """
-    Load sample tasks (MVP phase).
-
-    TODO: Replace with real benchmark dataset loading.
-    """
-    return [
-        {
-            "task_id": "sample_001",
-            "description": (
-                "Summarise all the names mentioned in the following "
-                "conversation and their relationships:\n"
-                "Alice: I went to a coffee shop with Bob yesterday "
-                "and ran into Charlie.\n"
-                "Bob: Charlie said he's marrying Diana next week.\n"
-                "Alice: Really? Diana was Charlie's university classmate, "
-                "right?"
-            ),
-            "expected": "Alice, Bob, Charlie, Diana",
-        },
-        {
-            "task_id": "sample_002",
-            "description": (
-                "Answer the question based on the following information:\n"
-                "- Zhang San lives in Beijing and is a programmer.\n"
-                "- Li Si lives in Shanghai and is Zhang San's colleague.\n"
-                "- Wang Wu lives in Guangzhou and is Li Si's university "
-                "roommate.\n"
-                "Question: What is the relationship between Wang Wu "
-                "and Zhang San?"
-            ),
-            "expected": "colleague's university roommate",
-        },
-    ]
 
 
 def _get_validation_tasks(task: dict) -> list[dict[str, str]]:
