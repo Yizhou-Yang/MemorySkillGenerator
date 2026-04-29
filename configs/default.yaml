@@ -1,0 +1,100 @@
+# MemorySkillGenerator default experiment configuration
+
+# ===== LLM Configuration =====
+llm:
+  model: deepseek-chat
+  temperature: 0.7
+  max_tokens: 4096
+  timeout: 120
+  max_retries: 3
+  retry_delay: 2
+
+# ===== Embedding Configuration =====
+embedding:
+  model: Qwen/Qwen3-Embedding-0.6B
+  device: cpu
+  batch_size: 32
+  dimension: 1024
+
+# ===== Memory Configuration =====
+memory:
+  framework: mem0                       # mem0 / amem / memorybank
+  memorybank:
+    forget_ephemeral: true              # Drop low-importance memories
+
+# ===== Skill Structure Configuration =====
+skill:
+  max_procedure_steps: 15
+  max_constraints: 10
+  max_facts: 10
+  max_rules: 10
+
+# ===== Trajectory Configuration =====
+trajectory:
+  max_steps: 50                         # Max steps per trajectory
+  record_format: jsonl                  # jsonl / json
+  include_observations: true
+  include_thoughts: true
+
+# ===== Benchmark Configuration =====
+benchmark:
+  name: hotpotqa                        # hotpotqa / hotpotqa_hard / triviaqa / gsm8k / musique / swebench
+  num_samples: 20                       # Sample count for MVP phase
+
+# ===== Skill Induction Configuration =====
+skill_induction:
+  variants:
+    - traj_to_skill
+    - memory_to_skill
+    - hybrid_to_skill
+  hybrid:
+    evidence_retrieval_top_k: 8         # Max memories to keep after tiered filtering (v7)
+    evidence_max_tokens: 2048
+
+# ===== RL Controller Configuration =====
+rl_controller:
+  enabled: true
+  embedding_dim: 1024
+  hidden_dim: 256
+  top_k: 3                              # Training: select 3 skills per span
+  top_k_eval: 7                         # Evaluation: select 7 skills (MemSkill finding)
+  tau_0: 0.3                            # Exploration incentive initial probability mass
+  t_explore: 50                         # Exploration decay steps
+  clip_epsilon: 0.2                     # PPO clip range
+  gamma: 0.99                           # Discount factor
+  entropy_coeff: 0.01                   # Entropy bonus coefficient
+  value_coeff: 0.5                      # Value loss coefficient
+  learning_rate: 0.0003                 # PPO learning rate
+
+# ===== Skill Designer Configuration (MemSkill §3.8) =====
+skill_designer:
+  trigger_interval: 100                 # Trigger evolution every N steps
+  max_edits_per_cycle: 3                # Max skill edits per evolution cycle
+  patience: 3                           # Early stop after N cycles without improvement
+  buffer_max_size: 200                  # Hard-case buffer max size
+  buffer_max_step_gap: 500              # Max step gap before case expiry
+  n_clusters: 5                         # KMeans clusters for hard case diversity
+  representatives_per_cluster: 3        # Representatives per cluster
+
+# ===== Span Processing Configuration (MemSkill §3.5) =====
+span_processing:
+  span_size: 512                        # Tokens per span
+  overlap: 64                           # Overlap between adjacent spans
+  align_sentences: true                 # Align span boundaries to sentences
+
+# ===== Evaluation Configuration =====
+evaluation:
+  metrics:
+    - success_rate
+    - reuse_frequency
+    - compression_ratio
+    - transfer_score
+  num_validation_runs: 3                # Validation runs per skill
+
+# ===== Logging & Output =====
+output:
+  experiment_dir: ./experiments
+  log_level: INFO
+  save_trajectories: true
+  save_memories: true
+  save_skills: true
