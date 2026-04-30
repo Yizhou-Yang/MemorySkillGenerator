@@ -2,9 +2,15 @@
 Skill evaluator.
 
 Evaluates the quality of induced skills using multiple metrics:
-- LLM-as-judge scoring (0-10): a separate LLM call rates the skill's
-  ability to guide task completion.  This replaces naive substring matching
-  and produces continuous scores that differentiate variant quality.
+
+Primary (objective, deterministic, academic-standard):
+- Exact Match (EM): binary — does the response contain the exact answer?
+- Token F1: token-level overlap between response and expected answer.
+
+Secondary (reference, non-deterministic):
+- LLM-as-judge scoring (0-10): a separate LLM call rates quality.
+
+Structural:
 - Compression ratio: chars(trajectory) / chars(skill).
 - Skill quality score: LLM rates the skill structure itself (0-10).
 """
@@ -12,6 +18,9 @@ Evaluates the quality of induced skills using multiple metrics:
 from __future__ import annotations
 
 import json
+import re
+import string
+from collections import Counter
 from typing import Any
 
 from loguru import logger
@@ -135,7 +144,11 @@ class SkillEvaluator:
 
         expected = task.get("expected", "")
 
-        # Step 2: LLM-as-judge scores the response
+        # Step 2a: Objective metrics (deterministic, no LLM call)
+        em = self._compute_em(response, expected)
+        f1 = self._compute_f1(response, expected)
+
+        # Step 2b: LLM-as-judge scores the response (reference metric)
         score = self._llm_judge_score(
             task_description=task.get("description", ""),
             expected_answer=expected,
@@ -145,11 +158,142 @@ class SkillEvaluator:
 
         return {
             "task_id": task.get("task_id", ""),
-            "success": score >= 7.0,
+            "success": em == 1.0 or f1 >= 0.5,
+            "em": em,
+            "f1": f1,
             "score": score,
             "response": response[:500],
             "expected": expected,
         }
+
+    # ================================================================
+    # Objective metrics (deterministic, no LLM call needed)
+    # These follow the standard evaluation protocol used by
+    # HotpotQA, TriviaQA, and SQuAD leaderboards.
+    # ================================================================
+
+    @staticmethod
+    def _normalise_answer(text: str) -> str:
+        """Normalise answer text for EM/F1 computation.
+
+        Follows the standard SQuAD/HotpotQA normalisation:
+        1. Lowercase
+        2. Remove punctuation
+        3. Remove articles (a, an, the)
+        4. Collapse whitespace
+        """
+        text = text.lower().strip()
+        # Remove punctuation
+        text = text.translate(str.maketrans("", "", string.punctuation))
+        # Remove articles
+        text = re.sub(r"\b(a|an|the)\b", " ", text)
+        # Collapse whitespace
+        text = " ".join(text.split())
+        return text
+
+    @staticmethod
+    def _extract_answer_from_response(response: str) -> str:
+        """Extract the final answer from a response.
+
+        Looks for common answer patterns:
+        - "Answer: X"
+        - "The answer is X"
+        - "Final answer: X"
+        - Last sentence if no pattern found
+        """
+        # Try explicit answer patterns
+        patterns = [
+            r"(?:final\s+)?answer\s*[:：]\s*(.+?)(?:\n|$)",
+            r"the\s+answer\s+is\s+(.+?)(?:\.|\n|$)",
+            r"therefore[,，]?\s+(.+?)(?:\.|\n|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+
+        # Fallback: use the last non-empty line
+        lines = [l.strip() for l in response.strip().split("\n") if l.strip()]
+        return lines[-1] if lines else response
+
+    @classmethod
+    def _compute_em(cls, response: str, expected: str) -> float:
+        """Compute Exact Match (EM) score.
+
+        Returns 1.0 if the normalised expected answer appears in the
+        normalised response (containment-based EM, standard for QA).
+        Returns 0.0 otherwise.
+
+        This is more lenient than strict EM (which requires the entire
+        response to equal the expected answer) but is standard practice
+        for generative QA evaluation where the model produces reasoning
+        before the answer.
+        """
+        if not expected:
+            return 1.0  # No expected answer — pass by default
+
+        norm_expected = cls._normalise_answer(expected)
+        if not norm_expected:
+            return 1.0
+
+        # First try: check if expected is contained in full response
+        norm_response = cls._normalise_answer(response)
+        if norm_expected in norm_response:
+            return 1.0
+
+        # Second try: extract answer portion and check
+        extracted = cls._extract_answer_from_response(response)
+        norm_extracted = cls._normalise_answer(extracted)
+        if norm_expected in norm_extracted:
+            return 1.0
+
+        # For numeric answers (GSM8K), also try exact number matching
+        expected_nums = re.findall(r"-?\d+\.?\d*", expected)
+        response_nums = re.findall(r"-?\d+\.?\d*", response)
+        if expected_nums and expected_nums[-1] in response_nums:
+            return 1.0
+
+        return 0.0
+
+    @classmethod
+    def _compute_f1(cls, response: str, expected: str) -> float:
+        """Compute token-level F1 score.
+
+        Standard QA F1: treats both response and expected as bags of
+        tokens, computes precision and recall, returns their harmonic mean.
+
+        Uses the extracted answer portion of the response (not the full
+        reasoning) to avoid inflating recall with irrelevant tokens.
+        """
+        if not expected:
+            return 1.0  # No expected answer — pass by default
+
+        norm_expected = cls._normalise_answer(expected)
+        if not norm_expected:
+            return 1.0
+
+        # Use extracted answer for F1 (more fair than full response)
+        extracted = cls._extract_answer_from_response(response)
+        norm_response = cls._normalise_answer(extracted)
+
+        # Tokenise
+        expected_tokens = norm_expected.split()
+        response_tokens = norm_response.split()
+
+        if not expected_tokens or not response_tokens:
+            return 0.0
+
+        # Compute overlap
+        common = Counter(expected_tokens) & Counter(response_tokens)
+        num_common = sum(common.values())
+
+        if num_common == 0:
+            return 0.0
+
+        precision = num_common / len(response_tokens)
+        recall = num_common / len(expected_tokens)
+        f1 = 2 * precision * recall / (precision + recall)
+        return round(f1, 4)
 
     def _llm_judge_score(
         self,

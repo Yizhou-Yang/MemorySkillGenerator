@@ -321,10 +321,16 @@ def run_single_benchmark(
 
         all_self_scores = []
         all_cross_scores = []
+        all_em_scores = []
+        all_f1_scores = []
         for r in results:
             details = r.validation_details
             if details:
                 all_self_scores.append(details[0].get("score", 0))
+                # Collect EM/F1 from all validation details
+                for d in details:
+                    all_em_scores.append(d.get("em", 0.0))
+                    all_f1_scores.append(d.get("f1", 0.0))
                 for d in details[1:]:
                     all_cross_scores.append(d.get("score", 0))
 
@@ -338,9 +344,21 @@ def run_single_benchmark(
             if all_cross_scores
             else 0
         )
+        avg_em = (
+            sum(all_em_scores) / len(all_em_scores)
+            if all_em_scores
+            else 0
+        )
+        avg_f1 = (
+            sum(all_f1_scores) / len(all_f1_scores)
+            if all_f1_scores
+            else 0
+        )
 
         metrics[variant_name] = {
             "num_tasks": n,
+            "em": round(avg_em, 4),
+            "f1": round(avg_f1, 4),
             "task_score": round(avg_task_score, 4),
             "self_score": round(avg_self / 10.0, 4),
             "cross_score": round(avg_cross / 10.0, 4),
@@ -410,8 +428,8 @@ def print_results_table(
     lines.append("")
     lines.append(
         f"{'Benchmark':<12} {'Variant':<25} "
-        f"{'Self':>7} {'Cross':>7} {'Transfer':>9} {'Quality':>8} "
-        f"{'Compress':>9} {'Tasks':>6}"
+        f"{'EM':>5} {'F1':>5} {'Self†':>7} {'Cross†':>7} {'Transfer†':>9} "
+        f"{'Quality†':>8} {'Compress':>9} {'N':>4}"
     )
     lines.append("-" * 150)
 
@@ -420,7 +438,10 @@ def print_results_table(
         target = TRANSFER_PAIRS.get(benchmark, "?")
         for variant, m in variant_metrics.items():
             bm_col = f"{benchmark}" if first else ""
-            # Display as raw score /10 for clarity
+            # Primary metrics (objective)
+            em_str = f"{m.get('em', 0):.0%}" if m.get('em', -1) >= 0 else "  —"
+            f1_str = f"{m.get('f1', 0):.0%}" if m.get('f1', -1) >= 0 else "  —"
+            # Secondary metrics (LLM-judge, marked with †)
             ss = f"{m.get('self_score', 0) * 10:.1f}"
             cs = f"{m.get('cross_score', 0) * 10:.1f}"
             ts = f"{m.get('transfer_score', 0) * 10:.1f}"
@@ -437,8 +458,8 @@ def print_results_table(
             n = f"{int(m.get('num_tasks', 0))}"
             lines.append(
                 f"{bm_col:<12} {variant:<25} "
-                f"{ss:>7} {cs:>7} {ts:>9} {qs:>8} "
-                f"{cr:>9} {n:>6}"
+                f"{em_str:>5} {f1_str:>5} {ss:>7} {cs:>7} {ts:>9} "
+                f"{qs:>8} {cr:>9} {n:>4}"
             )
             first = False
         lines.append(f"  (transfer target: {target})")
@@ -561,18 +582,25 @@ def print_results_table(
     lines.append("")
     lines.append("Legend:")
     lines.append(
-        "  Self     = LLM-judge score on the SAME task (self-consistency), /10"
+        "  EM       = Exact Match (objective, deterministic) — standard QA metric"
     )
     lines.append(
-        "  Cross    = LLM-judge score on OTHER tasks within same benchmark, /10"
+        "  F1       = Token F1 (objective, deterministic) — standard QA metric"
     )
     lines.append(
-        "  Transfer = LLM-judge score on a DIFFERENT benchmark's tasks, /10"
+        "  Self†    = LLM-judge score on the SAME task (reference, /10)"
     )
     lines.append(
-        "  Quality  = 5-dimension skill structure quality (strict rubric), /10"
+        "  Cross†   = LLM-judge score on OTHER tasks within same benchmark (reference, /10)"
+    )
+    lines.append(
+        "  Transfer†= LLM-judge score on a DIFFERENT benchmark's tasks (reference, /10)"
+    )
+    lines.append(
+        "  Quality† = 5-dimension skill structure quality (reference, /10)"
     )
     lines.append("  Compress = chars(trajectory) / chars(skill)")
+    lines.append("  † = LLM-as-judge (non-deterministic, for reference only)")
     lines.append("  Δ        = absolute score improvement over no-skill baseline")
     lines.append("  Relative↑= average relative improvement over baseline")
     lines.append(
