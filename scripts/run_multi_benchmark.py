@@ -368,6 +368,20 @@ def run_single_benchmark(
         }
 
     save_json(metrics, experiment_dir / benchmark_name / "metrics.json")
+
+    # Save per-task validation details (response/expected/em/f1) for traceability
+    for variant_name in VARIANTS:
+        details_dir = experiment_dir / benchmark_name / "validation_details"
+        details_dir.mkdir(parents=True, exist_ok=True)
+        variant_details = []
+        for eval_result in variant_results[variant_name]:
+            for d in eval_result.validation_details:
+                variant_details.append(d)
+        save_json(
+            variant_details,
+            details_dir / f"{variant_name}.json",
+        )
+
     return metrics
 
 
