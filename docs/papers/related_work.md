@@ -269,3 +269,63 @@
 
 ???????`{arxiv_id}_{short_name}.pdf`
 
+
+---
+
+### 15.9 ??????2026-04-30??????
+
+???? SkillRL ???????????????"skill extraction + agent"?"self-evolving agent + skill"?"memory to skill + agent"?"trajectory distillation + agent"?"skill library + LLM"?????? **13 ?????**?
+
+#### ? H. ????????
+
+| # | ?? | arXiv | ???? | ?????? |
+|---|------|-------|---------|------------|
+| H1 | **SkillRL: Evolving Agents via Recursive Skill-Augmented Reinforcement Learning** | [2602.08234](https://arxiv.org/abs/2602.08234) | ? RL ? trajectory ????? reusable skill patterns | ?? **?????** ???? trajectory ? skill ? RL ??????? traj_to_skill baseline ?? |
+| H2 | **MemCollab: Cross-Agent Memory Collaboration via Contrastive Trajectory Distillation** | [2603.23234](https://arxiv.org/abs/2603.23234) | ? agent ? memory ????? contrastive trajectory distillation | ???trajectory distillation ??? |
+| H3 | **MemEvolve: Meta-Evolution of Agent Memory Systems** | [2512.18746](https://arxiv.org/abs/2512.18746) | Agent memory ??? meta-evolution | ???memory ??????? |
+| H4 | **MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory** | [2601.03192](https://arxiv.org/abs/2601.03192) | ? episodic memory ?? runtime RL ?? self-evolving | ?? **?????** memory + RL ? skill ??? |
+| H5 | **CASCADE: Cumulative Agentic Skill Creation through Autonomous Development and Evolution** | [2512.23880](https://arxiv.org/abs/2512.23880) | ??? skill ????? | ???skill ? incremental creation |
+| H6 | **FactorMiner: A Self-Evolving Agent with Skills and Experience Memory for Financial Alpha Discovery** | [2602.14670](https://arxiv.org/abs/2602.14670) | ????? skill + experience memory ??? agent | ???domain-specific skill + memory |
+| H7 | **SAGER: Self-Evolving User Policy Skills for Recommendation Agent** | [2604.14972](https://arxiv.org/abs/2604.14972) | ?????? self-evolving user policy skills | ???skill ???????? |
+| H8 | **WebXSkill: Skill Learning for Autonomous Web Agents** | [2604.13318](https://arxiv.org/abs/2604.13318) | Web agent ? skill learning | ???web ??? skill ?? |
+| H9 | **MetaClaw: Just Talk -- An Agent That Meta-Learns and Evolves in the Wild** | [2603.17187](https://arxiv.org/abs/2603.17187) | Meta-learning + skill library ? in-the-wild ?? | ???meta-learning ??? skill ?? |
+| H10 | **SCALAR: Learning and Composing Skills through LLM Guided Symbolic Planning and Deep RL** | [2603.09036](https://arxiv.org/abs/2603.09036) | LLM ??? symbolic planning + RL ?????? skill | ???skill composition ?? |
+| H11 | **Ask Only When Needed: Proactive Retrieval from Memory and Skills for Experience-Driven Lifelong Agents** | [2604.20572](https://arxiv.org/abs/2604.20572) | ??? memory ? skill ? proactive retrieval | ???skill retrieval ?? |
+| H12 | **GEMS: Agent-Native Multimodal Generation with Memory and Skills** | [2603.28088](https://arxiv.org/abs/2603.28088) | ??? agent ?? memory + skill ?? | ???memory + skill ????? |
+| H13 | **AEL: Agent Evolving Learning for Open-Ended Environments** | [2604.21725](https://arxiv.org/abs/2604.21725) | ?????? agent ???? | ???open-ended skill evolution |
+
+### 15.10 ???????????
+
+**? ???????????????????**?
+1. **G1 ? Experience Compression Spectrum** (2604.15877) ? compression ? skill quality
+2. **H1 ? SkillRL** (2602.08234) ? RL-based trajectory ? skill extraction
+3. **A1 ? SkillForge (Liu et al.)** (2604.08618) ? ????
+4. **G2 ? Externalization in LLM Agents** (2604.08224) ? ???
+5. **H4 ? MemRL** (2601.03192) ? memory + RL ? self-evolving
+
+**?????????????**?
+6. A6 ? MemSkill (2602.02474) ? ??????
+7. B3 ? Diagnosing Retrieval vs. Utilization (2603.02473)
+8. H2 ? MemCollab (2603.23234) ? contrastive trajectory distillation
+9. H5 ? CASCADE (2512.23880) ? cumulative skill creation
+10. G4 ? Co-Evolving Decision and Skill Bank (2604.20987)
+
+**?????????? + ?????**?
+11. C6 ? Agent Skills Survey (2602.12430)
+12. D8 ? Adaptation of Agentic AI Survey (2512.16301)
+13. H3 ? MemEvolve (2512.18746)
+14. G3 ? Hierarchical Procedural Memory (2512.18950)
+15. H9 ? MetaClaw (2603.17187)
+
+---
+
+### 15.11 ????
+
+| ?? | ?? |
+|------|------|
+| ?????? | **57 ?** |
+| ??? PDF | **40 ?** |
+| ??????? | 12 ? |
+| ???? | arXiv Paper Search + CCF Paper Researcher |
+| ???? | 2026-04-30 |
+
