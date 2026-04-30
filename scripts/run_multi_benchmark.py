@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SkillForge multi-benchmark experiment runner (v6).
+SkillForge multi-benchmark experiment runner (v7).
 
 Key design for statistical significance (NO artificial noise):
 1. No-skill baseline: control group to prove skill value.
@@ -10,15 +10,17 @@ Key design for statistical significance (NO artificial noise):
 4. Cross-benchmark transfer: HotpotQA skills → MuSiQue tasks.
 5. Fine-grained quality: 5-dimension strict rubric.
 6. Separate Self / Cross / Transfer metrics.
+7. Win Rate: pairwise comparison across all tasks for statistical rigour.
 
-Core hypothesis (why hybrid should win — Evidence-as-Filter v6):
+Core hypothesis (why hybrid should win — Evidence-as-Filter v7):
 - traj→skill: sees the FULL verbose trajectory → information overload
   → produces over-specific or vague skills → low Cross/Transfer
 - memory→skill: sees ONLY compressed memory → clean but uses ALL
   memories indiscriminately (including low-value ones) → medium Cross
-- hybrid→skill (v6): uses trajectory to FILTER and RANK memories,
-  then induces skill from ONLY the best memories → memory-level
-  abstraction + better memory selection → highest Cross/Transfer
+- hybrid→skill (v7 Tiered Retention): uses trajectory to FILTER and
+  RANK memories with tiered retention (high-gen always kept, medium-gen
+  needs evidence) → memory-level abstraction + better memory selection
+  + preserves general methodology → highest Cross AND Transfer
 
 Transfer pairs:
 - HotpotQA skills → MuSiQue tasks (multi-hop → harder multi-hop)
@@ -351,38 +353,81 @@ def run_single_benchmark(
     return metrics
 
 
+def _compute_win_rates(
+    all_metrics: dict[str, dict[str, dict[str, float]]],
+) -> dict[str, dict[str, float]]:
+    """
+    Compute pairwise win rates: for each variant pair (A vs B),
+    what fraction of benchmarks does A beat B on each metric?
+
+    Returns a dict like:
+      {"hybrid_to_skill_vs_memory_to_skill": {"self": 1.0, "cross": 0.67, ...}}
+    """
+    # Collect per-benchmark scores for each variant
+    variant_scores: dict[str, dict[str, list[float]]] = {
+        v: {"self": [], "cross": [], "transfer": []} for v in VARIANTS
+    }
+    for bm_metrics in all_metrics.values():
+        for variant in VARIANTS:
+            if variant in bm_metrics:
+                m = bm_metrics[variant]
+                variant_scores[variant]["self"].append(m.get("self_score", 0))
+                variant_scores[variant]["cross"].append(m.get("cross_score", 0))
+                variant_scores[variant]["transfer"].append(m.get("transfer_score", 0))
+
+    win_rates: dict[str, dict[str, float]] = {}
+    # Compare hybrid vs each other variant
+    for other in ["traj_to_skill", "memory_to_skill"]:
+        key = f"hybrid_to_skill_vs_{other}"
+        wins: dict[str, int] = {"self": 0, "cross": 0, "transfer": 0}
+        total = len(variant_scores["hybrid_to_skill"]["self"])
+        for metric in ["self", "cross", "transfer"]:
+            for i in range(total):
+                h_score = variant_scores["hybrid_to_skill"][metric][i]
+                o_score = variant_scores[other][metric][i]
+                if h_score > o_score:
+                    wins[metric] += 1
+        win_rates[key] = {
+            m: (wins[m] / total if total > 0 else 0.0)
+            for m in ["self", "cross", "transfer"]
+        }
+
+    return win_rates
+
+
 def print_results_table(
     all_metrics: dict[str, dict[str, dict[str, float]]],
 ) -> str:
-    """Print and return a formatted results table."""
+    """Print and return a formatted results table with raw scores, delta, and win rates."""
     lines: list[str] = []
     lines.append("")
-    lines.append("=" * 130)
+    lines.append("=" * 150)
     lines.append(
-        "SkillForge Experiment Results — v6 "
-        "(baseline + Evidence-as-Filter hybrid + transfer)"
+        "SkillForge Experiment Results — v7 "
+        "(baseline + Evidence-as-Filter hybrid [tiered retention] + transfer)"
     )
-    lines.append("=" * 130)
+    lines.append("=" * 150)
     lines.append("")
     lines.append(
         f"{'Benchmark':<12} {'Variant':<25} "
-        f"{'Self':>6} {'Cross':>7} {'Transfer':>9} {'Quality':>8} "
+        f"{'Self':>7} {'Cross':>7} {'Transfer':>9} {'Quality':>8} "
         f"{'Compress':>9} {'Tasks':>6}"
     )
-    lines.append("-" * 130)
+    lines.append("-" * 150)
 
     for benchmark, variant_metrics in all_metrics.items():
         first = True
         target = TRANSFER_PAIRS.get(benchmark, "?")
         for variant, m in variant_metrics.items():
             bm_col = f"{benchmark}" if first else ""
-            ss = f"{m.get('self_score', 0):.0%}"
-            cs = f"{m.get('cross_score', 0):.0%}"
-            ts = f"{m.get('transfer_score', 0):.0%}"
+            # Display as raw score /10 for clarity
+            ss = f"{m.get('self_score', 0) * 10:.1f}"
+            cs = f"{m.get('cross_score', 0) * 10:.1f}"
+            ts = f"{m.get('transfer_score', 0) * 10:.1f}"
             qs = (
-                f"{m.get('quality_score', 0):.0%}"
+                f"{m.get('quality_score', 0) * 10:.1f}"
                 if m.get("quality_score", 0) > 0
-                else "  —"
+                else "   —"
             )
             cr = (
                 f"{m.get('compression_ratio', 0):.1f}x"
@@ -392,37 +437,47 @@ def print_results_table(
             n = f"{int(m.get('num_tasks', 0))}"
             lines.append(
                 f"{bm_col:<12} {variant:<25} "
-                f"{ss:>6} {cs:>7} {ts:>9} {qs:>8} "
+                f"{ss:>7} {cs:>7} {ts:>9} {qs:>8} "
                 f"{cr:>9} {n:>6}"
             )
             first = False
         lines.append(f"  (transfer target: {target})")
-        lines.append("-" * 130)
+        lines.append("-" * 150)
 
-    # Cross-benchmark averages
+    # Cross-benchmark averages with delta vs baseline
     lines.append("")
-    lines.append("Cross-Benchmark Averages:")
-    lines.append("-" * 90)
+    lines.append("Cross-Benchmark Averages (score /10):")
+    lines.append("-" * 120)
     lines.append(
-        f"  {'Variant':<25} {'Self':>6} {'Cross':>7} "
+        f"  {'Variant':<25} {'Self':>7} {'Cross':>7} "
         f"{'Transfer':>9} {'Quality':>8} {'Compress':>9}"
     )
-    lines.append(f"  {'-' * 70}")
+    lines.append(f"  {'-' * 90}")
 
-    # Baseline average
-    bl_scores = []
+    # Compute baseline average
+    bl_self_scores = []
+    bl_cross_scores = []
+    bl_transfer_scores = []
     for bm_metrics in all_metrics.values():
         if "no_skill_baseline" in bm_metrics:
-            bl_scores.append(
-                bm_metrics["no_skill_baseline"].get("self_score", 0)
-            )
-    if bl_scores:
-        avg_bl = sum(bl_scores) / len(bl_scores)
+            bl = bm_metrics["no_skill_baseline"]
+            bl_self_scores.append(bl.get("self_score", 0))
+            bl_cross_scores.append(bl.get("cross_score", 0))
+            bl_transfer_scores.append(bl.get("transfer_score", 0))
+
+    avg_bl_self = sum(bl_self_scores) / len(bl_self_scores) if bl_self_scores else 0
+    avg_bl_cross = sum(bl_cross_scores) / len(bl_cross_scores) if bl_cross_scores else 0
+    avg_bl_transfer = sum(bl_transfer_scores) / len(bl_transfer_scores) if bl_transfer_scores else 0
+
+    if bl_self_scores:
         lines.append(
-            f"  {'no_skill_baseline':<25} {avg_bl:>5.0%} {avg_bl:>7.0%} "
-            f"{avg_bl:>9.0%} {'  —':>8} {'  —':>9}"
+            f"  {'no_skill_baseline':<25} "
+            f"{avg_bl_self * 10:>6.2f} {avg_bl_cross * 10:>7.2f} "
+            f"{avg_bl_transfer * 10:>9.2f} {'   —':>8} {'  —':>9}"
         )
 
+    # Variant averages with delta
+    variant_avgs: dict[str, dict[str, float]] = {}
     for variant in VARIANTS:
         self_scores = []
         cross_scores = []
@@ -443,27 +498,86 @@ def print_results_table(
             avg_ts = sum(transfer_scores_list) / len(transfer_scores_list)
             avg_qs = sum(quality_scores) / len(quality_scores)
             avg_cr = sum(compression_ratios) / len(compression_ratios)
+            variant_avgs[variant] = {
+                "self": avg_ss, "cross": avg_cs, "transfer": avg_ts,
+                "quality": avg_qs, "compress": avg_cr,
+            }
             lines.append(
-                f"  {variant:<25} {avg_ss:>5.0%} {avg_cs:>7.0%} "
-                f"{avg_ts:>9.0%} {avg_qs:>8.0%} {avg_cr:>8.1f}x"
+                f"  {variant:<25} "
+                f"{avg_ss * 10:>6.2f} {avg_cs * 10:>7.2f} "
+                f"{avg_ts * 10:>9.2f} {avg_qs * 10:>8.2f} {avg_cr:>8.1f}x"
             )
+
+    # Delta table (vs baseline)
+    lines.append("")
+    lines.append("Delta vs Baseline (absolute improvement, /10 scale):")
+    lines.append("-" * 120)
+    lines.append(
+        f"  {'Variant':<25} {'ΔSelf':>7} {'ΔCross':>8} "
+        f"{'ΔTransfer':>10} {'Relative↑':>10}"
+    )
+    lines.append(f"  {'-' * 70}")
+    for variant in VARIANTS:
+        if variant in variant_avgs:
+            va = variant_avgs[variant]
+            d_self = (va["self"] - avg_bl_self) * 10
+            d_cross = (va["cross"] - avg_bl_cross) * 10
+            d_transfer = (va["transfer"] - avg_bl_transfer) * 10
+            # Relative improvement: average of (delta/baseline) across metrics
+            rel_parts = []
+            if avg_bl_self > 0:
+                rel_parts.append((va["self"] - avg_bl_self) / avg_bl_self)
+            if avg_bl_cross > 0:
+                rel_parts.append((va["cross"] - avg_bl_cross) / avg_bl_cross)
+            if avg_bl_transfer > 0:
+                rel_parts.append((va["transfer"] - avg_bl_transfer) / avg_bl_transfer)
+            avg_rel = sum(rel_parts) / len(rel_parts) if rel_parts else 0
+            sign_s = "+" if d_self >= 0 else ""
+            sign_c = "+" if d_cross >= 0 else ""
+            sign_t = "+" if d_transfer >= 0 else ""
+            lines.append(
+                f"  {variant:<25} "
+                f"{sign_s}{d_self:>5.2f} {sign_c}{d_cross:>7.2f} "
+                f"{sign_t}{d_transfer:>9.2f} {avg_rel:>+9.1%}"
+            )
+
+    # Win Rate table (hybrid vs others)
+    win_rates = _compute_win_rates(all_metrics)
+    lines.append("")
+    lines.append("Win Rate (hybrid vs others, across benchmarks):")
+    lines.append("-" * 90)
+    lines.append(
+        f"  {'Comparison':<40} {'Self':>7} {'Cross':>7} {'Transfer':>9}"
+    )
+    lines.append(f"  {'-' * 70}")
+    for key, rates in win_rates.items():
+        display_key = key.replace("hybrid_to_skill_vs_", "hybrid vs ")
+        lines.append(
+            f"  {display_key:<40} "
+            f"{rates['self']:>6.0%} {rates['cross']:>7.0%} "
+            f"{rates['transfer']:>9.0%}"
+        )
 
     lines.append("")
     lines.append("Legend:")
     lines.append(
-        "  Self     = LLM-judge score on the SAME task (self-consistency)"
+        "  Self     = LLM-judge score on the SAME task (self-consistency), /10"
     )
     lines.append(
-        "  Cross    = LLM-judge score on OTHER tasks within same benchmark"
+        "  Cross    = LLM-judge score on OTHER tasks within same benchmark, /10"
     )
     lines.append(
-        "  Transfer = LLM-judge score on a DIFFERENT benchmark's tasks "
-        "(cross-benchmark generalisation)"
+        "  Transfer = LLM-judge score on a DIFFERENT benchmark's tasks, /10"
     )
     lines.append(
-        "  Quality  = 5-dimension skill structure quality (strict rubric)"
+        "  Quality  = 5-dimension skill structure quality (strict rubric), /10"
     )
     lines.append("  Compress = chars(trajectory) / chars(skill)")
+    lines.append("  Δ        = absolute score improvement over no-skill baseline")
+    lines.append("  Relative↑= average relative improvement over baseline")
+    lines.append(
+        "  Win Rate = fraction of benchmarks where hybrid beats the other variant"
+    )
     lines.append("")
     lines.append("Transfer pairs:")
     for src, tgt in TRANSFER_PAIRS.items():
@@ -503,21 +617,21 @@ def main() -> None:
     config = load_config(args.config)
     setup_logger(config.get("output", {}).get("log_level", "INFO"))
 
-    logger.info("SkillForge Multi-Benchmark Experiment v6")
+    logger.info("SkillForge Multi-Benchmark Experiment v7")
     logger.info(f"  Benchmarks: {benchmarks}")
     logger.info(f"  Samples per benchmark: {num_samples}")
     logger.info(f"  Variants: {VARIANTS} + no_skill_baseline")
     logger.info(f"  Transfer pairs: {TRANSFER_PAIRS}")
     logger.info(
         f"  Design: natural trajectories (no noise), Evidence-as-Filter "
-        f"hybrid, cross-benchmark transfer"
+        f"hybrid (v7 tiered retention), cross-benchmark transfer"
     )
 
     llm_client = LLMClient(config.get("llm", {}))
 
     experiment_dir = (
         Path(config.get("output", {}).get("experiment_dir", "./experiments"))
-        / "multi_benchmark_v6"
+        / "multi_benchmark_v7"
     )
     experiment_dir.mkdir(parents=True, exist_ok=True)
 

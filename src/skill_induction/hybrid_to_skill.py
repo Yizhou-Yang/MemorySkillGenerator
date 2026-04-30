@@ -1,18 +1,22 @@
 """
 Variant 3: Memory + Evidence Trajectory -> Skill (hybrid path).
 
-Evidence-as-Filter approach (v6):
+Evidence-as-Filter approach (v7 — Tiered Retention):
 Instead of injecting trajectory details INTO the skill, we use the
-trajectory as a FILTER to validate and rank memory entries. Only
-memories that are strongly supported by trajectory evidence survive.
+trajectory as a FILTER to validate and rank memory entries.
 
-This gives hybrid the best of both worlds:
-- Memory-level abstraction (clean, generic procedures)
-- Trajectory-validated relevance (only the most important memories)
-- Confidence-weighted prioritisation (high-evidence memories first)
+v7 improvement over v6:
+- v6 required BOTH evidence>=moderate AND generalizability>=medium
+  → too aggressive, dropped useful general methodology memories
+- v7 uses TIERED retention:
+  * Tier 1 (always keep): generalizability=high (regardless of evidence)
+  * Tier 2 (evidence-gated): generalizability=medium requires evidence>=moderate
+  * Tier 3 (drop): generalizability=low OR (medium + no evidence)
+- Increased top-K from 5 to 8 to reduce information loss
 
 The key insight: the trajectory's role is to SELECT which memories
-matter, not to ADD concrete details to the skill.
+matter, not to ADD concrete details to the skill. General methodology
+memories should always survive because they are inherently transferable.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ class HybridToSkillInducer(BaseSkillInducer):
     def __init__(self, llm_client: LLMClient, config: dict[str, Any] | None = None) -> None:
         self.llm_client = llm_client
         self.config = config or {}
-        self.evidence_top_k: int = self.config.get("evidence_retrieval_top_k", 5)
+        self.evidence_top_k: int = self.config.get("evidence_retrieval_top_k", 8)
 
     def induce(
         self,
@@ -182,16 +186,25 @@ CRITICAL RULES:
             data = json.loads(response)
             raw_validated = data.get("validated_memories", [])
 
-            # Filter: keep only memories with at least moderate evidence
-            # and at least medium generalizability
+            # v7 Tiered Retention Strategy:
+            # Tier 1: generalizability=high → ALWAYS keep (bypass evidence gate)
+            # Tier 2: generalizability=medium + evidence>=moderate → keep
+            # Tier 3: everything else → drop
             filtered: list[dict[str, Any]] = []
             for item in raw_validated:
                 evidence = item.get("evidence_strength", "none")
                 generalizability = item.get("generalizability", "low")
                 importance = float(item.get("importance_for_similar_tasks", 0.0))
 
-                # Filter criteria: must have evidence AND be generalizable
-                if evidence in ("strong", "moderate") and generalizability in ("high", "medium"):
+                keep = False
+                # Tier 1: high generalizability always passes
+                if generalizability == "high":
+                    keep = True
+                # Tier 2: medium generalizability needs evidence support
+                elif generalizability == "medium" and evidence in ("strong", "moderate"):
+                    keep = True
+
+                if keep:
                     filtered.append({
                         "content": item.get("content", ""),
                         "category": item.get("category", "general"),
