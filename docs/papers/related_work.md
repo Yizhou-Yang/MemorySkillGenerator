@@ -225,107 +225,106 @@
 
 ---
 
-### 15.6 ?????CCF Paper Researcher ???2026-04-30?
+### 15.6 补充论文（CCF Paper Researcher 搜索，2026-04-30）
 
-?????? CCF Paper Researcher ?????????? arXiv ?????
+以下论文通过 CCF Paper Researcher 工具搜索发现，与上述 arXiv 搜索互补：
 
-#### ? G. ?????????
+#### 🔥 G. 新发现的强相关论文
 
-| # | ?? | arXiv | ???? | ?????? |
+| # | 论文 | arXiv | 核心贡献 | 与我们的关系 |
 |---|------|-------|---------|------------|
-| G1 | **Experience Compression Spectrum: Unifying Memory, Skills, and Rules in LLM Agents** | [2604.15877](https://arxiv.org/abs/2604.15877) | ?????memory/skill/rule ??? spectrum ???????? | ?? **?????** ???? compression ? skill quality ??? |
-| G2 | **Externalization in LLM Agents: A Unified Review of Memory, Skills, Protocols** | [2604.08224](https://arxiv.org/abs/2604.08224) | ???memory/skill/protocol ????? | ???????????? |
-| G3 | **Learning Hierarchical Procedural Memory for LLM Agents through Bayesian Self-** | [2512.18950](https://arxiv.org/abs/2512.18950) | ??? procedural memory ?? | ???hierarchical memory ? skill |
-| G4 | **Co-Evolving LLM Decision and Skill Bank Agents for Long-Horizon Tasks** | [2604.20987](https://arxiv.org/abs/2604.20987) | Decision agent + Skill bank ? co-evolution | ???skill bank ????? |
-| G5 | **Skill-SD: Skill-Conditioned Self-Distillation for Multi-turn LLM Agents** | [2604.10674](https://arxiv.org/abs/2604.10674) | Skill-conditioned self-distillation | ?????????? distill skill |
-| G6 | **Agentic Skill Discovery** | [2405.15019](https://arxiv.org/abs/2405.15019) | Agentic ???? skill | ???skill discovery ???? |
-| G7 | **Distilling Feedback into Memory-as-a-Tool** | [2601.05960](https://arxiv.org/abs/2601.05960) | ? feedback distill ? memory tool | ???feedback ? memory ? skill ??? |
-| G8 | **A Plan Reuse Mechanism for LLM-Driven Agent** | [2512.21309](https://arxiv.org/abs/2512.21309) | Plan reuse??? skill reuse? | ???plan ? skill ??? |
-| G9 | **MemoryCD: Benchmarking Long-Context User Memory of LLM Agents for Lifelong** | [2603.25973](https://arxiv.org/abs/2603.25973) | Memory benchmark for lifelong agents | ???memory ???? |
+| G1 | **Experience Compression Spectrum: Unifying Memory, Skills, and Rules in LLM Agents** | [2604.15877](https://arxiv.org/abs/2604.15877) | 统一框架：memory/skill/rule 是同一 spectrum 上的不同压缩程度 | ⚠️ **极度相关！** 直接研究 compression 对 skill quality 的影响 |
+| G2 | **Externalization in LLM Agents: A Unified Review of Memory, Skills, Protocols** | [2604.08224](https://arxiv.org/abs/2604.08224) | 综述：memory/skill/protocol 的统一视角 | 必读综述，定位我们的工作 |
+| G3 | **Learning Hierarchical Procedural Memory for LLM Agents through Bayesian Self-** | [2512.18950](https://arxiv.org/abs/2512.18950) | 层次化 procedural memory 学习 | 相关：hierarchical memory → skill |
+| G4 | **Co-Evolving LLM Decision and Skill Bank Agents for Long-Horizon Tasks** | [2604.20987](https://arxiv.org/abs/2604.20987) | Decision agent + Skill bank 的 co-evolution | 相关：skill bank 的动态管理 |
+| G5 | **Skill-SD: Skill-Conditioned Self-Distillation for Multi-turn LLM Agents** | [2604.10674](https://arxiv.org/abs/2604.10674) | Skill-conditioned self-distillation | 方法论相似：从经验中 distill skill |
+| G6 | **Agentic Skill Discovery** | [2405.15019](https://arxiv.org/abs/2405.15019) | Agentic 方式发现 skill | 相关：skill discovery 的自动化 |
+| G7 | **Distilling Feedback into Memory-as-a-Tool** | [2601.05960](https://arxiv.org/abs/2601.05960) | 将 feedback distill 为 memory tool | 相关：feedback → memory → skill 的路径 |
+| G8 | **A Plan Reuse Mechanism for LLM-Driven Agent** | [2512.21309](https://arxiv.org/abs/2512.21309) | Plan reuse（类似 skill reuse） | 相关：plan 和 skill 的关系 |
+| G9 | **MemoryCD: Benchmarking Long-Context User Memory of LLM Agents for Lifelong** | [2603.25973](https://arxiv.org/abs/2603.25973) | Memory benchmark for lifelong agents | 相关：memory 评估方法 |
 
-### 15.7 ?????????
+### 15.7 更新后的阅读优先级
 
-**? ????????????????????**?
-1. **G1 ? Experience Compression Spectrum** ? ??????????? compression ? skill quality ?????????????
-2. **G2 ? Externalization in LLM Agents** ? ??????????????
+**🚨 最高优先级（新增，可能直接影响论文定位）**：
+1. **G1 — Experience Compression Spectrum** — 如果这篇论文已经研究了 compression 对 skill quality 的影响，我们需要确认差异化
+2. **G2 — Externalization in LLM Agents** — 新综述，可能覆盖了我们的方向
 
-**?????????**?
-3. A1 ? SkillForge (Liu et al.) ? ????
-4. A6 ? MemSkill ? ??????
-5. B3 ? Diagnosing Retrieval vs. Utilization ? ??????
-6. C6 ? Agent Skills Survey ? ????
-7. D8 ? Adaptation of Agentic AI Survey ? ????
+**第一优先级（不变）**：
+3. A1 — SkillForge (Liu et al.) — 同名论文
+4. A6 — MemSkill — 直接灵感来源
+5. B3 — Diagnosing Retrieval vs. Utilization — 方法论最相似
+6. C6 — Agent Skills Survey — 全景定位
+7. D8 — Adaptation of Agentic AI Survey — 全景定位
 
-**?????????**?
-8. G3 ? Hierarchical Procedural Memory ? ??? memory ??
-9. G4 ? Co-Evolving Decision and Skill Bank ? skill bank co-evolution
-10. G5 ? Skill-SD ? skill-conditioned self-distillation
-
----
-
-### 15.8 ?? PDF ????
-
-???? PDF ??? `docs/papers/pdfs/` ????? gitignore??
-
-???????`{arxiv_id}_{short_name}.pdf`
-
+**第二优先级（新增）**：
+8. G3 — Hierarchical Procedural Memory — 层次化 memory 学习
+9. G4 — Co-Evolving Decision and Skill Bank — skill bank co-evolution
+10. G5 — Skill-SD — skill-conditioned self-distillation
 
 ---
 
-### 15.9 ??????2026-04-30??????
+### 15.8 论文 PDF 下载清单
 
-???? SkillRL ???????????????"skill extraction + agent"?"self-evolving agent + skill"?"memory to skill + agent"?"trajectory distillation + agent"?"skill library + LLM"?????? **13 ?????**?
+所有论文 PDF 存放在 `docs/papers/pdfs/` 目录下（已 gitignore）。
 
-#### ? H. ????????
+文件命名规则：`{arxiv_id}_{short_name}.pdf`
 
-| # | ?? | arXiv | ???? | ?????? |
+---
+
+### 15.9 第二轮补充（2026-04-30，修复遗漏）
+
+用户指出 SkillRL 遗漏。经过更广泛的关键词搜索（"skill extraction + agent"、"self-evolving agent + skill"、"memory to skill + agent"、"trajectory distillation + agent"、"skill library + LLM"），发现以下 **13 篇遗漏论文**：
+
+#### 🔥 H. 遗漏的强相关论文
+
+| # | 论文 | arXiv | 核心贡献 | 与我们的关系 |
 |---|------|-------|---------|------------|
-| H1 | **SkillRL: Evolving Agents via Recursive Skill-Augmented Reinforcement Learning** | [2602.08234](https://arxiv.org/abs/2602.08234) | ? RL ? trajectory ????? reusable skill patterns | ?? **?????** ???? trajectory ? skill ? RL ??????? traj_to_skill baseline ?? |
-| H2 | **MemCollab: Cross-Agent Memory Collaboration via Contrastive Trajectory Distillation** | [2603.23234](https://arxiv.org/abs/2603.23234) | ? agent ? memory ????? contrastive trajectory distillation | ???trajectory distillation ??? |
-| H3 | **MemEvolve: Meta-Evolution of Agent Memory Systems** | [2512.18746](https://arxiv.org/abs/2512.18746) | Agent memory ??? meta-evolution | ???memory ??????? |
-| H4 | **MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory** | [2601.03192](https://arxiv.org/abs/2601.03192) | ? episodic memory ?? runtime RL ?? self-evolving | ?? **?????** memory + RL ? skill ??? |
-| H5 | **CASCADE: Cumulative Agentic Skill Creation through Autonomous Development and Evolution** | [2512.23880](https://arxiv.org/abs/2512.23880) | ??? skill ????? | ???skill ? incremental creation |
-| H6 | **FactorMiner: A Self-Evolving Agent with Skills and Experience Memory for Financial Alpha Discovery** | [2602.14670](https://arxiv.org/abs/2602.14670) | ????? skill + experience memory ??? agent | ???domain-specific skill + memory |
-| H7 | **SAGER: Self-Evolving User Policy Skills for Recommendation Agent** | [2604.14972](https://arxiv.org/abs/2604.14972) | ?????? self-evolving user policy skills | ???skill ???????? |
-| H8 | **WebXSkill: Skill Learning for Autonomous Web Agents** | [2604.13318](https://arxiv.org/abs/2604.13318) | Web agent ? skill learning | ???web ??? skill ?? |
-| H9 | **MetaClaw: Just Talk -- An Agent That Meta-Learns and Evolves in the Wild** | [2603.17187](https://arxiv.org/abs/2603.17187) | Meta-learning + skill library ? in-the-wild ?? | ???meta-learning ??? skill ?? |
-| H10 | **SCALAR: Learning and Composing Skills through LLM Guided Symbolic Planning and Deep RL** | [2603.09036](https://arxiv.org/abs/2603.09036) | LLM ??? symbolic planning + RL ?????? skill | ???skill composition ?? |
-| H11 | **Ask Only When Needed: Proactive Retrieval from Memory and Skills for Experience-Driven Lifelong Agents** | [2604.20572](https://arxiv.org/abs/2604.20572) | ??? memory ? skill ? proactive retrieval | ???skill retrieval ?? |
-| H12 | **GEMS: Agent-Native Multimodal Generation with Memory and Skills** | [2603.28088](https://arxiv.org/abs/2603.28088) | ??? agent ?? memory + skill ?? | ???memory + skill ????? |
-| H13 | **AEL: Agent Evolving Learning for Open-Ended Environments** | [2604.21725](https://arxiv.org/abs/2604.21725) | ?????? agent ???? | ???open-ended skill evolution |
+| H1 | **SkillRL: Evolving Agents via Recursive Skill-Augmented Reinforcement Learning** | [2602.08234](https://arxiv.org/abs/2602.08234) | 用 RL 从 trajectory 中递归提取 reusable skill patterns | ⚠️ **极度相关！** 直接研究 trajectory → skill 的 RL 路径，与我们的 traj_to_skill baseline 对比 |
+| H2 | **MemCollab: Cross-Agent Memory Collaboration via Contrastive Trajectory Distillation** | [2603.23234](https://arxiv.org/abs/2603.23234) | 跨 agent 的 memory 协作，通过 contrastive trajectory distillation | 相关：trajectory distillation 方法论 |
+| H3 | **MemEvolve: Meta-Evolution of Agent Memory Systems** | [2512.18746](https://arxiv.org/abs/2512.18746) | Agent memory 系统的 meta-evolution | 相关：memory 系统的自动演化 |
+| H4 | **MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory** | [2601.03192](https://arxiv.org/abs/2601.03192) | 在 episodic memory 上做 runtime RL 实现 self-evolving | ⚠️ **高度相关！** memory + RL → skill 的路径 |
+| H5 | **CASCADE: Cumulative Agentic Skill Creation through Autonomous Development and Evolution** | [2512.23880](https://arxiv.org/abs/2512.23880) | 累积式 skill 创建和演化 | 相关：skill 的 incremental creation |
+| H6 | **FactorMiner: A Self-Evolving Agent with Skills and Experience Memory for Financial Alpha Discovery** | [2602.14670](https://arxiv.org/abs/2602.14670) | 金融领域的 skill + experience memory 自演化 agent | 相关：domain-specific skill + memory |
+| H7 | **SAGER: Self-Evolving User Policy Skills for Recommendation Agent** | [2604.14972](https://arxiv.org/abs/2604.14972) | 推荐系统中的 self-evolving user policy skills | 相关：skill 在推荐领域的应用 |
+| H8 | **WebXSkill: Skill Learning for Autonomous Web Agents** | [2604.13318](https://arxiv.org/abs/2604.13318) | Web agent 的 skill learning | 相关：web 领域的 skill 学习 |
+| H9 | **MetaClaw: Just Talk -- An Agent That Meta-Learns and Evolves in the Wild** | [2603.17187](https://arxiv.org/abs/2603.17187) | Meta-learning + skill library 的 in-the-wild 演化 | 相关：meta-learning 视角的 skill 演化 |
+| H10 | **SCALAR: Learning and Composing Skills through LLM Guided Symbolic Planning and Deep RL** | [2603.09036](https://arxiv.org/abs/2603.09036) | LLM 引导的 symbolic planning + RL 来学习和组合 skill | 相关：skill composition 方法 |
+| H11 | **Ask Only When Needed: Proactive Retrieval from Memory and Skills for Experience-Driven Lifelong Agents** | [2604.20572](https://arxiv.org/abs/2604.20572) | 按需从 memory 和 skill 中 proactive retrieval | 相关：skill retrieval 策略 |
+| H12 | **GEMS: Agent-Native Multimodal Generation with Memory and Skills** | [2603.28088](https://arxiv.org/abs/2603.28088) | 多模态 agent 中的 memory + skill 架构 | 相关：memory + skill 的统一架构 |
+| H13 | **AEL: Agent Evolving Learning for Open-Ended Environments** | [2604.21725](https://arxiv.org/abs/2604.21725) | 开放环境中的 agent 演化学习 | 相关：open-ended skill evolution |
 
-### 15.10 ???????????
+### 15.10 更新后的最终阅读优先级
 
-**? ???????????????????**?
-1. **G1 ? Experience Compression Spectrum** (2604.15877) ? compression ? skill quality
-2. **H1 ? SkillRL** (2602.08234) ? RL-based trajectory ? skill extraction
-3. **A1 ? SkillForge (Liu et al.)** (2604.08618) ? ????
-4. **G2 ? Externalization in LLM Agents** (2604.08224) ? ???
-5. **H4 ? MemRL** (2601.03192) ? memory + RL ? self-evolving
+**🚨 最高优先级（直接影响论文定位和差异化）**：
+1. **G1 — Experience Compression Spectrum** (2604.15877) — compression → skill quality
+2. **H1 — SkillRL** (2602.08234) — RL-based trajectory → skill extraction
+3. **A1 — SkillForge (Liu et al.)** (2604.08618) — 同名论文
+4. **G2 — Externalization in LLM Agents** (2604.08224) — 新综述
+5. **H4 — MemRL** (2601.03192) — memory + RL → self-evolving
 
-**?????????????**?
-6. A6 ? MemSkill (2602.02474) ? ??????
-7. B3 ? Diagnosing Retrieval vs. Utilization (2603.02473)
-8. H2 ? MemCollab (2603.23234) ? contrastive trajectory distillation
-9. H5 ? CASCADE (2512.23880) ? cumulative skill creation
-10. G4 ? Co-Evolving Decision and Skill Bank (2604.20987)
+**第一优先级（方法论最相似）**：
+6. A6 — MemSkill (2602.02474) — 直接灵感来源
+7. B3 — Diagnosing Retrieval vs. Utilization (2603.02473)
+8. H2 — MemCollab (2603.23234) — contrastive trajectory distillation
+9. H5 — CASCADE (2512.23880) — cumulative skill creation
+10. G4 — Co-Evolving Decision and Skill Bank (2604.20987)
 
-**?????????? + ?????**?
-11. C6 ? Agent Skills Survey (2602.12430)
-12. D8 ? Adaptation of Agentic AI Survey (2512.16301)
-13. H3 ? MemEvolve (2512.18746)
-14. G3 ? Hierarchical Procedural Memory (2512.18950)
-15. H9 ? MetaClaw (2603.17187)
+**第二优先级（全景定位 + 方法参考）**：
+11. C6 — Agent Skills Survey (2602.12430)
+12. D8 — Adaptation of Agentic AI Survey (2512.16301)
+13. H3 — MemEvolve (2512.18746)
+14. G3 — Hierarchical Procedural Memory (2512.18950)
+15. H9 — MetaClaw (2603.17187)
 
 ---
 
-### 15.11 ????
+### 15.11 论文统计
 
-| ?? | ?? |
+| 指标 | 数值 |
 |------|------|
-| ?????? | **57 ?** |
-| ??? PDF | **40 ?** |
-| ??????? | 12 ? |
-| ???? | arXiv Paper Search + CCF Paper Researcher |
-| ???? | 2026-04-30 |
+| 总收录论文数 | **57 篇** |
+| 已下载 PDF | **40 篇** |
+| 搜索关键词组合 | 12 组 |
+| 搜索工具 | arXiv Paper Search + CCF Paper Researcher |
+| 最后更新 | 2026-04-30 |
 
