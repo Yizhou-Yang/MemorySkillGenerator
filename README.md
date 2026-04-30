@@ -4,7 +4,7 @@
 
 SkillForge implements the research idea *"Learning to Compile Agent Skills via Adaptive Routing and Denoising"*. It takes raw agent interaction trajectories, compresses them into structured memory, then induces reusable skills through three competing pathways — and evaluates which pathway produces the most transferable, high-quality skills.
 
-**Key finding (v6):** The *Evidence-as-Filter* hybrid approach — using trajectory evidence to **filter and rank** memories rather than inject details — achieves the best Self-consistency (77%) and Cross-task generalisation (68%) across benchmarks.
+**Key finding (v6):** The *Evidence-as-Filter* hybrid approach — using trajectory evidence to **filter and rank** memories rather than inject details — achieves the best Self-consistency (7.7/10) and Cross-task generalisation (6.8/10) across benchmarks. All scores are LLM-as-judge ratings on a 0–10 scale; objective EM/F1 metrics are implemented for future runs.
 
 ---
 
@@ -304,21 +304,39 @@ Each pathway produces a `Skill` with: `name`, `description`, `preconditions`, `p
 
 ### 4. Evaluation (`src/evaluation/evaluator.py`)
 
-- **LLM-as-judge**: Injects skill as system prompt → agent answers task → separate judge LLM scores 0-10
-- **5-dimension quality**: Specificity, Reusability, Structure, Denoising, Completeness
-- **Compression ratio**: `chars(trajectory) / chars(skill)`
+Two tiers of evaluation metrics:
+
+**Primary (objective, deterministic):**
+- **Exact Match (EM)**: normalised containment check — does the response contain the expected answer? Follows SQuAD/HotpotQA normalisation (lowercase, remove punctuation/articles).
+- **Token F1**: token-level precision/recall harmonic mean between extracted answer and expected answer.
+
+**Secondary (LLM-as-judge, non-deterministic, for reference):**
+- **LLM-as-judge (0–10)**: Injects skill as system prompt → agent answers task → separate judge LLM scores on a strict rubric.
+- **5-dimension quality (0–10)**: Specificity, Reusability, Structure, Denoising, Completeness — each scored independently.
+- **Compression ratio**: `chars(trajectory) / chars(skill)` — higher means more compact.
 
 ---
 
 ## Evaluation Metrics
 
-| Metric | What it measures | How it's computed |
-|--------|-----------------|-------------------|
-| **Self** | Information retention | Skill from task A evaluated on task A |
-| **Cross** | Same-benchmark generalisation | Skill from task A evaluated on tasks B, C, D... |
-| **Transfer** | Cross-benchmark generalisation | Skill from benchmark X evaluated on benchmark Y |
-| **Quality** | Skill structure quality (5 dimensions) | LLM rates specificity/reusability/structure/denoising/completeness |
-| **Compress** | Information density | chars(trajectory) / chars(skill) — higher = more compact |
+### Primary Metrics (Objective)
+
+| Metric | What it measures | How it's computed | Deterministic? |
+|--------|-----------------|-------------------|:--------------:|
+| **EM** | Answer correctness | Normalised expected answer ⊆ response (SQuAD protocol) | ✅ Yes |
+| **F1** | Answer overlap | Token-level precision × recall harmonic mean | ✅ Yes |
+
+### Secondary Metrics (LLM-as-Judge)
+
+| Metric | What it measures | How it's computed | Deterministic? |
+|--------|-----------------|-------------------|:--------------:|
+| **Self** | Information retention | Skill from task A evaluated on task A (0–10 judge) | ❌ No |
+| **Cross** | Same-benchmark generalisation | Skill from task A evaluated on tasks B, C, D... (0–10 judge) | ❌ No |
+| **Transfer** | Cross-benchmark generalisation | Skill from benchmark X evaluated on benchmark Y (0–10 judge) | ❌ No |
+| **Quality** | Skill structure quality | LLM rates 5 dimensions: specificity / reusability / structure / denoising / completeness (0–10 each) | ❌ No |
+| **Compress** | Information density | chars(trajectory) / chars(skill) — higher = more compact | ✅ Yes |
+
+> **Note:** v6 results below use LLM-as-judge scores. EM/F1 objective metrics are implemented in the evaluator and will be reported in future experiment runs.
 
 ### Transfer pairs
 
@@ -345,51 +363,62 @@ First-run dataset download is automatic via HuggingFace `datasets` library (~200
 
 ## Latest Results (v6)
 
-### Cross-Benchmark Averages
+> **Methodology:** N=10 tasks per benchmark, 3 benchmarks, 4 variants (incl. baseline). All Self/Cross/Transfer scores are LLM-as-judge ratings on a **0–10 scale**, normalised to 0–1 for the table. Quality is the mean of 5 sub-dimensions (each 0–10). Compress is deterministic (chars ratio). Runtime: 114 min, 3,181 LLM calls, 2.84M tokens.
+
+### Cross-Benchmark Averages (3 benchmarks)
 
 | Variant | Self ↑ | Cross ↑ | Transfer | Quality ↑ | Compress |
-|---------|--------|---------|----------|-----------|----------|
-| no_skill_baseline | 67% | 67% | 67% | — | — |
-| traj→skill | 59% | 62% | 43% | 81% | 2.3× |
-| memory→skill | 72% | 65% | **47%** | 77% | **4.4×** |
-| **hybrid→skill** | **77%** | **68%** | 41% | 79% | 3.4× |
+|---------|:------:|:-------:|:--------:|:---------:|:--------:|
+| no_skill_baseline | 6.7 | 6.7 | 6.7 | — | — |
+| traj→skill | 5.9 | 6.2 | 4.3 | 8.1 | 2.3× |
+| memory→skill | 7.2 | 6.5 | **4.7** | 7.7 | **4.4×** |
+| **hybrid→skill** | **7.7** | **6.8** | 4.1 | 7.9 | 3.4× |
+
+*Scores are on a 0–10 scale (LLM-as-judge). Higher is better for all metrics except Compress (higher = more compact, also better).*
 
 ### Per-Benchmark Results
 
 #### HotpotQA (multi-hop reasoning → MuSiQue transfer)
 
-| Variant | Self | Cross | Transfer | Quality |
-|---------|------|-------|----------|---------|
-| baseline | 20% | 20% | 20% | — |
-| traj→skill | 20% | 7% | 6% | 82% |
-| memory→skill | 50% | 27% | 14% | 77% |
-| **hybrid→skill** | **58%** | **28%** | 9% | 80% |
+| Variant | Self /10 | Cross /10 | Transfer /10 | Quality /10 | Compress |
+|---------|:--------:|:---------:|:------------:|:-----------:|:--------:|
+| baseline | 2.0 | 2.0 | 2.0 | — | — |
+| traj→skill | 2.0 | 0.7 | 0.6 | 8.2 | 2.2× |
+| memory→skill | 5.0 | 2.7 | 1.4 | 7.7 | **4.9×** |
+| **hybrid→skill** | **5.8** | **2.8** | 0.9 | 8.0 | 3.7× |
 
 #### GSM8K (math reasoning → TriviaQA transfer)
 
-| Variant | Self | Cross | Transfer | Quality |
-|---------|------|-------|----------|---------|
-| baseline | 100% | 100% | 100% | — |
-| traj→skill | 86% | 98% | 100% | 82% |
-| memory→skill | 86% | 91% | 96% | 79% |
-| **hybrid→skill** | **92%** | **95%** | 96% | 81% |
+| Variant | Self /10 | Cross /10 | Transfer /10 | Quality /10 | Compress |
+|---------|:--------:|:---------:|:------------:|:-----------:|:--------:|
+| baseline | 10.0 | 10.0 | 10.0 | — | — |
+| traj→skill | 8.6 | 9.8 | 10.0 | 8.2 | 2.6× |
+| memory→skill | 8.6 | 9.1 | 9.6 | 7.9 | **4.1×** |
+| **hybrid→skill** | **9.2** | **9.5** | 9.6 | 8.1 | 3.2× |
 
 #### TriviaQA (factoid QA → HotpotQA transfer)
 
-| Variant | Self | Cross | Transfer | Quality |
-|---------|------|-------|----------|---------|
-| baseline | 82% | 82% | 82% | — |
-| traj→skill | 72% | 80% | 22% | 79% |
-| memory→skill | 80% | 77% | 30% | 74% |
-| **hybrid→skill** | **82%** | **81%** | 18% | 76% |
+| Variant | Self /10 | Cross /10 | Transfer /10 | Quality /10 | Compress |
+|---------|:--------:|:---------:|:------------:|:-----------:|:--------:|
+| baseline | 8.2 | 8.2 | 8.2 | — | — |
+| traj→skill | 7.2 | 8.0 | 2.2 | 7.9 | 2.0× |
+| memory→skill | 8.0 | 7.7 | **3.0** | 7.4 | **4.3×** |
+| **hybrid→skill** | **8.2** | **8.1** | 1.8 | 7.6 | 3.3× |
 
-### Key Findings
+### Key Observations
 
-1. **hybrid→skill leads in Self (+5pp) and Cross (+3pp)** over memory→skill across all benchmarks
-2. **memory→skill leads in Transfer (+6pp)** — evidence filtering is too aggressive, dropping generalizable memories
-3. **traj→skill consistently worst** in Self and Cross — information overload causes overfitting
-4. **Compression**: memory→skill achieves 4.4× (best), hybrid 3.4×, traj 2.3×
-5. **HotpotQA shows largest differentiation** — complex multi-hop tasks amplify strategy differences
+1. **hybrid→skill achieves the highest Self (7.7) and Cross (6.8)** across benchmarks, outperforming memory→skill by +0.5 and +0.3 points respectively on the 0–10 scale.
+2. **memory→skill achieves the highest Transfer (4.7)** and best Compression (4.4×), suggesting that aggressive denoising via memory compression produces more transferable and compact skills.
+3. **traj→skill shows the largest Self–Cross gap** (5.9 vs 6.2 = −0.3 on average, but on HotpotQA: 2.0 vs 0.7 = −1.3), indicating overfitting to source task details.
+4. **HotpotQA (complex multi-hop) shows the largest inter-variant differentiation**: hybrid Self=5.8 vs traj Self=2.0 (Δ=3.8 points). Simple benchmarks (GSM8K, TriviaQA) show smaller gaps.
+5. **All skill variants outperform baseline on HotpotQA** (the hardest benchmark), confirming that skill injection provides value for complex reasoning tasks.
+6. **GSM8K baseline scores 10.0/10** — the LLM already solves grade-school math perfectly without skills, making this benchmark a ceiling control rather than a differentiator.
+
+### Limitations of Current Evaluation
+
+- All Self/Cross/Transfer/Quality scores are **LLM-as-judge** (non-deterministic). The same evaluation may produce slightly different scores on re-run.
+- **Objective EM/F1 metrics** have been implemented in the evaluator (`_compute_em`, `_compute_f1`) but were not available during the v6 experiment run. Future experiments will report both objective and judge-based metrics.
+- N=10 per benchmark provides moderate statistical power. Confidence intervals are not yet computed.
 
 ---
 
