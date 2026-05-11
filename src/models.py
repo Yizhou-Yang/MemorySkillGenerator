@@ -1,5 +1,5 @@
 """
-SkillForge core data model definitions.
+MemorySkillGenerator core data model definitions.
 
 Defines Trajectory, Memory, Skill and other core data structures
 using Pydantic v2 for type validation and serialization.

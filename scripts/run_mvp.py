@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SkillForge MVP experiment runner.
+MemorySkillGenerator MVP experiment runner.
 
 Executes the full MVP pipeline:
 1. Load benchmark tasks.
@@ -36,7 +36,7 @@ from src.utils.logging import setup_logger
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SkillForge MVP Experiment")
+    parser = argparse.ArgumentParser(description="MemorySkillGenerator MVP Experiment")
     parser.add_argument(
         "--config",
         type=str,
@@ -55,7 +55,7 @@ def main() -> None:
     config = load_config(args.config)
     setup_logger(config.get("output", {}).get("log_level", "INFO"))
 
-    logger.info(f"SkillForge MVP experiment started: config={args.config}")
+    logger.info(f"MemorySkillGenerator MVP experiment started: config={args.config}")
     logger.info(f"Config:\n{json.dumps(config, indent=2, ensure_ascii=False)}")
 
     if args.dry_run:

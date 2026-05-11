@@ -86,11 +86,10 @@
 
 **问题**：Liu et al. (2604.08618) 已经发表了一篇名为 "SkillForge" 的论文，聚焦企业云技术支持场景。
 
-**避坑策略**：
+**已解决**：项目已更名为 **MemorySkillGenerator**，避免命名冲突。
 - 我们的工作聚焦 **memory compression 对 skill quality 的影响**（信息论视角）
 - 他们聚焦 **execution failure → skill refinement 的闭环**（工程视角）
-- 我们需要在论文中明确区分，或考虑改名
-- **必须精读此论文**，确认方法论层面没有重叠
+- 命名冲突已通过更名彻底解决
 
 #### ⚠️ 坑 2：Skill 的评估标准不统一
 

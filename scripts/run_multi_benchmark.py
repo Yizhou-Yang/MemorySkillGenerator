@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SkillForge multi-benchmark experiment runner (v7).
+MemorySkillGenerator multi-benchmark experiment runner (v7).
 
 Key design for statistical significance (NO artificial noise):
 1. No-skill baseline: control group to prove skill value.
@@ -53,15 +53,19 @@ from src.utils.llm import LLMClient
 from src.utils.logging import setup_logger
 
 # Primary benchmarks for skill induction
-BENCHMARKS = ["hotpotqa", "gsm8k", "triviaqa"]
+BENCHMARKS = ["gaia", "alfworld", "hotpotqa", "2wikimultihopqa", "aime", "travelplanner", "webshop"]
 VARIANTS = ["traj_to_skill", "memory_to_skill", "hybrid_to_skill"]
 
 # Cross-benchmark transfer pairs: source_benchmark → target_benchmark
 # Designed to test generalisation across task types
 TRANSFER_PAIRS = {
-    "hotpotqa": "musique",      # multi-hop QA → harder multi-hop QA
-    "gsm8k": "triviaqa",        # math reasoning → factoid QA (should fail)
-    "triviaqa": "hotpotqa",     # single-hop → multi-hop (partial transfer)
+    "hotpotqa": "2wikimultihopqa",  # multi-hop QA → multi-hop QA (different source)
+    "2wikimultihopqa": "hotpotqa",  # multi-hop QA → multi-hop QA (reverse)
+    "gaia": "webshop",              # general assistant → web shopping (partial)
+    "aime": "gaia",                 # math competition → general assistant (should fail)
+    "alfworld": "travelplanner",    # embodied tasks → planning (partial transfer)
+    "travelplanner": "alfworld",    # planning → embodied tasks (partial transfer)
+    "webshop": "gaia",              # web shopping → general assistant (partial)
 }
 TRANSFER_NUM_TASKS = 5  # Number of target tasks for transfer evaluation
 
@@ -435,7 +439,7 @@ def print_results_table(
     lines.append("")
     lines.append("=" * 150)
     lines.append(
-        "SkillForge Experiment Results — v7 "
+        "MemorySkillGenerator Experiment Results — v7 "
         "(baseline + Evidence-as-Filter hybrid [tiered retention] + transfer)"
     )
     lines.append("=" * 150)
@@ -630,7 +634,7 @@ def print_results_table(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="SkillForge Multi-Benchmark Experiment v6"
+        description="MemorySkillGenerator Multi-Benchmark Experiment v6"
     )
     parser.add_argument(
         "--benchmarks",
@@ -659,7 +663,7 @@ def main() -> None:
     config = load_config(args.config)
     setup_logger(config.get("output", {}).get("log_level", "INFO"))
 
-    logger.info("SkillForge Multi-Benchmark Experiment v7")
+    logger.info("MemorySkillGenerator Multi-Benchmark Experiment v7")
     logger.info(f"  Benchmarks: {benchmarks}")
     logger.info(f"  Samples per benchmark: {num_samples}")
     logger.info(f"  Variants: {VARIANTS} + no_skill_baseline")

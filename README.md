@@ -1,10 +1,10 @@
-# SkillForge
+# MemorySkillGenerator
 
-> **Skill compiler that produces reusable agent skills from conversation trajectories and/or compressed memories.**
+> **Skill compiler that produces reusable agent skills from conversation trajectories and/or compressed memories, with iterative refinement and co-evolutionary memory management.**
 
-SkillForge implements the research idea *"Learning to Compile Agent Skills via Adaptive Routing and Denoising"*. It takes raw agent interaction trajectories, compresses them into structured memory, then induces reusable skills through three competing pathways — and evaluates which pathway produces the most transferable, high-quality skills.
+MemorySkillGenerator implements the research idea *"Learning to Compile Agent Skills via Adaptive Routing and Denoising"*. It takes raw agent interaction trajectories, compresses them into structured memory, then induces reusable skills through three competing pathways — and evaluates which pathway produces the most transferable, high-quality skills.
 
-**Key finding (v6):** The *Evidence-as-Filter* hybrid approach — using trajectory evidence to **filter and rank** memories rather than inject details — achieves the best Self-consistency (7.7/10) and Cross-task generalisation (6.8/10) across benchmarks. All scores are LLM-as-judge ratings on a 0–10 scale; objective EM/F1 metrics are implemented for future runs.
+**Key finding (v7):** Building on the *Evidence-as-Filter* hybrid approach, v7 introduces **multi-judge verification** (breaking the LLM-as-judge echo chamber), **memory consolidation** (deduplication & merging), **iterative skill refinement** (validation-driven self-correction), and a **skill library** (retrieval & reuse via recruit-or-create decisions). These improvements are inspired by the Mem2Evolve co-evolutionary framework analysis. Objective EM/F1 metrics serve as primary evaluation, with multi-judge LLM scoring as secondary reference.
 
 ---
 
@@ -42,7 +42,7 @@ We compare three approaches and measure which produces skills that generalise be
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                        SkillForge Pipeline                           │
+│                   MemorySkillGenerator Pipeline                      │
 │                                                                      │
 │  ┌──────────┐    ┌──────────────┐    ┌───────────────────────────┐   │
 │  │Benchmark │───>│  Trajectory  │───>│   Memory Compressor       │   │
@@ -117,10 +117,10 @@ v6 (right): Trajectory validates Memory → filter & rank → keep only best →
 ## Project Structure
 
 ```
-SkillForge/
+MemorySkillGenerator/
 ├── benchmarks/
 │   ├── __init__.py
-│   └── loader.py              # HuggingFace dataset loader (HotpotQA/TriviaQA/GSM8K/MuSiQue/SWE-bench)
+│   └── loader.py              # HuggingFace dataset loader (GAIA/ALFWorld/HotpotQA/AIME/TravelPlanner/WebShop/...)
 ├── configs/
 │   ├── default.yaml           # Default experiment configuration
 │   └── mvp_locomo.yaml        # MVP experiment config (overrides default)
@@ -139,25 +139,30 @@ SkillForge/
 │   ├── trajectory/
 │   │   └── collector.py       # ReAct agent trajectory collector (forced multi-step)
 │   ├── memory/
-│   │   └── compressor.py      # Memory compressors (Mem0, A-MEM, MemoryBank) + factory
+│   │   ├── compressor.py      # Memory compressors (Mem0, A-MEM, MemoryBank) + factory
+│   │   └── consolidation.py   # Memory consolidation (dedup + merge, v7)
 │   ├── skill_induction/
 │   │   ├── base.py            # Abstract base class
 │   │   ├── factory.py         # Skill inducer factory
 │   │   ├── traj_to_skill.py   # Path 1: trajectory → skill (direct)
 │   │   ├── memory_to_skill.py # Path 2: memory → skill (compressed)
-│   │   └── hybrid_to_skill.py # Path 3: hybrid → skill (evidence-as-filter, v6)
+│   │   ├── hybrid_to_skill.py # Path 3: hybrid → skill (evidence-as-filter, v6)
+│   │   ├── skill_refiner.py   # Iterative skill refinement (v7)
+│   │   └── skill_library.py   # Skill library with retrieval & reuse (v7)
 │   ├── evaluation/
-│   │   └── evaluator.py       # LLM-as-judge + 5-dimension quality scoring
+│   │   ├── evaluator.py       # EM/F1 + LLM-as-judge + 5-dimension quality scoring
+│   │   └── multi_judge.py     # Multi-judge verifier (echo chamber breaker, v7)
 │   ├── rl_controller/         # (Future) RL-based adaptive routing
 │   └── utils/
 │       ├── config.py          # YAML config loader + env override
 │       ├── io.py              # JSON/JSONL serialisation helpers
 │       ├── llm.py             # Unified LLM API client (OpenAI-compatible)
 │       └── logging.py         # Loguru-based logger setup
-├── tests/                     # Unit & integration tests
+├── tests/                     # Unit & integration tests (196 tests)
 │   ├── test_compressors.py
 │   ├── test_loader.py
 │   ├── test_skill_induction.py
+│   ├── test_mem2evolve_improvements.py  # P0-P3 tests (v7)
 │   ├── test_utils.py
 │   ├── test_models.py
 │   └── test_config.py
@@ -188,7 +193,7 @@ SkillForge/
 ### 1. Install dependencies
 
 ```bash
-cd /root/workspace/SkillForge
+cd MemorySkillGenerator
 pip install -r requirements.txt
 ```
 
@@ -252,7 +257,7 @@ The system loads `default.yaml` first, then deep-merges the override config on t
 
 ### Using a different LLM provider
 
-SkillForge uses the OpenAI-compatible API format. Update `.env`:
+MemorySkillGenerator uses the OpenAI-compatible API format. Update `.env`:
 
 ```bash
 # Example: OpenAI
