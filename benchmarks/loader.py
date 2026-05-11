@@ -11,6 +11,8 @@ Primary benchmarks (active):
 - AIME 24/25: math competition (30 questions each, answer matching)
 - TravelPlanner: long-horizon planning (~180 tasks, multi-constraint satisfaction)
 - WebShop: web shopping simulation (test subset, task completion rate)
+- LoCoMo: long conversation memory (10 samples × ~200 QA, F1 + LLM-Judge)
+- LongMemEval: ultra-long dialogue memory (306 tasks, F1 + LLM-Judge)
 
 Legacy benchmarks (disabled, still loadable):
 - HotpotQA-hard: hard subset of HotpotQA for transfer evaluation
@@ -39,6 +41,8 @@ PRIMARY_BENCHMARKS = [
     "aime",
     "travelplanner",
     "webshop",
+    "locomo",
+    "longmemeval",
 ]
 
 # Legacy benchmarks (disabled but not deleted, still loadable by name)
@@ -76,6 +80,8 @@ class BenchmarkLoader:
             "aime": self._load_aime,
             "travelplanner": self._load_travelplanner,
             "webshop": self._load_webshop,
+            "locomo": self._load_locomo,
+            "longmemeval": self._load_longmemeval,
             # Legacy benchmarks (disabled but still loadable)
             "hotpotqa_hard": self._load_hotpotqa_hard,
             "triviaqa": self._load_triviaqa,
@@ -528,6 +534,145 @@ class BenchmarkLoader:
             return match.group(1).strip()
         # Fallback: return first 200 chars
         return prompt[:200]
+
+    # ------------------------------------------------------------------
+    # LoCoMo — Long Conversation Memory (F1 + LLM-Judge)
+    # Source: KhangPTT373/locomo_preprocess (test split, 10 samples × ~200 QA)
+    # Each sample has questions, answers, evidences, category, turns, sessions
+    # ------------------------------------------------------------------
+
+    def _load_locomo(self) -> list[dict[str, Any]]:
+        """
+        Load the LoCoMo benchmark (test split).
+
+        LoCoMo evaluates long conversation memory capabilities.
+        Each sample contains a multi-session dialogue (~19 sessions)
+        and ~200 QA pairs that test memory of conversation details.
+        Evaluation uses token-level F1 and LLM-Judge scoring.
+
+        Categories: 1=single-hop, 2=multi-hop, 3=temporal reasoning
+
+        Source: https://huggingface.co/datasets/KhangPTT373/locomo_preprocess
+        """
+        logger.info("Loading LoCoMo (test) from HuggingFace...")
+        raw_dataset = load_dataset(
+            "KhangPTT373/locomo_preprocess",
+            split="test",
+        )
+
+        tasks: list[dict[str, Any]] = []
+        for sample_idx, row in enumerate(raw_dataset):
+            if sample_idx >= self.num_samples:
+                break
+
+            questions = row.get("questions", [])
+            answers = row.get("answers", [])
+            categories = row.get("category", [])
+            sessions = row.get("sessions", [])
+            turns = row.get("turns", [])
+            evidences = row.get("evidences", [])
+
+            # Build dialogue context from sessions
+            dialogue_context = "\n\n---\n\n".join(
+                sessions[:20]  # Limit to first 20 sessions
+            ) if sessions else ""
+
+            # Create one task per QA pair
+            for qa_idx, (question, answer) in enumerate(zip(questions, answers)):
+                if len(tasks) >= self.num_samples * 200:  # Safety limit
+                    break
+
+                category = categories[qa_idx] if qa_idx < len(categories) else 0
+                category_name = {1: "single-hop", 2: "multi-hop", 3: "temporal"}.get(
+                    category, "unknown"
+                )
+
+                evidence = evidences[qa_idx] if qa_idx < len(evidences) else []
+
+                description = (
+                    f"Answer the following question based on the conversation history.\n\n"
+                    f"Conversation:\n{dialogue_context[:8000]}\n\n"
+                    f"Question: {question}"
+                )
+
+                tasks.append({
+                    "task_id": f"locomo_s{sample_idx}_q{qa_idx}",
+                    "description": description,
+                    "expected": answer,
+                    "context": dialogue_context[:8000],
+                    "metadata": {
+                        "sample_idx": sample_idx,
+                        "qa_idx": qa_idx,
+                        "category": category,
+                        "category_name": category_name,
+                        "evidence": evidence,
+                        "num_sessions": len(sessions),
+                        "num_turns": len(turns),
+                    },
+                })
+
+        return tasks
+
+    # ------------------------------------------------------------------
+    # LongMemEval — Ultra-long Dialogue Memory (F1 + LLM-Judge)
+    # Source: kellyhongg/cleaned-longmemeval-s (train split, 306 tasks)
+    # Each task has question, answer, full_input (~100K tokens), focused_input
+    # ------------------------------------------------------------------
+
+    def _load_longmemeval(self) -> list[dict[str, Any]]:
+        """
+        Load the LongMemEval benchmark (cleaned version, 306 tasks).
+
+        LongMemEval evaluates memory over ultra-long dialogues (~100K tokens).
+        Each task provides a question about conversation history, with both
+        a full input (complete history) and a focused input (relevant excerpt).
+        Evaluation uses token-level F1 and LLM-Judge scoring.
+
+        Source: https://huggingface.co/datasets/kellyhongg/cleaned-longmemeval-s
+        """
+        logger.info("Loading LongMemEval (cleaned) from HuggingFace...")
+        raw_dataset = load_dataset(
+            "kellyhongg/cleaned-longmemeval-s",
+            split="train",
+        )
+
+        tasks: list[dict[str, Any]] = []
+        for idx, row in enumerate(raw_dataset):
+            if idx >= self.num_samples:
+                break
+
+            custom_id = row.get("custom_id", str(idx))
+            question = row.get("question", "")
+            answer = row.get("answer", "")
+            full_input = row.get("full_input", "")
+            full_input_tokens = row.get("full_input_tokens", 0)
+            focused_input = row.get("focused_input", "")
+            focused_input_tokens = row.get("focused_input_tokens", 0)
+
+            # Use focused_input as context (much shorter, ~320 tokens)
+            # Full input is too long (~100K tokens) for most LLMs
+            context = focused_input if focused_input else full_input[:8000]
+
+            description = (
+                f"Answer the following question based on the conversation history.\n\n"
+                f"Conversation excerpt:\n{context}\n\n"
+                f"Question: {question}"
+            )
+
+            tasks.append({
+                "task_id": f"longmemeval_{custom_id}",
+                "description": description,
+                "expected": str(answer),
+                "context": context,
+                "metadata": {
+                    "custom_id": custom_id,
+                    "full_input_tokens": full_input_tokens,
+                    "focused_input_tokens": focused_input_tokens,
+                    "has_full_input": bool(full_input),
+                },
+            })
+
+        return tasks
 
     # ==================================================================
     # LEGACY BENCHMARKS (disabled but not deleted)

@@ -51,15 +51,36 @@ skill_induction:
     evidence_retrieval_top_k: 8         # Max memories to keep after tiered filtering (v7)
     evidence_max_tokens: 2048
 
-# ===== RL Controller Configuration (future use) =====
+# ===== RL Controller Configuration =====
 rl_controller:
-  enabled: false
-  algorithm: ppo
-  state_dim: 8
-  hidden_dim: 64
-  learning_rate: 0.0003
-  gamma: 0.99
-  episodes: 1000
+  enabled: true
+  embedding_dim: 1024
+  hidden_dim: 256
+  top_k: 3                              # Training: select 3 skills per span
+  top_k_eval: 7                         # Evaluation: select 7 skills (MemSkill finding)
+  tau_0: 0.3                            # Exploration incentive initial probability mass
+  t_explore: 50                         # Exploration decay steps
+  clip_epsilon: 0.2                     # PPO clip range
+  gamma: 0.99                           # Discount factor
+  entropy_coeff: 0.01                   # Entropy bonus coefficient
+  value_coeff: 0.5                      # Value loss coefficient
+  learning_rate: 0.0003                 # PPO learning rate
+
+# ===== Skill Designer Configuration (MemSkill §3.8) =====
+skill_designer:
+  trigger_interval: 100                 # Trigger evolution every N steps
+  max_edits_per_cycle: 3                # Max skill edits per evolution cycle
+  patience: 3                           # Early stop after N cycles without improvement
+  buffer_max_size: 200                  # Hard-case buffer max size
+  buffer_max_step_gap: 500              # Max step gap before case expiry
+  n_clusters: 5                         # KMeans clusters for hard case diversity
+  representatives_per_cluster: 3        # Representatives per cluster
+
+# ===== Span Processing Configuration (MemSkill §3.5) =====
+span_processing:
+  span_size: 512                        # Tokens per span
+  overlap: 64                           # Overlap between adjacent spans
+  align_sentences: true                 # Align span boundaries to sentences
 
 # ===== Evaluation Configuration =====
 evaluation:
