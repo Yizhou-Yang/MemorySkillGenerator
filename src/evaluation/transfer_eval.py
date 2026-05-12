@@ -1,10 +1,10 @@
 """
-跨模型迁移评测 — 衡量 skill 的跨模型可迁移性。
+Cross-model transfer evaluation — measures skill transferability across models.
 
-参考 MemSkill 论文 §5.1:
-- 用 Model A 训练 skill → 用 Model B 执行 → 对比性能
-- 这是衡量"真演化" vs "prompt 包装"的核心指标
-- MemSkill 的消融显示 designer 在跨模型时贡献放大
+Reference: MemSkill paper §5.1:
+- Train skill with Model A → execute with Model B → compare performance
+- Core metric for distinguishing "real evolution" vs "prompt wrapping"
+- MemSkill ablation shows designer contribution amplifies in cross-model transfer
 
 Reference: docs/internal/memskill_analysis.md §5.1
 """
@@ -23,7 +23,7 @@ from src.utils.llm import LLMClient
 
 @dataclass
 class TransferResult:
-    """单个 skill 的跨模型迁移结果"""
+    """Transfer result for a single skill across models"""
     skill_id: str
     skill_name: str
     source_model: str
@@ -37,7 +37,7 @@ class TransferResult:
 
     @property
     def transfer_ratio(self) -> float:
-        """迁移比率: target_f1 / source_f1"""
+        """Transfer ratio: target_f1 / source_f1"""
         if self.source_f1 <= 0:
             return 0.0
         return self.target_f1 / self.source_f1
@@ -45,7 +45,7 @@ class TransferResult:
 
 @dataclass
 class TransferReport:
-    """跨模型迁移评测报告"""
+    """Cross-model transfer evaluation report"""
     source_model: str
     target_model: str
     results: list[TransferResult] = field(default_factory=list)
@@ -55,7 +55,7 @@ class TransferReport:
     avg_transfer_ratio: float = 0.0
 
     def compute_aggregates(self) -> None:
-        """计算聚合指标"""
+        """Compute aggregate metrics"""
         if not self.results:
             return
         n = len(self.results)
@@ -68,18 +68,18 @@ class TransferReport:
 
 class CrossModelTransferEvaluator:
     """
-    跨模型迁移评测器。
+    Cross-model transfer evaluator.
 
-    核心思路:
-    1. 用 source_model 训练/生成 skill
-    2. 用 target_model 执行相同 skill
-    3. 对比两者的 EM/F1 性能
-    4. 如果 target 性能接近或超过 source，说明 skill 有真正的跨模型语义价值
+    Core approach:
+    1. Train/generate skill with source_model
+    2. Execute same skill with target_model
+    3. Compare EM/F1 performance between both
+    4. If target performance matches or exceeds source, the skill has genuine cross-model semantic value
 
-    MemSkill 的关键发现:
-    - Qwen 上 MemSkill 比 LLaMA 上还强 (52.07 vs 50.96)
-    - 去掉 designer 在 Qwen 上跌 17.36 (vs LLaMA 跌 6.85)
-    - 说明演化出的 skill 有跨模型的"语义价值"
+    MemSkill's key findings:
+    - MemSkill on Qwen outperforms LLaMA (52.07 vs 50.96)
+    - Removing designer drops 17.36 on Qwen (vs 6.85 on LLaMA)
+    - Indicates evolved skills have cross-model "semantic value"
     """
 
     def __init__(
@@ -100,13 +100,13 @@ class CrossModelTransferEvaluator:
         target_model_name: str = "target",
     ) -> TransferReport:
         """
-        评测 skill 的跨模型迁移性能。
+        Evaluate skill cross-model transfer performance.
 
         Args:
-            skills: 要评测的 skill 列表
-            tasks: 评测任务列表
-            source_model_name: 源模型名称
-            target_model_name: 目标模型名称
+            skills: List of skills to evaluate
+            tasks: List of evaluation tasks
+            source_model_name: Source model name
+            target_model_name: Target model name
 
         Returns:
             TransferReport
@@ -139,7 +139,7 @@ class CrossModelTransferEvaluator:
         source_model_name: str,
         target_model_name: str,
     ) -> TransferResult:
-        """评测单个 skill 的跨模型迁移"""
+        """Evaluate single skill cross-model transfer"""
         result = TransferResult(
             skill_id=skill.skill_id,
             skill_name=skill.name,
@@ -150,7 +150,7 @@ class CrossModelTransferEvaluator:
 
         skill_prompt = self._format_skill_prompt(skill)
 
-        # 用 source model 评测
+        # Evaluate with source model
         if self.source_client:
             source_scores = self._run_tasks(
                 self.source_client, skill_prompt, tasks
@@ -158,7 +158,7 @@ class CrossModelTransferEvaluator:
             result.source_em = source_scores["avg_em"]
             result.source_f1 = source_scores["avg_f1"]
 
-        # 用 target model 评测
+        # Evaluate with target model
         if self.target_client:
             target_scores = self._run_tasks(
                 self.target_client, skill_prompt, tasks
@@ -175,7 +175,7 @@ class CrossModelTransferEvaluator:
         skill_prompt: str,
         tasks: list[dict[str, str]],
     ) -> dict[str, float]:
-        """用指定 LLM 客户端运行任务"""
+        """Run tasks with specified LLM client"""
         total_em = 0.0
         total_f1 = 0.0
         count = 0
@@ -196,7 +196,7 @@ class CrossModelTransferEvaluator:
                 response = client.chat(messages)
                 expected = task.get("expected", "")
 
-                # 简单的 EM/F1 计算
+                # Simple EM/F1 computation
                 em = 1.0 if expected.lower().strip() in response.lower() else 0.0
                 f1 = self._compute_token_f1(response, expected)
 
@@ -212,7 +212,7 @@ class CrossModelTransferEvaluator:
 
     @staticmethod
     def _compute_token_f1(response: str, expected: str) -> float:
-        """计算 token-level F1"""
+        """Compute token-level F1"""
         if not expected:
             return 1.0
 
@@ -235,7 +235,7 @@ class CrossModelTransferEvaluator:
 
     @staticmethod
     def _format_skill_prompt(skill: Skill) -> str:
-        """格式化 skill 为 prompt"""
+        """Format skill as prompt"""
         parts = [f"## Skill: {skill.name}", skill.description, ""]
         if skill.procedure:
             parts.append("**Procedure:**")
@@ -251,7 +251,7 @@ class CrossModelTransferEvaluator:
     def generate_comparison_table(
         self, report: TransferReport
     ) -> str:
-        """生成对比表格（Markdown 格式）"""
+        """Generate comparison table (Markdown format)"""
         lines = [
             f"## Cross-Model Transfer: {report.source_model} → {report.target_model}",
             "",

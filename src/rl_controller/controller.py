@@ -1,11 +1,11 @@
 """
-RL Controller — 基于 embedding 的 skill 选择 + Gumbel-Top-K 采样 + PPO 训练。
+RL Controller — embedding-based skill selection + Gumbel-Top-K sampling + PPO training.
 
-参考 MemSkill 论文 §3.2-3.7:
+Reference: MemSkill paper §3.2-3.7:
 - Embedding-based compatibility score: z_{t,i} = h_t^T u_i
-- Gumbel-Top-K 采样: 训练时有探索性，评估时贪心
-- PPO 训练循环: 用下游 EM/F1 作为 reward signal
-- 可变 skill bank: 新 skill 直接 plug-and-play，不需要重训 action head
+- Gumbel-Top-K sampling: exploratory during training, greedy at eval
+- PPO training loop: uses downstream EM/F1 as reward signal
+- Dynamic skill bank: new skills plug-and-play without retraining action head
 
 Reference: docs/internal/memskill_analysis.md §3.2-3.7
 """
@@ -21,40 +21,40 @@ from loguru import logger
 
 
 # ============================================================
-# 数据结构
+# Data Structures
 # ============================================================
 
 @dataclass
 class ControllerState:
-    """Controller 的状态表示，对应 MemSkill 公式 1: h_t = f_ctx(x_t, M_t)"""
-    embedding: np.ndarray  # 状态 embedding 向量 (dim,)
-    span_text: str = ""  # 原始 span 文本（用于调试）
+    """Controller state representation, corresponds to MemSkill Eq.1: h_t = f_ctx(x_t, M_t)"""
+    embedding: np.ndarray  # State embedding vector (dim,)
+    span_text: str = ""  # Raw span text (for debugging)
     retrieved_memories: list[str] = field(default_factory=list)
 
 
 @dataclass
 class SkillEmbedding:
-    """Skill 的 embedding 表示，对应 MemSkill 公式 2: u_i = f_skill(desc(s_i))"""
+    """Skill embedding representation, corresponds to MemSkill Eq.2: u_i = f_skill(desc(s_i))"""
     skill_id: str
     skill_name: str
-    embedding: np.ndarray  # skill description embedding 向量 (dim,)
-    is_new: bool = False  # 是否为新加入的 skill（用于 exploration incentive）
-    creation_step: int = 0  # 创建时的训练步数
+    embedding: np.ndarray  # Skill description embedding vector (dim,)
+    is_new: bool = False  # Whether newly added skill (for exploration incentive)
+    creation_step: int = 0  # Training step when created
 
 
 @dataclass
 class SelectionResult:
-    """Top-K skill 选择结果"""
-    selected_skill_ids: list[str]  # 选中的 K 个 skill ID
-    selected_indices: list[int]  # 选中的 K 个 skill 在 bank 中的索引
-    log_prob: float  # 联合对数概率 log π(A_t | s_t)
-    raw_scores: np.ndarray  # 原始 compatibility scores z_{t,i}
-    probabilities: np.ndarray  # softmax 概率 p_θ(i | h_t)
+    """Top-K skill selection result"""
+    selected_skill_ids: list[str]  # Selected K skill IDs
+    selected_indices: list[int]  # Selected K skill indices in the bank
+    log_prob: float  # Joint log probability log π(A_t | s_t)
+    raw_scores: np.ndarray  # Raw compatibility scores z_{t,i}
+    probabilities: np.ndarray  # Softmax probabilities p_θ(i | h_t)
 
 
 @dataclass
 class PPOTransition:
-    """PPO 训练用的单步 transition"""
+    """Single-step transition for PPO training"""
     state_embedding: np.ndarray
     selected_indices: list[int]
     log_prob: float
@@ -70,12 +70,12 @@ class PPOTransition:
 
 class ControllerMLP:
     """
-    轻量 MLP 用于 state embedding 变换。
+    Lightweight MLP for state embedding transformation.
 
-    MemSkill 的 controller 是一个简单的 MLP，将 state embedding
-    映射到与 skill embedding 同维度的空间，然后用内积做 compatibility score。
+    MemSkill's controller is a simple MLP that maps state embedding
+    to the same dimensional space as skill embeddings, then uses dot product for compatibility score.
 
-    这里用 numpy 实现（不依赖 PyTorch），保持项目轻量。
+    Implemented in numpy (no PyTorch dependency) to keep the project lightweight.
     """
 
     def __init__(
@@ -90,7 +90,7 @@ class ControllerMLP:
         self.output_dim = output_dim
 
         rng = np.random.RandomState(seed)
-        # Xavier 初始化
+        # Xavier initialization
         scale1 = np.sqrt(2.0 / (input_dim + hidden_dim))
         scale2 = np.sqrt(2.0 / (hidden_dim + output_dim))
 
@@ -100,28 +100,28 @@ class ControllerMLP:
         self.b2 = np.zeros(output_dim, dtype=np.float32)
 
     def forward(self, x: np.ndarray) -> np.ndarray:
-        """前向传播: x -> ReLU(xW1 + b1) -> W2 + b2"""
+        """Forward pass: x -> ReLU(xW1 + b1) -> W2 + b2"""
         h = np.maximum(0, x @ self.W1 + self.b1)  # ReLU
         return h @ self.W2 + self.b2
 
     def get_params(self) -> list[np.ndarray]:
-        """获取所有参数（用于 PPO 更新）"""
+        """Get all parameters (for PPO update)"""
         return [self.W1, self.b1, self.W2, self.b2]
 
     def set_params(self, params: list[np.ndarray]) -> None:
-        """设置所有参数"""
+        """Set all parameters"""
         self.W1, self.b1, self.W2, self.b2 = params
 
     def clone_params(self) -> list[np.ndarray]:
-        """深拷贝所有参数"""
+        """Deep copy all parameters"""
         return [p.copy() for p in self.get_params()]
 
 
 class ValueNetwork:
     """
-    Value network V_φ(s_t) 用于 PPO 的 advantage 估计。
+    Value network V_φ(s_t) for PPO advantage estimation.
 
-    简单的两层 MLP，输出标量 value。
+    Simple two-layer MLP that outputs a scalar value.
     """
 
     def __init__(
@@ -143,7 +143,7 @@ class ValueNetwork:
         self.b2 = np.zeros(1, dtype=np.float32)
 
     def forward(self, x: np.ndarray) -> float:
-        """前向传播: x -> ReLU(xW1 + b1) -> W2 + b2 -> scalar"""
+        """Forward pass: x -> ReLU(xW1 + b1) -> W2 + b2 -> scalar"""
         h = np.maximum(0, x @ self.W1 + self.b1)
         return float((h @ self.W2 + self.b2)[0])
 
@@ -163,36 +163,36 @@ class ValueNetwork:
 
 class SkillSelectionController:
     """
-    基于 embedding 的 skill 选择 controller。
+    Embedding-based skill selection controller.
 
-    核心机制 (MemSkill §3.2-3.4):
-    1. Compatibility Score: z_{t,i} = h_t^T u_i (状态与 skill 的内积)
-    2. Softmax 概率: p_θ(i|h_t) = softmax(z_t)_i
-    3. Gumbel-Top-K 采样: 训练时加 Gumbel 噪声探索，评估时贪心
-    4. 联合概率: π(A_t|s_t) = ∏ p(a_j) / (1 - Σ_{l<j} p(a_l))
-    5. Exploration Incentive: 新 skill 的概率质量 >= τ_t (线性衰减)
+    Core mechanism (MemSkill §3.2-3.4):
+    1. Compatibility Score: z_{t,i} = h_t^T u_i (dot product of state and skill)
+    2. Softmax probability: p_θ(i|h_t) = softmax(z_t)_i
+    3. Gumbel-Top-K sampling: add Gumbel noise for exploration during training, greedy at eval
+    4. Joint probability: π(A_t|s_t) = ∏ p(a_j) / (1 - Σ_{l<j} p(a_l))
+    5. Exploration Incentive: new skill probability mass >= τ_t (linear decay)
     """
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self.config = config or {}
 
-        # 维度配置
+        # Dimension config
         self.embedding_dim: int = self.config.get("embedding_dim", 1024)
         self.hidden_dim: int = self.config.get("hidden_dim", 256)
         self.top_k: int = self.config.get("top_k", 3)
 
-        # Exploration incentive 配置 (MemSkill §3.8.5)
+        # Exploration incentive config (MemSkill §3.8.5)
         self.tau_0: float = self.config.get("tau_0", 0.3)
         self.t_explore: int = self.config.get("t_explore", 50)
 
-        # PPO 配置
+        # PPO config
         self.clip_epsilon: float = self.config.get("clip_epsilon", 0.2)
         self.gamma: float = self.config.get("gamma", 0.99)
         self.entropy_coeff: float = self.config.get("entropy_coeff", 0.01)
         self.value_coeff: float = self.config.get("value_coeff", 0.5)
         self.learning_rate: float = self.config.get("learning_rate", 3e-4)
 
-        # 网络
+        # Networks
         self.policy_net = ControllerMLP(
             input_dim=self.embedding_dim,
             hidden_dim=self.hidden_dim,
@@ -203,10 +203,10 @@ class SkillSelectionController:
             hidden_dim=self.hidden_dim // 2,
         )
 
-        # Skill bank (动态大小)
+        # Skill bank (dynamic size)
         self._skill_embeddings: list[SkillEmbedding] = []
 
-        # 训练状态
+        # Training state
         self._current_step: int = 0
         self._trajectory_buffer: list[PPOTransition] = []
         self._best_params: list[np.ndarray] | None = None
@@ -219,7 +219,7 @@ class SkillSelectionController:
 
     @property
     def skill_bank_size(self) -> int:
-        """当前 skill bank 大小"""
+        """Current skill bank size"""
         return len(self._skill_embeddings)
 
     def register_skill(
@@ -230,10 +230,10 @@ class SkillSelectionController:
         is_new: bool = False,
     ) -> None:
         """
-        注册一个 skill 到 bank 中。
+        Register a skill into the bank.
 
-        新 skill 直接 plug-and-play，不需要重训 action head。
-        这是 embedding-based score 的核心优势。
+        New skills plug-and-play without retraining action head.
+        This is the core advantage of embedding-based scoring.
         """
         se = SkillEmbedding(
             skill_id=skill_id,
@@ -249,7 +249,7 @@ class SkillSelectionController:
         )
 
     def remove_skill(self, skill_id: str) -> bool:
-        """从 bank 中移除一个 skill"""
+        """Remove a skill from the bank"""
         before = len(self._skill_embeddings)
         self._skill_embeddings = [
             se for se in self._skill_embeddings if se.skill_id != skill_id
@@ -266,15 +266,15 @@ class SkillSelectionController:
         training: bool = False,
     ) -> SelectionResult:
         """
-        选择 Top-K 个 skill。
+        Select Top-K skills.
 
         Args:
-            state: 当前状态 (embedding)
-            top_k: 选择数量 (默认 self.top_k)
-            training: 是否训练模式 (True 时用 Gumbel-Top-K 采样)
+            state: Current state (embedding)
+            top_k: Number to select (default self.top_k)
+            training: Training mode (True uses Gumbel-Top-K sampling)
 
         Returns:
-            SelectionResult 包含选中的 skill 和概率信息
+            SelectionResult containing selected skills and probability info
         """
         k = min(top_k or self.top_k, self.skill_bank_size)
         if k == 0:
@@ -286,28 +286,28 @@ class SkillSelectionController:
                 probabilities=np.array([]),
             )
 
-        # Step 1: 通过 policy network 变换 state embedding
+        # Step 1: Transform state embedding via policy network
         h_t = self.policy_net.forward(state.embedding)
 
-        # Step 2: 计算 compatibility scores (MemSkill 公式 3)
+        # Step 2: Compute compatibility scores (MemSkill Eq.3)
         skill_embeddings = np.stack(
             [se.embedding for se in self._skill_embeddings]
         )  # (N, dim)
-        z_t = skill_embeddings @ h_t  # (N,) — 内积
+        z_t = skill_embeddings @ h_t  # (N,) — dot product
 
-        # Step 3: Exploration incentive (MemSkill §3.8.5 公式 6-8)
+        # Step 3: Exploration incentive (MemSkill §3.8.5 Eq.6-8)
         z_t = self._apply_exploration_incentive(z_t)
 
-        # Step 4: Softmax 概率
+        # Step 4: Softmax probabilities
         probs = self._softmax(z_t)
 
-        # Step 5: 选择 Top-K
+        # Step 5: Select Top-K
         if training:
             selected_indices = self._gumbel_top_k(z_t, k)
         else:
             selected_indices = self._greedy_top_k(probs, k)
 
-        # Step 6: 计算联合对数概率 (MemSkill 公式 11)
+        # Step 6: Compute joint log probability (MemSkill Eq.11)
         log_prob = self._compute_joint_log_prob(probs, selected_indices)
 
         selected_ids = [
@@ -323,36 +323,36 @@ class SkillSelectionController:
         )
 
     def get_value(self, state: ControllerState) -> float:
-        """获取状态的 value 估计 V_φ(s_t)"""
+        """Get state value estimate V_φ(s_t)"""
         return self.value_net.forward(state.embedding)
 
     # ================================================================
-    # Gumbel-Top-K 采样 (MemSkill §3.4)
+    # Gumbel-Top-K Sampling (MemSkill §3.4)
     # ================================================================
 
     @staticmethod
     def _gumbel_top_k(logits: np.ndarray, k: int) -> list[int]:
         """
-        Gumbel-Top-K 采样。
+        Gumbel-Top-K sampling.
 
-        给每个 logit 加独立 Gumbel(0,1) 噪声，然后取 Top-K。
-        等价于按 softmax(logits) 做无放回采样。
+        Add independent Gumbel(0,1) noise to each logit, then take Top-K.
+        Equivalent to sampling without replacement from softmax(logits).
         """
-        # 采样 Gumbel(0,1) 噪声: g = -log(-log(u)), u ~ Uniform(0,1)
+        # Sample Gumbel(0,1) noise: g = -log(-log(u)), u ~ Uniform(0,1)
         u = np.random.uniform(1e-8, 1.0 - 1e-8, size=logits.shape)
         gumbel_noise = -np.log(-np.log(u))
         perturbed = logits + gumbel_noise
-        # 取 Top-K 索引
+        # Take Top-K indices
         indices = np.argsort(perturbed)[::-1][:k].tolist()
         return indices
 
     @staticmethod
     def _greedy_top_k(probs: np.ndarray, k: int) -> list[int]:
-        """贪心选择概率最高的 K 个"""
+        """Greedy selection of top-K by probability"""
         return np.argsort(probs)[::-1][:k].tolist()
 
     # ================================================================
-    # 联合概率计算 (MemSkill 公式 11)
+    # Joint Probability Computation (MemSkill Eq.11)
     # ================================================================
 
     @staticmethod
@@ -360,11 +360,11 @@ class SkillSelectionController:
         probs: np.ndarray, selected_indices: list[int]
     ) -> float:
         """
-        计算无放回 Top-K 选择的联合对数概率。
+        Compute joint log probability of Top-K selection without replacement.
 
         π(A_t|s_t) = ∏_{j=1}^K p(a_j) / (1 - Σ_{l<j} p(a_l))
 
-        对应 MemSkill 公式 11 的"无放回抽糖果"数学。
+        Corresponds to MemSkill Eq.11 "sampling without replacement" math.
         """
         log_prob = 0.0
         cumulative_prob = 0.0
@@ -375,23 +375,23 @@ class SkillSelectionController:
             if denominator <= 1e-10:
                 break
             conditional_p = p_i / denominator
-            conditional_p = max(conditional_p, 1e-10)  # 数值稳定
+            conditional_p = max(conditional_p, 1e-10)  # Numerical stability
             log_prob += math.log(conditional_p)
             cumulative_prob += p_i
 
         return log_prob
 
     # ================================================================
-    # Exploration Incentive (MemSkill §3.8.5 公式 6-8)
+    # Exploration Incentive (MemSkill §3.8.5 Eq.6-8)
     # ================================================================
 
     def _apply_exploration_incentive(self, z_t: np.ndarray) -> np.ndarray:
         """
-        对新 skill 施加 exploration incentive。
+        Apply exploration incentive to new skills.
 
-        公式 6: Σ_{i ∈ S_new} p_θ(i|s_t) >= τ_t
-        公式 7: z'_{t,i} = z_{t,i} + δ_t (i ∈ S_new)
-        公式 8: τ_t = τ_0 · (1 - t/T_explore)
+        Eq.6: Σ_{i ∈ S_new} p_θ(i|s_t) >= τ_t
+        Eq.7: z'_{t,i} = z_{t,i} + δ_t (i ∈ S_new)
+        Eq.8: τ_t = τ_0 · (1 - t/T_explore)
         """
         new_indices = [
             i for i, se in enumerate(self._skill_embeddings)
@@ -401,8 +401,8 @@ class SkillSelectionController:
         if not new_indices:
             return z_t
 
-        # 计算当前 τ_t (线性衰减)
-        # 对每个新 skill 用其自己的 age 计算衰减
+        # Compute current τ_t (linear decay)
+        # Compute decay using each new skill's own age
         max_age = max(
             self._current_step - self._skill_embeddings[i].creation_step
             for i in new_indices
@@ -412,18 +412,18 @@ class SkillSelectionController:
         if tau_t <= 0:
             return z_t
 
-        # 检查当前新 skill 的概率质量是否满足约束
+        # Check if new skill probability mass satisfies constraint
         probs = self._softmax(z_t)
         new_prob_mass = sum(probs[i] for i in new_indices)
 
         if new_prob_mass >= tau_t:
-            return z_t  # 已满足约束
+            return z_t  # Constraint already satisfied
 
-        # 计算需要加的 δ_t 使约束成立
-        # 二分搜索找最小 δ
+        # Compute δ_t needed to satisfy constraint
+        # Binary search for minimum δ
         z_modified = z_t.copy()
         delta_low, delta_high = 0.0, 10.0
-        for _ in range(20):  # 二分搜索
+        for _ in range(20):  # Binary search
             delta_mid = (delta_low + delta_high) / 2
             z_trial = z_t.copy()
             for i in new_indices:
@@ -441,19 +441,19 @@ class SkillSelectionController:
         return z_modified
 
     # ================================================================
-    # PPO 训练 (MemSkill §3.7 公式 15-19)
+    # PPO Training (MemSkill §3.7 Eq.15-19)
     # ================================================================
 
     def record_transition(self, transition: PPOTransition) -> None:
-        """记录一个 transition 到 buffer"""
+        """Record a transition to the buffer"""
         self._trajectory_buffer.append(transition)
         self._current_step += 1
 
     def compute_advantages(self, final_reward: float) -> None:
         """
-        计算 GAE advantages。
+        Compute GAE advantages.
 
-        MemSkill 用 episode-level reward，中间步骤都是 0。
+        MemSkill uses episode-level reward, intermediate steps are 0.
         G_t = γ^{T-t} · R
         Â_t = G_t - V_φ(s_t)
         """
@@ -462,20 +462,20 @@ class SkillSelectionController:
             return
 
         for t, transition in enumerate(self._trajectory_buffer):
-            # 折扣回报
+            # Discounted returns
             transition.returns = (self.gamma ** (T - 1 - t)) * final_reward
             # Advantage = returns - value baseline
             transition.advantage = transition.returns - transition.value
 
     def ppo_update(self, epochs: int = 4, batch_size: int = 32) -> dict[str, float]:
         """
-        执行 PPO 更新。
+        Execute PPO update.
 
-        公式 16: L_policy = E[min(r_t · Â_t, clip(r_t, 1±ε) · Â_t)]
-        公式 19: max L_policy - c_v · L_value + c_H · H(θ)
+        Eq.16: L_policy = E[min(r_t · Â_t, clip(r_t, 1±ε) · Â_t)]
+        Eq.19: max L_policy - c_v · L_value + c_H · H(θ)
 
         Returns:
-            训练统计信息
+            Training statistics
         """
         if not self._trajectory_buffer:
             return {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0}
@@ -490,7 +490,7 @@ class SkillSelectionController:
 
         for _epoch in range(epochs):
             for transition in self._trajectory_buffer:
-                # 计算新策略下的 log_prob
+                # Compute log_prob under new policy
                 state = ControllerState(embedding=transition.state_embedding)
                 result = self.select_skills(state, training=False)
 
@@ -526,13 +526,13 @@ class SkillSelectionController:
                 total_entropy += entropy
                 num_updates += 1
 
-                # 简化的梯度更新 (数值微分近似)
-                # 在实际部署中应使用 PyTorch autograd
+                # Simplified gradient update (numerical differentiation approximation)
+                # Should use PyTorch autograd in production
                 self._numerical_update(
                     transition, policy_loss, value_loss, entropy
                 )
 
-        # 清空 buffer
+        # Clear the buffer
         n = max(num_updates, 1)
         stats = {
             "policy_loss": total_policy_loss / n,
@@ -557,10 +557,10 @@ class SkillSelectionController:
         entropy: float,
     ) -> None:
         """
-        简化的参数更新。
+        Simplified parameter update.
 
-        在完整实现中应使用 PyTorch autograd。
-        这里用小幅随机扰动 + 方向性更新作为近似。
+        Full implementation should use PyTorch autograd.
+        Uses small random perturbation + directional update as approximation.
         """
         lr = self.learning_rate
         total_loss = (
@@ -569,12 +569,12 @@ class SkillSelectionController:
             - self.entropy_coeff * entropy
         )
 
-        # 对 policy network 做小幅更新
+        # Small update to policy network
         for param in self.policy_net.get_params():
             noise = np.random.randn(*param.shape).astype(np.float32) * 0.01
             param -= lr * total_loss * noise
 
-        # 对 value network 做小幅更新
+        # Small update to value network
         for param in self.value_net.get_params():
             noise = np.random.randn(*param.shape).astype(np.float32) * 0.01
             param -= lr * value_loss * noise
@@ -585,10 +585,10 @@ class SkillSelectionController:
 
     def save_snapshot(self, reward: float) -> bool:
         """
-        保存当前参数快照（如果是最佳）。
+        Save current parameter snapshot (if best).
 
         Returns:
-            True 如果保存了新的最佳快照
+            True if a new best snapshot was saved
         """
         if reward > self._best_reward:
             self._best_reward = reward
@@ -603,10 +603,10 @@ class SkillSelectionController:
 
     def rollback_to_best(self) -> bool:
         """
-        回滚到最佳参数快照。
+        Rollback to best parameter snapshot.
 
         Returns:
-            True 如果成功回滚
+            True if rollback succeeded
         """
         if self._best_params is None:
             return False
@@ -622,21 +622,21 @@ class SkillSelectionController:
         return True
 
     # ================================================================
-    # 辅助方法
+    # Utility Methods
     # ================================================================
 
     @staticmethod
     def _softmax(x: np.ndarray) -> np.ndarray:
-        """数值稳定的 softmax"""
+        """Numerically stable softmax"""
         x_shifted = x - np.max(x)
         exp_x = np.exp(x_shifted)
         return exp_x / (np.sum(exp_x) + 1e-10)
 
     def get_skill_ids(self) -> list[str]:
-        """获取所有注册的 skill ID"""
+        """Get all registered skill IDs"""
         return [se.skill_id for se in self._skill_embeddings]
 
     def mark_skills_not_new(self) -> None:
-        """将所有 skill 标记为非新 skill（exploration 结束后调用）"""
+        """Mark all skills as non-new (called after exploration period ends)"""
         for se in self._skill_embeddings:
             se.is_new = False

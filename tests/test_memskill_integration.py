@@ -1,12 +1,12 @@
 """
-MemSkill 集成测试 — 验证从 MemSkill 论文引入的所有组件。
+MemSkill integration tests -- verifies all components from the MemSkill paper.
 
-覆盖:
+Coverage:
 - Phase 1: LoCoMo + LongMemEval benchmark loader
 - Phase 2: RL Controller (embedding-based skill selection + Gumbel-Top-K + PPO)
 - Phase 3: Skill Designer (hard-case buffer + evolution)
 - Phase 4: Span-level processing
-- Phase 5: 跨模型迁移评测
+- Phase 5: Cross-model transfer evaluation
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ MOCK_LONGMEMEVAL_ROWS = [
 
 
 class TestLoCoMoLoader:
-    """LoCoMo benchmark loader 测试"""
+    """LoCoMo benchmark loader tests"""
 
     @patch("benchmarks.loader.load_dataset")
     def test_load_locomo_basic(self, mock_load_dataset):
@@ -115,7 +115,7 @@ class TestLoCoMoLoader:
         loader = BenchmarkLoader({"name": "locomo", "num_samples": 10})
         tasks = loader.load()
 
-        # 应该有 3 个 QA pair（来自 mock 数据的 3 个问题）
+        # Should have 3 QA pairs (from mock data's 3 questions)
         assert len(tasks) == 3
         assert tasks[0]["expected"] == "7 May 2023"
         assert tasks[1]["expected"] == "2022"
@@ -138,13 +138,13 @@ class TestLoCoMoLoader:
         loader = BenchmarkLoader({"name": "locomo", "num_samples": 10})
         tasks = loader.load()
 
-        # Context 应该包含 session 内容
+        # Context should contain session content
         assert "Hey Mel" in tasks[0]["context"]
         assert "counseling" in tasks[0]["context"]
 
 
 class TestLongMemEvalLoader:
-    """LongMemEval benchmark loader 测试"""
+    """LongMemEval benchmark loader tests"""
 
     @patch("benchmarks.loader.load_dataset")
     def test_load_longmemeval_basic(self, mock_load_dataset):
@@ -176,7 +176,7 @@ class TestLongMemEvalLoader:
         loader = BenchmarkLoader({"name": "longmemeval", "num_samples": 10})
         tasks = loader.load()
 
-        # 应该使用 focused_input 而非 full_input
+        # Should use focused_input instead of full_input
         assert "pick up 3 items" in tasks[0]["context"]
         assert tasks[0]["expected"] == "3"
 
@@ -199,7 +199,7 @@ class TestLongMemEvalLoader:
 
 
 class TestBenchmarkListsUpdated:
-    """验证 benchmark 列表已正确更新"""
+    """Verify benchmark lists are correctly updated"""
 
     def test_locomo_in_primary(self):
         assert "locomo" in PRIMARY_BENCHMARKS
@@ -208,7 +208,7 @@ class TestBenchmarkListsUpdated:
         assert "longmemeval" in PRIMARY_BENCHMARKS
 
     def test_primary_benchmarks_count(self):
-        # 原有 7 个 + 新增 2 个 = 9 个
+        # Original 7 + 2 new = 9
         assert len(PRIMARY_BENCHMARKS) == 9
 
 
@@ -228,7 +228,7 @@ from src.rl_controller.controller import (
 
 
 class TestControllerMLP:
-    """Controller MLP 网络测试"""
+    """Controller MLP network tests"""
 
     def test_forward_shape(self):
         mlp = ControllerMLP(input_dim=64, hidden_dim=32, output_dim=64)
@@ -249,12 +249,12 @@ class TestControllerMLP:
         x = np.random.randn(64).astype(np.float32)
         out_before = mlp.forward(x)
 
-        # 修改参数
+        # Modify parameters
         mlp.W1 += 1.0
         out_after = mlp.forward(x)
         assert not np.allclose(out_before, out_after)
 
-        # 恢复参数
+        # Restore parameters
         mlp.set_params(original_params)
         out_restored = mlp.forward(x)
         np.testing.assert_array_almost_equal(out_before, out_restored)
@@ -266,7 +266,7 @@ class TestControllerMLP:
 
 
 class TestValueNetwork:
-    """Value Network 测试"""
+    """Value Network tests"""
 
     def test_forward_returns_scalar(self):
         vn = ValueNetwork(input_dim=64, hidden_dim=32)
@@ -283,7 +283,7 @@ class TestValueNetwork:
 
 
 class TestSkillSelectionController:
-    """Skill Selection Controller 完整测试"""
+    """Skill Selection Controller comprehensive tests"""
 
     def _make_controller(self, dim=64, hidden=32, top_k=3):
         return SkillSelectionController({
@@ -325,11 +325,11 @@ class TestSkillSelectionController:
         assert len(result.selected_indices) == 3
         assert isinstance(result.log_prob, float)
         assert result.probabilities.shape == (10,)
-        # 概率和应该接近 1
+        # Probabilities should sum to ~1
         assert abs(result.probabilities.sum() - 1.0) < 1e-5
 
     def test_select_skills_training_mode(self):
-        """训练模式应该使用 Gumbel-Top-K 采样（有随机性）"""
+        """Training mode should use Gumbel-Top-K sampling (with randomness)"""
         ctrl = self._make_controller(top_k=3)
         self._register_skills(ctrl, n=10)
 
@@ -337,17 +337,17 @@ class TestSkillSelectionController:
             embedding=np.random.randn(64).astype(np.float32)
         )
 
-        # 多次采样，应该有不同的结果（概率上）
+        # Multiple samples should yield different results (probabilistically)
         results = set()
         for _ in range(20):
             result = ctrl.select_skills(state, training=True)
             results.add(tuple(sorted(result.selected_indices)))
 
-        # 至少应该有 2 种不同的选择（Gumbel 噪声导致）
+        # Should have at least 2 different selections (due to Gumbel noise)
         assert len(results) >= 2, "Gumbel-Top-K should produce diverse selections"
 
     def test_select_skills_greedy_deterministic(self):
-        """贪心模式应该是确定性的"""
+        """Greedy mode should be deterministic"""
         ctrl = self._make_controller(top_k=3)
         self._register_skills(ctrl, n=10)
 
@@ -369,7 +369,7 @@ class TestSkillSelectionController:
         assert result.log_prob == 0.0
 
     def test_select_skills_fewer_than_k(self):
-        """当 bank 中 skill 数量少于 K 时"""
+        """When bank has fewer skills than K"""
         ctrl = self._make_controller(top_k=5)
         self._register_skills(ctrl, n=2)
 
@@ -380,7 +380,7 @@ class TestSkillSelectionController:
         assert len(result.selected_skill_ids) == 2  # min(5, 2)
 
     def test_joint_log_prob_valid(self):
-        """联合对数概率应该是负数（概率 < 1）"""
+        """Joint log probability should be negative (probability < 1)"""
         ctrl = self._make_controller(top_k=3)
         self._register_skills(ctrl, n=10)
 
@@ -391,15 +391,15 @@ class TestSkillSelectionController:
         assert result.log_prob < 0, "Log probability should be negative"
 
     def test_joint_log_prob_formula(self):
-        """验证联合概率公式 (MemSkill 公式 11)"""
+        """Verify joint probability formula (MemSkill Eq.11)"""
         probs = np.array([0.4, 0.3, 0.15, 0.1, 0.05])
-        indices = [0, 1, 2]  # 选 A, B, C
+        indices = [0, 1, 2]  # Select A, B, C
 
         log_prob = SkillSelectionController._compute_joint_log_prob(
             probs, indices
         )
 
-        # 手动计算:
+        # Manual computation:
         # P(A) = 0.4 / 1.0 = 0.4
         # P(B|A) = 0.3 / (1 - 0.4) = 0.5
         # P(C|A,B) = 0.15 / (1 - 0.4 - 0.3) = 0.5
@@ -408,7 +408,7 @@ class TestSkillSelectionController:
         assert abs(log_prob - expected_log_prob) < 1e-6
 
     def test_softmax_numerical_stability(self):
-        """Softmax 应该对大数值稳定"""
+        """Softmax should be numerically stable for large values"""
         large_x = np.array([1000.0, 1001.0, 999.0])
         probs = SkillSelectionController._softmax(large_x)
         assert not np.any(np.isnan(probs))
@@ -416,10 +416,10 @@ class TestSkillSelectionController:
         assert abs(probs.sum() - 1.0) < 1e-5
 
     def test_exploration_incentive(self):
-        """新 skill 应该获得更高的选择概率"""
+        """New skills should get higher selection probability"""
         ctrl = self._make_controller(top_k=1)
 
-        # 注册 5 个普通 skill
+        # Register 5 regular skills
         for i in range(5):
             ctrl.register_skill(
                 f"old_{i}", f"Old Skill {i}",
@@ -427,7 +427,7 @@ class TestSkillSelectionController:
                 is_new=False,
             )
 
-        # 注册 1 个新 skill（弱 embedding）
+        # Register 1 new skill (weak embedding)
         weak_emb = np.zeros(64, dtype=np.float32) * 0.01
         ctrl.register_skill("new_1", "New Skill", weak_emb, is_new=True)
 
@@ -436,7 +436,7 @@ class TestSkillSelectionController:
         )
         result = ctrl.select_skills(state, training=False)
 
-        # 新 skill 的概率应该被 boost
+        # New skill probability should be boosted
         new_idx = ctrl.skill_bank_size - 1
         assert result.probabilities[new_idx] > 0.01, \
             "New skill should have boosted probability due to exploration incentive"
@@ -457,27 +457,27 @@ class TestSkillSelectionController:
             embedding=np.random.randn(64).astype(np.float32)
         )
 
-        # 保存快照
+        # Save snapshot
         result_before = ctrl.select_skills(state, training=False)
         assert ctrl.save_snapshot(0.8)
 
-        # 修改参数
+        # Modify parameters
         ctrl.policy_net.W1 += 10.0
         result_modified = ctrl.select_skills(state, training=False)
 
-        # 回滚
+        # Rollback
         assert ctrl.rollback_to_best()
         result_after = ctrl.select_skills(state, training=False)
 
-        # 回滚后应该恢复
+        # Should restore after rollback
         assert result_before.selected_indices == result_after.selected_indices
 
     def test_ppo_update_basic(self):
-        """PPO 更新应该不报错"""
+        """PPO update should not raise errors"""
         ctrl = self._make_controller()
         self._register_skills(ctrl, n=5)
 
-        # 记录一些 transitions
+        # Record some transitions
         for _ in range(5):
             transition = PPOTransition(
                 state_embedding=np.random.randn(64).astype(np.float32),
@@ -488,17 +488,17 @@ class TestSkillSelectionController:
             )
             ctrl.record_transition(transition)
 
-        # 计算 advantages
+        # Compute advantages
         ctrl.compute_advantages(final_reward=0.7)
 
-        # PPO 更新
+        # PPO update
         stats = ctrl.ppo_update(epochs=2)
         assert "policy_loss" in stats
         assert "value_loss" in stats
         assert "entropy" in stats
 
     def test_compute_advantages(self):
-        """GAE advantage 计算"""
+        """GAE advantage computation"""
         ctrl = self._make_controller()
         self._register_skills(ctrl, n=5)
 
@@ -514,7 +514,7 @@ class TestSkillSelectionController:
 
         ctrl.compute_advantages(final_reward=1.0)
 
-        # 最后一步的 returns 应该最高
+        # Last step should have highest returns
         buffer = ctrl._trajectory_buffer
         assert buffer[-1].returns > buffer[0].returns or ctrl.gamma == 1.0
         # Advantage = returns - value
@@ -533,13 +533,13 @@ class TestSkillSelectionController:
 
 
 class TestGumbelTopK:
-    """Gumbel-Top-K 采样专项测试"""
+    """Gumbel-Top-K sampling dedicated tests"""
 
     def test_returns_k_indices(self):
         logits = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         indices = SkillSelectionController._gumbel_top_k(logits, k=3)
         assert len(indices) == 3
-        assert len(set(indices)) == 3  # 无重复
+        assert len(set(indices)) == 3  # No duplicates
 
     def test_indices_in_range(self):
         logits = np.random.randn(20)
@@ -548,13 +548,13 @@ class TestGumbelTopK:
             assert 0 <= idx < 20
 
     def test_high_logit_more_likely(self):
-        """高 logit 的 skill 应该更频繁被选中"""
+        """High logit skills should be selected more frequently"""
         logits = np.array([10.0, 0.0, 0.0, 0.0, 0.0])
         counts = np.zeros(5)
         for _ in range(100):
             indices = SkillSelectionController._gumbel_top_k(logits, k=1)
             counts[indices[0]] += 1
-        # 第一个 skill 应该被选中最多次
+        # First skill should be selected most often
         assert counts[0] > 50, "High logit skill should be selected most often"
 
 
@@ -572,7 +572,7 @@ from src.models import Skill
 
 
 class TestHardCase:
-    """Hard Case 数据结构测试"""
+    """Hard Case data structure tests"""
 
     def test_difficulty_score(self):
         """d(q) = (1 - r(q)) · c(q)"""
@@ -588,7 +588,7 @@ class TestHardCase:
         assert abs(case.difficulty_score - 1.5) < 1e-6
 
     def test_difficulty_ordering(self):
-        """验证论文中的例子: A > C > B"""
+        """Verify paper example: A > C > B"""
         case_a = HardCase(query="A", reward=0.2, fail_count=3)  # d=2.4
         case_b = HardCase(query="B", reward=0.0, fail_count=1)  # d=1.0
         case_c = HardCase(query="C", reward=0.7, fail_count=5)  # d=1.5
@@ -597,7 +597,7 @@ class TestHardCase:
 
 
 class TestHardCaseBuffer:
-    """Hard-Case Buffer 测试"""
+    """Hard-Case Buffer tests"""
 
     def test_add_and_size(self):
         buf = HardCaseBuffer(max_size=100)
@@ -610,10 +610,10 @@ class TestHardCaseBuffer:
         buf.add(HardCase(query="q1", reward=0.3, step=1))
         buf.add(HardCase(query="q1", reward=0.1, step=2))
         assert buf.size == 1
-        # fail_count 应该增加
+        # fail_count should increase
         cases = buf.get_top_cases(n=1)
         assert cases[0].fail_count == 2
-        # reward 应该取最小值
+        # reward should take minimum value
         assert cases[0].reward == 0.1
 
     def test_max_size_eviction(self):
@@ -629,7 +629,7 @@ class TestHardCaseBuffer:
         buf.add(HardCase(query="medium", reward=0.5, fail_count=3, step=3))
 
         top = buf.get_top_cases(n=3)
-        # 应该按 difficulty_score 降序
+        # Should be sorted by difficulty_score descending
         assert top[0].query == "hard"  # d = 0.9 * 5 = 4.5
         assert top[1].query == "medium"  # d = 0.5 * 3 = 1.5
 
@@ -639,13 +639,13 @@ class TestHardCaseBuffer:
         buf.add(HardCase(query="new", reward=0.1, fail_count=5, step=100))
 
         top = buf.get_top_cases(n=10, current_step=105)
-        # "old" case 应该被过期清理 (105 - 1 = 104 > 10)
+        # "old" case should be expired (105 - 1 = 104 > 10)
         assert len(top) == 1
         assert top[0].query == "new"
 
     def test_clustered_representatives(self):
         buf = HardCaseBuffer(max_size=100)
-        # 添加两类 case
+        # Add two types of cases
         for i in range(10):
             buf.add(HardCase(
                 query=f"temporal when did event {i} happen",
@@ -660,7 +660,7 @@ class TestHardCaseBuffer:
         reps = buf.get_clustered_representatives(
             n_clusters=2, representatives_per_cluster=3
         )
-        # 应该从两个簇各选代表
+        # Should select representatives from each cluster
         assert len(reps) <= 6
         assert len(reps) >= 2
 
@@ -672,7 +672,7 @@ class TestHardCaseBuffer:
 
 
 class TestSkillDesigner:
-    """Skill Designer 测试"""
+    """Skill Designer tests"""
 
     def test_should_trigger(self):
         designer = SkillDesigner(config={"trigger_interval": 100})
@@ -685,7 +685,7 @@ class TestSkillDesigner:
 
     def test_should_trigger_empty_buffer(self):
         designer = SkillDesigner(config={"trigger_interval": 100})
-        assert not designer.should_trigger(100)  # 空 buffer 不触发
+        assert not designer.should_trigger(100)  # Empty buffer does not trigger
 
     def test_record_failure(self):
         designer = SkillDesigner()
@@ -700,14 +700,14 @@ class TestSkillDesigner:
 
     def test_update_reward_improvement(self):
         designer = SkillDesigner(config={"patience": 3})
-        assert designer.update_reward(0.5)  # 第一次总是改善
-        assert designer.update_reward(0.6)  # 改善
+        assert designer.update_reward(0.5)  # First time always improves
+        assert designer.update_reward(0.6)  # Improved
         assert designer._patience_counter == 0
 
     def test_update_reward_no_improvement(self):
         designer = SkillDesigner(config={"patience": 3})
         designer.update_reward(0.5)
-        assert not designer.update_reward(0.4)  # 没改善
+        assert not designer.update_reward(0.4)  # No improvement
         assert designer._patience_counter == 1
 
     def test_early_stop(self):
@@ -771,7 +771,7 @@ class TestSkillDesigner:
         assert bank[0].name == "Good Skill"
 
     def test_evolve_with_llm(self):
-        """测试带 LLM 的完整演化流程"""
+        """Test full evolution flow with LLM"""
         mock_client = MagicMock()
         # Stage 1: analysis
         mock_client.chat.return_value = "The agent fails on temporal reasoning questions."
@@ -809,7 +809,7 @@ from src.memory.span_processor import SpanProcessor, TextSpan
 
 
 class TestSpanProcessor:
-    """Span-level Processor 测试"""
+    """Span-level Processor tests"""
 
     def test_split_basic(self):
         processor = SpanProcessor({"span_size": 50})
@@ -840,13 +840,13 @@ class TestSpanProcessor:
             assert span.span_id == i
 
     def test_span_coverage(self):
-        """所有 span 应该覆盖原文（考虑 overlap）"""
+        """All spans should cover original text (considering overlap)"""
         processor = SpanProcessor({"span_size": 50, "overlap": 0})
         text = "Word " * 200
         spans = processor.split_into_spans(text)
-        # 所有 span 的文本拼接应该包含原文的所有内容
+        # Concatenated span text should contain all original content
         all_text = " ".join(s.text for s in spans)
-        # 至少原文中的大部分 word 应该出现
+        # At least most words from original should appear
         assert all_text.count("Word") >= 100
 
     def test_dialogue_split_with_sessions(self):
@@ -857,7 +857,7 @@ class TestSpanProcessor:
         ]
         spans = processor.split_dialogue_into_spans([], sessions=sessions)
         assert len(spans) >= 1
-        # 应该包含两个 session 的内容
+        # Should contain content from both sessions
         all_text = " ".join(s.text for s in spans)
         assert "Session 1" in all_text or "Hello" in all_text
 
@@ -903,7 +903,7 @@ from src.evaluation.transfer_eval import (
 
 
 class TestTransferResult:
-    """TransferResult 数据结构测试"""
+    """TransferResult data structure tests"""
 
     def test_transfer_ratio(self):
         result = TransferResult(
@@ -923,7 +923,7 @@ class TestTransferResult:
 
 
 class TestTransferReport:
-    """TransferReport 聚合测试"""
+    """TransferReport aggregation tests"""
 
     def test_compute_aggregates(self):
         report = TransferReport(
@@ -953,7 +953,7 @@ class TestTransferReport:
 
 
 class TestCrossModelTransferEvaluator:
-    """跨模型迁移评测器测试"""
+    """Cross-model transfer evaluator tests"""
 
     def test_generate_comparison_table(self):
         evaluator = CrossModelTransferEvaluator()
@@ -991,28 +991,28 @@ class TestCrossModelTransferEvaluator:
 
 
 # ============================================================
-# 集成测试: 端到端 Pipeline 验证
+# Integration Tests: End-to-End Pipeline Verification
 # ============================================================
 
 class TestEndToEndPipeline:
-    """端到端 pipeline 集成测试"""
+    """End-to-end pipeline integration tests"""
 
     def test_controller_designer_integration(self):
-        """Controller + Designer 协同工作"""
-        # 1. 创建 controller 和 designer
+        """Controller + Designer working together"""
+        # 1. Create controller and designer
         ctrl = SkillSelectionController({
             "embedding_dim": 32, "hidden_dim": 16, "top_k": 2,
         })
         designer = SkillDesigner(config={"trigger_interval": 5, "patience": 2})
 
-        # 2. 注册初始 skill (MemSkill 的 4 个基本原语)
+        # 2. Register initial skills (MemSkill's 4 basic primitives)
         for name in ["INSERT", "UPDATE", "DELETE", "SKIP"]:
             ctrl.register_skill(
                 f"primitive_{name}", name,
                 np.random.randn(32).astype(np.float32),
             )
 
-        # 3. 模拟训练循环
+        # 3. Simulate training loop
         for step in range(10):
             state = ControllerState(
                 embedding=np.random.randn(32).astype(np.float32)
@@ -1020,7 +1020,7 @@ class TestEndToEndPipeline:
             result = ctrl.select_skills(state, training=True)
             assert len(result.selected_skill_ids) == 2
 
-            # 模拟失败
+            # Simulate failure
             if step % 2 == 0:
                 designer.record_failure(
                     query=f"Question {step}",
@@ -1030,12 +1030,12 @@ class TestEndToEndPipeline:
                     step=step,
                 )
 
-        # 4. 检查 designer 状态
+        # 4. Check designer state
         assert designer.hard_case_buffer.size > 0
         assert designer.should_trigger(10)  # trigger_interval=5
 
     def test_span_processor_with_locomo_format(self):
-        """Span processor 处理 LoCoMo 格式数据"""
+        """Span processor handles LoCoMo format data"""
         processor = SpanProcessor({"span_size": 100})
 
         sessions = [
@@ -1046,14 +1046,14 @@ class TestEndToEndPipeline:
         spans = processor.split_dialogue_into_spans([], sessions=sessions)
         assert len(spans) >= 1
 
-        # 每个 span 应该有合理的 token 数
+        # Each span should have reasonable token count
         for span in spans:
             assert span.approx_tokens > 0
             assert span.text.strip()
 
     def test_skill_evolution_cycle(self):
-        """完整的 skill 演化 cycle"""
-        # 1. 初始 skill bank
+        """Complete skill evolution cycle"""
+        # 1. Initial skill bank
         skills = [
             Skill(name="INSERT", description="Insert new memory"),
             Skill(name="UPDATE", description="Update existing memory"),
@@ -1061,7 +1061,7 @@ class TestEndToEndPipeline:
             Skill(name="SKIP", description="Skip this span"),
         ]
 
-        # 2. Designer 提出演化
+        # 2. Designer proposes evolution
         designer = SkillDesigner()
         proposal = EvolutionProposal(
             action="add",
@@ -1075,12 +1075,12 @@ class TestEndToEndPipeline:
             },
         )
 
-        # 3. 应用提案
+        # 3. Apply proposals
         skills, new_skill = designer.apply_proposal(proposal, skills)
         assert len(skills) == 5
         assert new_skill.name == "Capture Temporal Context"
 
-        # 4. 注册到 controller
+        # 4. Register to controller
         ctrl = SkillSelectionController({
             "embedding_dim": 32, "hidden_dim": 16, "top_k": 3,
         })
@@ -1091,7 +1091,7 @@ class TestEndToEndPipeline:
                 is_new=(skill.name == "Capture Temporal Context"),
             )
 
-        # 5. 选择 skill（新 skill 应该有 exploration incentive）
+        # 5. Select skills (new skills should have exploration incentive)
         state = ControllerState(
             embedding=np.random.randn(32).astype(np.float32)
         )
@@ -1099,7 +1099,7 @@ class TestEndToEndPipeline:
         assert len(result.selected_skill_ids) == 3
 
     def test_reward_and_rollback_cycle(self):
-        """Reward 追踪 + Rollback 机制"""
+        """Reward tracking + Rollback mechanism"""
         ctrl = SkillSelectionController({
             "embedding_dim": 32, "hidden_dim": 16, "top_k": 2,
         })
@@ -1111,21 +1111,21 @@ class TestEndToEndPipeline:
 
         designer = SkillDesigner(config={"patience": 2})
 
-        # Cycle 1: 改善
+        # Cycle 1: Improvement
         ctrl.save_snapshot(0.5)
         assert designer.update_reward(0.5)
 
-        # Cycle 2: 改善
+        # Cycle 2: Improvement
         ctrl.save_snapshot(0.7)
         assert designer.update_reward(0.7)
 
-        # Cycle 3: 退化
-        ctrl.policy_net.W1 += 100.0  # 破坏参数
+        # Cycle 3: Degradation
+        ctrl.policy_net.W1 += 100.0  # Corrupt parameters
         assert not designer.update_reward(0.3)
 
-        # Cycle 4: 继续退化 -> early stop + rollback
+        # Cycle 4: Continued degradation -> early stop + rollback
         assert not designer.update_reward(0.2)
         assert designer.should_stop
 
-        # Rollback 到最佳
+        # Rollback to best
         assert ctrl.rollback_to_best()

@@ -1,12 +1,12 @@
 """
-Skill Designer — 基于 Hard-Case 分析的技能演化机制。
+Skill Designer — hard-case-driven skill evolution mechanism.
 
-参考 MemSkill 论文 §3.8:
-- Hard-Case Buffer: 记录答错的 query + 失败次数 + reward
+Reference: MemSkill paper §3.8:
+- Hard-Case Buffer: records failed queries + fail count + reward
 - Difficulty Score: d(q) = (1 - r(q)) · c(q)
-- Cluster + Filter: KMeans 聚类 hard cases，每个簇选代表
-- Two-Stage Evolution: 分析失败 → 提出 skill 修改/新增
-- Early Stop + Rollback: 连续 N 个 cycle 没改善就回滚
+- Cluster + Filter: KMeans clustering of hard cases, select representatives per cluster
+- Two-Stage Evolution: analyze failures → propose skill modifications/additions
+- Early Stop + Rollback: rollback after N consecutive cycles without improvement
 
 Reference: docs/internal/memskill_analysis.md §3.8
 """
@@ -26,35 +26,35 @@ from src.utils.llm import LLMClient
 
 
 # ============================================================
-# 数据结构
+# Data Structures
 # ============================================================
 
 @dataclass
 class HardCase:
-    """一个 hard case 记录"""
+    """A single hard case record"""
     query: str
     retrieved_memories: list[str] = field(default_factory=list)
     model_prediction: str = ""
     ground_truth: str = ""
     reward: float = 0.0
     fail_count: int = 1
-    step: int = 0  # 记录时的训练步数
-    embedding: np.ndarray | None = None  # 用于聚类
+    step: int = 0  # Training step when recorded
+    embedding: np.ndarray | None = None  # For clustering
 
     @property
     def difficulty_score(self) -> float:
         """
-        Difficulty Score (MemSkill 公式 5):
+        Difficulty Score (MemSkill Eq.5):
         d(q) = (1 - r(q)) · c(q)
 
-        低 reward × 反复失败 = 最该被关注的难 case
+        Low reward × repeated failures = highest priority hard case
         """
         return (1.0 - self.reward) * self.fail_count
 
 
 @dataclass
 class EvolutionProposal:
-    """Designer 提出的 skill 演化提案"""
+    """Skill evolution proposal from the Designer"""
     action: str  # "add" | "modify" | "remove"
     skill_name: str
     description: str = ""
@@ -64,7 +64,7 @@ class EvolutionProposal:
 
 @dataclass
 class EvolutionCycleResult:
-    """一个演化 cycle 的结果"""
+    """Result of one evolution cycle"""
     cycle_id: int
     proposals: list[EvolutionProposal]
     pre_reward: float
@@ -81,8 +81,8 @@ class HardCaseBuffer:
     """
     Hard-Case Buffer (MemSkill §3.8.1)
 
-    滑动窗口 buffer，记录答错的 query。
-    支持按 difficulty score 排序和聚类采样。
+    Sliding window buffer that records failed queries.
+    Supports sorting by difficulty score and clustered sampling.
     """
 
     def __init__(
@@ -100,11 +100,11 @@ class HardCaseBuffer:
         return len(self._cases)
 
     def add(self, case: HardCase) -> None:
-        """添加或更新一个 hard case"""
-        query_key = case.query[:200]  # 截断作为 key
+        """Add or update a hard case"""
+        query_key = case.query[:200]  # Truncate as key
 
         if query_key in self._query_index:
-            # 更新已有 case 的失败次数
+            # Update fail count of existing case
             idx = self._query_index[query_key]
             if idx < len(self._cases):
                 self._cases[idx].fail_count += 1
@@ -117,7 +117,7 @@ class HardCaseBuffer:
         self._cases.append(case)
         self._query_index[query_key] = len(self._cases) - 1
 
-        # 容量管理
+        # Capacity management
         if len(self._cases) > self.max_size:
             self._evict_oldest()
 
@@ -127,11 +127,11 @@ class HardCaseBuffer:
         current_step: int = 0,
     ) -> list[HardCase]:
         """
-        获取 difficulty score 最高的 N 个 case。
+        Get top-N cases by difficulty score.
 
-        先清理过期 case，再按 difficulty_score 排序。
+        Clean up expired cases first, then sort by difficulty_score.
         """
-        # 清理过期 case
+        # Clean up expired cases
         if current_step > 0:
             self._cases = [
                 c for c in self._cases
@@ -139,7 +139,7 @@ class HardCaseBuffer:
             ]
             self._rebuild_index()
 
-        # 按 difficulty score 降序排序
+        # Sort by difficulty score descending
         sorted_cases = sorted(
             self._cases, key=lambda c: c.difficulty_score, reverse=True
         )
@@ -152,10 +152,10 @@ class HardCaseBuffer:
         current_step: int = 0,
     ) -> list[HardCase]:
         """
-        聚类采样 (MemSkill §3.8.3)
+        Clustered sampling (MemSkill §3.8.3)
 
-        对 hard cases 做 KMeans 聚类，每个簇选 difficulty 最高的代表。
-        保证 designer 看到的 case 类型多样。
+        KMeans clustering of hard cases, select highest-difficulty representative per cluster.
+        Ensures diversity of case types seen by the designer.
         """
         top_cases = self.get_top_cases(
             n=min(100, self.size), current_step=current_step
@@ -164,13 +164,13 @@ class HardCaseBuffer:
         if len(top_cases) <= n_clusters * representatives_per_cluster:
             return top_cases
 
-        # 简单的基于文本特征的聚类
-        # 用 query 的 token 集合做 Jaccard 距离
+        # Simple text-feature-based clustering
+        # Use query token sets with Jaccard distance
         clusters = self._simple_cluster(top_cases, n_clusters)
 
         representatives: list[HardCase] = []
         for cluster in clusters:
-            # 每个簇按 difficulty_score 排序，取 top
+            # Sort each cluster by difficulty_score, take top
             sorted_cluster = sorted(
                 cluster, key=lambda c: c.difficulty_score, reverse=True
             )
@@ -181,19 +181,19 @@ class HardCaseBuffer:
         return representatives
 
     def clear(self) -> None:
-        """清空 buffer"""
+        """Clear the buffer"""
         self._cases.clear()
         self._query_index.clear()
 
     def _evict_oldest(self) -> None:
-        """淘汰最老的 case"""
+        """Evict the oldest cases"""
         if self._cases:
             self._cases.sort(key=lambda c: c.step)
             self._cases = self._cases[-(self.max_size):]
             self._rebuild_index()
 
     def _rebuild_index(self) -> None:
-        """重建 query 索引"""
+        """Rebuild query index"""
         self._query_index = {
             c.query[:200]: i for i, c in enumerate(self._cases)
         }
@@ -203,21 +203,21 @@ class HardCaseBuffer:
         cases: list[HardCase], n_clusters: int
     ) -> list[list[HardCase]]:
         """
-        简单的基于文本特征的聚类。
+        Simple text-feature-based clustering.
 
-        用 query token 集合的 Jaccard 距离做贪心聚类。
+        Greedy clustering using Jaccard distance of query token sets.
         """
         if not cases:
             return []
 
-        # 为每个 case 计算 token 集合
+        # Compute token set for each case
         token_sets = [set(c.query.lower().split()) for c in cases]
 
-        # 贪心聚类
+        # Greedy clustering
         clusters: list[list[HardCase]] = [[] for _ in range(n_clusters)]
         assigned = [False] * len(cases)
 
-        # 选择 n_clusters 个种子（均匀间隔）
+        # Select n_clusters seeds (evenly spaced)
         step = max(1, len(cases) // n_clusters)
         seeds = [i * step for i in range(n_clusters)]
         seeds = [min(s, len(cases) - 1) for s in seeds]
@@ -226,7 +226,7 @@ class HardCaseBuffer:
             clusters[ci].append(cases[seed_idx])
             assigned[seed_idx] = True
 
-        # 分配剩余 case 到最近的簇
+        # Assign remaining cases to nearest cluster
         for i, case in enumerate(cases):
             if assigned[i]:
                 continue
@@ -237,7 +237,7 @@ class HardCaseBuffer:
             for ci, cluster in enumerate(clusters):
                 if not cluster:
                     continue
-                # 与簇中第一个 case 的 Jaccard 相似度
+                # Jaccard similarity with first case in cluster
                 seed_tokens = set(cluster[0].query.lower().split())
                 intersection = token_sets[i] & seed_tokens
                 union = token_sets[i] | seed_tokens
@@ -248,7 +248,7 @@ class HardCaseBuffer:
 
             clusters[best_cluster].append(case)
 
-        # 过滤空簇
+        # Filter out empty clusters
         return [c for c in clusters if c]
 
 
@@ -258,18 +258,18 @@ class HardCaseBuffer:
 
 class SkillDesigner:
     """
-    Skill Designer — 基于 Hard-Case 分析的技能演化 (MemSkill §3.8)
+    Skill Designer — hard-case-driven skill evolution (MemSkill §3.8)
 
-    核心机制:
-    1. 收集 hard cases 到 buffer
-    2. 聚类采样保证多样性
-    3. Two-Stage Evolution: 分析失败 → 提出修改
-    4. Early Stop + Rollback: 连续 N 个 cycle 没改善就回滚
+    Core mechanism:
+    1. Collect hard cases into buffer
+    2. Clustered sampling for diversity
+    3. Two-Stage Evolution: analyze failures → propose modifications
+    4. Early Stop + Rollback: rollback after N consecutive cycles without improvement
     """
 
-    DEFAULT_TRIGGER_INTERVAL = 100  # 每 100 步触发一次
-    DEFAULT_MAX_EDITS_PER_CYCLE = 3  # 每轮最多 3 个 edit
-    DEFAULT_PATIENCE = 3  # 连续 N 个 cycle 没改善就 early stop
+    DEFAULT_TRIGGER_INTERVAL = 100  # Trigger every 100 steps
+    DEFAULT_MAX_EDITS_PER_CYCLE = 3  # Max 3 edits per cycle
+    DEFAULT_PATIENCE = 3  # Early stop after N cycles without improvement
 
     def __init__(
         self,
@@ -295,7 +295,7 @@ class SkillDesigner:
             max_step_gap=self.config.get("buffer_max_step_gap", 500),
         )
 
-        # 演化历史
+        # Evolution history
         self._cycle_history: list[EvolutionCycleResult] = []
         self._best_reward: float = -float("inf")
         self._patience_counter: int = 0
@@ -303,7 +303,7 @@ class SkillDesigner:
 
     @property
     def should_stop(self) -> bool:
-        """是否应该 early stop"""
+        """Whether early stop should be triggered"""
         return self._patience_counter >= self.patience
 
     def record_failure(
@@ -315,7 +315,7 @@ class SkillDesigner:
         step: int,
         retrieved_memories: list[str] | None = None,
     ) -> None:
-        """记录一个失败 case"""
+        """Record a failure case"""
         case = HardCase(
             query=query,
             model_prediction=prediction,
@@ -327,7 +327,7 @@ class SkillDesigner:
         self.hard_case_buffer.add(case)
 
     def should_trigger(self, current_step: int) -> bool:
-        """是否应该触发演化"""
+        """Whether evolution should be triggered"""
         return (
             current_step > 0
             and current_step % self.trigger_interval == 0
@@ -341,24 +341,24 @@ class SkillDesigner:
         current_step: int,
     ) -> list[EvolutionProposal]:
         """
-        执行一轮 skill 演化 (MemSkill §3.8.4)
+        Execute one round of skill evolution (MemSkill §3.8.4)
 
         Two-Stage:
-        1. Analyze Failures: 分析 hard cases + 当前 skill bank
-        2. Propose Changes: 提出具体的 skill 修改/新增
+        1. Analyze Failures: analyze hard cases + current skill bank
+        2. Propose Changes: propose specific skill modifications/additions
 
         Args:
-            current_skills: 当前 skill bank
-            current_step: 当前训练步数
+            current_skills: Current skill bank
+            current_step: Current training step
 
         Returns:
-            演化提案列表
+            List of evolution proposals
         """
         if self.llm_client is None:
             logger.warning("[Designer] No LLM client, cannot evolve")
             return []
 
-        # 获取聚类采样的 hard cases
+        # Get clustered hard case representatives
         representatives = self.hard_case_buffer.get_clustered_representatives(
             n_clusters=5,
             representatives_per_cluster=3,
@@ -385,15 +385,15 @@ class SkillDesigner:
 
     def update_reward(self, tail_reward: float) -> bool:
         """
-        更新 cycle 的 stabilized reward (MemSkill §3.8.6 公式 9)
+        Update cycle stabilized reward (MemSkill §3.8.6 Eq.9)
 
-        只看最后 1/4 的平均 reward。
+        Only considers the last 1/4 average reward.
 
         Args:
-            tail_reward: 当前 cycle 最后 1/4 的平均 reward
+            tail_reward: Average reward of last 1/4 of current cycle
 
         Returns:
-            True 如果有改善
+            True if improved
         """
         improved = tail_reward > self._best_reward
 
@@ -420,12 +420,12 @@ class SkillDesigner:
         current_skills: list[Skill],
     ) -> str:
         """
-        Stage 1: 分析失败模式 (MemSkill §3.8.4)
+        Stage 1: Analyze failure patterns (MemSkill §3.8.4)
 
-        输入: 代表 hard cases + 当前 skill bank
-        输出: 自然语言分析
+        Input: representative hard cases + current skill bank
+        Output: natural language analysis
         """
-        # 格式化 hard cases
+        # Format hard cases
         cases_text = []
         for i, case in enumerate(hard_cases[:10]):
             cases_text.append(
@@ -437,7 +437,7 @@ class SkillDesigner:
             )
         cases_str = "\n".join(cases_text)
 
-        # 格式化当前 skill bank
+        # Format current skill bank
         skills_text = []
         for skill in current_skills:
             skills_text.append(
@@ -485,9 +485,9 @@ Provide a detailed analysis in natural language."""
         current_skills: list[Skill],
     ) -> list[EvolutionProposal]:
         """
-        Stage 2: 提出具体的 skill 修改/新增 (MemSkill §3.8.4)
+        Stage 2: Propose specific skill modifications/additions (MemSkill §3.8.4)
 
-        每轮最多 max_edits 个 edit。
+        Max max_edits edits per cycle.
         """
         skills_text = []
         for skill in current_skills:
@@ -572,14 +572,14 @@ Return JSON:
         skill_bank: list[Skill],
     ) -> tuple[list[Skill], Skill | None]:
         """
-        应用一个演化提案到 skill bank。
+        Apply an evolution proposal to the skill bank.
 
         Args:
-            proposal: 演化提案
-            skill_bank: 当前 skill bank
+            proposal: Evolution proposal
+            skill_bank: Current skill bank
 
         Returns:
-            (更新后的 skill bank, 新增/修改的 skill 或 None)
+            (Updated skill bank, added/modified skill or None)
         """
         if proposal.action == "add":
             new_skill = Skill(
@@ -604,7 +604,7 @@ Return JSON:
         elif proposal.action == "modify":
             for i, skill in enumerate(skill_bank):
                 if skill.name == proposal.skill_name:
-                    # 更新 skill 内容
+                    # Update skill content
                     skill.description = proposal.description or skill.description
                     if proposal.content.get("how_to_apply"):
                         skill.procedure = [proposal.content["how_to_apply"]]
@@ -634,5 +634,5 @@ Return JSON:
         return skill_bank, None
 
     def get_cycle_history(self) -> list[EvolutionCycleResult]:
-        """获取演化历史"""
+        """Get evolution history"""
         return self._cycle_history
