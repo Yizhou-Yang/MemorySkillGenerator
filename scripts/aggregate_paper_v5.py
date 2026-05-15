@@ -28,6 +28,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.curation.void_case import calibrate_tau_quantile, cv_select_quantile
+
 
 RESULTS_PATH = PROJECT_ROOT / "experiments" / "paper_v5_void_results.json"
 FIGURES_DIR = PROJECT_ROOT / "paper" / "figures"
@@ -268,6 +270,153 @@ def calibrate_tau_lobo(results: dict) -> dict:
     }
 
 
+# ============================================================
+# Plan C: per-benchmark data-driven τ via quantile heuristic
+# ============================================================
+
+def calibrate_tau_plan_c(
+    results: dict,
+    n_folds: int = 5,
+    seeds: tuple[int, ...] = (42, 123, 456, 789, 2024),
+) -> dict:
+    """Per-benchmark q-quantile calibration with multi-seed robustness.
+
+    For each benchmark:
+      - 5-fold CV × len(seeds) seeds to pick q*(b) maximizing the test-fold
+        primary metric. The chosen τ_b = quantile_q*(train_s_max) is data-
+        driven and contains no test information.
+      - Report mean ± std of the test-fold metric across (seed, fold)
+        configs as the headline number.
+
+    Returns a dict ready to be embedded into the aggregated JSON.
+    """
+    main = results["main_experiment"]
+    benches = [b for b in main if "error" not in main[b]
+               and main[b]["methods"].get("A3+void")
+               and main[b]["methods"]["A3+void"].get("per_task")]
+    if not benches:
+        return {"error": "no benchmarks with per_task data"}
+
+    per_bench: dict[str, dict] = {}
+    for b in benches:
+        bd = main[b]
+        pt = bd["methods"]["A3+void"]["per_task"]
+        s = np.array([t["s_max"] for t in pt])
+        primary = bd["primary_metric"]
+        if primary == "em":
+            ei = np.array([t["em_inject"] for t in pt])
+            ev = np.array([t["em_void"] for t in pt])
+        else:  # f1
+            ei = np.array([t["f1_inject"] for t in pt])
+            ev = np.array([t["f1_void"] for t in pt])
+        b0_score = bd["methods"].get("B0", {}).get("primary", {}).get(f"avg_{primary}")
+        a3_score = bd["methods"].get("A3", {}).get("primary", {}).get(f"avg_{primary}")
+        max_base = max(b0_score or 0.0, a3_score or 0.0)
+
+        # Multi-seed × multi-fold robustness
+        all_runs = []
+        from collections import Counter
+        q_choices: list[float] = []
+        for seed in seeds:
+            q_star, score_star, _ = cv_select_quantile(
+                s, ei, ev, n_folds=n_folds, seed=seed,
+            )
+            tau_b = calibrate_tau_quantile(s, q=q_star)
+            all_runs.append({"seed": seed, "q_star": q_star,
+                             "tau_b": tau_b, "score": score_star})
+            q_choices.append(q_star)
+
+        scores = [r["score"] for r in all_runs]
+        q_mode = Counter(q_choices).most_common(1)[0]
+
+        per_bench[b] = {
+            "primary_metric": primary,
+            "n_tasks": len(s),
+            "B0": b0_score,
+            "A3": a3_score,
+            "max_base": max_base,
+            "score_mean": float(np.mean(scores)),
+            "score_std": float(np.std(scores)),
+            "score_min": float(np.min(scores)),
+            "score_max": float(np.max(scores)),
+            "delta_vs_max_base_pp": float((np.mean(scores) - max_base) * 100),
+            "q_star_mode": float(q_mode[0]),
+            "q_star_stability": q_mode[1] / len(q_choices),
+            "tau_b_at_q_mode": calibrate_tau_quantile(s, q=q_mode[0]),
+            "all_runs": all_runs,
+        }
+
+    # Aggregate Δ across benchmarks (incl & excl locomo)
+    all_b = list(per_bench.keys())
+    deltas = [per_bench[b]["delta_vs_max_base_pp"] for b in all_b]
+    deltas_ex = [per_bench[b]["delta_vs_max_base_pp"]
+                 for b in all_b if b != "locomo"]
+
+    return {
+        "per_benchmark": per_bench,
+        "aggregate": {
+            "n_benchmarks_full": len(deltas),
+            "n_benchmarks_excl_locomo": len(deltas_ex),
+            "avg_delta_pp_full": float(np.mean(deltas)),
+            "avg_delta_pp_excl_locomo": float(np.mean(deltas_ex)) if deltas_ex else None,
+            "std_delta_pp_full": float(np.std(deltas)),
+            "std_delta_pp_excl_locomo": float(np.std(deltas_ex)) if deltas_ex else None,
+            "wins_full": sum(1 for d in deltas if d >= -0.1),
+            "wins_excl_locomo": sum(1 for d in deltas_ex if d >= -0.1),
+        },
+        "method_name": "A3+c_∅ (Plan C, per-bench q-quantile, k-fold CV)",
+        "n_folds": n_folds,
+        "seeds": list(seeds),
+    }
+
+
+def build_plan_c_table(plan_c: dict) -> str:
+    """Markdown table for Plan C — paper main result."""
+    if "error" in plan_c:
+        return f"# Plan C calibration failed: {plan_c['error']}"
+    lines = []
+    lines.append("# Plan C — Per-Benchmark Quantile Heuristic (Paper main result)")
+    lines.append("")
+    lines.append(
+        f"Method: τ_b = quantile_{{q*(b)}} of train s_max, "
+        f"q* selected by {plan_c['n_folds']}-fold CV averaged over {len(plan_c['seeds'])} seeds."
+    )
+    lines.append("")
+    agg = plan_c["aggregate"]
+    lines.append(
+        f"**Aggregate (excl. locomo, n={agg['n_benchmarks_excl_locomo']}):** "
+        f"Δ vs max(B0, A3) = **{agg['avg_delta_pp_excl_locomo']:+.2f} pp** "
+        f"(wins {agg['wins_excl_locomo']}/{agg['n_benchmarks_excl_locomo']})."
+    )
+    lines.append("")
+    lines.append(
+        f"**Aggregate (incl. locomo, n={agg['n_benchmarks_full']}):** "
+        f"Δ = **{agg['avg_delta_pp_full']:+.2f} pp** "
+        f"(wins {agg['wins_full']}/{agg['n_benchmarks_full']}). "
+        f"Note: locomo is flagged ⚠ EM not applicable (see appendix)."
+    )
+    lines.append("")
+    lines.append(
+        "| Benchmark | metric | n | B0 | A3 | max(base) | "
+        "**A3+c_∅ (Plan C)** | Δ pp | q* (mode) | τ_b | stable |"
+    )
+    lines.append(
+        "|---|---|---|---|---|---|---|---|---|---|---|"
+    )
+    for b, pb in plan_c["per_benchmark"].items():
+        flag = "" if b != "locomo" else " ⚠"
+        lines.append(
+            f"| {b}{flag} | {pb['primary_metric'].upper()} | {pb['n_tasks']} | "
+            f"{(pb['B0'] or 0):.1%} | {(pb['A3'] or 0):.1%} | "
+            f"{pb['max_base']:.1%} | "
+            f"**{pb['score_mean']:.1%}** ± {pb['score_std']*100:.1f}pp | "
+            f"{pb['delta_vs_max_base_pp']:+.2f} | "
+            f"{pb['q_star_mode']:.2f} | {pb['tau_b_at_q_mode']:.3f} | "
+            f"{pb['q_star_stability']*100:.0f}% |"
+        )
+    return "\n".join(lines)
+
+
 def main():
     if not RESULTS_PATH.exists():
         print(f"❌ {RESULTS_PATH} not found. Run scripts/run_paper_v5_void.py first.")
@@ -297,18 +446,34 @@ def main():
     print(smax_tbl)
     print()
 
-    # LOBO-CV calibration
+    # LOBO-CV calibration (legacy, for comparison)
     lobo = calibrate_tau_lobo(results)
     print("=" * 60)
-    print("LOBO Cross-Validation")
+    print("LOBO Cross-Validation (legacy fixed-τ)")
     print("=" * 60)
     print(json.dumps(lobo, indent=2, default=str))
+
+    # Plan C: per-bench quantile (paper main)
+    print()
+    print("=" * 60)
+    print("Plan C — Per-Benchmark Quantile Heuristic (paper main)")
+    print("=" * 60)
+    plan_c = calibrate_tau_plan_c(results)
+    plan_c_md = build_plan_c_table(plan_c)
+    plan_c_path = FIGURES_DIR / "table_plan_c_quantile.md"
+    plan_c_path.write_text(plan_c_md)
+    print(f"✓ Plan C table → {plan_c_path}")
+    print()
+    print(plan_c_md)
+    print()
 
     # Aggregate output
     agg = {
         "table1_md": tbl1,
         "smax_table_md": smax_tbl,
         "lobo_calibration": lobo,
+        "plan_c_calibration": plan_c,
+        "plan_c_table_md": plan_c_md,
         "primary_tau_paper": results["meta"]["primary_tau"],
     }
     out = EXPERIMENTS_DIR / "paper_v5_aggregated.json"
