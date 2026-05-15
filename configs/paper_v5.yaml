@@ -1,0 +1,121 @@
+# SkillCurator Paper Experiments v5 — Void-Case (c_∅) Augmentation
+#
+# v5 vs v4:
+#   - NEW: SRDP void-case prior c_∅ (Memento-2 §3.2 Eq. 7-8)
+#     λ(x) = 1[s_max(x) ≥ τ_void]  (hard-threshold realization)
+#   - SCOPE: 7 text-output benchmarks (alfworld/webshop deferred to future
+#     work — they require simulator-based completion-rate metrics, not EM)
+#   - METRICS: locomo switches to F1 main metric (verbose answer style)
+#   - τ_void: swept over {0.0, 0.20, 0.30, 0.35, 0.40, 0.45, 0.50, 0.60}
+#     in a single evaluation pass (no extra LLM calls — gating happens
+#     post-retrieval, decision recorded per task)
+#
+# Usage:
+#   nohup /usr/bin/python3.9 scripts/run_paper_v5_void.py \
+#     > experiments/paper_v5_stdout.log 2>&1 &
+
+# ===== LLM Configuration (same as v4) =====
+llm:
+  model: deepseek-chat
+  temperature: 0.7
+  max_tokens: 4096
+  timeout: 120
+  max_retries: 3
+  retry_delay: 2
+
+# ===== Embedding Configuration =====
+embedding:
+  model: all-MiniLM-L6-v2     # same as v4 retrieval embedding (cosine)
+  device: cpu
+
+# ===== Active Benchmarks (7 — alfworld/webshop excluded) =====
+# Rationale: alfworld and webshop require simulator-based completion
+# metrics; EM/F1 are not meaningful for action-trajectory expected
+# answers. Deferred to future work (paper §5.1).
+benchmarks:
+  hotpotqa:        {train: 40, test: 50, primary_metric: em}
+  2wikimultihopqa: {train: 40, test: 50, primary_metric: em}
+  musique:         {train: 40, test: 50, primary_metric: em}
+  triviaqa:        {train: 20, test: 30, primary_metric: em}
+  gsm8k:           {train: 20, test: 30, primary_metric: em}
+  longmemeval:     {train: 10, test: 20, primary_metric: em}
+  locomo:          {train: 10, test: 20, primary_metric: f1}  # ← F1 due to verbose answers
+
+# ===== Methods to Evaluate =====
+# We compare 6 columns:
+#   B0       — zero-shot baseline (no skill injection ever)
+#   B2       — SkillOS-style retrieval (top-k, no c_∅)
+#   A3       — Full SkillCurator (no c_∅) — v4 paper's main method
+#   B2+c_∅   — SkillOS + void-case (ablation: does c_∅ help any retrieval method?)
+#   A1+c_∅   — Semantic compaction + void-case (ablation: c_∅ orthogonal to MERGE?)
+#   A3+c_∅   — Full SkillCurator + void-case (PROPOSED — paper main)
+methods:
+  - B0
+  - B2
+  - A3
+  - B2+void
+  - A1+void
+  - A3+void
+
+# ===== Void-Case Configuration =====
+void_case:
+  enable: true
+  tau_void: 0.35              # PRIMARY threshold (used in main Table 1 column "A3+c_∅")
+  smoothing: hard             # {hard, soft} — hard for paper main, soft for §6.x ablation
+  soft_temperature: 5.0
+  log_decisions: false
+
+  # Sweep range — these τ values are evaluated in a SINGLE pass per task
+  # (the gate decision is computed post-hoc from cached s_max values, so
+  # we get all sweep results at the cost of a single-method evaluation).
+  sweep_tau:
+    - 0.00       # equivalent to A3 (no gating)
+    - 0.20
+    - 0.30
+    - 0.35       # primary
+    - 0.40
+    - 0.45
+    - 0.50
+    - 0.60
+    - 1.01       # equivalent to B0 (always void)
+
+# ===== Retrieval Configuration =====
+retrieval:
+  top_k: 5
+  embedding_normalize: true   # required for cosine similarity
+
+# ===== Reproducibility =====
+seed: 42
+
+# ===== Skill Induction =====
+induction:
+  variant: hybrid_to_skill    # same as v4
+  max_traj_steps: 6
+  dedup_threshold: 0.75       # post-induction semantic dedup
+
+# ===== Compaction (used by A1+c_∅, A3+c_∅) =====
+compaction:
+  merge_threshold: 0.60
+  max_merges_per_round: 5
+
+# ===== Output =====
+output:
+  experiment_dir: ./experiments
+  results_file: paper_v5_void_results.json
+  log_file: paper_v5.log
+  figures_dir: ./paper/figures
+  log_level: INFO
+  save_skill_banks: true       # NEW: persist skill_banks for future reproducibility
+  skill_banks_dir: ./experiments/paper_v5_skill_banks
+
+# ===== Token Budget =====
+budget:
+  max_tokens: 5_000_000        # 5M ceiling (estimate ~3M actual)
+  estimated_runtime_hours: 2
+
+# ===== Notes =====
+# Cost decomposition (per benchmark):
+#   - Skill induction: train_size × ~5K token = ~200K token (bench tier 1)
+#   - Evaluation: test_size × 6 methods × ~3K token = ~900K token
+#   - Total per bench: ~1.1M token (tier 1) / ~600K token (tier 2-3)
+#   - 7 benchmarks total: ~5M token expected
