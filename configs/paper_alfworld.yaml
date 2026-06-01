@@ -1,0 +1,94 @@
+# SkillCurator Paper Experiments — ALFWorld (procedural action benchmark)
+#
+# Goal: extend v5 (text-output benchmarks) to include ALFWorld, the most
+# direct comparator to SkillOS / MemSkill / Mem2Evolve. We mirror v5's
+# top-k retrieval + Plan C void-case gating, but instead of single-step
+# QA we run a multi-step ReAct loop in the TextWorld engine.
+#
+# Design decisions (locked 2026-05-17):
+#   - split:          valid_unseen (134 games)
+#   - n_eval_tasks:   50 (stratified across 6 task types)
+#   - n_train_tasks:  20 (skill induction trajectories)
+#   - methods:        B0 / B2 / A3 / A3+c_∅ (Plan C, q-quantile per-bench)
+#   - max_steps:      50 per episode (SkillOS standard)
+#   - LLM:            DeepSeek-Chat (same as v5)
+#   - Skill induction: re-use train rollouts (LLM-based, like SkillOS)
+#
+# Cost estimate:
+#   - Skill induction: 20 train tasks × ~30 steps × 4 KB = ~2.4M token
+#   - Eval: 4 methods × 50 tasks × ~30 steps × 4 KB = ~24M token
+#   - Total: ~26M token ≈ $40, ~3.5 h wallclock
+
+# ===== LLM Configuration =====
+llm:
+  model: deepseek-chat
+  temperature: 0.0          # deterministic action selection (greedy)
+  max_tokens: 256           # ALFWorld actions are single-line commands
+  timeout: 60
+  max_retries: 3
+
+# ===== Embedding (same model as v5 for consistency) =====
+embedding:
+  model: all-MiniLM-L6-v2
+
+# ===== ALFWorld Environment =====
+alfworld:
+  split: valid_unseen      # 134 games (SkillOS standard test split)
+  max_steps: 50            # per episode
+  n_eval_tasks: 50         # subset, stratified by task type
+  n_train_tasks: 20        # for skill induction
+  stratify: true           # ensure 6 task types are represented
+  data_path: /root/workspace/SkillForge/.venv_alfworld/data
+
+# ===== Methods to Evaluate =====
+# B0      — zero-shot ReAct (no skill injection)
+# B2      — top-k retrieval on every step (SkillOS-style)
+# A3      — Full SkillCurator (sandwich+compact skill block, no c_∅)
+# A3+c_∅ — A3 + Plan C void gating (q-quantile τ from train s_max)
+methods:
+  - B0
+  - B2
+  - A3
+  - A3+void
+
+# ===== Plan C Void Gating =====
+void_case:
+  enable: true
+  smoothing: hard
+  calibration_mode: quantile
+  quantile_q: 0.30          # default; will be CV-selected on train if data permits
+  log_decisions: false
+
+# ===== Retrieval =====
+retrieval:
+  top_k: 3                  # smaller K for action env (skill_block must fit in step prompt)
+
+# ===== Reproducibility =====
+seed: 42
+
+# ===== Skill Induction =====
+induction:
+  variant: hybrid_to_skill  # same as v4/v5
+  max_traj_steps: 30        # ALFWorld trajectories are longer than QA
+  dedup_threshold: 0.75
+
+# ===== ReAct Loop =====
+react:
+  history_window: 10        # how many (action, obs) pairs to keep in context
+  obs_truncate_chars: 400   # per-observation truncation
+  action_format: admissible # must pick from env's admissible_commands list
+
+# ===== Output =====
+output:
+  experiment_dir: ./experiments
+  results_file: paper_alfworld_results.json
+  log_file: paper_alfworld.log
+  log_level: INFO
+  save_skill_banks: true
+  skill_banks_dir: ./experiments/paper_alfworld_skill_banks
+  per_task_dir: ./experiments/paper_alfworld_per_task
+
+# ===== Token Budget (alarm threshold) =====
+budget:
+  max_tokens: 50_000_000     # 50M ceiling
+  estimated_runtime_hours: 4
