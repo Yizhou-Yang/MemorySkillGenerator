@@ -692,12 +692,21 @@ def analyze_execution(task_id: str, task_desc: str,
                       agent_actions: list[dict], oracle_actions: list[dict],
                       token_cost: int = 0, time_cost: float = 0.0,
                       augmentation_used: str = "") -> Experience:
-    """Analyze execution with V6 enhancements: taxonomy, cost, complexity."""
-    # Extract tool sequences (same as V5)
+    """Analyze execution with V6 enhancements: taxonomy, cost, complexity.
+    
+    Supports multiple action formats:
+    - Gaia2: {"tool": "Bash", "input": {"command": "calendar list"}}
+    - Generic: {"tool": "action", "command": "go to desk"}  
+    - LLM output: {"tool": "LLM", "output": "response text"}
+    - Oracle (Gaia2): {"app": "Calendar", "fn": "list_events", "args": {...}}
+    - Oracle (generic): {"tool": "action", "command": "go to desk"}
+    """
+    # ─── Extract agent tool sequence (format-adaptive) ────────────────
     agent_tools = []
     agent_cmds = []
     for a in agent_actions:
         if a.get('tool') == 'Bash':
+            # Gaia2 format
             cmd = a.get('input', {}).get('command', '') if isinstance(a.get('input'), dict) else ''
             agent_cmds.append(cmd)
             clean = re.sub(r'GAIA2_STATE_DIR=\S+\s*', '', cmd).strip()
@@ -705,20 +714,48 @@ def analyze_execution(task_id: str, task_desc: str,
             if parts:
                 tool_fn = f"{parts[0]} {parts[1]}" if len(parts) > 1 and not parts[1].startswith('-') else parts[0]
                 agent_tools.append(tool_fn)
+        elif a.get('command'):
+            # Generic action format: {"tool": "action", "command": "go to desk"}
+            cmd = a['command']
+            agent_cmds.append(cmd)
+            agent_tools.append(cmd.lower())
+        elif a.get('output'):
+            # LLM output format: parse response for action-like content
+            output = a['output']
+            agent_cmds.append(output[:200])
+            # Extract action verbs from output
+            lines = output.split('\n')
+            for line in lines:
+                line_clean = line.strip().lower()
+                if any(line_clean.startswith(v) for v in ('go to', 'take', 'put', 'use', 'open', 'close', 'clean', 'heat', 'cool')):
+                    agent_tools.append(line_clean)
+            if not agent_tools:
+                agent_tools.append(output[:50].lower())
     
+    # ─── Extract oracle tool sequence (format-adaptive) ───────────────
     oracle_tools = []
     for o in oracle_actions:
-        oracle_tools.append(f"{o.get('app','')}.{o.get('fn','')}")
+        if o.get('app') and o.get('fn'):
+            # Gaia2 oracle format
+            oracle_tools.append(f"{o['app']}.{o['fn']}")
+        elif o.get('command'):
+            # Generic oracle format: {"tool": "action", "command": "go to desk"}
+            oracle_tools.append(o['command'].lower())
+        elif o.get('output'):
+            # LLM expected output
+            oracle_tools.append(o['output'][:50].lower())
     
-    # Match (function-level)
+    # ─── Match (adaptive: exact substring or word overlap) ────────────
     matched = 0
     used = set()
     for ot in oracle_tools:
+        ot_parts = set(ot.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
         for j, at in enumerate(agent_tools):
             if j not in used:
-                ot_parts = ot.lower().replace('.', ' ').replace('_', ' ').split()
-                at_parts = at.lower().replace('-', ' ').replace('_', ' ').split()
-                if set(ot_parts) & set(at_parts):
+                at_parts = set(at.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
+                # Match if significant word overlap (≥2 words or exact substring)
+                overlap = ot_parts & at_parts
+                if len(overlap) >= 2 or ot.lower() in at.lower() or at.lower() in ot.lower():
                     matched += 1
                     used.add(j)
                     break
@@ -729,10 +766,11 @@ def analyze_execution(task_id: str, task_desc: str,
     missing = []
     for ot in oracle_tools:
         found = False
+        ot_parts = set(ot.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
         for at in agent_tools:
-            ot_parts = set(ot.lower().replace('.', ' ').replace('_', ' ').split())
-            at_parts = set(at.lower().replace('-', ' ').replace('_', ' ').split())
-            if ot_parts & at_parts:
+            at_parts = set(at.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
+            overlap = ot_parts & at_parts
+            if len(overlap) >= 2 or ot.lower() in at.lower() or at.lower() in ot.lower():
                 found = True
                 break
         if not found:
