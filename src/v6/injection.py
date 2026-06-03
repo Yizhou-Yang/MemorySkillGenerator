@@ -1,21 +1,26 @@
-"""Cost-Aware Prompt Injection — full information preservation, no truncation."""
+"""Cost-Aware Prompt Injection — routes by task type, enforces token budget."""
 from __future__ import annotations
+import tiktoken
 from .experience import Experience, ExperienceLibrary
 from .gate import should_augment, classify_task_type
 
-
+# Lazy-loaded tokenizer (cl100k_base covers GPT-3.5/4/most models)
+_enc = None
 def estimate_token_count(text: str) -> int:
-    return len(text) // 4
+    """Accurate token count via tiktoken."""
+    global _enc
+    if _enc is None:
+        try:
+            _enc = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            return len(text) // 4  # fallback
+    return len(_enc.encode(text, disallowed_special=()))
 
 
 def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
-    """Format successful experience. AI-refined preferred. NO truncation of content —
-    only omits lower-priority fields when budget is tight."""
+    """Format successful experience. AI-refined preferred. No content truncation."""
     taxonomy = exp.failure_taxonomy
-    parts = []
-
-    parts.append(f"[Successful approach for similar task]")
-    parts.append(f"Task: {exp.task_desc}")
+    parts = [f"[Successful approach for similar task]", f"Task: {exp.task_desc}"]
 
     if taxonomy.get("ai_refined") and taxonomy.get("generalized_steps"):
         parts.append(f"Causal lesson: {taxonomy.get('causal_lesson', '')}")
@@ -24,33 +29,28 @@ def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
         if taxonomy.get("evolution_insight"):
             parts.append(f"Evolution insight: {taxonomy['evolution_insight']}")
     else:
-        # Raw: include ALL action commands, not just first N
         steps = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
         parts.append(f"Steps:\n{steps}")
     parts.append(f"Score: {exp.score:.0%}")
 
     result = "\n".join(parts)
-    # Budget control: drop lowest-priority fields first (transferability, evolution_insight)
-    # but NEVER truncate mid-sentence
+    # Budget: drop low-priority fields (never truncate mid-content)
     if estimate_token_count(result) > budget_tokens and len(parts) > 4:
-        result = "\n".join(parts[:4])  # Keep task + lesson + steps, drop extras
+        result = "\n".join(parts[:4])
     return result
 
 
 def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
-    """Format failed experience. Full information — no field truncation."""
+    """Format failed experience. Full information preserved."""
     taxonomy = exp.failure_taxonomy
-    parts = []
-
-    parts.append(f"[⚠️ Lesson from similar failed task]")
-    parts.append(f"Task: {exp.task_desc}")
+    parts = [f"[⚠️ Lesson from similar failed task]", f"Task: {exp.task_desc}"]
 
     if taxonomy.get("ai_refined") and taxonomy.get("causal_lesson"):
         parts.append(f"Why it failed: {taxonomy['causal_lesson']}")
         if taxonomy.get("avoidance_note"):
             parts.append(f"Avoid: {taxonomy['avoidance_note']}")
         if taxonomy.get("generalized_steps"):
-            parts.append(f"What was attempted:\n{taxonomy['generalized_steps']}")
+            parts.append(f"Attempted:\n{taxonomy['generalized_steps']}")
         if exp.missing_steps:
             parts.append("MISSING steps: " + ", ".join(exp.missing_steps))
         if taxonomy.get("transferability"):
@@ -61,53 +61,39 @@ def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
         if exp.failure_reason:
             parts.append(f"What went wrong: {exp.failure_reason}")
         if exp.missing_steps:
-            parts.append("MISSING steps: " + ", ".join(exp.missing_steps))
+            parts.append("MISSING: " + ", ".join(exp.missing_steps))
         if exp.action_commands:
             steps = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
-            parts.append(f"What was attempted:\n{steps}")
+            parts.append(f"Attempted:\n{steps}")
 
     result = "\n".join(parts)
-    # Budget: drop lowest-priority fields (transferability, evolution_insight) but keep core
     if estimate_token_count(result) > budget_tokens and len(parts) > 5:
         result = "\n".join(parts[:5])
     return result
 
 
 def _build_qa_hint(task_desc: str, library: ExperienceLibrary, token_budget: int = 400) -> str:
-    """Lightweight hints for QA tasks. Filters by content relevance, not keyword blacklist."""
+    """Lightweight hints for QA tasks."""
     candidates = library.retrieve_similar(task_desc, top_k=5)
     if not candidates:
         return ""
-
     hints = []
     for exp in candidates:
         ft = exp.failure_taxonomy
         if not ft.get("ai_refined"):
             continue
-        # Use transferability and causal_lesson — these are the most generalizable fields.
-        # Skip if the hint is about specific tool usage that wouldn't apply to a QA context
-        # (detected by checking if the lesson is about the REASONING, not about tool mechanics)
         for text in [ft.get("transferability", ""), ft.get("causal_lesson", "")]:
             if not text or len(text) < 20:
                 continue
             hints.append(text)
             break
-
     if not hints:
         return ""
-    # Deduplicate by prefix
     seen = set()
-    unique = []
-    for h in hints:
-        key = h[:40].lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(h)
-
+    unique = [h for h in hints if not (h[:40].lower() in seen or seen.add(h[:40].lower()))]
     if not unique:
         return ""
-    result = "## Reasoning Hints\n" + "\n".join(f"- {h}" for h in unique[:3])
-    return result
+    return "## Reasoning Hints\n" + "\n".join(f"- {h}" for h in unique[:3])
 
 
 def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,

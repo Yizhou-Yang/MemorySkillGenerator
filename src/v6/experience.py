@@ -60,21 +60,6 @@ def _get_embedding_model():
         return None
 
 
-def _embed(texts: list[str]) -> list[list[float]]:
-    """Encode texts to normalized embeddings."""
-    model = _get_embedding_model()
-    if model is None:
-        return []
-    import numpy as np
-    embs = model.encode(texts, normalize_embeddings=True)
-    return embs.tolist()
-
-
-def _cosine_sim(a: list[float], b: list[float]) -> float:
-    """Cosine similarity between two normalized vectors (just dot product)."""
-    return sum(x * y for x, y in zip(a, b))
-
-
 def _tf_idf_fallback(query: str, doc: str) -> float:
     """Fallback: sklearn TF-IDF cosine when embeddings unavailable."""
     try:

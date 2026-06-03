@@ -1,5 +1,7 @@
 """Version-Conditioned AI Refinement — ADDS information, never removes."""
 from __future__ import annotations
+from json_repair import repair_json
+import json
 from .experience import Experience
 
 
@@ -18,23 +20,22 @@ Failure reason: {failure_reason}
 {version_history_section}
 ## Instructions
 1. Generalize: replace hard-coded IDs/dates/names with [PLACEHOLDER], but KEEP EVERY STEP.
-2. Extract causal lesson: WHY did this succeed/fail? What's the transferable insight?
+2. Extract causal lesson: WHY did this succeed/fail?
 3. If version history exists: what improved across attempts? What regressed?
-4. DO NOT remove, compress, or summarize any steps. Add context, don't subtract.
+4. DO NOT remove, compress, or summarize any steps.
 
 ## Response (JSON only)
 {{
-  "generalized_steps": "ALL original steps rewritten with placeholders — same count, same detail level",
+  "generalized_steps": "ALL original steps rewritten with placeholders — same count, same detail",
   "causal_lesson": "one sentence: why this worked/failed",
   "avoidance_note": "what to avoid (empty string if success)",
-  "transferability": "what task types benefit from this experience",
+  "transferability": "what task types benefit from this",
   "evolution_insight": "what version history reveals (empty string if no history)",
   "quality_score": 0-10
 }}"""
 
 
 def _format_patch_history(patch_history: list) -> str:
-    """Format version diffs for the AI reviewer."""
     if not patch_history:
         return ""
     lines = ["\n## Version History"]
@@ -50,10 +51,9 @@ def _format_patch_history(patch_history: list) -> str:
 
 
 def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
-    """Version-conditioned refinement. Passes ALL data to LLM — no pre-truncation.
-    Returns structured 7-field dict."""
+    """Version-conditioned refinement. Full data passed to LLM, no pre-truncation.
+    Uses json_repair for robust JSON extraction from LLM response."""
     if llm_fn is None:
-        # Passthrough: return raw data as-is (no information loss)
         return {
             "generalized_steps": "\n".join(exp.action_commands),
             "causal_lesson": exp.failure_reason if exp.outcome != "success" else "Completed all required steps",
@@ -64,7 +64,6 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
             "refined": False,
         }
 
-    # Pass ALL steps and ALL missing steps to LLM (no [:10] or [:5] truncation)
     steps_str = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
     missing_str = ", ".join(exp.missing_steps) if exp.missing_steps else "(none)"
 
@@ -77,17 +76,21 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
 
     try:
         response = llm_fn(prompt)
-        import json
-        if "{" in response:
-            json_str = response[response.index("{"):response.rindex("}") + 1]
-            result = json.loads(json_str)
+        # json_repair handles: trailing commas, missing quotes, markdown fences, etc.
+        repaired = repair_json(response, return_objects=True)
+        if isinstance(repaired, dict):
+            repaired["refined"] = True
+            repaired.setdefault("evolution_insight", "")
+            return repaired
+        # If repair_json returned a list or string, try extracting dict
+        if isinstance(repaired, list) and repaired and isinstance(repaired[0], dict):
+            result = repaired[0]
             result["refined"] = True
             result.setdefault("evolution_insight", "")
             return result
     except Exception:
         pass
 
-    # Fallback: passthrough (no information loss)
     return {
         "generalized_steps": "\n".join(exp.action_commands),
         "causal_lesson": exp.failure_reason if exp.outcome != "success" else "Completed all required steps",
