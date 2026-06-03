@@ -1,7 +1,7 @@
 """Applicability Gate + Task Type Classification — no hardcoded keywords."""
 from __future__ import annotations
 import re
-from .experience import ExperienceLibrary, _compute_similarity
+from .experience import ExperienceLibrary, compute_similarity
 
 
 def assess_task_complexity(task_desc: str) -> str:
@@ -48,7 +48,7 @@ def should_augment(task_desc: str, library: ExperienceLibrary,
     if not candidates:
         return False, "no_relevant_experiences"
 
-    best_relevance = _compute_similarity(task_desc, candidates[0].task_desc)
+    best_relevance = compute_similarity(task_desc, candidates[0].task_desc)
     if best_relevance < relevance_threshold:
         return False, f"low_relevance ({best_relevance:.3f} < {relevance_threshold})"
 

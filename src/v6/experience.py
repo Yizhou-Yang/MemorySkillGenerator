@@ -1,4 +1,4 @@
-"""Experience dataclass + ExperienceLibrary with n-gram similarity retrieval."""
+"""Experience dataclass + ExperienceLibrary with semantic embedding retrieval."""
 from __future__ import annotations
 import json
 import os
@@ -37,55 +37,82 @@ class Experience:
     timestamp: float = 0.0
 
 
-def _tokenize(text: str) -> list[str]:
-    """Lowercase split + basic normalization."""
+# ══════════════════════════════════════════════════════════════════════════
+#  Similarity: semantic embedding with TF-cosine fallback
+# ══════════════════════════════════════════════════════════════════════════
+
+_embedding_model = None
+_embedding_available = None
+
+
+def _get_embedding_model():
+    """Lazy-load sentence-transformers model. Returns None if unavailable."""
+    global _embedding_model, _embedding_available
+    if _embedding_available is False:
+        return None
+    if _embedding_model is not None:
+        return _embedding_model
+    try:
+        from sentence_transformers import SentenceTransformer
+        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        _embedding_available = True
+        return _embedding_model
+    except Exception:
+        _embedding_available = False
+        return None
+
+
+def _embed(texts: list[str]) -> list[list[float]]:
+    """Encode texts to normalized embeddings."""
+    model = _get_embedding_model()
+    if model is None:
+        return []
+    import numpy as np
+    embs = model.encode(texts, normalize_embeddings=True)
+    return embs.tolist()
+
+
+def _cosine_sim(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two normalized vectors (just dot product)."""
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _tf_cosine_fallback(query: str, doc: str) -> float:
+    """Fallback: TF-cosine + bigram when embeddings unavailable."""
     import re
-    return re.findall(r'[a-z0-9]+', text.lower())
-
-
-def _ngrams(tokens: list[str], n: int) -> list[str]:
-    return [" ".join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
-
-
-def _compute_similarity(query_text: str, doc_text: str) -> float:
-    """Hybrid similarity: unigram TF overlap + bigram bonus.
-    
-    Better than Jaccard: captures word frequency and word-order (bigram).
-    No external dependencies (no sklearn/numpy needed).
-    """
-    q_tokens = _tokenize(query_text)
-    d_tokens = _tokenize(doc_text)
+    q_tokens = re.findall(r'[a-z0-9]+', query.lower())
+    d_tokens = re.findall(r'[a-z0-9]+', doc.lower())
     if not q_tokens or not d_tokens:
         return 0.0
-
-    # Unigram: TF-weighted overlap (not just set intersection)
-    q_tf = Counter(q_tokens)
-    d_tf = Counter(d_tokens)
-    shared_terms = set(q_tf) & set(d_tf)
-    if not shared_terms:
+    q_tf, d_tf = Counter(q_tokens), Counter(d_tokens)
+    shared = set(q_tf) & set(d_tf)
+    if not shared:
         return 0.0
-
-    # Cosine on TF vectors (lightweight, no IDF needed for small corpus)
-    dot = sum(q_tf[t] * d_tf[t] for t in shared_terms)
+    dot = sum(q_tf[t] * d_tf[t] for t in shared)
     norm_q = math.sqrt(sum(v * v for v in q_tf.values()))
     norm_d = math.sqrt(sum(v * v for v in d_tf.values()))
-    unigram_sim = dot / (norm_q * norm_d) if norm_q > 0 and norm_d > 0 else 0.0
+    return dot / (norm_q * norm_d) if norm_q > 0 and norm_d > 0 else 0.0
 
-    # Bigram bonus: rewards matching word order
-    q_bigrams = set(_ngrams(q_tokens, 2))
-    d_bigrams = set(_ngrams(d_tokens, 2))
-    if q_bigrams and d_bigrams:
-        bigram_overlap = len(q_bigrams & d_bigrams) / max(len(q_bigrams | d_bigrams), 1)
-    else:
-        bigram_overlap = 0.0
 
-    return 0.7 * unigram_sim + 0.3 * bigram_overlap
+def compute_similarity(query: str, doc: str) -> float:
+    """Semantic similarity: embedding cosine (preferred) or TF-cosine (fallback)."""
+    model = _get_embedding_model()
+    if model is not None:
+        import numpy as np
+        embs = model.encode([query, doc], normalize_embeddings=True)
+        return float(np.dot(embs[0], embs[1]))
+    return _tf_cosine_fallback(query, doc)
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ExperienceLibrary
+# ══════════════════════════════════════════════════════════════════════════
 
 class ExperienceLibrary:
     def __init__(self):
         self.experiences: list[Experience] = []
         self._augment_stats: dict[str, dict] = {}
+        self._exp_effectiveness: dict[str, dict] = {}  # exp.task_id → {injected_count, total_score_delta}
 
     def record(self, exp: Experience):
         self.experiences.append(exp)
@@ -100,6 +127,22 @@ class ExperienceLibrary:
             else:
                 self._augment_stats[key]["neutral"] += 1
 
+    def update_effectiveness(self, source_exp_id: str, score_delta: float):
+        """Track per-experience injection effectiveness (EvoMem-style)."""
+        if source_exp_id not in self._exp_effectiveness:
+            self._exp_effectiveness[source_exp_id] = {"count": 0, "total_delta": 0.0}
+        self._exp_effectiveness[source_exp_id]["count"] += 1
+        self._exp_effectiveness[source_exp_id]["total_delta"] += score_delta
+
+    def get_experience_weight(self, exp_id: str) -> float:
+        """Weight for retrieval ranking: downweight experiences that historically hurt."""
+        stats = self._exp_effectiveness.get(exp_id)
+        if not stats or stats["count"] < 2:
+            return 1.0  # Default: full weight (cold start)
+        avg_delta = stats["total_delta"] / stats["count"]
+        # Positive delta → weight ≥ 1; negative → weight < 1 (min 0.3)
+        return max(0.3, min(1.5, 1.0 + avg_delta * 2))
+
     def retrieve_similar(self, task_desc: str, top_k: int = 3,
                          outcome_filter: str | None = None,
                          exclude_tool_failures: bool = False) -> list[Experience]:
@@ -112,7 +155,13 @@ class ExperienceLibrary:
         if not candidates:
             return []
 
-        scored = [((_compute_similarity(task_desc, exp.task_desc)), exp) for exp in candidates]
+        # Score: similarity × effectiveness weight
+        scored = []
+        for exp in candidates:
+            sim = compute_similarity(task_desc, exp.task_desc)
+            weight = self.get_experience_weight(exp.task_id)
+            scored.append((sim * weight, exp))
+
         scored.sort(key=lambda x: -x[0])
         return [exp for _, exp in scored[:top_k]]
 
@@ -158,6 +207,7 @@ class ExperienceLibrary:
                 for e in self.experiences
             ],
             "augment_stats": self._augment_stats,
+            "exp_effectiveness": self._exp_effectiveness,
         }
 
     def from_dict(self, data: dict | list):
@@ -178,6 +228,7 @@ class ExperienceLibrary:
                 d.setdefault("patch_history", [])
                 self.experiences.append(Experience(**d))
             self._augment_stats = data.get("augment_stats", {})
+            self._exp_effectiveness = data.get("exp_effectiveness", {})
 
     def save(self, path: str):
         with open(path, 'w') as f:
