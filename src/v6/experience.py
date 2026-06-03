@@ -2,8 +2,6 @@
 from __future__ import annotations
 import json
 import os
-import math
-from collections import Counter
 from dataclasses import dataclass, field
 
 
@@ -77,31 +75,26 @@ def _cosine_sim(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _tf_cosine_fallback(query: str, doc: str) -> float:
-    """Fallback: TF-cosine + bigram when embeddings unavailable."""
-    import re
-    q_tokens = re.findall(r'[a-z0-9]+', query.lower())
-    d_tokens = re.findall(r'[a-z0-9]+', doc.lower())
-    if not q_tokens or not d_tokens:
+def _tf_idf_fallback(query: str, doc: str) -> float:
+    """Fallback: sklearn TF-IDF cosine when embeddings unavailable."""
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        vec = TfidfVectorizer()
+        tfidf = vec.fit_transform([query, doc])
+        return float(cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0])
+    except Exception:
         return 0.0
-    q_tf, d_tf = Counter(q_tokens), Counter(d_tokens)
-    shared = set(q_tf) & set(d_tf)
-    if not shared:
-        return 0.0
-    dot = sum(q_tf[t] * d_tf[t] for t in shared)
-    norm_q = math.sqrt(sum(v * v for v in q_tf.values()))
-    norm_d = math.sqrt(sum(v * v for v in d_tf.values()))
-    return dot / (norm_q * norm_d) if norm_q > 0 and norm_d > 0 else 0.0
 
 
 def compute_similarity(query: str, doc: str) -> float:
-    """Semantic similarity: embedding cosine (preferred) or TF-cosine (fallback)."""
+    """Semantic similarity: embedding cosine (preferred) or TF-IDF cosine (fallback)."""
     model = _get_embedding_model()
     if model is not None:
         import numpy as np
         embs = model.encode([query, doc], normalize_embeddings=True)
         return float(np.dot(embs[0], embs[1]))
-    return _tf_cosine_fallback(query, doc)
+    return _tf_idf_fallback(query, doc)
 
 
 # ══════════════════════════════════════════════════════════════════════════
