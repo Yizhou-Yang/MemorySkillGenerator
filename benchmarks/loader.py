@@ -3,9 +3,10 @@ Benchmark dataset loader.
 
 Loads real datasets from HuggingFace Hub:
 
-Primary benchmarks (active):
-- GAIA (L1/L2/L3): general assistant tasks (466 questions, EM + human eval)
-- ALFWorld: embodied text game (~134 tasks, task completion rate)
+Primary benchmarks (active, online/dynamic):
+- Gaia2: agentic CLI tool-calling via gaia2-cli scenarios (soft recall)
+- SWE-bench Dynamic: Docker-based code bug-fixing (pass@1, patch rate)
+- ALFWorld Interactive: embodied text game via subprocess (task completion)
 - HotpotQA: multi-hop QA (dev set subsample, EM/F1)
 - 2WikiMultihopQA: multi-hop QA (dev set subsample, EM/F1)
 - AIME 24/25: math competition (30 questions each, answer matching)
@@ -14,17 +15,18 @@ Primary benchmarks (active):
 - LoCoMo: long conversation memory (10 samples × ~200 QA, F1 + LLM-Judge)
 - LongMemEval: ultra-long dialogue memory (306 tasks, F1 + LLM-Judge)
 
-Legacy benchmarks (disabled, still loadable):
-- HotpotQA-hard: hard subset of HotpotQA for transfer evaluation
-- TriviaQA: single-hop factoid QA (classic baseline)
-- GSM8K: grade-school math reasoning with chain-of-thought
-- MuSiQue: multi-hop QA with explicit question decomposition
-- SWE-bench Lite: code bug-fixing (300 tasks, patch-diff expected answers)
+Legacy benchmarks (static, disabled but still loadable):
+- GAIA (HF static): general assistant QA (no tools)
+- ALFWorld (HF static): offline walkthrough matching
+- SWE-bench Lite: static patch-diff expected answers
+- HotpotQA-hard / TriviaQA / GSM8K / MuSiQue
 """
 
 from __future__ import annotations
 
+import glob
 import json
+import os
 import re
 from typing import Any
 
@@ -32,10 +34,11 @@ from datasets import load_dataset
 from loguru import logger
 
 
-# Primary benchmarks (new evaluation suite)
+# Primary benchmarks (online/dynamic evaluation)
 PRIMARY_BENCHMARKS = [
-    "gaia",
-    "alfworld",
+    "gaia2",
+    "swebench_dynamic",
+    "alfworld_interactive",
     "hotpotqa",
     "2wikimultihopqa",
     "aime",
@@ -45,13 +48,15 @@ PRIMARY_BENCHMARKS = [
     "longmemeval",
 ]
 
-# Legacy benchmarks (disabled but not deleted, still loadable by name)
+# Legacy benchmarks (static, disabled but still loadable)
 LEGACY_BENCHMARKS = [
+    "gaia",
+    "alfworld",
+    "swebench",
     "hotpotqa_hard",
     "triviaqa",
     "gsm8k",
     "musique",
-    "swebench",
 ]
 
 
@@ -72,9 +77,10 @@ class BenchmarkLoader:
             ``description``, ``expected``, ``context``, etc.
         """
         loader_map = {
-            # Primary benchmarks
-            "gaia": self._load_gaia,
-            "alfworld": self._load_alfworld,
+            # Primary benchmarks (online/dynamic)
+            "gaia2": self._load_gaia2,
+            "swebench_dynamic": self._load_swebench_dynamic,
+            "alfworld_interactive": self._load_alfworld_interactive,
             "hotpotqa": self._load_hotpotqa,
             "2wikimultihopqa": self._load_2wikimultihopqa,
             "aime": self._load_aime,
@@ -82,7 +88,9 @@ class BenchmarkLoader:
             "webshop": self._load_webshop,
             "locomo": self._load_locomo,
             "longmemeval": self._load_longmemeval,
-            # Legacy benchmarks (disabled but still loadable)
+            # Legacy (static, still loadable)
+            "gaia": self._load_gaia,
+            "alfworld": self._load_alfworld,
             "hotpotqa_hard": self._load_hotpotqa_hard,
             "triviaqa": self._load_triviaqa,
             "gsm8k": self._load_gsm8k,
@@ -104,7 +112,196 @@ class BenchmarkLoader:
         return tasks
 
     # ==================================================================
-    # PRIMARY BENCHMARKS
+    # PRIMARY BENCHMARKS — ONLINE / DYNAMIC
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # Gaia2 — Agentic CLI Tool-Calling (soft recall)
+    # ------------------------------------------------------------------
+
+    def _load_gaia2(self) -> list[dict[str, Any]]:
+        """Load Gaia2 scenarios from local JSON files for CLI tool-calling evaluation."""
+        scenario_dir = self.config.get(
+            "scenario_dir", "/data1/benchmarks/gaia2/scenarios"
+        )
+        logger.info(f"Loading Gaia2 scenarios from {scenario_dir}...")
+
+        scenario_files = sorted(
+            glob.glob(os.path.join(scenario_dir, "**/*.json"), recursive=True)
+        )
+        if not scenario_files:
+            logger.warning(f"No Gaia2 scenarios found in {scenario_dir}")
+            return []
+
+        app_to_cli = {
+            'Calendar': 'calendar', 'Contacts': 'contacts',
+            'Emails': 'emails', 'Messages': 'messages',
+            'Chats': 'chats', 'RentAFlat': 'rent-a-flat',
+            'City': 'city', 'Cabs': 'cabs', 'Shopping': 'shopping',
+        }
+
+        tasks: list[dict[str, Any]] = []
+        for scenario_path in scenario_files:
+            if len(tasks) >= self.num_samples:
+                break
+            try:
+                with open(scenario_path) as f:
+                    scenario = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            task_prompt = ""
+            for event in scenario.get("events", []):
+                if event.get("event_type") == "USER":
+                    for arg in event.get("action", {}).get("args", []):
+                        if arg.get("name") == "content":
+                            task_prompt = arg["value"]
+                            break
+                    if task_prompt:
+                        break
+            if not task_prompt:
+                continue
+
+            oracle_actions = []
+            for event in scenario.get("events", []):
+                if event.get("event_type") == "AGENT":
+                    action = event.get("action", {})
+                    oracle_actions.append({
+                        "app": action.get("app", ""),
+                        "fn": action.get("fn", ""),
+                        "args": action.get("args", []),
+                    })
+
+            tools = [app_to_cli[app["name"]]
+                     for app in scenario.get("apps", [])
+                     if app.get("name") in app_to_cli]
+
+            scenario_id = os.path.splitext(os.path.basename(scenario_path))[0]
+            tasks.append({
+                "task_id": f"gaia2_{scenario_id}",
+                "description": task_prompt,
+                "expected": oracle_actions,
+                "context": "",
+                "metadata": {
+                    "benchmark": "gaia2",
+                    "scenario_path": scenario_path,
+                    "tools": tools,
+                    "apps": [app["name"] for app in scenario.get("apps", [])],
+                    "num_oracle_actions": len(oracle_actions),
+                },
+            })
+
+        return tasks
+
+    # ------------------------------------------------------------------
+    # SWE-bench Dynamic — Docker-based Code Bug-Fixing (pass@1)
+    # ------------------------------------------------------------------
+
+    def _load_swebench_dynamic(self) -> list[dict[str, Any]]:
+        """Load SWE-bench Verified for dynamic Docker-based evaluation."""
+        docker_image_prefix = self.config.get(
+            "docker_image_prefix",
+            "ghcr.io/epoch-research/swe-bench.eval.x86_64"
+        )
+        logger.info("Loading SWE-bench Verified from HuggingFace...")
+        raw_dataset = load_dataset(
+            "princeton-nlp/SWE-bench_Verified", split="test"
+        )
+
+        tasks: list[dict[str, Any]] = []
+        for idx, row in enumerate(raw_dataset):
+            if len(tasks) >= self.num_samples:
+                break
+
+            instance_id = row.get("instance_id", "")
+            repo = row.get("repo", "")
+            problem = row.get("problem_statement", "")
+            hints = row.get("hints_text", "") or ""
+
+            description = (
+                f"Fix the following issue in the {repo} repository.\n\n"
+                f"Issue:\n{problem}"
+            )
+            if hints:
+                description += f"\n\nHints:\n{hints}"
+
+            tasks.append({
+                "task_id": f"swebench_{instance_id}",
+                "description": description,
+                "expected": row.get("FAIL_TO_PASS", ""),
+                "context": "",
+                "metadata": {
+                    "benchmark": "swebench",
+                    "instance_id": instance_id,
+                    "repo": repo,
+                    "base_commit": row.get("base_commit", ""),
+                    "docker_image": f"{docker_image_prefix}.{instance_id}:latest",
+                    "fail_to_pass": row.get("FAIL_TO_PASS", ""),
+                    "pass_to_pass": row.get("PASS_TO_PASS", ""),
+                    "version": row.get("version", ""),
+                },
+            })
+
+        return tasks
+
+    # ------------------------------------------------------------------
+    # ALFWorld Interactive — Embodied Text Game via Subprocess
+    # ------------------------------------------------------------------
+
+    def _load_alfworld_interactive(self) -> list[dict[str, Any]]:
+        """Load ALFWorld tasks for interactive subprocess-based evaluation."""
+        logger.info("Loading ALFWorld (interactive) from HuggingFace...")
+        raw_dataset = load_dataset(
+            "awawa-agi/alfworld-raw",
+            split="eval_out_of_distribution",
+        )
+
+        tasks: list[dict[str, Any]] = []
+        for idx, row in enumerate(raw_dataset):
+            if idx >= self.num_samples:
+                break
+
+            task_id_raw = row.get("id", str(idx))
+            task_type = row.get("task_type", "")
+            game_file_path = row.get("game_file_path", "")
+
+            game_content_str = row.get("game_content", "{}")
+            try:
+                game_content = json.loads(game_content_str)
+            except (json.JSONDecodeError, TypeError):
+                game_content = {}
+
+            walkthrough = game_content.get("walkthrough", [])
+            task_desc = self._alfworld_task_description(task_type, game_file_path)
+
+            description = (
+                f"Complete the following household task in a text-based environment.\n\n"
+                f"Task: {task_desc}\n"
+                f"Task type: {task_type}\n\n"
+                f"You interact by sending text commands. "
+                f"Available: go to, take, put, open, close, use, examine, look."
+            )
+
+            tasks.append({
+                "task_id": f"alfworld_{task_id_raw}",
+                "description": description,
+                "expected": " -> ".join(walkthrough) if walkthrough else "",
+                "context": "",
+                "metadata": {
+                    "benchmark": "alfworld",
+                    "task_type": task_type,
+                    "game_file_path": game_file_path,
+                    "game_content": game_content_str,
+                    "walkthrough_steps": walkthrough,
+                    "num_steps": len(walkthrough),
+                    "interactive": True,
+                },
+            })
+
+        return tasks
+
+    # ==================================================================
+    # STATIC BENCHMARKS (HuggingFace datasets, QA-style)
     # ==================================================================
 
     # ------------------------------------------------------------------

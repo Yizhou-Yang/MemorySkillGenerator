@@ -1,7 +1,7 @@
 """Applicability Gate + Task Type Classification — no hardcoded keywords."""
 from __future__ import annotations
 import re
-from .experience import ExperienceLibrary, compute_similarity
+from .experience import ExperienceLibrary
 
 
 def assess_task_complexity(task_desc: str) -> str:
@@ -38,25 +38,15 @@ def assess_task_complexity(task_desc: str) -> str:
 
 def should_augment(task_desc: str, library: ExperienceLibrary,
                    relevance_threshold: float = 0.15) -> tuple[bool, str]:
-    """Three-layer gate: complexity → relevance → historical effectiveness."""
-    complexity = assess_task_complexity(task_desc)
-
-    if complexity == "simple":
-        return False, f"simple_task (complexity={complexity})"
-
+    """Always inject — more information always helps; AI review handles quality.
+    
+    Gate only blocks when library is truly empty (nothing to inject).
+    """
     candidates = library.retrieve_similar(task_desc, top_k=1)
     if not candidates:
         return False, "no_relevant_experiences"
 
-    best_relevance = compute_similarity(task_desc, candidates[0].task_desc)
-    if best_relevance < relevance_threshold:
-        return False, f"low_relevance ({best_relevance:.3f} < {relevance_threshold})"
-
-    effectiveness = library.get_augmentation_effectiveness(complexity)
-    if effectiveness < 0.3:
-        return False, f"historically_ineffective ({effectiveness:.1%} help rate for {complexity})"
-
-    return True, f"approved (complexity={complexity}, relevance={best_relevance:.3f}, effectiveness={effectiveness:.1%})"
+    return True, "always_inject (AI review ensures quality)"
 
 
 def classify_task_type(task_desc: str, expected: str = "", metadata: dict | None = None) -> str:
