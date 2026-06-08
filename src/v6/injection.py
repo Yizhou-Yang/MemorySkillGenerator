@@ -4,6 +4,44 @@ from .experience import Experience, ExperienceLibrary
 from .gate import should_augment, classify_task_type
 
 
+def _is_quality_success(exp: Experience) -> bool:
+    """Check if a success experience is high-quality enough to inject.
+
+    Prevents overfitting by filtering out:
+    - Low-score "successes" (partial matches scored as success)
+    - Empty experiences with no actionable content
+    """
+    if exp.score < 0.5:
+        return False
+    # Must have either AI-refined content or meaningful action commands
+    taxonomy = exp.failure_taxonomy
+    if taxonomy.get("ai_refined") and taxonomy.get("generalized_steps"):
+        return True
+    if exp.action_commands and any(cmd.strip() for cmd in exp.action_commands):
+        return True
+    return False
+
+
+def _is_quality_failure(exp: Experience) -> bool:
+    """Check if a failure experience provides actionable lessons.
+
+    Prevents noise injection by filtering out:
+    - Raw unrefined failures (just error messages, no causal analysis)
+    - Tool-chain failures (infra issues, not skill issues)
+    - Failures with no meaningful lesson content
+    """
+    taxonomy = exp.failure_taxonomy
+    # AI-refined failures always have quality content
+    if taxonomy.get("ai_refined") and taxonomy.get("causal_lesson"):
+        causal = taxonomy["causal_lesson"]
+        # Filter out trivial/generic causal lessons
+        if len(causal) > 20:
+            return True
+    # Unrefined failures are noise — they contain raw error messages
+    # and task-specific action sequences that don't generalize
+    return False
+
+
 def format_success_experience(exp: Experience) -> str:
     """Format successful experience with version evolution context."""
     taxonomy = exp.failure_taxonomy
@@ -107,21 +145,26 @@ def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
 
     sections = []
 
-    successes = library.retrieve_similar(task_desc, top_k=top_k_success, outcome_filter="success")
-    if successes:
+    # Retrieve and quality-gate success experiences
+    successes = library.retrieve_similar(task_desc, top_k=top_k_success * 2,
+                                         outcome_filter="success")
+    quality_successes = [exp for exp in successes if _is_quality_success(exp)][:top_k_success]
+    if quality_successes:
         sections.append("## Relevant Experience (from similar successful tasks)\n")
-        for exp in successes:
+        for exp in quality_successes:
             entry = format_success_experience(exp)
             sections.append(entry + "\n")
 
-    failures = library.retrieve_similar(task_desc, top_k=top_k_failure,
+    # Retrieve and quality-gate failure experiences
+    failures = library.retrieve_similar(task_desc, top_k=top_k_failure * 2,
                                          outcome_filter="failure", exclude_tool_failures=True)
     if not failures:
-        failures = library.retrieve_similar(task_desc, top_k=top_k_failure,
+        failures = library.retrieve_similar(task_desc, top_k=top_k_failure * 2,
                                              outcome_filter="partial", exclude_tool_failures=True)
-    if failures:
+    quality_failures = [exp for exp in failures if _is_quality_failure(exp)][:top_k_failure]
+    if quality_failures:
         sections.append("## Lessons from Similar Failed Attempts\n")
-        for exp in failures:
+        for exp in quality_failures:
             entry = format_failure_experience(exp)
             sections.append(entry + "\n")
 

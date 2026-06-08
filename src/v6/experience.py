@@ -56,15 +56,28 @@ def _get_embedding_model():
         return None
 
 def _tf_idf_fallback(query: str, doc: str) -> float:
-    """Fallback: sklearn TF-IDF cosine when embeddings unavailable."""
+    """Fallback: word-overlap cosine when embeddings unavailable.
+
+    Uses CountVectorizer (not TF-IDF) because with only 2 documents,
+    IDF weights are meaningless. CountVectorizer + cosine gives a
+    reasonable word-overlap similarity measure.
+    """
     try:
-        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.feature_extraction.text import CountVectorizer
         from sklearn.metrics.pairwise import cosine_similarity
-        vec = TfidfVectorizer()
-        tfidf = vec.fit_transform([query, doc])
-        return float(cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0])
+        vec = CountVectorizer()
+        counts = vec.fit_transform([query, doc])
+        sim = float(cosine_similarity(counts[0:1], counts[1:2])[0][0])
+        return sim
     except Exception:
-        return 0.0
+        # Ultimate fallback: simple word overlap (Jaccard)
+        q_words = set(query.lower().split())
+        d_words = set(doc.lower().split())
+        if not q_words or not d_words:
+            return 0.0
+        intersection = q_words & d_words
+        union = q_words | d_words
+        return len(intersection) / len(union) if union else 0.0
 
 def compute_similarity(query: str, doc: str) -> float:
     """Semantic similarity: embedding cosine (preferred) or TF-IDF cosine (fallback)."""
@@ -116,7 +129,16 @@ class ExperienceLibrary:
 
     def retrieve_similar(self, task_desc: str, top_k: int = 3,
                          outcome_filter: str | None = None,
-                         exclude_tool_failures: bool = False) -> list[Experience]:
+                         exclude_tool_failures: bool = False,
+                         min_similarity: float = 0.25) -> list[Experience]:
+        """Retrieve top-k similar experiences above minimum similarity threshold.
+
+        Args:
+            min_similarity: Minimum cosine similarity to include (default 0.25).
+                Prevents injection of irrelevant experiences that would cause
+                overfitting or noise. Empirically, 0.25 filters out clearly
+                unrelated tasks while keeping transferable experiences.
+        """
         candidates = self.experiences
         if outcome_filter:
             candidates = [e for e in candidates if e.outcome == outcome_filter]
@@ -130,6 +152,8 @@ class ExperienceLibrary:
         scored = []
         for exp in candidates:
             sim = compute_similarity(task_desc, exp.task_desc)
+            if sim < min_similarity:
+                continue  # Skip irrelevant experiences
             weight = self.get_experience_weight(exp.task_id)
             scored.append((sim * weight, exp))
 

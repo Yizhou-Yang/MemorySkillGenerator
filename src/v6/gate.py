@@ -33,12 +33,18 @@ def assess_task_complexity(task_desc: str) -> str:
 
 
 def should_augment(task_desc: str, library: ExperienceLibrary,
-                   relevance_threshold: float = 0.15) -> tuple[bool, str]:
-    """Always inject if relevant experiences exist — full context always helps."""
-    candidates = library.retrieve_similar(task_desc, top_k=1)
+                   relevance_threshold: float = 0.25) -> tuple[bool, str]:
+    """Inject only if semantically relevant experiences exist above threshold.
+
+    The relevance_threshold (default 0.25) prevents injection of irrelevant
+    experiences that would cause overfitting. retrieve_similar already filters
+    by min_similarity, so if it returns empty → no relevant experiences.
+    """
+    candidates = library.retrieve_similar(task_desc, top_k=1,
+                                          min_similarity=relevance_threshold)
     if not candidates:
         return False, "no_relevant_experiences"
-    return True, "always_inject"
+    return True, "relevant_experience_found"
 
 
 def classify_task_type(task_desc: str, expected: str = "", metadata: dict | None = None) -> str:
