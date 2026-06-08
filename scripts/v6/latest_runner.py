@@ -39,7 +39,7 @@ QUALITY_THRESHOLD = 5
 
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
 
-TASK_LIMITS = {"gaia": 50, "alfworld": 40, "locomo": 50}
+TASK_LIMITS = {"gaia": 50, "alfworld": 40, "locomo": 50, "gaia2": 50, "swebench_dynamic": 30}
 
 ALFWORLD_PYTHON = str(PROJECT_ROOT / ".venv_alfworld" / "bin" / "python")
 ALFWORLD_DATA = str(PROJECT_ROOT / ".venv_alfworld" / "data")
@@ -391,11 +391,56 @@ async def run_locomo_task(task: dict, experience_section: str = "",
 # ─── Evaluation ───────────────────────────────────────────────────────────
 
 async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True) -> dict:
-    """Primary metric:"""
+    """Primary metric:
+       - alfworld: pass@1 (binary won)
+       - gaia2: soft recall (action sequence matching)
+       - swebench_dynamic: pass@1 (patch correctness via LLM judge)
+       - gaia/locomo: Exact Match
+    """
     if benchmark == "alfworld":
         won = bool(result.get("won", False))
         return {"score": 1.0 if won else 0.0, "em": 1.0 if won else 0.0,
                 "won": won, "method": "pass@1"}
+
+    if benchmark == "gaia2":
+        # Soft recall: what fraction of oracle actions were covered by agent actions
+        oracle_actions = result.get("expected", [])
+        agent_actions = result.get("actions", [])
+        if not oracle_actions:
+            return {"score": 0.0, "em": 0.0, "method": "soft_recall_empty"}
+        if isinstance(oracle_actions, str):
+            # Fallback if expected is string
+            return {"score": 0.0, "em": 0.0, "method": "soft_recall_str_fallback"}
+        # Match: for each oracle action, check if agent did something similar
+        matched = 0
+        agent_strs = [f"{a.get('tool','')}: {a.get('input','')[:100]}" for a in agent_actions] if agent_actions else []
+        for oracle in oracle_actions:
+            oracle_key = f"{oracle.get('app','')}.{oracle.get('fn','')}"
+            for agent_str in agent_strs:
+                if oracle.get('app', '').lower() in agent_str.lower() or oracle.get('fn', '').lower() in agent_str.lower():
+                    matched += 1
+                    break
+        recall = matched / len(oracle_actions)
+        return {"score": recall, "em": 1.0 if recall >= 0.8 else 0.0,
+                "soft_recall": recall, "method": "soft_recall"}
+
+    if benchmark == "swebench_dynamic":
+        # SWE-bench: use LLM judge to assess if the response contains a valid patch
+        response = (result.get("response") or "").strip()
+        expected = (result.get("expected") or "").strip()
+        if not response:
+            return {"score": 0.0, "em": 0.0, "method": "swebench_empty"}
+        # Check if response contains a diff/patch
+        has_patch = "diff" in response or "---" in response or "+++" in response or "patch" in response.lower()
+        if not has_patch:
+            return {"score": 0.0, "em": 0.0, "method": "swebench_no_patch"}
+        # Use LLM judge for quality assessment
+        if use_llm_judge:
+            score = await llm_judge_answer(response[:1000], expected[:500],
+                                           f"Does this patch fix the failing tests: {expected[:200]}?")
+            return {"score": score, "em": 1.0 if score >= 0.7 else 0.0,
+                    "llm_judge": score, "method": "swebench_llm_judge"}
+        return {"score": 0.5, "em": 0.0, "method": "swebench_has_patch"}
 
     expected = (result.get("expected") or "").strip()
     response = (result.get("response") or "").strip()
@@ -505,7 +550,7 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
                         metadata=task.get("metadata", {})
                     )
 
-            if benchmark == "gaia":
+            if benchmark == "gaia" or benchmark == "gaia2" or benchmark == "swebench_dynamic":
                 r = await run_gaia_task(task, experience_section=aug, group="train")
             elif benchmark == "alfworld":
                 game = game_list[i] if game_list else None
@@ -630,7 +675,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
     print(f"    [A] Baseline (no augmentation)...", flush=True)
     async def run_test_a(i, task):
         async with sem:
-            if benchmark == "gaia":
+            if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
                 return await run_gaia_task(task, "", "A")
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
@@ -654,9 +699,9 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
 
     async def run_test_b(i, task):
         async with sem:
-            if benchmark == "gaia":
+            if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
                 aug = build_augmented_prompt(task["description"][:300], raw_library,
-                                            token_budget=2000, metadata={"benchmark": "gaia"})
+                                            token_budget=2000, metadata={"benchmark": benchmark})
                 return await run_gaia_task(task, aug, "B")
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
@@ -678,9 +723,9 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
     print(f"    [C] AI-refined + critic-gated injection...", flush=True)
     async def run_test_c(i, task):
         async with sem:
-            if benchmark == "gaia":
+            if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
                 aug = build_augmented_prompt(task["description"][:300], sf.library,
-                                            token_budget=2000, metadata={"benchmark": "gaia"})
+                                            token_budget=2000, metadata={"benchmark": benchmark})
                 return await run_gaia_task(task, aug, "C")
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
@@ -774,8 +819,11 @@ async def main():
 
     print("\n  Loading benchmarks...")
     benchmarks = {}
-    for name in ["gaia", "alfworld", "locomo"]:
-        loader = BenchmarkLoader({"name": name, "num_samples": TASK_LIMITS[name]})
+    for name in ["gaia", "alfworld", "locomo", "gaia2", "swebench_dynamic"]:
+        config = {"name": name, "num_samples": TASK_LIMITS[name]}
+        if name == "gaia2":
+            config["scenario_dir"] = "/tmp/harbor-datasets/datasets/gaia2-cli"
+        loader = BenchmarkLoader(config)
         tasks = loader.load()[:TASK_LIMITS[name]]
         benchmarks[name] = tasks
         print(f"    {name}: {len(tasks)} tasks")

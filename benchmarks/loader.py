@@ -93,7 +93,7 @@ class BenchmarkLoader:
         logger.info(f"Loading Gaia2 scenarios from {scenario_dir}...")
 
         scenario_files = sorted(
-            glob.glob(os.path.join(scenario_dir, "**/*.json"), recursive=True)
+            glob.glob(os.path.join(scenario_dir, "**/scenario.json"), recursive=True)
         )
         if not scenario_files:
             logger.warning(f"No Gaia2 scenarios found in {scenario_dir}")
