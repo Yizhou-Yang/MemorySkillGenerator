@@ -415,7 +415,7 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
 async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
                                     score: float, benchmark: str, aug_used: str):
     """Record experience via sf.record_experience() to trigger version history
-    and patch tracking (EvoMem-style). Cross-agent critic gates library entry."""
+    and patch tracking (EvoMem-style). Async critic refines quality score."""
     response = result.get("response", "")
     actions = result.get("actions", [])
 
@@ -432,9 +432,11 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
     expected = result.get("expected", task.get("expected", ""))
     oracle_actions = [{"output": expected[:200]}] if expected else []
 
-    # Use the task_id from the task dict (consistent across retries)
+    # Use the task_id from the task dict (consistent across retries for patch_history)
     task_id = task["task_id"]
 
+    # record_experience without LLM (avoids sync LLM in async context → socket leak)
+    # Version history + patch_history still works (no LLM needed)
     exp = sf.record_experience(
         task_id=task_id,
         task_desc=task["description"][:300],
@@ -443,14 +445,19 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
         token_cost=len(response) // 4 + len(actions) * 50,
         time_cost=result.get("time_cost", 0),
         augmentation_used=aug_used[:100] if aug_used else "",
-        llm_reviewer=llm_review_fn,
-        critic_fn=llm_review_fn,
-        critic_threshold=QUALITY_THRESHOLD,
     )
 
-    critic_score = exp.failure_taxonomy.get("critic_quality", 5) if exp else 5
-    recorded = not exp.failure_taxonomy.get("excluded", False) if exp else False
-    return recorded, critic_score
+    # Async critic evaluation (safe in async context)
+    summary = (
+        f"Outcome: {exp.outcome} (score={exp.score:.2f})\n"
+        f"Steps: {' -> '.join(exp.tool_sequence[:8])}\n"
+        f"Missing: {', '.join(exp.missing_steps[:5])}\n"
+        f"Failure: {exp.failure_reason}"
+    )
+    critic_score = await llm_critic_skill_quality(summary, task["description"][:300])
+    exp.failure_taxonomy["critic_quality"] = critic_score
+
+    return True, critic_score
 
 # ─── Sequential training (no oracle-driven retry for QA tasks) ────────────
 
