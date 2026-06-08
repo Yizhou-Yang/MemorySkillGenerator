@@ -9,7 +9,6 @@ from .injection import (build_augmented_prompt, format_success_experience,
 from .analysis import analyze_execution, classify_failure
 from .refine import ai_review_experience, cross_agent_evaluate_skill, _format_patch_history
 
-
 class SkillForgeV6:
     """Orchestrates: record_experience → version tracking → AI refine → injection."""
 

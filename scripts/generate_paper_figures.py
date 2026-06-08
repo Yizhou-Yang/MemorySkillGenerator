@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SkillCurator Paper Figure & Table Generator
-============================================
-Produces all 3 tables + 7 figures required by the experiment manual (scratch_4.txt).
-
-Output:
-  Tables:  Table 1 (main), Table 2 (δ_att independence), Table 3 (ablation)
-  Figures: Figure 2 (curation behavior), Figure 3 (health tracking),
-           Figure 4 (bound tightening), Figure 5a (phase transition),
-           Figure 5b (compaction cliff), Figure 5c (scissors effect)
-  (Figure 1 = architecture diagram, hand-drawn/tikz, not generated here)
-
-Usage:
-  python scripts/generate_paper_figures.py [--data experiments/paper_v3_results.json]
-  python scripts/generate_paper_figures.py --data experiments/full_paper_results.json
-"""
+"""SkillCurator Paper Figure & Table Generator"""
 from __future__ import annotations
 
 import argparse
@@ -32,9 +17,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 
-# ============================================================
 # Paper Style Configuration (per scratch_4.txt spec)
-# ============================================================
 
 COLORS = {
     "B0": "#7F7F7F",   # No Memory = grey
@@ -73,7 +56,6 @@ STRATEGY_COLORS = {
     "compacted": "#D62728",
 }
 
-
 def setup_style():
     plt.rcParams.update({
         "font.family": "serif",
@@ -93,7 +75,6 @@ def setup_style():
         "axes.spines.right": False,
     })
 
-
 def save_fig(fig, name: str, outdir: Path):
     for ext in ["pdf", "png"]:
         path = outdir / f"{name}.{ext}"
@@ -101,10 +82,7 @@ def save_fig(fig, name: str, outdir: Path):
     plt.close(fig)
     print(f"  ✅ {name}.pdf + .png")
 
-
-# ============================================================
 # TABLE 1: Main Experiment (§6.1)
-# ============================================================
 
 def generate_table1(data: dict, outdir: Path):
     """Table 1: 6 methods × N benchmarks × 5 metrics."""
@@ -190,10 +168,7 @@ def generate_table1(data: dict, outdir: Path):
             print(f"  {sr:>12.1%}  {tok:>8.0f}  ", end="")
         print()
 
-
-# ============================================================
 # TABLE 2: δ_attention Independence (§6.2)
-# ============================================================
 
 def generate_table2(data: dict, outdir: Path):
     """Table 2: attention strategies × (SR, F1, Tokens, ΔSR)."""
@@ -272,10 +247,7 @@ def generate_table2(data: dict, outdir: Path):
             delta = (sr - baseline_sr) * 100
             print(f"  {nice_names.get(strat, strat):<25} {sr:>7.1%} {tok:>8.0f} {delta:>+7.1f}pp")
 
-
-# ============================================================
 # TABLE 3: Ablation (§6.3)
-# ============================================================
 
 def generate_table3(data: dict, outdir: Path):
     """Table 3: ablation + 2×2 cross matrix."""
@@ -345,10 +317,7 @@ def generate_table3(data: dict, outdir: Path):
     else:
         print(f"  Interaction: sub-additive ({interaction*100:.1f}pp) → some redundancy")
 
-
-# ============================================================
 # FIGURE 2: Curation Behavior Evolution (§6.4)
-# ============================================================
 
 def generate_figure2(data: dict, outdir: Path):
     """Figure 2: Stacked area chart of curation operations over time."""
@@ -439,14 +408,10 @@ def generate_figure2(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure2_curation_behavior", outdir)
 
-
-# ============================================================
 # FIGURE 3: Library Health Tracking (§6.5)
-# ============================================================
 
 def generate_figure3(data: dict, outdir: Path):
-    """Figure 3: N_eff/|S| over time for B1, B2, A3.
-    Data comes from scissors_effect experiment (3 independent libraries)."""
+    """Figure 3: N_eff/|S| over time for B1, B2, A3."""
     print("\n📈 FIGURE 3: Library Health Tracking")
 
     ph = data.get("phenomena", {})
@@ -490,14 +455,10 @@ def generate_figure3(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure3_health_tracking", outdir)
 
-
-# ============================================================
 # FIGURE 4: Bound Tightening (§6.6)
-# ============================================================
 
 def generate_figure4(data: dict, outdir: Path):
-    """Figure 4: δ_M decomposition + comparison across B2/A1/A3.
-    v4 data has b2_history, a1_history, a3_history for each benchmark."""
+    """Figure 4: δ_M decomposition + comparison across B2/A1/A3."""
     print("\n📈 FIGURE 4: Bound Tightening")
 
     bt = data.get("bound_tightening", {})
@@ -580,10 +541,7 @@ def generate_figure4(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure4_bound_tightening", outdir)
 
-
-# ============================================================
 # FIGURE 5a: Phase Transition (§6.7.1)
-# ============================================================
 
 def generate_figure5a(data: dict, outdir: Path):
     """Figure 5a: SR vs Library Size (inverted U-shape)."""
@@ -649,14 +607,10 @@ def generate_figure5a(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure5a_phase_transition", outdir)
 
-
-# ============================================================
 # FIGURE 5b: Compaction Cliff (§6.7.2)
-# ============================================================
 
 def generate_figure5b(data: dict, outdir: Path):
-    """Figure 5b: Token consumption — B2 (monotonic) vs A3 (sawtooth).
-    v4 data has b2_token_history and a3_token_history."""
+    """Figure 5b: Token consumption — B2 (monotonic) vs A3 (sawtooth)."""
     print("\n📈 FIGURE 5b: Compaction Cliff")
 
     ph = data.get("phenomena", {})
@@ -725,10 +679,7 @@ def generate_figure5b(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure5b_compaction_cliff", outdir)
 
-
-# ============================================================
 # FIGURE 5c: Scissors Effect (§6.7.3)
-# ============================================================
 
 def generate_figure5c(data: dict, outdir: Path):
     """Figure 5c: Total vs Effective skill count (scissors gap)."""
@@ -814,14 +765,10 @@ def generate_figure5c(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure5c_scissors_effect", outdir)
 
-
-# ============================================================
 # FIGURE 6: 2×2 Ablation Bar Chart (§6.3)
-# ============================================================
 
 def generate_figure6(data: dict, outdir: Path):
-    """Figure 6: Grouped bar chart showing 2×2 cross-ablation (B2/A1/A2/A3).
-    Shows SR for each method across benchmarks, with interaction annotations."""
+    """Figure 6: Grouped bar chart showing 2×2 cross-ablation (B2/A1/A2/A3)."""
     print("\n📈 FIGURE 6: 2×2 Ablation Bar Chart")
 
     me = data.get("main_experiment", {})
@@ -891,10 +838,7 @@ def generate_figure6(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure6_ablation_2x2", outdir)
 
-
-# ============================================================
 # FIGURE 2 (alt): δ_attention Bar Chart for Table 2
-# ============================================================
 
 def generate_attention_bar(data: dict, outdir: Path):
     """Supplementary bar chart for δ_attention independence."""
@@ -946,10 +890,7 @@ def generate_attention_bar(data: dict, outdir: Path):
     fig.tight_layout()
     save_fig(fig, "figure_supp_attention_bar", outdir)
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     parser = argparse.ArgumentParser(description="Generate all paper figures and tables")
@@ -1053,7 +994,6 @@ def main():
         found = any(filename in f.name for f in all_files)
         status = "✅" if found else "❌"
         print(f"   {status} {label}")
-
 
 if __name__ == "__main__":
     main()

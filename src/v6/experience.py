@@ -4,14 +4,12 @@ import json
 import os
 from dataclasses import dataclass, field
 
-
 @dataclass
 class FailureTaxonomy:
     category: str = ""          # model_failure | tool_failure | task_mismatch | over_action
     root_cause: str = ""
     is_tool_chain: bool = False
     recoverable: bool = True
-
 
 @dataclass
 class Experience:
@@ -34,14 +32,12 @@ class Experience:
     patch_history: list = field(default_factory=list)
     timestamp: float = 0.0
 
-
 # ══════════════════════════════════════════════════════════════════════════
 #  Similarity: semantic embedding with TF-cosine fallback
 # ══════════════════════════════════════════════════════════════════════════
 
 _embedding_model = None
 _embedding_available = None
-
 
 def _get_embedding_model():
     """Lazy-load sentence-transformers model. Returns None if unavailable."""
@@ -59,7 +55,6 @@ def _get_embedding_model():
         _embedding_available = False
         return None
 
-
 def _tf_idf_fallback(query: str, doc: str) -> float:
     """Fallback: sklearn TF-IDF cosine when embeddings unavailable."""
     try:
@@ -71,7 +66,6 @@ def _tf_idf_fallback(query: str, doc: str) -> float:
     except Exception:
         return 0.0
 
-
 def compute_similarity(query: str, doc: str) -> float:
     """Semantic similarity: embedding cosine (preferred) or TF-IDF cosine (fallback)."""
     model = _get_embedding_model()
@@ -80,7 +74,6 @@ def compute_similarity(query: str, doc: str) -> float:
         embs = model.encode([query, doc], normalize_embeddings=True)
         return float(np.dot(embs[0], embs[1]))
     return _tf_idf_fallback(query, doc)
-
 
 # ══════════════════════════════════════════════════════════════════════════
 #  ExperienceLibrary

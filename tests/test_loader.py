@@ -9,10 +9,7 @@ import pytest
 
 from benchmarks.loader import BenchmarkLoader, PRIMARY_BENCHMARKS, LEGACY_BENCHMARKS
 
-
-# ============================================================
 # Mock HuggingFace dataset rows
-# ============================================================
 
 MOCK_HOTPOTQA_ROWS = [
     {
@@ -184,9 +181,7 @@ MOCK_SWEBENCH_ROWS = [
     },
 ]
 
-# ============================================================
 # New benchmark mock data
-# ============================================================
 
 MOCK_GAIA_ROWS = [
     {
@@ -356,11 +351,7 @@ MOCK_WEBSHOP_ROWS = [
     },
 ]
 
-
-# ============================================================
 # GAIA loader tests
-# ============================================================
-
 
 class TestGAIALoader:
     """Tests for GAIA loading with mocked HuggingFace datasets."""
@@ -407,11 +398,7 @@ class TestGAIALoader:
         tasks = loader.load()
         assert len(tasks) == 2
 
-
-# ============================================================
 # ALFWorld loader tests
-# ============================================================
-
 
 class TestALFWorldLoader:
     """Tests for ALFWorld loading with mocked HuggingFace datasets."""
@@ -474,11 +461,7 @@ class TestALFWorldLoader:
         assert "pick and place simple" in tasks[0]["description"].lower()
         assert "look at obj in light" in tasks[1]["description"].lower()
 
-
-# ============================================================
 # 2WikiMultihopQA loader tests
-# ============================================================
-
 
 class Test2WikiMultihopQALoader:
     """Tests for 2WikiMultihopQA loading with mocked HuggingFace datasets."""
@@ -526,11 +509,7 @@ class Test2WikiMultihopQALoader:
         tasks = loader.load()
         assert len(tasks) == 1
 
-
-# ============================================================
 # AIME loader tests
-# ============================================================
-
 
 class TestAIMELoader:
     """Tests for AIME loading with mocked HuggingFace datasets."""
@@ -577,11 +556,7 @@ class TestAIMELoader:
         tasks = loader.load()
         assert len(tasks) == 2
 
-
-# ============================================================
 # TravelPlanner loader tests
-# ============================================================
-
 
 class TestTravelPlannerLoader:
     """Tests for TravelPlanner loading with mocked HuggingFace datasets."""
@@ -635,11 +610,7 @@ class TestTravelPlannerLoader:
         tasks = loader.load()
         assert len(tasks) == 1
 
-
-# ============================================================
 # WebShop loader tests
-# ============================================================
-
 
 class TestWebShopLoader:
     """Tests for WebShop loading with mocked HuggingFace datasets."""
@@ -687,11 +658,7 @@ class TestWebShopLoader:
         tasks = loader.load()
         assert len(tasks) == 2
 
-
-# ============================================================
 # HotpotQA loader tests (kept from original)
-# ============================================================
-
 
 class TestHotpotQALoader:
     """Tests for HotpotQA loading with mocked HuggingFace datasets."""
@@ -740,11 +707,7 @@ class TestHotpotQALoader:
         assert "[Ed Wood]" in task["context"]
         assert "American filmmaker" in task["context"]
 
-
-# ============================================================
 # HotpotQA hard subset tests (legacy)
-# ============================================================
-
 
 class TestHotpotQAHardLoader:
     """Tests for HotpotQA hard subset loading."""
@@ -768,11 +731,7 @@ class TestHotpotQAHardLoader:
         tasks = loader.load()
         assert len(tasks) == 0
 
-
-# ============================================================
 # SWE-bench loader tests (legacy)
-# ============================================================
-
 
 class TestSWEBenchLoader:
     """Tests for SWE-bench loading with mocked HuggingFace datasets."""
@@ -821,11 +780,7 @@ class TestSWEBenchLoader:
         task = tasks[1]
         assert "Hints:" not in task["description"]
 
-
-# ============================================================
 # TriviaQA loader tests (legacy)
-# ============================================================
-
 
 class TestTriviaQALoader:
     """Tests for TriviaQA loading with mocked HuggingFace datasets."""
@@ -860,11 +815,7 @@ class TestTriviaQALoader:
         tasks = loader.load()
         assert len(tasks) == 1
 
-
-# ============================================================
 # GSM8K loader tests (legacy)
-# ============================================================
-
 
 class TestGSM8KLoader:
     """Tests for GSM8K loading with mocked HuggingFace datasets."""
@@ -908,11 +859,7 @@ class TestGSM8KLoader:
         assert BenchmarkLoader._extract_gsm8k_answer("no marker here") == "no marker here"
         assert BenchmarkLoader._extract_gsm8k_answer("step1\nstep2\n#### 7,500") == "7,500"
 
-
-# ============================================================
 # MuSiQue loader tests (legacy)
-# ============================================================
-
 
 class TestMuSiQueLoader:
     """Tests for MuSiQue loading with mocked HuggingFace datasets."""
@@ -952,11 +899,7 @@ class TestMuSiQueLoader:
         assert "[Green (Steve Hillage album)]" in task["context"]
         assert "Steve Hillage" in task["context"]
 
-
-# ============================================================
 # General loader tests
-# ============================================================
-
 
 class TestBenchmarkLoaderGeneral:
     """General tests for BenchmarkLoader."""
@@ -1010,11 +953,7 @@ class TestBenchmarkLoaderGeneral:
         expected = {"hotpotqa_hard", "triviaqa", "gsm8k", "musique", "swebench"}
         assert set(LEGACY_BENCHMARKS) == expected
 
-
-# ============================================================
 # Helper method tests
-# ============================================================
-
 
 class TestHelperMethods:
     """Tests for static/class helper methods."""
@@ -1069,11 +1008,7 @@ class TestHelperMethods:
         assert BenchmarkLoader._extract_gsm8k_answer("no marker here") == "no marker here"
         assert BenchmarkLoader._extract_gsm8k_answer("step1\nstep2\n#### 7,500") == "7,500"
 
-
-# ============================================================
 # MuSiQue loader tests
-# ============================================================
-
 
 class TestMuSiQueLoader:
     """Tests for MuSiQue loading with mocked HuggingFace datasets."""
@@ -1113,11 +1048,7 @@ class TestMuSiQueLoader:
         assert "[Green (Steve Hillage album)]" in task["context"]
         assert "Steve Hillage" in task["context"]
 
-
-# ============================================================
 # General loader tests
-# ============================================================
-
 
 class TestBenchmarkLoaderGeneral:
     """General tests for BenchmarkLoader."""

@@ -6,7 +6,6 @@ import pytest
 
 from src.utils.config import PROJECT_ROOT, _deep_merge, load_config
 
-
 class TestDeepMerge:
     """Deep-merge tests."""
 
@@ -22,7 +21,6 @@ class TestDeepMerge:
         result = _deep_merge(base, override)
         assert result["llm"]["provider"] == "deepseek"
         assert result["llm"]["temperature"] == 0.5
-
 
 class TestLoadConfig:
     """Configuration loading tests."""

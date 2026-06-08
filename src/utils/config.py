@@ -1,8 +1,4 @@
-"""
-Configuration loader.
-
-Supports loading configs from YAML files and merging with .env environment variables.
-"""
+"""Configuration loader."""
 
 from __future__ import annotations
 
@@ -18,7 +14,6 @@ from loguru import logger
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIGS_DIR = PROJECT_ROOT / "configs"
 
-
 def load_env() -> None:
     """Load environment variables from the .env file."""
     env_path = PROJECT_ROOT / ".env"
@@ -31,17 +26,8 @@ def load_env() -> None:
             f"Please copy .env.example to .env and fill in actual values."
         )
 
-
 def load_config(config_name: str = "default") -> dict[str, Any]:
-    """
-    Load an experiment configuration file.
-
-    Args:
-        config_name: Config file name (without .yaml extension).
-
-    Returns:
-        Merged configuration dictionary.
-    """
+    """Load an experiment configuration file."""
     # Load default config
     default_path = CONFIGS_DIR / "default.yaml"
     config: dict[str, Any] = {}
@@ -65,7 +51,6 @@ def load_config(config_name: str = "default") -> dict[str, Any]:
 
     return config
 
-
 def _deep_merge(base: dict, override: dict) -> dict:
     """Deep-merge two dicts; *override* takes precedence."""
     result = base.copy()
@@ -75,7 +60,6 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = value
     return result
-
 
 def _override_from_env(config: dict) -> None:
     """Override config entries from environment variables."""

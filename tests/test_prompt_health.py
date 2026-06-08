@@ -1,13 +1,4 @@
-"""
-Tests for Prompt Health Monitor — validates anti-bloat mechanisms.
-
-Based on the article "Agent Skill Bloat to Refactoring" (snowsyzheng, 2026-05-12):
-- Detects prompt bloat (line count thresholds)
-- Finds semantic duplicates
-- Flags negative instructions
-- Checks structural placement of critical rules
-- Identifies potential rule conflicts
-"""
+"""Tests for Prompt Health Monitor — validates anti-bloat mechanisms."""
 from __future__ import annotations
 
 import pytest
@@ -19,7 +10,6 @@ from src.utils.prompt_health import (
     check_prompt_health,
     format_health_report,
 )
-
 
 class TestPromptHealthBasic:
     """Basic health check tests."""
@@ -60,7 +50,6 @@ class TestPromptHealthBasic:
         assert any(i.category == "bloat" and i.severity == "critical" for i in report.issues)
         assert report.needs_restructure
 
-
 class TestSemanticDedup:
     """Semantic deduplication detection tests."""
 
@@ -90,7 +79,6 @@ class TestSemanticDedup:
         report = check_prompt_health(prompt)
         dedup_issues = [i for i in report.issues if i.category == "dedup"]
         assert len(dedup_issues) == 0
-
 
 class TestNegativeInstructions:
     """Negative instruction detection tests."""
@@ -125,7 +113,6 @@ class TestNegativeInstructions:
         # Should have individual issues + a summary warning
         assert any(i.severity == "warning" for i in negative_issues)
 
-
 class TestStructuralPlacement:
     """Structural placement validation tests."""
 
@@ -149,7 +136,6 @@ class TestStructuralPlacement:
         placement_issues = [i for i in report.issues if i.category == "placement"]
         assert len(placement_issues) == 0
 
-
 class TestRuleConflicts:
     """Rule conflict detection tests."""
 
@@ -169,7 +155,6 @@ class TestRuleConflicts:
         # May or may not detect depending on token overlap
         # The key is it doesn't crash
         assert isinstance(report.score, float)
-
 
 class TestFormatReport:
     """Report formatting tests."""
@@ -197,7 +182,6 @@ class TestFormatReport:
         assert "RESTRUCTURING" in text
         assert "bloat" in text
 
-
 class TestSuggestRestructure:
     """Restructuring suggestion tests."""
 
@@ -213,7 +197,6 @@ class TestSuggestRestructure:
         prompt = "\n".join(lines)
         result = monitor.suggest_restructure(prompt)
         assert "externalizing" in result.lower() or "Restructuring" in result
-
 
 class TestIntegrationWithSkillForge:
     """Integration tests with SkillForge's actual prompts."""

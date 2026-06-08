@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""
-WebShop skill induction — produce skill banks for B2 (raw) and A3 (curated)
-plus a TRAIN-only calibration JSON for Plan-C τ.
-
-Pipeline:
-    1. Load `Skyler215/webshop-agent-cot` test split. Group by trajectory id.
-    2. Take the trajectories with ≥ MIN_TRAJ_STEPS visible steps (most have
-       only 1-2 visible steps; we want longer ones to distill into skills).
-    3. Stratified-sample N trajectories, half → induction set, half → calib.
-    4. INDUCE: for each trajectory in induce_set, gather its visible
-       (instruction, observation_summary, gold_action) chain and ask the LLM
-       to summarise it into a Skill. → B2 bank (raw).
-    5. CURATE: cluster by task_type, LLM-merge intra-cluster. → A3 bank.
-    6. CALIB: for each trajectory in calib_set, take its highest-step sample
-       (most informative decision) and run B0 + A3 single-step prediction;
-       record (s_max, sr_void=B0_correct, sr_inject=A3_correct). → train_calib.json
-    7. Also write `induced_ids.json` (the trace ids used in induction+calib)
-       so eval can exclude them.
-
-Cost estimate (N=30 trajectories, mean ~3-5 visible steps):
-    - Distill: 15 calls × ~3K tok ≈ 45K
-    - Merge:   6 calls × ~3K tok ≈ 20K
-    - Calib:   15 trajectories × 2 methods × ~1.5K tok ≈ 45K
-    - TOTAL: ~110K tokens (~$0.20)
-
-Usage:
-    python scripts/induce_webshop_skills.py \
-        --n-train 30 --min-traj-steps 3 \
-        --output-b2 experiments/webshop_skills/b2_bank.json \
-        --output-a3 experiments/webshop_skills/a3_bank.json
-"""
+"""WebShop skill induction — produce skill banks for B2 (raw) and A3 (curated)"""
 
 from __future__ import annotations
 
@@ -62,13 +32,9 @@ from scripts.run_webshop_eval import (  # type: ignore[import]
     build_skill_block_a3,
 )
 
-
-# ============================================================
 # Trajectory grouping
-# ============================================================
 
 _TRAJ_RE = re.compile(r"(.+)_step_(\d+)")
-
 
 def group_by_trajectory(records: list[dict]) -> dict[str, list[int]]:
     """Group record indices by trajectory id. Returns {traj_id: [idx, idx, ...] sorted by step}."""
@@ -81,10 +47,7 @@ def group_by_trajectory(records: list[dict]) -> dict[str, list[int]]:
             by_traj[r["id"]].append((0, i))
     return {traj: [i for _, i in sorted(items)] for traj, items in by_traj.items()}
 
-
-# ============================================================
 # LLM-based skill distillation
-# ============================================================
 
 DISTILL_SYSTEM = """You are an expert at extracting reusable web-shopping skills from agent trajectories.
 
@@ -104,7 +67,6 @@ strict JSON form:
 Use placeholders, NOT specific products from this trajectory.
 Output ONLY the JSON, no commentary."""
 
-
 MERGE_SYSTEM = """You are an expert at distilling redundant web-shopping skills.
 
 Given several skills that handle similar shopping situations, merge them into
@@ -120,9 +82,7 @@ a SINGLE more general skill. Output strict JSON form:
 
 Output ONLY the JSON."""
 
-
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-
 
 def _extract_json(reply: str) -> dict | None:
     m = _JSON_RE.search(reply)
@@ -133,13 +93,11 @@ def _extract_json(reply: str) -> dict | None:
     except Exception:
         return None
 
-
 def _summarise_observation(obs: str, max_chars: int = 200) -> str:
     """Compress a webshop observation into a 1-line summary (drop UI fluff)."""
     obs = re.sub(r"\[.*?\]", "", obs)         # strip [button] markers
     obs = re.sub(r"\s+", " ", obs).strip()
     return obs[:max_chars]
-
 
 def distill_skill(
     llm: LLMClient,
@@ -184,7 +142,6 @@ def distill_skill(
     except Exception as e:
         logger.warning(f"Skill construction error: {e}")
         return None
-
 
 def merge_skills_llm(llm: LLMClient, group: list[Skill], group_label: str) -> Skill | None:
     if not group:
@@ -231,10 +188,7 @@ def merge_skills_llm(llm: LLMClient, group: list[Skill], group_label: str) -> Sk
         logger.warning(f"merged Skill construction error: {e}")
         return group[0]
 
-
-# ============================================================
 # Embedding
-# ============================================================
 
 def embed_skills(skills: list[Skill], encoder) -> np.ndarray:
     if not skills:
@@ -244,7 +198,6 @@ def embed_skills(skills: list[Skill], encoder) -> np.ndarray:
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return (embs / norms).astype(np.float32)
-
 
 def save_bank(skills: list[Skill], embs: np.ndarray, path: Path,
               method: str, induced_from: str) -> None:
@@ -260,24 +213,14 @@ def save_bank(skills: list[Skill], embs: np.ndarray, path: Path,
     path.write_text(json.dumps(blob, indent=2, default=str))
     logger.info(f"[save] {method} bank → {path} ({len(skills)} skills)")
 
-
-# ============================================================
 # Trajectory characterisation (use the LAST step's task_type as label)
-# ============================================================
 
 def trajectory_task_type(records: list[dict], step_idxs: list[int]) -> str:
-    """Use the last visible step's task_type to label the trajectory.
-
-    Rationale: the ending action (often buy/select) characterises the goal
-    structure better than navigation/inspect steps in the middle.
-    """
+    """Use the last visible step's task_type to label the trajectory."""
     last = records[step_idxs[-1]]
     return last["task_type"]
 
-
-# ============================================================
 # Stratified trajectory sampler
-# ============================================================
 
 def stratified_sample_trajectories(
     eligible_traj_ids: list[str],
@@ -307,10 +250,7 @@ def stratified_sample_trajectories(
         selected.extend(leftovers[: n - len(selected)])
     return selected[:n]
 
-
-# ============================================================
 # Induction main
-# ============================================================
 
 def induce(args) -> None:
     load_env()
@@ -482,7 +422,6 @@ def induce(args) -> None:
                 f"  Excl.  : {len(induced_ids)} ids → {ids_path}\n"
                 f"  Total LLM tokens: {llm._total_tokens}\n")
 
-
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--split", default="test")
@@ -496,7 +435,6 @@ def parse_args():
     p.add_argument("--output-a3", type=str,
                    default="experiments/webshop_skills/a3_bank.json")
     return p.parse_args()
-
 
 if __name__ == "__main__":
     args = parse_args()

@@ -1,16 +1,4 @@
-"""
-Unified LLM API wrapper — supports DeepSeek V4 Pro and CodeBuddy SDK (hy3-preview-ioa).
-
-Provider selection via environment variable LLM_PROVIDER:
-  - "deepseek" (default): uses OpenAI-compatible DeepSeek API
-  - "codebuddy": uses CodeBuddy Agent SDK with hy3-preview-ioa model
-
-For CodeBuddy provider, set:
-  CODEBUDDY_API_KEY=ck_xxx
-  CODEBUDDY_INTERNET_ENVIRONMENT=ioa
-  LLM_PROVIDER=codebuddy
-  CODEBUDDY_MODEL=hy3-preview-ioa  (optional, default)
-"""
+"""Unified LLM API wrapper — supports DeepSeek V4 Pro and CodeBuddy SDK (hy3-preview-ioa)."""
 
 from __future__ import annotations
 
@@ -21,7 +9,6 @@ from typing import Any
 
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
-
 
 MODEL_INFO = {
     "deepseek-v4-pro": {
@@ -46,7 +33,6 @@ MODEL_INFO = {
         "thinking": True,
     },
 }
-
 
 class LLMClient:
     """Unified LLM client — DeepSeek (OpenAI-compat) or CodeBuddy SDK."""
@@ -149,7 +135,7 @@ class LLMClient:
         import subprocess
         import json as _json
 
-        headless = "/data/home/yizhouyang/.workbuddy/binaries/python/versions/3.14.3/lib/python3.14/site-packages/codebuddy_agent_sdk/bin/codebuddy-headless"
+        headless = "/root/.conda/envs/skillforge/lib/python3.11/site-packages/codebuddy_agent_sdk/bin/codebuddy-headless"
         cmd = [
             headless, "--print",
             "--model", self.model,

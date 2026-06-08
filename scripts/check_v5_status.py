@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Monitor v5 void-case experiment progress.
-
-Usage:
-    python scripts/check_v5_status.py
-"""
+"""Monitor v5 void-case experiment progress."""
 from __future__ import annotations
 
 import json
@@ -22,7 +17,6 @@ SKILL_BANKS = PROJECT_ROOT / "experiments" / "paper_v5_skill_banks"
 
 BENCHMARKS = ["hotpotqa", "2wikimultihopqa", "musique",
               "triviaqa", "gsm8k", "longmemeval", "locomo"]
-
 
 def get_pid() -> int | None:
     try:
@@ -47,7 +41,6 @@ def get_pid() -> int | None:
     except subprocess.CalledProcessError:
         return None
 
-
 def get_runtime(pid: int) -> str:
     try:
         out = subprocess.check_output(
@@ -56,7 +49,6 @@ def get_runtime(pid: int) -> str:
         return out
     except subprocess.CalledProcessError:
         return "n/a"
-
 
 def parse_progress(log_path: Path) -> dict:
     if not log_path.exists():
@@ -97,7 +89,6 @@ def parse_progress(log_path: Path) -> dict:
             state["errors"].append(line.strip()[:200])
     return state
 
-
 def parse_results(results_path: Path) -> dict:
     if not results_path.exists():
         return {"status": "no results yet"}
@@ -129,7 +120,6 @@ def parse_results(results_path: Path) -> dict:
         summary["completed_benchmarks"].append(row)
     return summary
 
-
 def estimate_token_usage(log_path: Path) -> int | None:
     if not log_path.exists():
         return None
@@ -141,7 +131,6 @@ def estimate_token_usage(log_path: Path) -> int | None:
             if m:
                 last = int(m.group(1))
     return last
-
 
 def main():
     print("=" * 70)
@@ -213,7 +202,6 @@ def main():
             tail = f.readlines()[-15:]
         for line in tail:
             print(f"  {line.rstrip()}")
-
 
 if __name__ == "__main__":
     main()

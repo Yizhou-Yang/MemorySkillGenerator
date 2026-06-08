@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""
-ALFWorld skill induction — produce skill banks for B2 (raw) and A3 (curated).
-
-Pipeline:
-    1. Run a successful expert / LLM rollout on N train tasks.
-    2. For each successful trajectory, ask the LLM to summarize it into
-       a Skill (name, description, procedure, constraints, ...).
-    3. B2 bank: keep all raw skills as-is.
-       A3 bank: cluster by task type → merge intra-cluster (LLM-distilled)
-                → reformat with sandwich+compact, drop near-duplicates.
-    4. Encode each skill's "name + description" via SentenceTransformer.
-    5. Write {skills, embeddings, ...} JSON.
-
-Cost estimate for N=20 train tasks × max 30 steps:
-    ~ 600 LLM calls × ~3K tok ≈ 1.8M tokens (~$2.5)
-    Plus 20 distillation calls + 6 merge calls ≈ 0.3M tokens (~$0.4)
-
-Usage:
-    source .venv_alfworld/bin/activate
-    python scripts/induce_alfworld_skills.py \
-        --split valid_seen --n-train 20 --max-steps 30 \
-        --output-b2 experiments/alfworld_skills/b2_bank.json \
-        --output-a3 experiments/alfworld_skills/a3_bank.json
-"""
+"""ALFWorld skill induction — produce skill banks for B2 (raw) and A3 (curated)."""
 
 from __future__ import annotations
 
@@ -49,7 +26,6 @@ from src.utils.alfworld_env import AlfworldEnv, task_type_from_gamefile
 from src.utils.config import load_env
 from src.utils.llm import LLMClient
 
-
 # Reuse ReAct primitives from the eval runner
 from scripts.run_alfworld_eval import (  # type: ignore[import]
     run_react_episode,
@@ -58,10 +34,7 @@ from scripts.run_alfworld_eval import (  # type: ignore[import]
     stratified_sample,
 )
 
-
-# ============================================================
 # LLM-based skill distillation
-# ============================================================
 
 DISTILL_SYSTEM = """You are an expert at extracting reusable procedural skills from agent trajectories.
 
@@ -79,7 +52,6 @@ produce a single concise Skill in strict JSON form:
 The skill MUST be a generalization (use placeholders, not specific objects from this trajectory).
 Output ONLY the JSON, no commentary."""
 
-
 MERGE_SYSTEM = """You are an expert at distilling redundant procedural skills.
 
 Given several skills that solve similar tasks, merge them into a SINGLE more general skill.
@@ -95,9 +67,7 @@ Output strict JSON form:
 
 Be more general than any one input but still actionable. Output ONLY the JSON."""
 
-
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-
 
 def _extract_json(reply: str) -> dict | None:
     m = _JSON_RE.search(reply)
@@ -107,7 +77,6 @@ def _extract_json(reply: str) -> dict | None:
         return json.loads(m.group(0))
     except Exception:
         return None
-
 
 def distill_skill(llm: LLMClient, task: str, actions: list[str], task_type: str) -> Skill | None:
     """Ask LLM to summarize a successful trajectory into a Skill."""
@@ -146,7 +115,6 @@ def distill_skill(llm: LLMClient, task: str, actions: list[str], task_type: str)
     except Exception as e:
         logger.warning(f"Skill construction error: {e}")
         return None
-
 
 def merge_skills_llm(llm: LLMClient, group: list[Skill], group_label: str) -> Skill | None:
     """Ask LLM to merge a group of skills into a single more general skill."""
@@ -197,10 +165,7 @@ def merge_skills_llm(llm: LLMClient, group: list[Skill], group_label: str) -> Sk
         logger.warning(f"merged Skill construction error: {e}")
         return group[0]
 
-
-# ============================================================
 # Embedding
-# ============================================================
 
 def embed_skills(skills: list[Skill], encoder) -> np.ndarray:
     """Embed each skill's 'name + description' via the encoder, L2-normalize."""
@@ -211,7 +176,6 @@ def embed_skills(skills: list[Skill], encoder) -> np.ndarray:
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return (embs / norms).astype(np.float32)
-
 
 def save_bank(skills: list[Skill], embs: np.ndarray, path: Path,
               method: str, induced_from: str) -> None:
@@ -227,10 +191,7 @@ def save_bank(skills: list[Skill], embs: np.ndarray, path: Path,
     path.write_text(json.dumps(blob, indent=2, default=str))
     logger.info(f"[save] {method} bank → {path} ({len(skills)} skills)")
 
-
-# ============================================================
 # Induction main
-# ============================================================
 
 def induce(args) -> None:
     load_env()
@@ -399,7 +360,6 @@ def induce(args) -> None:
                 f"  A3 bank: {len(a3_skills)} skills → {args.output_a3}\n"
                 f"  Total LLM tokens: {llm._total_tokens}\n")
 
-
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--split", default="valid_seen", choices=["train", "valid_seen", "valid_unseen"])
@@ -412,7 +372,6 @@ def parse_args():
     p.add_argument("--output-b2", type=str, default="experiments/alfworld_skills/b2_bank.json")
     p.add_argument("--output-a3", type=str, default="experiments/alfworld_skills/a3_bank.json")
     return p.parse_args()
-
 
 if __name__ == "__main__":
     args = parse_args()

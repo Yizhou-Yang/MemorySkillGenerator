@@ -49,10 +49,7 @@ from src.skill_induction.factory import create_inducer
 from src.trajectory.collector import TrajectoryCollector
 from src.models import TransformVariant
 
-
-# ============================================================
 # Metrics (same as systematic benchmark)
-# ============================================================
 
 def compute_em(prediction: str, ground_truth: str) -> float:
     def normalize(s):
@@ -63,7 +60,6 @@ def compute_em(prediction: str, ground_truth: str) -> float:
         s = s.translate(str.maketrans('', '', string.punctuation))
         return s.strip()
     return 1.0 if normalize(ground_truth) in normalize(prediction) else 0.0
-
 
 def compute_token_f1(prediction: str, ground_truth: str) -> float:
     if not ground_truth.strip():
@@ -80,14 +76,10 @@ def compute_token_f1(prediction: str, ground_truth: str) -> float:
     recall = num_common / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
-
 def avg(lst):
     return sum(lst) / len(lst) if lst else 0.0
 
-
-# ============================================================
 # Skill Formatting Strategies (Article Solutions 1, 3, 4, 5)
-# ============================================================
 
 def format_skill_baseline(skill: Skill) -> str:
     """Baseline: standard formatting (current approach)."""
@@ -106,7 +98,6 @@ def format_skill_baseline(skill: Skill) -> str:
         for r in skill.rules:
             parts.append(f"- {r}")
     return "\n".join(parts)
-
 
 def format_skill_layered(skill: Skill) -> str:
     """
@@ -144,7 +135,6 @@ def format_skill_layered(skill: Skill) -> str:
         parts.append(f"Remember: {skill.constraints[0]}")
 
     return "\n".join(parts)
-
 
 def format_skill_positive(skill: Skill) -> str:
     """
@@ -192,7 +182,6 @@ def format_skill_positive(skill: Skill) -> str:
 
     return "\n".join(parts)
 
-
 def format_skill_table(skill: Skill) -> str:
     """
     Article Solution 4: Structured table format.
@@ -219,7 +208,6 @@ def format_skill_table(skill: Skill) -> str:
 
     return "\n".join(parts)
 
-
 def format_skill_compact(skill: Skill) -> str:
     """
     Article Solution 6: Externalize — keep only essential rules.
@@ -236,10 +224,7 @@ def format_skill_compact(skill: Skill) -> str:
         parts.append(f"  ⚠️ {skill.constraints[0][:60]}")
     return "\n".join(parts)
 
-
-# ============================================================
 # Skill Library Formatting (with ordering strategies)
-# ============================================================
 
 def format_library_random(skills: list[Skill], formatter) -> str:
     """Random order (baseline)."""
@@ -247,7 +232,6 @@ def format_library_random(skills: list[Skill], formatter) -> str:
     shuffled = skills.copy()
     random.shuffle(shuffled)
     return "\n\n---\n\n".join(formatter(s) for s in shuffled)
-
 
 def format_library_priority(skills: list[Skill], formatter) -> str:
     """Priority order: most constrained/important skills first."""
@@ -258,7 +242,6 @@ def format_library_priority(skills: list[Skill], formatter) -> str:
         reverse=True,
     )
     return "\n\n---\n\n".join(formatter(s) for s in sorted_skills)
-
 
 def format_library_sandwich(skills: list[Skill], formatter) -> str:
     """
@@ -284,10 +267,7 @@ def format_library_sandwich(skills: list[Skill], formatter) -> str:
 
     return "\n\n---\n\n".join(formatter(s) for s in result)
 
-
-# ============================================================
 # Experiment Runner
-# ============================================================
 
 def run_formatting_experiment(
     llm_client: LLMClient,
@@ -356,10 +336,7 @@ def run_formatting_experiment(
     )
     return result
 
-
-# ============================================================
 # Skill Compaction Experiment (Article Solution 8)
-# ============================================================
 
 def compact_skill_bank(skills: list[Skill], llm_client: LLMClient) -> list[Skill]:
     """
@@ -427,10 +404,7 @@ def compact_skill_bank(skills: list[Skill], llm_client: LLMClient) -> list[Skill
     logger.info(f"  [Compaction] {len(skills)} skills → {len(merged)} skills")
     return merged
 
-
-# ============================================================
 # Main Experiment
-# ============================================================
 
 def main():
     logger.remove()
@@ -630,7 +604,6 @@ def main():
     }
     output_path.write_text(json.dumps(output, indent=2, default=str))
     logger.info(f"\n  Results saved to: {output_path}")
-
 
 if __name__ == "__main__":
     main()

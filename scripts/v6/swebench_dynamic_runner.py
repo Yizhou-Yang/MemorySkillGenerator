@@ -37,23 +37,19 @@ N_TEST = 50
 RESULTS_DIR = "/data1/benchmarks/unified_v6_results/swebench_dynamic"
 DOCKER_IMAGE_PREFIX = "ghcr.io/epoch-research/swe-bench.eval.x86_64"
 
-
 # ══════════════════════════════════════════════════════════════════════════
 #  Docker helpers
 # ══════════════════════════════════════════════════════════════════════════
 
 def instance_to_image(instance_id: str) -> str:
     """Convert instance_id to Docker image name."""
-    # astropy__astropy-12907 → ghcr.io/epoch-research/swe-bench.eval.x86_64.astropy__astropy-12907:latest
     return f"{DOCKER_IMAGE_PREFIX}.{instance_id}:latest"
-
 
 def image_exists(instance_id: str) -> bool:
     """Check if Docker image exists locally."""
     img = instance_to_image(instance_id)
     r = subprocess.run(["docker", "image", "inspect", img], capture_output=True, timeout=10)
     return r.returncode == 0
-
 
 def start_container(instance_id: str) -> str:
     """Start a Docker container for this instance. Returns container ID."""
@@ -67,7 +63,6 @@ def start_container(instance_id: str) -> str:
         raise RuntimeError(f"Docker start failed: {r.stderr[:200]}")
     return r.stdout.strip()
 
-
 def exec_in_container(container_id: str, cmd: str, timeout: int = 60) -> tuple[str, str, int]:
     """Execute command in container. Returns (stdout, stderr, returncode)."""
     r = subprocess.run(
@@ -76,7 +71,6 @@ def exec_in_container(container_id: str, cmd: str, timeout: int = 60) -> tuple[s
     )
     return r.stdout, r.stderr, r.returncode
 
-
 def stop_container(container_id: str):
     """Stop and remove container."""
     try:
@@ -84,12 +78,10 @@ def stop_container(container_id: str):
     except Exception:
         pass
 
-
 def get_patch_from_container(container_id: str) -> str:
     """Get git diff (the agent's patch) from the container."""
     stdout, _, _ = exec_in_container(container_id, "cd /testbed && git diff", timeout=30)
     return stdout
-
 
 # ══════════════════════════════════════════════════════════════════════════
 #  Run one SWE-bench instance
@@ -297,7 +289,6 @@ Fix the bug. Start by reading the relevant source code."""
     
     return result
 
-
 # ══════════════════════════════════════════════════════════════════════════
 #  Main
 # ══════════════════════════════════════════════════════════════════════════
@@ -438,7 +429,6 @@ async def main():
     with open(f"{RESULTS_DIR}/report.json", "w") as f:
         json.dump(report, f, indent=2)
     print(f"\n  Saved: {RESULTS_DIR}/report.json")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -23,11 +23,7 @@ from src.skill_induction.hybrid_to_skill import HybridToSkillInducer
 from src.skill_induction.memory_to_skill import MemoryToSkillInducer
 from src.skill_induction.traj_to_skill import TrajToSkillInducer
 
-
-# ============================================================
 # Shared fixtures
-# ============================================================
-
 
 def _make_trajectory() -> Trajectory:
     """Create a sample trajectory for testing."""
@@ -42,7 +38,6 @@ def _make_trajectory() -> Trajectory:
             TrajectoryStep(step_id=3, step_type=StepType.THOUGHT, content="Combining evidence"),
         ],
     )
-
 
 def _make_memory_store(trajectory_id: str = "traj_001") -> MemoryStore:
     """Create a sample memory store for testing."""
@@ -68,7 +63,6 @@ def _make_memory_store(trajectory_id: str = "traj_001") -> MemoryStore:
         source_trajectory_id=trajectory_id,
     )
 
-
 VALID_SKILL_RESPONSE = json.dumps({
     "name": "Multi-hop QA Reasoning",
     "description": "Skill for answering multi-hop questions by combining evidence",
@@ -83,11 +77,7 @@ VALID_SKILL_RESPONSE = json.dumps({
     "rules": ["If evidence conflicts, prefer the more specific source"],
 })
 
-
-# ============================================================
 # Skill Induction Factory
-# ============================================================
-
 
 class TestSkillInductionFactory:
     """Tests for the skill inducer factory."""
@@ -112,11 +102,7 @@ class TestSkillInductionFactory:
         with pytest.raises(ValueError):
             create_inducer("nonexistent_variant", llm_client=None)
 
-
-# ============================================================
 # Variant 1: Trajectory -> Skill
-# ============================================================
-
 
 class TestTrajToSkillInducer:
     """Tests for TrajToSkillInducer with mock LLM."""
@@ -160,11 +146,7 @@ class TestTrajToSkillInducer:
         skill = inducer.induce(trajectory=traj, memory=memory)
         assert isinstance(skill, Skill)
 
-
-# ============================================================
 # Variant 2: Memory -> Skill
-# ============================================================
-
 
 class TestMemoryToSkillInducer:
     """Tests for MemoryToSkillInducer with mock LLM."""
@@ -203,18 +185,10 @@ class TestMemoryToSkillInducer:
         assert skill.name == "Parse Error Skill"
         assert skill.source_variant == TransformVariant.MEMORY_TO_SKILL
 
-
-# ============================================================
 # Variant 3: Hybrid -> Skill
-# ============================================================
-
 
 class TestHybridToSkillInducer:
-    """Tests for HybridToSkillInducer with mock LLM (two LLM calls).
-
-    v6 Evidence-as-Filter: first call validates/ranks memories,
-    second call induces skill from filtered memories only.
-    """
+    """Tests for HybridToSkillInducer with mock LLM (two LLM calls)."""
 
     def test_induce_basic(self):
         validation_response = json.dumps({
@@ -265,11 +239,7 @@ class TestHybridToSkillInducer:
         assert isinstance(skill, Skill)
         assert mock_llm.chat_json.call_count == 2
 
-
-# ============================================================
 # Skill Evaluator
-# ============================================================
-
 
 class TestSkillEvaluator:
     """Tests for SkillEvaluator with mock LLM (LLM-as-judge scoring)."""
@@ -488,11 +458,7 @@ class TestSkillEvaluator:
         assert "**Facts:**" in prompt
         assert "Fact A" in prompt
 
-
-# ============================================================
 # Variant Comparison
-# ============================================================
-
 
 class TestVariantComparison:
     """Tests for SkillEvaluator.compare_variants."""

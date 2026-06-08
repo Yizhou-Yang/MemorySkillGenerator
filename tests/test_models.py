@@ -13,7 +13,6 @@ from src.models import (
     TransformVariant,
 )
 
-
 class TestTrajectory:
     """Trajectory model tests."""
 
@@ -57,7 +56,6 @@ class TestTrajectory:
         # 3 steps, 2 unique -> repetition_rate = 1 - 2/3 ~ 0.333
         assert abs(trajectory.repetition_rate - 1 / 3) < 0.01
 
-
 class TestMemory:
     """Memory model tests."""
 
@@ -79,7 +77,6 @@ class TestMemory:
         store = MemoryStore(task_id="test", entries=entries)
         assert store.avg_specificity == 0.7
         assert store.num_entries == 2
-
 
 class TestSkill:
     """Skill model tests."""
@@ -109,7 +106,6 @@ class TestSkill:
         restored = Skill.model_validate_json(json_str)
         assert restored.name == skill.name
         assert restored.facts == skill.facts
-
 
 class TestEnums:
     """Enumeration type tests."""

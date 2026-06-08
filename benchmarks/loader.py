@@ -1,26 +1,4 @@
-"""
-Benchmark dataset loader.
-
-Loads real datasets from HuggingFace Hub:
-
-Primary benchmarks (active, online/dynamic):
-- Gaia2: agentic CLI tool-calling via gaia2-cli scenarios (soft recall)
-- SWE-bench Dynamic: Docker-based code bug-fixing (pass@1, patch rate)
-- ALFWorld Interactive: embodied text game via subprocess (task completion)
-- HotpotQA: multi-hop QA (dev set subsample, EM/F1)
-- 2WikiMultihopQA: multi-hop QA (dev set subsample, EM/F1)
-- AIME 24/25: math competition (30 questions each, answer matching)
-- TravelPlanner: long-horizon planning (~180 tasks, multi-constraint satisfaction)
-- WebShop: web shopping simulation (test subset, task completion rate)
-- LoCoMo: long conversation memory (10 samples × ~200 QA, F1 + LLM-Judge)
-- LongMemEval: ultra-long dialogue memory (306 tasks, F1 + LLM-Judge)
-
-Legacy benchmarks (static, disabled but still loadable):
-- GAIA (HF static): general assistant QA (no tools)
-- ALFWorld (HF static): offline walkthrough matching
-- SWE-bench Lite: static patch-diff expected answers
-- HotpotQA-hard / TriviaQA / GSM8K / MuSiQue
-"""
+"""Benchmark dataset loader."""
 
 from __future__ import annotations
 
@@ -32,7 +10,6 @@ from typing import Any
 
 from datasets import load_dataset
 from loguru import logger
-
 
 # Primary benchmarks (online/dynamic evaluation)
 PRIMARY_BENCHMARKS = [
@@ -59,7 +36,6 @@ LEGACY_BENCHMARKS = [
     "musique",
 ]
 
-
 class BenchmarkLoader:
     """Benchmark dataset loader backed by HuggingFace datasets."""
 
@@ -69,13 +45,7 @@ class BenchmarkLoader:
         self.num_samples: int = self.config.get("num_samples", 20)
 
     def load(self) -> list[dict[str, Any]]:
-        """
-        Load benchmark tasks.
-
-        Returns:
-            A list of task dicts, each containing ``task_id``,
-            ``description``, ``expected``, ``context``, etc.
-        """
+        """Load benchmark tasks."""
         loader_map = {
             # Primary benchmarks (online/dynamic)
             "gaia2": self._load_gaia2,
@@ -111,13 +81,9 @@ class BenchmarkLoader:
         )
         return tasks
 
-    # ==================================================================
     # PRIMARY BENCHMARKS — ONLINE / DYNAMIC
-    # ==================================================================
 
-    # ------------------------------------------------------------------
     # Gaia2 — Agentic CLI Tool-Calling (soft recall)
-    # ------------------------------------------------------------------
 
     def _load_gaia2(self) -> list[dict[str, Any]]:
         """Load Gaia2 scenarios from local JSON files for CLI tool-calling evaluation."""
@@ -193,9 +159,7 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ------------------------------------------------------------------
     # SWE-bench Dynamic — Docker-based Code Bug-Fixing (pass@1)
-    # ------------------------------------------------------------------
 
     def _load_swebench_dynamic(self) -> list[dict[str, Any]]:
         """Load SWE-bench Verified for dynamic Docker-based evaluation."""
@@ -244,9 +208,7 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ------------------------------------------------------------------
     # ALFWorld Interactive — Embodied Text Game via Subprocess
-    # ------------------------------------------------------------------
 
     def _load_alfworld_interactive(self) -> list[dict[str, Any]]:
         """Load ALFWorld tasks for interactive subprocess-based evaluation."""
@@ -300,26 +262,12 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ==================================================================
-    # STATIC BENCHMARKS (HuggingFace datasets, QA-style)
-    # ==================================================================
-
-    # ------------------------------------------------------------------
     # GAIA (L1/L2/L3) — General Assistant (EM + human evaluation)
     # Source: Intelligent-Internet/ii-agent_gaia-benchmark_validation
     # 165 tasks with Level 1/2/3, Question + Final answer
-    # ------------------------------------------------------------------
 
     def _load_gaia(self) -> list[dict[str, Any]]:
-        """
-        Load the GAIA benchmark (validation split).
-
-        GAIA evaluates general-purpose assistant capabilities across
-        three difficulty levels. Evaluation uses Exact Match on the
-        final answer string.
-
-        Source: https://huggingface.co/datasets/Intelligent-Internet/ii-agent_gaia-benchmark_validation
-        """
+        """Load the GAIA benchmark (validation split)."""
         logger.info("Loading GAIA (validation) from HuggingFace...")
         raw_dataset = load_dataset(
             "Intelligent-Internet/ii-agent_gaia-benchmark_validation",
@@ -355,22 +303,12 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ------------------------------------------------------------------
     # ALFWorld — Embodied Text Game (task completion rate)
     # Source: awawa-agi/alfworld-raw (eval_out_of_distribution split)
     # 134 tasks with task_type + walkthrough (gold solution)
-    # ------------------------------------------------------------------
 
     def _load_alfworld(self) -> list[dict[str, Any]]:
-        """
-        Load the ALFWorld benchmark (eval out-of-distribution split).
-
-        ALFWorld is an embodied text-game benchmark where agents must
-        complete household tasks. Evaluation is based on task completion
-        rate (whether the agent reaches the goal state).
-
-        Source: https://huggingface.co/datasets/awawa-agi/alfworld-raw
-        """
+        """Load the ALFWorld benchmark (eval out-of-distribution split)."""
         logger.info("Loading ALFWorld (eval_out_of_distribution) from HuggingFace...")
         raw_dataset = load_dataset(
             "awawa-agi/alfworld-raw",
@@ -441,16 +379,10 @@ class BenchmarkLoader:
 
         return task_type_readable
 
-    # ------------------------------------------------------------------
     # HotpotQA (multi-hop reasoning, classic benchmark)
-    # ------------------------------------------------------------------
 
     def _load_hotpotqa(self) -> list[dict[str, Any]]:
-        """
-        Load the HotpotQA dataset (distractor setting, validation split).
-
-        Source: https://huggingface.co/datasets/hotpotqa/hotpot_qa
-        """
+        """Load the HotpotQA dataset (distractor setting, validation split)."""
         logger.info("Loading HotpotQA (distractor, validation) from HuggingFace...")
         raw_dataset = load_dataset(
             "hotpotqa/hotpot_qa", "distractor", split="validation"
@@ -464,22 +396,12 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ------------------------------------------------------------------
     # 2WikiMultihopQA (multi-hop QA, EM/F1)
     # Source: scholarly-shadows-syndicate/2WikiMultiHopQA
     # 12576 validation tasks with question + answer + context
-    # ------------------------------------------------------------------
 
     def _load_2wikimultihopqa(self) -> list[dict[str, Any]]:
-        """
-        Load the 2WikiMultihopQA dataset (validation split).
-
-        2WikiMultihopQA is a multi-hop QA dataset constructed from
-        two Wikipedia articles, requiring compositional reasoning.
-        Evaluation uses EM and token-level F1.
-
-        Source: https://huggingface.co/datasets/scholarly-shadows-syndicate/2WikiMultiHopQA
-        """
+        """Load the 2WikiMultihopQA dataset (validation split)."""
         logger.info("Loading 2WikiMultihopQA (validation) from HuggingFace...")
         raw_dataset = load_dataset(
             "scholarly-shadows-syndicate/2WikiMultiHopQA",
@@ -553,22 +475,12 @@ class BenchmarkLoader:
                 parts.append(f"[{title}]\n{paragraph}")
         return "\n\n".join(parts)
 
-    # ------------------------------------------------------------------
     # AIME 24/25 — Math Competition (answer matching)
     # Source: Maxwell-Jia/AIME_2024 (30 tasks)
     # Each task has Problem, Solution, Answer (integer)
-    # ------------------------------------------------------------------
 
     def _load_aime(self) -> list[dict[str, Any]]:
-        """
-        Load the AIME 2024 dataset (30 competition math problems).
-
-        AIME (American Invitational Mathematics Examination) problems
-        require advanced mathematical reasoning. Each answer is an
-        integer from 000 to 999. Evaluation uses exact answer matching.
-
-        Source: https://huggingface.co/datasets/Maxwell-Jia/AIME_2024
-        """
+        """Load the AIME 2024 dataset (30 competition math problems)."""
         logger.info("Loading AIME 2024 from HuggingFace...")
         raw_dataset = load_dataset(
             "Maxwell-Jia/AIME_2024",
@@ -604,21 +516,11 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ------------------------------------------------------------------
     # TravelPlanner — Long-horizon Planning (multi-constraint satisfaction)
     # Source: osunlp/TravelPlanner (validation config, 180 tasks)
-    # ------------------------------------------------------------------
 
     def _load_travelplanner(self) -> list[dict[str, Any]]:
-        """
-        Load the TravelPlanner benchmark (validation split, 180 tasks).
-
-        TravelPlanner evaluates long-horizon planning ability with
-        multiple constraints (budget, dates, preferences). Evaluation
-        is based on multi-constraint satisfaction rate.
-
-        Source: https://huggingface.co/datasets/osunlp/TravelPlanner
-        """
+        """Load the TravelPlanner benchmark (validation split, 180 tasks)."""
         logger.info("Loading TravelPlanner (validation) from HuggingFace...")
         raw_dataset = load_dataset(
             "osunlp/TravelPlanner",
@@ -671,21 +573,11 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ------------------------------------------------------------------
     # WebShop — Web Shopping Simulation (task completion rate)
     # Source: Skyler215/webshop-agent-cot (test split, 2225 tasks)
-    # ------------------------------------------------------------------
 
     def _load_webshop(self) -> list[dict[str, Any]]:
-        """
-        Load the WebShop benchmark (test split).
-
-        WebShop simulates web shopping tasks where agents must find
-        and purchase products matching specific criteria. Evaluation
-        is based on task completion rate (correct product purchased).
-
-        Source: https://huggingface.co/datasets/Skyler215/webshop-agent-cot
-        """
+        """Load the WebShop benchmark (test split)."""
         logger.info("Loading WebShop (test) from HuggingFace...")
         raw_dataset = load_dataset(
             "Skyler215/webshop-agent-cot",
@@ -732,25 +624,12 @@ class BenchmarkLoader:
         # Fallback: return first 200 chars
         return prompt[:200]
 
-    # ------------------------------------------------------------------
     # LoCoMo — Long Conversation Memory (F1 + LLM-Judge)
     # Source: KhangPTT373/locomo_preprocess (test split, 10 samples × ~200 QA)
     # Each sample has questions, answers, evidences, category, turns, sessions
-    # ------------------------------------------------------------------
 
     def _load_locomo(self) -> list[dict[str, Any]]:
-        """
-        Load the LoCoMo benchmark (test split).
-
-        LoCoMo evaluates long conversation memory capabilities.
-        Each sample contains a multi-session dialogue (~19 sessions)
-        and ~200 QA pairs that test memory of conversation details.
-        Evaluation uses token-level F1 and LLM-Judge scoring.
-
-        Categories: 1=single-hop, 2=multi-hop, 3=temporal reasoning
-
-        Source: https://huggingface.co/datasets/KhangPTT373/locomo_preprocess
-        """
+        """Load the LoCoMo benchmark (test split)."""
         logger.info("Loading LoCoMo (test) from HuggingFace...")
         raw_dataset = load_dataset(
             "KhangPTT373/locomo_preprocess",
@@ -810,23 +689,12 @@ class BenchmarkLoader:
 
         return tasks
 
-    # ------------------------------------------------------------------
     # LongMemEval — Ultra-long Dialogue Memory (F1 + LLM-Judge)
     # Source: kellyhongg/cleaned-longmemeval-s (train split, 306 tasks)
     # Each task has question, answer, full_input (~100K tokens), focused_input
-    # ------------------------------------------------------------------
 
     def _load_longmemeval(self) -> list[dict[str, Any]]:
-        """
-        Load the LongMemEval benchmark (cleaned version, 306 tasks).
-
-        LongMemEval evaluates memory over ultra-long dialogues (~100K tokens).
-        Each task provides a question about conversation history, with both
-        a full input (complete history) and a focused input (relevant excerpt).
-        Evaluation uses token-level F1 and LLM-Judge scoring.
-
-        Source: https://huggingface.co/datasets/kellyhongg/cleaned-longmemeval-s
-        """
+        """Load the LongMemEval benchmark (cleaned version, 306 tasks)."""
         logger.info("Loading LongMemEval (cleaned) from HuggingFace...")
         raw_dataset = load_dataset(
             "kellyhongg/cleaned-longmemeval-s",
@@ -870,10 +738,6 @@ class BenchmarkLoader:
             })
 
         return tasks
-
-    # ==================================================================
-    # LEGACY BENCHMARKS (disabled but not deleted)
-    # ==================================================================
 
     def _load_hotpotqa_hard(self) -> list[dict[str, Any]]:
         """
@@ -927,11 +791,7 @@ class BenchmarkLoader:
         }
 
     def _load_triviaqa(self) -> list[dict[str, Any]]:
-        """
-        Load the TriviaQA dataset (rc config, validation split).
-
-        TriviaQA is a classic single-hop factoid QA benchmark.
-        """
+        """Load the TriviaQA dataset (rc config, validation split)."""
         logger.info("Loading TriviaQA (rc, validation) from HuggingFace...")
         raw_dataset = load_dataset(
             "mandarjoshi/trivia_qa", "rc", split="validation"
@@ -966,12 +826,7 @@ class BenchmarkLoader:
         return tasks
 
     def _load_gsm8k(self) -> list[dict[str, Any]]:
-        """
-        Load the GSM8K dataset (main config, test split).
-
-        GSM8K is a math reasoning benchmark that naturally produces
-        chain-of-thought trajectories.
-        """
+        """Load the GSM8K dataset (main config, test split)."""
         logger.info("Loading GSM8K (main, test) from HuggingFace...")
         raw_dataset = load_dataset("openai/gsm8k", "main", split="test")
 
@@ -1003,12 +858,7 @@ class BenchmarkLoader:
 
     @staticmethod
     def _extract_gsm8k_answer(raw_answer: str) -> str:
-        """
-        Extract the final numeric answer from a GSM8K solution.
-
-        GSM8K answers follow the pattern:
-            <chain-of-thought>\\n#### <number>
-        """
+        """Extract the final numeric answer from a GSM8K solution."""
         match = re.search(r"####\s*(.+)", raw_answer)
         if match:
             return match.group(1).strip()
@@ -1016,12 +866,7 @@ class BenchmarkLoader:
         return lines[-1].strip() if lines else raw_answer
 
     def _load_musique(self) -> list[dict[str, Any]]:
-        """
-        Load the MuSiQue dataset (validation split).
-
-        MuSiQue is a multi-hop QA dataset with explicit question
-        decomposition annotations.
-        """
+        """Load the MuSiQue dataset (validation split)."""
         logger.info("Loading MuSiQue (validation) from HuggingFace...")
         raw_dataset = load_dataset(
             "dgslibisey/MuSiQue", split="validation"
@@ -1073,14 +918,7 @@ class BenchmarkLoader:
         return tasks
 
     def _load_swebench(self) -> list[dict[str, Any]]:
-        """
-        Load the SWE-bench Lite dataset.
-
-        Source: https://huggingface.co/datasets/princeton-nlp/SWE-bench_Lite
-
-        WARNING: The expected answer is a patch diff, which makes
-        evaluation via simple substring matching unreliable.
-        """
+        """Load the SWE-bench Lite dataset."""
         logger.info("Loading SWE-bench Lite from HuggingFace...")
         raw_dataset = load_dataset(
             "princeton-nlp/SWE-bench_Lite", split="test"

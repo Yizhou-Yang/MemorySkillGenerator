@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-ALFWorld Interactive Runner — SkillForge V6 with real environment interaction.
-
-Each game runs in its own subprocess with a SINGLE game file,
-avoiding the game-switching bug in AlfworldEnv.reset(game_idx).
-
-Architecture:
-  main (Python 3.14 + SDK) ←→ per-game subprocess (Python 3.9 + alfworld)
-"""
+"""ALFWorld Interactive Runner — SkillForge V6 with real environment interaction."""
 import asyncio
 import json
 import os
@@ -33,7 +25,6 @@ CONCURRENCY = 5
 RESULTS_DIR = "/data1/benchmarks/unified_v6_results/alfworld_interactive"
 ALFWORLD_PYTHON = "/data/home/yizhouyang/workspace/SkillForge/.venv_alfworld/bin/python"
 ALFWORLD_DATA = "/data/home/yizhouyang/workspace/SkillForge/.venv_alfworld/data"
-
 
 # ══════════════════════════════════════════════════════════════════════════
 #  ALFWorld subprocess: one game file per process
@@ -84,7 +75,6 @@ for line in sys.stdin:
 env.close()
 '''
 
-
 def get_game_list():
     """Probe ALFWorld to get all game files + types."""
     import subprocess as sp
@@ -100,7 +90,6 @@ print(json.dumps([{{"file":g,"type":task_type_from_gamefile(g)}} for g in env.li
 '''
     r = sp.run([ALFWORLD_PYTHON, "-c", code], capture_output=True, text=True, timeout=60)
     return json.loads(r.stdout.strip())
-
 
 class SingleGameEnv:
     """One ALFWorld game in a subprocess."""
@@ -128,15 +117,12 @@ class SingleGameEnv:
         except Exception:
             self.proc.kill()
 
-
 # ══════════════════════════════════════════════════════════════════════════
 #  LLM action decision (runs in thread to isolate event loop)
 # ══════════════════════════════════════════════════════════════════════════
 
 def _llm_call_sync(prompt: str) -> str:
-    """Run SDK query in a fresh event loop in current thread.
-    Explicitly kills spawned headless process after each call to prevent leak.
-    """
+    """Run SDK query in a fresh event loop in current thread."""
     import signal
     
     # Track child PIDs before call
@@ -182,14 +168,12 @@ def _llm_call_sync(prompt: str) -> str:
     
     return result
 
-
 def _simplify_action(action: str) -> str:
     """Simplify ALFWorld action by stripping coordinate IDs for display."""
     # "go to cabinet_bar__minus_00_dot_49..." → "go to cabinet 1"
     cleaned = re.sub(r'_bar__(?:minus|plus)_\d+_dot_\d+(?:_bar__(?:minus|plus)_\d+_dot_\d+)*', '', action)
     cleaned = re.sub(r'_+', ' ', cleaned).strip()
     return cleaned
-
 
 async def llm_decide_action(observation, task, admissible_actions, history, experience_section=""):
     history_str = "\n".join(f"  {i+1}. {h}" for i, h in enumerate(history[-10:]))
@@ -250,7 +234,6 @@ Output ONLY the number (0-{min(len(admissible_actions), 20)-1}) of your chosen a
             best_s, best = s, a
     return best
 
-
 # ══════════════════════════════════════════════════════════════════════════
 #  Run one game
 # ══════════════════════════════════════════════════════════════════════════
@@ -289,7 +272,6 @@ async def run_game(game_file, game_type, experience_section=""):
                 "steps": 0, "trajectory": [], "score": 0.0, "error": str(e)[:200]}
     finally:
         env.close()
-
 
 # ══════════════════════════════════════════════════════════════════════════
 #  Main experiment

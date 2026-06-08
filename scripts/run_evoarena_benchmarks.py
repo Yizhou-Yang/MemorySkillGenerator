@@ -1,32 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SkillForge — Skill Evolution Benchmark (EvoArena-style).
-
-Core idea: Skills EVOLVE through a continuous task stream.
-Unlike static skill induction (create once, use forever),
-skill evolution means:
-  - Skills get REFINED when they partially fail
-  - Skills get MERGED when overlapping patterns emerge
-  - Skills get RETIRED when they consistently underperform
-  - Skills get VERSIONED — old knowledge is tracked via patches
-
-Pipeline:
-  For each task in stream:
-    1. Retrieve relevant skills (+ patch history for version awareness)
-    2. Attempt to answer using skills
-    3. Evaluate result
-    4. EVOLVE: update/merge/retire skills based on outcome
-    5. Record evolution patches
-
-Compares:
-  - B0: Zero-shot (no memory/skills)
-  - SkillStatic: Induction only (create skills, never evolve)
-  - SkillEvo: Full evolution (create + refine + merge + retire + patch)
-
-Usage:
-    /data1/venv_skillforge/bin/python scripts/run_evoarena_benchmarks.py
-"""
+"""SkillForge — Skill Evolution Benchmark (EvoArena-style)."""
 
 from __future__ import annotations
 
@@ -53,10 +27,7 @@ from src.evomem.patch_recorder import PatchRecorder
 from src.evomem.patch_retriever import PatchRetriever
 from benchmarks.loader import BenchmarkLoader
 
-
-# ============================================================
 # Metrics
-# ============================================================
 
 def normalize(s: str) -> str:
     s = s.lower().strip()
@@ -65,10 +36,8 @@ def normalize(s: str) -> str:
             s = s[len(a):]
     return s.translate(str.maketrans("", "", string.punctuation)).strip()
 
-
 def em_score(pred: str, gold: str) -> float:
     return 1.0 if normalize(pred) == normalize(gold) else 0.0
-
 
 def f1_score(pred: str, gold: str) -> float:
     pt, gt = normalize(pred).split(), normalize(gold).split()
@@ -80,10 +49,7 @@ def f1_score(pred: str, gold: str) -> float:
     p, r = common / len(pt), common / len(gt)
     return 2 * p * r / (p + r)
 
-
-# ============================================================
 # B0: Zero-shot Baseline
-# ============================================================
 
 def run_b0(llm: LLMClient, tasks: list[dict], bench: str) -> dict:
     logger.info(f"[B0] {bench}: {len(tasks)} tasks")
@@ -107,18 +73,10 @@ def run_b0(llm: LLMClient, tasks: list[dict], bench: str) -> dict:
         "n": len(results),
     }
 
-
-# ============================================================
 # Skill Evolution Engine
-# ============================================================
 
 class SkillEvolutionEngine:
-    """
-    Drives skill evolution through a task stream.
-
-    For each task:
-      1. Retrieve → 2. Answer → 3. Evaluate → 4. Evolve
-    """
+    """Drives skill evolution through a task stream."""
 
     def __init__(
         self,
@@ -147,12 +105,7 @@ class SkillEvolutionEngine:
         tasks: list[dict],
         benchmark: str,
     ) -> list[dict]:
-        """
-        Process a stream of tasks with skill evolution.
-
-        Each task is both an evaluation point AND a learning signal.
-        Skills evolve continuously as the stream progresses.
-        """
+        """Process a stream of tasks with skill evolution."""
         results = []
 
         for i, task in enumerate(tasks):
@@ -226,14 +179,7 @@ class SkillEvolutionEngine:
         self, task: dict, response: str, em: float, f1: float,
         step: int, benchmark: str,
     ):
-        """
-        Evolve skills based on task outcome.
-
-        Evolution rules:
-        - SUCCESS (f1 >= 0.5): Strengthen/create skill from this experience
-        - PARTIAL (0.1 < f1 < 0.5): Refine existing skill with new insight
-        - FAILURE (f1 <= 0.1): Check if a skill misled us → retire if repeated
-        """
+        """Evolve skills based on task outcome."""
         task_desc = task["description"][:500]
 
         if f1 >= 0.5:
@@ -383,10 +329,7 @@ class SkillEvolutionEngine:
         except Exception:
             return f"Skill_{task['task_id'][:8]}"
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     parser = argparse.ArgumentParser()
@@ -496,7 +439,6 @@ def main():
     }, indent=2, default=str))
     logger.info(f"\nSaved: {out_path}")
     logger.info(f"API: {llm.stats}")
-
 
 if __name__ == "__main__":
     main()

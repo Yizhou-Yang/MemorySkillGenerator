@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""
-SkillForge V6 Rerun — DeepSeek V4 Pro via CodeBuddy CLI
-
-重跑表现不佳的 benchmark：GAIA HF、ALFWorld、LoCoMo
-模型：deepseek-v4-pro（通过 codebuddy-headless CLI 调用）
-
-对于 LoCoMo（静态 QA benchmark），同时测试：
-  - 静态路径：直接 QA（无经验注入）
-  - 动态路径：AI-Refined experience injection
-
-Ablation groups:
-  A: Baseline (no augmentation)
-  B: Raw experience injection
-  C: AI-refined experience injection (动态路径)
-"""
+"""SkillForge V6 Rerun — DeepSeek V4 Pro via CodeBuddy CLI"""
 import asyncio
 import json
 import os
@@ -168,15 +154,7 @@ def evaluate_task(result: dict, benchmark: str) -> dict:
 async def run_benchmark(benchmark: str, tasks: list[dict],
                         existing_library_path: str | None = None,
                         run_static_dynamic: bool = False) -> dict:
-    """
-    运行单个 benchmark 的完整 ablation。
-    
-    Args:
-        benchmark: benchmark 名称
-        tasks: 任务列表
-        existing_library_path: 已有经验库路径（如果有则跳过 train 阶段）
-        run_static_dynamic: 是否同时跑静态/动态路径对比（LoCoMo 专用）
-    """
+    """运行单个 benchmark 的完整 ablation。"""
     print(f"\n{'='*70}")
     print(f"  Benchmark: {benchmark} (model: {MODEL})")
     print(f"  Total tasks: {len(tasks)}")
@@ -459,7 +437,6 @@ async def main():
             new_c = all_reports[name]["results"]["C_refined"]["avg_score"]
             delta_model = new_c - prev_c
             print(f"  {name:<12} {prev_a:>9.1%} {prev_c:>9.1%} {new_a:>9.1%} {new_c:>9.1%} {delta_model:>+7.1%}")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

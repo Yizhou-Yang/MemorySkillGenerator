@@ -55,10 +55,7 @@ from src.utils.config import load_env  # for .env loading
 from src.utils.llm import LLMClient
 from src.utils.skill_formatter import FormattingConfig, format_skill_library
 
-
-# ============================================================
 # Skill bank IO
-# ============================================================
 
 def load_skill_bank(path: Path) -> tuple[list[Skill], np.ndarray]:
     """Load a skill bank JSON file into (skills, embeddings).
@@ -85,17 +82,13 @@ def load_skill_bank(path: Path) -> tuple[list[Skill], np.ndarray]:
     embs = embs / norms
     return skills, embs
 
-
 def embed_query(text: str, encoder) -> np.ndarray:
     """Embed a single query string and L2-normalize."""
     v = encoder.encode([text], show_progress_bar=False, convert_to_numpy=True)[0]
     n = float(np.linalg.norm(v))
     return v / max(n, 1e-12)
 
-
-# ============================================================
 # Skill retrieval (cosine top-k + s_max)
-# ============================================================
 
 def retrieve_skills(
     query_emb: np.ndarray,
@@ -111,10 +104,7 @@ def retrieve_skills(
     idx = np.argsort(sims)[::-1][:top_k]
     return [skills[i] for i in idx], s_max
 
-
-# ============================================================
 # ReAct loop
-# ============================================================
 
 REACT_SYSTEM_BASE = """You are an embodied agent solving a household task in a text-based environment.
 You see a textual room description, a task goal, and a list of admissible commands.
@@ -170,9 +160,7 @@ Use them as guidance when relevant; ignore them when not applicable:
 {skill_block}
 """
 
-
 _ACTION_RE = re.compile(r"Action\s*:\s*(.+?)(?:\n|$)", re.IGNORECASE)
-
 
 def parse_action(reply: str, admissible: list[str]) -> str:
     """Extract the Action line from the LLM reply and snap to admissible.
@@ -206,7 +194,6 @@ def parse_action(reply: str, admissible: list[str]) -> str:
         return candidates[0]
     # 4. fallback
     return admissible[0]
-
 
 def run_react_episode(
     env: AlfworldEnv,
@@ -294,15 +281,11 @@ def run_react_episode(
         "final_obs": last_obs[:200],
     }
 
-
-# ============================================================
 # Method: skill block construction
-# ============================================================
 
 def build_skill_block_b0(query: str, **kwargs) -> tuple[str, dict]:
     """B0: no skills."""
     return "", {"method": "B0", "n_skills_used": 0, "s_max": 0.0}
-
 
 def _format_skills_plain(skills: list[Skill]) -> str:
     """SkillOS-style plain dump: raw skills concatenated, no sandwich/compact.
@@ -325,7 +308,6 @@ def _format_skills_plain(skills: list[Skill]) -> str:
         parts.append("\n".join(block))
     return "\n\n".join(parts)
 
-
 def build_skill_block_b2(
     query: str,
     skills: list[Skill],
@@ -341,7 +323,6 @@ def build_skill_block_b2(
     selected, s_max = retrieve_skills(q, skills, skill_embs, top_k)
     block = _format_skills_plain(selected)
     return block, {"method": "B2", "n_skills_used": len(selected), "s_max": s_max}
-
 
 def build_skill_block_a3(
     query: str,
@@ -365,7 +346,6 @@ def build_skill_block_a3(
     selected, s_max = retrieve_skills(q, skills, skill_embs, top_k)
     block = format_skill_library(selected, FormattingConfig(max_skills_in_prompt=top_k))
     return block, {"method": "A3", "n_skills_used": len(selected), "s_max": s_max}
-
 
 def build_skill_block_a3_planc(
     query: str,
@@ -392,7 +372,6 @@ def build_skill_block_a3_planc(
     return block, {"method": "A3+PlanC", "n_skills_used": len(selected),
                     "s_max": s_max, "tau": tau_void, "void": False}
 
-
 METHOD_BUILDERS = {
     "B0": build_skill_block_b0,
     "B2": build_skill_block_b2,
@@ -400,10 +379,7 @@ METHOD_BUILDERS = {
     "A3+PlanC": build_skill_block_a3_planc,
 }
 
-
-# ============================================================
 # Stratified sampling
-# ============================================================
 
 def stratified_sample(num_games: int, gamefiles: list[str], n: int, seed: int) -> list[int]:
     """Sample n game indices stratified by task type (6 ALFWorld categories).
@@ -430,10 +406,7 @@ def stratified_sample(num_games: int, gamefiles: list[str], n: int, seed: int) -
     selected.sort()
     return selected
 
-
-# ============================================================
 # Plan C calibration
-# ============================================================
 
 def calibrate_planc_tau(
     train_per_task: list[dict],
@@ -478,10 +451,7 @@ def calibrate_planc_tau(
         "n_train": int(len(s)),
     }
 
-
-# ============================================================
 # Main eval
-# ============================================================
 
 def run_eval(args) -> dict[str, Any]:
     # Load .env so DEEPSEEK_API_KEY is available
@@ -683,7 +653,6 @@ def run_eval(args) -> dict[str, Any]:
     logger.info(f"\n[final] saved to {out_path}")
     return results
 
-
 def _flush_partial(out_path: Path, results: dict, method: str, per_task: list) -> None:
     """Best-effort partial save — overwrite the same file with current state."""
     snap = dict(results)
@@ -692,11 +661,6 @@ def _flush_partial(out_path: Path, results: dict, method: str, per_task: list) -
         out_path.write_text(json.dumps(snap, indent=2, default=str))
     except Exception as e:
         logger.warning(f"partial flush failed: {e}")
-
-
-# ============================================================
-# CLI
-# ============================================================
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -718,7 +682,6 @@ def parse_args():
     p.add_argument("--output", type=str,
                    default="experiments/alfworld_eval_results.json")
     return p.parse_args()
-
 
 if __name__ == "__main__":
     args = parse_args()

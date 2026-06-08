@@ -23,10 +23,7 @@ from src.models import Skill, TransformVariant
 from src.skill_induction.factory import create_inducer
 from src.trajectory.collector import TrajectoryCollector
 
-
-# ============================================================
 # Configuration
-# ============================================================
 
 # Sample sizes: small enough for fast validation, large enough for signal
 HOTPOTQA_SAMPLES = 5
@@ -37,7 +34,6 @@ VARIANTS = [
     TransformVariant.MEMORY_TO_SKILL,
     TransformVariant.HYBRID_TO_SKILL,
 ]
-
 
 def compute_token_f1(prediction: str, ground_truth: str) -> float:
     """Compute token-level F1 between prediction and ground truth."""
@@ -61,7 +57,6 @@ def compute_token_f1(prediction: str, ground_truth: str) -> float:
     recall = num_common / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
-
 def compute_em(prediction: str, ground_truth: str) -> float:
     """Compute Exact Match (normalized)."""
     # Normalize: lowercase, strip punctuation and whitespace
@@ -78,17 +73,10 @@ def compute_em(prediction: str, ground_truth: str) -> float:
 
     return 1.0 if normalize(ground_truth) in normalize(prediction) else 0.0
 
-
-# ============================================================
 # Test 1: HotpotQA — Multi-hop QA
-# ============================================================
 
 def run_hotpotqa_validation(llm_client: LLMClient) -> dict:
-    """
-    Run HotpotQA validation with actual LLM calls.
-
-    Tests the full pipeline: task → trajectory → memory → skill → eval.
-    """
+    """Run HotpotQA validation with actual LLM calls."""
     logger.info("=" * 60)
     logger.info("TEST 1: HotpotQA Multi-hop QA Validation")
     logger.info("=" * 60)
@@ -177,17 +165,10 @@ def run_hotpotqa_validation(llm_client: LLMClient) -> dict:
     _compute_aggregates(results)
     return results
 
-
-# ============================================================
 # Test 2: LoCoMo — Long Conversation Memory
-# ============================================================
 
 def run_locomo_validation(llm_client: LLMClient) -> dict:
-    """
-    Run LoCoMo validation with actual LLM calls.
-
-    Tests memory-intensive QA over long conversations.
-    """
+    """Run LoCoMo validation with actual LLM calls."""
     logger.info("=" * 60)
     logger.info("TEST 2: LoCoMo Long Conversation Memory Validation")
     logger.info("=" * 60)
@@ -270,10 +251,7 @@ def run_locomo_validation(llm_client: LLMClient) -> dict:
 
     return results
 
-
-# ============================================================
 # Test 3: Skill Induction Quality
-# ============================================================
 
 def run_skill_quality_validation(llm_client: LLMClient) -> dict:
     """
@@ -342,10 +320,7 @@ def run_skill_quality_validation(llm_client: LLMClient) -> dict:
 
     return results
 
-
-# ============================================================
 # Helpers
-# ============================================================
 
 def _format_skill_for_eval(skill: Skill) -> str:
     """Format a skill as a prompt for evaluation."""
@@ -361,7 +336,6 @@ def _format_skill_for_eval(skill: Skill) -> str:
             parts.append(f"- {c}")
     return "\n".join(parts)
 
-
 def _compute_aggregates(results: dict) -> None:
     """Compute aggregate metrics for HotpotQA results."""
     # Baseline
@@ -374,10 +348,7 @@ def _compute_aggregates(results: dict) -> None:
         vdata["avg_em"] = sum(vdata["em_scores"]) / len(vdata["em_scores"]) if vdata["em_scores"] else 0
         vdata["avg_f1"] = sum(vdata["f1_scores"]) / len(vdata["f1_scores"]) if vdata["f1_scores"] else 0
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     logger.remove()
@@ -433,9 +404,7 @@ def main():
         logger.error(f"Skill quality validation failed: {exc}")
         all_results["skill_quality"] = {"error": str(exc)}
 
-    # ============================================================
     # Summary Report
-    # ============================================================
     elapsed = time.time() - start_time
     stats = llm_client.stats
 
@@ -549,7 +518,6 @@ def main():
     logger.info(f"\n  Results saved to: {output_path}")
 
     return passed == total
-
 
 if __name__ == "__main__":
     success = main()

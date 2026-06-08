@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-MemorySkillGenerator MVP experiment runner.
-
-Executes the full MVP pipeline:
-1. Load benchmark tasks.
-2. Collect trajectories.
-3. Compress into structured memory.
-4. Induce skills via all three variants.
-5. Evaluate and compare results.
-"""
+"""MemorySkillGenerator MVP experiment runner."""
 
 from __future__ import annotations
 
@@ -33,7 +24,6 @@ from src.utils.config import load_config, load_env
 from src.utils.io import save_json, save_jsonl
 from src.utils.llm import LLMClient
 from src.utils.logging import setup_logger
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MemorySkillGenerator MVP Experiment")
@@ -153,13 +143,8 @@ def main() -> None:
     logger.info(f"\nExperiment complete! Results saved to: {experiment_dir}")
     logger.info(f"LLM call statistics: {llm_client.stats}")
 
-
 def _get_validation_tasks(task: dict) -> list[dict[str, str]]:
-    """
-    Get validation tasks (MVP phase: reuse the original task).
-
-    TODO: Generate variant tasks to validate skill generalisation.
-    """
+    """Get validation tasks (MVP phase: reuse the original task)."""
     return [
         {
             "task_id": f"{task['task_id']}_val",
@@ -167,7 +152,6 @@ def _get_validation_tasks(task: dict) -> list[dict[str, str]]:
             "expected": task.get("expected", ""),
         }
     ]
-
 
 if __name__ == "__main__":
     main()

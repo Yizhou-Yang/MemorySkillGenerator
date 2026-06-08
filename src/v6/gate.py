@@ -36,10 +36,7 @@ def assess_task_complexity(task_desc: str) -> str:
 
 def should_augment(task_desc: str, library: ExperienceLibrary,
                    relevance_threshold: float = 0.15) -> tuple[bool, str]:
-    """Always inject — more information always helps; AI review handles quality.
-    
-    Gate only blocks when library is truly empty (nothing to inject).
-    """
+    """Always inject — more information always helps; AI review handles quality."""
     candidates = library.retrieve_similar(task_desc, top_k=1)
     if not candidates:
         return False, "no_relevant_experiences"
@@ -47,14 +44,7 @@ def should_augment(task_desc: str, library: ExperienceLibrary,
     return True, "always_inject (AI review ensures quality)"
 
 def classify_task_type(task_desc: str, expected: str = "", metadata: dict | None = None) -> str:
-    """Auto-classify: agentic / qa / embodied. Uses structural signals, not keyword lists.
-    
-    Signal priority: metadata > expected structure > description structure.
-    
-    Key fix: GAIA tasks (requiring web search, file parsing, multi-step reasoning)
-    are classified as "agentic" to get full experience injection rather than
-    lightweight QA hints.
-    """
+    """Auto-classify: agentic / qa / embodied. Uses structural signals, not keyword lists."""
     metadata = metadata or {}
     desc_lower = task_desc.lower()
 

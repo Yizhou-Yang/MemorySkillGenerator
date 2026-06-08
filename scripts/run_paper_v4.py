@@ -1,22 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SkillCurator Full Paper Experiments v4 — 9 benchmarks, all bugs fixed.
-
-v4 vs v3 fixes:
-  - Compaction Cliff: now runs BOTH B2 (no compaction) and A3 (with compaction)
-    on the SAME task stream, so token comparison is fair
-  - Scissors Effect: runs 3 independent libraries (append-only, skillos-delete, ours-compact)
-    with proper compaction that actually reduces skills
-  - Bound Tightening: runs 3 methods (B2/A1/A3) on same stream, no synthetic data
-  - Health Tracking: derived from scissors_effect real data (3 libraries)
-  - Phase Transition: larger skill pool (30 skills) with proper size sweep
-  - Figure 6 data: 2×2 ablation matrix computed from main experiment
-  - All figures use REAL data, zero synthetic/fabricated lines
-
-Usage:
-  nohup /usr/bin/python3.9 scripts/run_paper_v4.py > experiments/paper_v4_stdout.log 2>&1 &
-"""
+"""SkillCurator Full Paper Experiments v4 — 9 benchmarks, all bugs fixed."""
 from __future__ import annotations
 
 import json
@@ -51,10 +35,7 @@ from src.utils.skill_formatter import (
     format_skill_library, FormattingConfig,
 )
 
-
-# ============================================================
 # 9-Benchmark Configuration (tiered)
-# ============================================================
 
 BENCHMARK_TIERS = {
     # Tier 1: Full scale — best for skill induction (multi-hop QA)
@@ -98,7 +79,6 @@ ATTENTION_STRATEGIES = [
 # Embedding model
 EMBED_MODEL = None
 
-
 def get_embed_model():
     global EMBED_MODEL
     if EMBED_MODEL is None:
@@ -107,10 +87,7 @@ def get_embed_model():
         logger.info("Loaded embedding model: all-MiniLM-L6-v2")
     return EMBED_MODEL
 
-
-# ============================================================
 # Metrics (same as v2)
-# ============================================================
 
 def compute_token_f1(prediction: str, ground_truth: str) -> float:
     if not ground_truth.strip():
@@ -127,7 +104,6 @@ def compute_token_f1(prediction: str, ground_truth: str) -> float:
     recall = num_common / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
-
 def compute_em(prediction: str, ground_truth: str) -> float:
     def normalize(s):
         s = s.lower().strip()
@@ -142,10 +118,8 @@ def compute_em(prediction: str, ground_truth: str) -> float:
         return 0.0
     return 1.0 if norm_gt in norm_pred else 0.0
 
-
 def avg(lst):
     return sum(lst) / len(lst) if lst else 0.0
-
 
 def std(lst):
     if len(lst) < 2:
@@ -153,10 +127,7 @@ def std(lst):
     m = avg(lst)
     return math.sqrt(sum((x - m) ** 2 for x in lst) / (len(lst) - 1))
 
-
-# ============================================================
 # Embedding-based Semantic Dedup (from v2)
-# ============================================================
 
 def skill_to_text(s: Skill) -> str:
     parts = [s.name, s.description]
@@ -165,12 +136,10 @@ def skill_to_text(s: Skill) -> str:
         parts.extend(s.constraints[:2])
     return " ".join(parts)
 
-
 def compute_skill_embeddings(skills: list[Skill]) -> np.ndarray:
     model = get_embed_model()
     texts = [skill_to_text(s) for s in skills]
     return model.encode(texts, normalize_embeddings=True)
-
 
 def find_redundant_pairs(skills: list[Skill], threshold: float = 0.75) -> list[tuple[int, int, float]]:
     if len(skills) < 2:
@@ -184,7 +153,6 @@ def find_redundant_pairs(skills: list[Skill], threshold: float = 0.75) -> list[t
                 pairs.append((i, j, float(sim_matrix[i][j])))
     pairs.sort(key=lambda x: x[2], reverse=True)
     return pairs
-
 
 def deduplicate_skills_embedding(skills: list[Skill], threshold: float = 0.75) -> list[Skill]:
     if len(skills) < 2:
@@ -201,7 +169,6 @@ def deduplicate_skills_embedding(skills: list[Skill], threshold: float = 0.75) -
         if not is_dup:
             keep_indices.append(i)
     return [skills[i] for i in keep_indices]
-
 
 def merge_skill_pair(llm_client: LLMClient, s1: Skill, s2: Skill) -> Skill:
     prompt = f"""Merge these two overlapping skills into ONE concise skill.
@@ -237,7 +204,6 @@ Output ONLY valid JSON:"""
     except Exception:
         return s1 if s1.compactness >= s2.compactness else s2
 
-
 def compact_library(llm_client: LLMClient, skills: list[Skill],
                     threshold: float = 0.75, max_merges: int = 10) -> tuple[list[Skill], int]:
     merged_count = 0
@@ -255,14 +221,10 @@ def compact_library(llm_client: LLMClient, skills: list[Skill],
         logger.debug(f"  MERGE: sim={sim:.3f}, {len(current)} skills remain")
     return current, merged_count
 
-
-# ============================================================
 # Skill Library Formatting (from v2)
-# ============================================================
 
 def format_skills_B0(skills: list[Skill], query: str) -> str:
     return ""
-
 
 def format_skills_B1(skills: list[Skill], query: str) -> str:
     parts = []
@@ -272,7 +234,6 @@ def format_skills_B1(skills: list[Skill], query: str) -> str:
             parts.append(f"Constraints: {'; '.join(s.constraints)}")
         parts.append("")
     return "\n".join(parts)
-
 
 def _retrieve_top_k(skills: list[Skill], query: str, k: int = 5) -> list[Skill]:
     if not skills:
@@ -284,28 +245,23 @@ def _retrieve_top_k(skills: list[Skill], query: str, k: int = 5) -> list[Skill]:
     top_indices = np.argsort(sims)[::-1][:k]
     return [skills[i] for i in top_indices]
 
-
 def format_skills_B2(skills: list[Skill], query: str) -> str:
     top = _retrieve_top_k(skills, query, k=5)
     return format_skills_B1(top, query)
-
 
 def format_skills_A1(skills: list[Skill], query: str) -> str:
     deduped = deduplicate_skills_embedding(skills, threshold=0.75)
     top = _retrieve_top_k(deduped, query, k=5)
     return format_skills_B1(top, query)
 
-
 def format_skills_A2(skills: list[Skill], query: str) -> str:
     top = _retrieve_top_k(skills, query, k=5)
     return format_skill_library(top, config=FormattingConfig(strategy="sandwich_compact"))
-
 
 def format_skills_A3(skills: list[Skill], query: str) -> str:
     deduped = deduplicate_skills_embedding(skills, threshold=0.75)
     top = _retrieve_top_k(deduped, query, k=5)
     return format_skill_library(top, config=FormattingConfig(strategy="sandwich_compact"))
-
 
 FORMAT_METHODS = {
     "B0": format_skills_B0,
@@ -315,7 +271,6 @@ FORMAT_METHODS = {
     "A2": format_skills_A2,
     "A3": format_skills_A3,
 }
-
 
 def _format_with_strategy(skills: list[Skill], strategy: str, query: str) -> str:
     if strategy == "random_order":
@@ -361,10 +316,7 @@ def _format_with_strategy(skills: list[Skill], strategy: str, query: str) -> str
         return format_skill_library(skills, config=FormattingConfig(strategy="sandwich_compact"))
     return format_skills_B1(skills, query)
 
-
-# ============================================================
 # Skill Induction Helper
-# ============================================================
 
 def induce_skills_from_tasks(
     llm_client: LLMClient,
@@ -390,10 +342,7 @@ def induce_skills_from_tasks(
     logger.info(f"  [{label}] Induced {len(skill_bank)} skills from {len(tasks)} tasks")
     return skill_bank
 
-
-# ============================================================
 # Evaluation Helper
-# ============================================================
 
 def evaluate_method(
     llm_client: LLMClient,
@@ -439,10 +388,7 @@ def evaluate_method(
         "f1_scores": f1_scores,
     }
 
-
-# ============================================================
 # EXPERIMENT 1: Main Experiment (Table 1) — 9 benchmarks
-# ============================================================
 
 def run_main_experiment(llm_client: LLMClient) -> dict:
     logger.info("=" * 70)
@@ -526,10 +472,7 @@ def run_main_experiment(llm_client: LLMClient) -> dict:
 
     return all_results
 
-
-# ============================================================
 # EXPERIMENT 2: δ_attention Independence (Table 2) — 2 benchmarks
-# ============================================================
 
 def run_attention_independence(llm_client: LLMClient) -> dict:
     logger.info("=" * 70)
@@ -603,10 +546,7 @@ def run_attention_independence(llm_client: LLMClient) -> dict:
 
     return all_results
 
-
-# ============================================================
 # EXPERIMENT 3: Phenomena — 3 benchmarks
-# ============================================================
 
 def run_phenomenon_experiments(llm_client: LLMClient) -> dict:
     logger.info("=" * 70)
@@ -637,7 +577,6 @@ def run_phenomenon_experiments(llm_client: LLMClient) -> dict:
         results["scissors_effect"][bench_name] = _run_scissors_effect(llm_client, bench_name)
 
     return results
-
 
 def _run_phase_transition(llm_client: LLMClient, bench_name: str) -> dict:
     from benchmarks.loader import BenchmarkLoader
@@ -703,11 +642,8 @@ def _run_phase_transition(llm_client: LLMClient, bench_name: str) -> dict:
         "total_skills": len(skill_bank),
     }
 
-
 def _run_compaction_cliff(llm_client: LLMClient, bench_name: str) -> dict:
-    """Run B2 (no compaction) and A3 (with compaction) on the SAME task stream.
-    Both libraries start from the same induced skills; B2 only appends,
-    A3 periodically compacts. This ensures fair token comparison."""
+    """Run B2 (no compaction) and A3 (with compaction) on the SAME task stream."""
     from benchmarks.loader import BenchmarkLoader
 
     loader = BenchmarkLoader({"name": bench_name, "num_samples": PHENOMENA_STREAM_LEN})
@@ -788,13 +724,8 @@ def _run_compaction_cliff(llm_client: LLMClient, bench_name: str) -> dict:
         "token_history": hist_a3,
     }
 
-
 def _run_scissors_effect(llm_client: LLMClient, bench_name: str) -> dict:
-    """Run 3 independent libraries on the same task stream:
-    - append_only (B1): never delete or merge
-    - skillos (B2): periodic DELETE of least-used skills (conservative)
-    - ours (A3): periodic MERGE + prune (aggressive compaction)
-    """
+    """Run 3 independent libraries on the same task stream:"""
     from benchmarks.loader import BenchmarkLoader
 
     loader = BenchmarkLoader({"name": bench_name, "num_samples": PHENOMENA_STREAM_LEN})
@@ -892,17 +823,10 @@ def _run_scissors_effect(llm_client: LLMClient, bench_name: str) -> dict:
             "skillos": _final(hist_skillos),
             "ours": _final(hist_ours)}
 
-
-# ============================================================
 # EXPERIMENT 4: Bound Tightening — 2 benchmarks
-# ============================================================
 
 def run_bound_tightening(llm_client: LLMClient) -> dict:
-    """Run 3 methods (B2/A1/A3) on the same task stream, tracking δ_M decomposition.
-    B2: append-only (no compaction)
-    A1: semantic compaction only (MERGE + prune)
-    A3: full compaction (MERGE + prune + attention formatting)
-    """
+    """Run 3 methods (B2/A1/A3) on the same task stream, tracking δ_M decomposition."""
     logger.info("=" * 70)
     logger.info("EXPERIMENT 4: Bound Tightening — 2 benchmarks, 3 methods")
     logger.info("=" * 70)
@@ -1007,10 +931,7 @@ def run_bound_tightening(llm_client: LLMClient) -> dict:
 
     return all_results
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     logger.remove()
@@ -1087,9 +1008,7 @@ def main():
             all_results[name] = {"error": str(exc)}
         save_intermediate()
 
-    # ============================================================
     # Final Summary
-    # ============================================================
     elapsed = time.time() - start_time
     stats = llm_client.stats
 
@@ -1218,7 +1137,6 @@ def main():
     logger.info(f"Final results: {output_path}")
 
     return True
-
 
 if __name__ == "__main__":
     success = main()

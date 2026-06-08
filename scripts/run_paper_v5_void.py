@@ -1,30 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SkillCurator Paper Experiments v5 — Void-Case (c_∅) Augmentation.
-
-This script extends v4 with the SRDP void-case prior c_∅
-(Memento-2 §3.2 Eq. 7-8). It re-induces skill banks (using the same
-seed as v4 for reproducibility), then evaluates 6 methods including
-the proposed A3+c_∅ on 7 text-output benchmarks.
-
-KEY DESIGN:
-  - τ_void sweep is FREE: the gate decision is determined by s_max(x),
-    which is computed once per task during retrieval. We cache s_max
-    and evaluate all τ candidates post-hoc → no extra LLM calls.
-  - For A3+c_∅: when s_max < τ_void, we re-run the LLM in zero-shot
-    mode (B0 prompt). This DOES cost extra calls, but only for the
-    ~20-40% of tasks expected to fall below threshold.
-
-ALFWORLD/WEBSHOP EXCLUSION:
-  These benchmarks require simulator-based completion metrics that
-  EM/F1 cannot capture. They are deferred to future work (§5.1) and
-  EXCLUDED from this experiment to keep main Table 1 clean.
-
-Usage:
-  nohup /usr/bin/python3.9 scripts/run_paper_v5_void.py \\
-      > experiments/paper_v5_stdout.log 2>&1 &
-"""
+"""SkillCurator Paper Experiments v5 — Void-Case (c_∅) Augmentation."""
 from __future__ import annotations
 
 import json
@@ -61,31 +37,22 @@ from src.curation.void_case import (
     compute_lambda_x,
 )
 
-
-# ============================================================
 # Configuration loader
-# ============================================================
 
 CONFIG_PATH = PROJECT_ROOT / "configs" / "paper_v5.yaml"
-
 
 def load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
-
 
 CONFIG = load_config()
 SEED = CONFIG.get("seed", 42)
 random.seed(SEED)
 np.random.seed(SEED)
 
-
-# ============================================================
 # Embedding model (lazy, shared)
-# ============================================================
 
 EMBED_MODEL = None
-
 
 def get_embed_model():
     global EMBED_MODEL
@@ -95,10 +62,7 @@ def get_embed_model():
         logger.info(f"Loaded embedding: {CONFIG['embedding']['model']}")
     return EMBED_MODEL
 
-
-# ============================================================
 # Metrics (copied from v4 for self-containment)
-# ============================================================
 
 def compute_token_f1(prediction: str, ground_truth: str) -> float:
     if not ground_truth.strip():
@@ -115,7 +79,6 @@ def compute_token_f1(prediction: str, ground_truth: str) -> float:
     recall = num_common / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
-
 def compute_em(prediction: str, ground_truth: str) -> float:
     def normalize(s):
         s = s.lower().strip()
@@ -130,10 +93,8 @@ def compute_em(prediction: str, ground_truth: str) -> float:
         return 0.0
     return 1.0 if norm_gt in norm_pred else 0.0
 
-
 def avg(lst):
     return sum(lst) / len(lst) if lst else 0.0
-
 
 def std(lst):
     if len(lst) < 2:
@@ -141,10 +102,7 @@ def std(lst):
     m = avg(lst)
     return math.sqrt(sum((x - m) ** 2 for x in lst) / (len(lst) - 1))
 
-
-# ============================================================
 # Skill embedding helpers (shared with v4)
-# ============================================================
 
 def skill_to_text(s: Skill) -> str:
     parts = [s.name, s.description]
@@ -153,14 +111,12 @@ def skill_to_text(s: Skill) -> str:
         parts.extend(s.constraints[:2])
     return " ".join(parts)
 
-
 def compute_skill_embeddings(skills: list[Skill]) -> np.ndarray:
     if not skills:
         return np.zeros((0, 384), dtype=np.float32)
     model = get_embed_model()
     texts = [skill_to_text(s) for s in skills]
     return model.encode(texts, normalize_embeddings=True).astype(np.float32)
-
 
 def find_redundant_pairs(skills: list[Skill], threshold: float = 0.75) -> list[tuple[int, int, float]]:
     if len(skills) < 2:
@@ -174,7 +130,6 @@ def find_redundant_pairs(skills: list[Skill], threshold: float = 0.75) -> list[t
                 pairs.append((i, j, float(sim_matrix[i][j])))
     pairs.sort(key=lambda x: x[2], reverse=True)
     return pairs
-
 
 def deduplicate_skills_embedding(skills: list[Skill], threshold: float = 0.75) -> list[Skill]:
     if len(skills) < 2:
@@ -192,10 +147,7 @@ def deduplicate_skills_embedding(skills: list[Skill], threshold: float = 0.75) -
             keep_indices.append(i)
     return [skills[i] for i in keep_indices]
 
-
-# ============================================================
 # Skill induction (same as v4)
-# ============================================================
 
 def induce_skills_from_tasks(
     llm_client: LLMClient,
@@ -221,7 +173,6 @@ def induce_skills_from_tasks(
     logger.info(f"  [{label}] Built {len(skill_bank)} skills from {len(tasks)} tasks")
     return skill_bank
 
-
 def save_skill_bank(skill_bank: list[Skill], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = []
@@ -238,7 +189,6 @@ def save_skill_bank(skill_bank: list[Skill], path: Path) -> None:
         })
     with open(path, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 def load_skill_bank(path: Path) -> list[Skill] | None:
     if not path.exists():
@@ -264,14 +214,10 @@ def load_skill_bank(path: Path) -> list[Skill] | None:
         skills.append(s)
     return skills
 
-
-# ============================================================
 # Skill Library Formatting (same as v4 for B0/B2/A1/A3)
-# ============================================================
 
 def format_skills_B0(skills: list[Skill]) -> str:
     return ""
-
 
 def format_skills_B1(skills: list[Skill]) -> str:
     parts = []
@@ -282,36 +228,20 @@ def format_skills_B1(skills: list[Skill]) -> str:
         parts.append("")
     return "\n".join(parts)
 
-
 def format_skills_B2(skills: list[Skill]) -> str:
     return format_skills_B1(skills)
 
-
 def format_skills_A3(skills: list[Skill]) -> str:
     return format_skill_library(skills, config=FormattingConfig(strategy="sandwich_compact"))
-
 
 def format_skills_A1(skills: list[Skill]) -> str:
     # A1 uses plain B1 formatting after dedup (compaction without attention ops)
     return format_skills_B1(skills)
 
-
-# ============================================================
 # Evaluation Core: caches s_max so we can sweep τ_void post-hoc
-# ============================================================
 
 class V5Evaluator:
-    """Evaluates a method on a list of test tasks, caching s_max per task
-    so that multiple τ_void thresholds can be evaluated without extra LLM calls.
-
-    For each task we run TWO LLM calls when c_∅ is enabled:
-      (a) zero-shot (B0 prompt) → cached as `pred_void`
-      (b) skill-injected (method's prompt) → cached as `pred_inject`
-    Then for any τ candidate we pick (a) or (b) per-task based on s_max.
-
-    Cost: 2× LLM calls per task per c_∅-enabled method (vs 1× without c_∅).
-    BUT we sweep ALL τ values for FREE on top of that.
-    """
+    """Evaluates a method on a list of test tasks, caching s_max per task"""
 
     def __init__(self, llm_client: LLMClient, top_k: int = 5):
         self.llm = llm_client
@@ -353,17 +283,7 @@ class V5Evaluator:
         with_void: bool,
         label: str = "",
     ) -> dict:
-        """Evaluate a method, optionally with c_∅ post-hoc sweepable.
-
-        Returns:
-            dict with per-task records:
-              - s_max_list, pred_inject_list, pred_void_list (if with_void),
-                em_inject_list, f1_inject_list, em_void_list, f1_void_list,
-                tokens_inject_list, expected_list
-
-            Plus aggregate metrics for primary τ (CONFIG.void_case.tau_void)
-            when with_void=True.
-        """
+        """Evaluate a method, optionally with c_∅ post-hoc sweepable."""
         per_task = []
         for idx, task in enumerate(test_tasks):
             desc = task["description"]
@@ -440,10 +360,7 @@ class V5Evaluator:
 
     @staticmethod
     def aggregate_with_tau(per_task: list[dict], tau: float) -> dict:
-        """Apply c_∅ gate at threshold τ, aggregate metrics.
-
-        For each task: if s_max >= τ → use inject result, else use void result.
-        """
+        """Apply c_∅ gate at threshold τ, aggregate metrics."""
         em_list, f1_list, tok_list = [], [], []
         n_void = 0
         for r in per_task:
@@ -468,10 +385,7 @@ class V5Evaluator:
             "std_f1": std(f1_list),
         }
 
-
-# ============================================================
 # Main pipeline
-# ============================================================
 
 def run_v5_main(llm_client: LLMClient) -> dict:
     """Run v5 main experiment: 6 methods × 7 benchmarks + τ sweep."""
@@ -646,10 +560,7 @@ def run_v5_main(llm_client: LLMClient) -> dict:
     all_results["meta"]["elapsed_seconds"] = time.time() - t0
     return all_results
 
-
-# ============================================================
 # Entry
-# ============================================================
 
 def main():
     load_env()
@@ -684,7 +595,6 @@ def main():
         json.dump(results, f, ensure_ascii=False, indent=2, default=str)
     logger.info(f"\n✓ Final results → {out_path}")
     logger.info(f"  total elapsed: {results['meta']['elapsed_seconds']:.0f}s")
-
 
 if __name__ == "__main__":
     main()

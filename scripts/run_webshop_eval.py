@@ -58,10 +58,7 @@ from src.utils.llm import LLMClient
 from src.utils.skill_formatter import FormattingConfig, format_skill_library
 from src.utils.webshop_env import WebShopTraceEnv
 
-
-# ============================================================
 # Skill bank IO  (mirrors run_alfworld_eval.load_skill_bank)
-# ============================================================
 
 def load_skill_bank(path: Path) -> tuple[list[Skill], np.ndarray]:
     if not path.exists():
@@ -76,12 +73,10 @@ def load_skill_bank(path: Path) -> tuple[list[Skill], np.ndarray]:
     embs = embs / norms
     return skills, embs
 
-
 def embed_query(text: str, encoder) -> np.ndarray:
     v = encoder.encode([text], show_progress_bar=False, convert_to_numpy=True)[0]
     n = float(np.linalg.norm(v))
     return v / max(n, 1e-12)
-
 
 def retrieve_skills(
     query_emb: np.ndarray,
@@ -96,10 +91,7 @@ def retrieve_skills(
     idx = np.argsort(sims)[::-1][:top_k]
     return [skills[i] for i in idx], s_max
 
-
-# ============================================================
 # Single-step decision prompt
-# ============================================================
 
 PROMPT_SYSTEM_BASE = """You are a web-shopping agent solving a customer's request.
 
@@ -116,7 +108,6 @@ Output exactly two lines:
 The Action MUST appear in the Valid actions list verbatim (case-insensitive).
 Examples of valid actions: click[buy now], click[< prev], click[red], search[blue hoodie]."""
 
-
 PROMPT_SYSTEM_WITH_SKILLS = PROMPT_SYSTEM_BASE + """
 
 The following procedural skills, learned from past successful trajectories,
@@ -125,9 +116,7 @@ may help. Use them as guidance; ignore them when not applicable:
 {skill_block}
 """
 
-
 _ACTION_RE = re.compile(r"Action\s*:\s*(.+?)(?:\n|$)", re.IGNORECASE)
-
 
 def parse_action(reply: str) -> str:
     """Pull the 'Action: ...' line out of an LLM reply (raw text, no snapping)."""
@@ -139,7 +128,6 @@ def parse_action(reply: str) -> str:
         if ln.strip():
             return ln.strip()
     return ""
-
 
 def predict_action(
     llm: LLMClient,
@@ -184,14 +172,10 @@ def predict_action(
     snapped = WebShopTraceEnv.snap_to_valid(raw, sample["valid_actions"])
     return snapped, tokens_used
 
-
-# ============================================================
 # Method-specific skill block builders (mirrors run_alfworld_eval)
-# ============================================================
 
 def build_skill_block_b0(query: str, **kwargs) -> tuple[str, dict]:
     return "", {"method": "B0", "n_skills_used": 0, "s_max": 0.0}
-
 
 def _format_skills_plain(skills: list[Skill]) -> str:
     if not skills:
@@ -209,7 +193,6 @@ def _format_skills_plain(skills: list[Skill]) -> str:
         parts.append("\n".join(block))
     return "\n\n".join(parts)
 
-
 def build_skill_block_b2(
     query: str, skills: list[Skill], skill_embs: np.ndarray,
     encoder, top_k: int = 3, **kwargs,
@@ -222,7 +205,6 @@ def build_skill_block_b2(
         "method": "B2", "n_skills_used": len(selected), "s_max": s_max,
     }
 
-
 def build_skill_block_a3(
     query: str, skills: list[Skill], skill_embs: np.ndarray,
     encoder, top_k: int = 3, **kwargs,
@@ -233,7 +215,6 @@ def build_skill_block_a3(
     selected, s_max = retrieve_skills(q, skills, skill_embs, top_k)
     block = format_skill_library(selected, FormattingConfig(max_skills_in_prompt=top_k))
     return block, {"method": "A3", "n_skills_used": len(selected), "s_max": s_max}
-
 
 def build_skill_block_a3_planc(
     query: str, skills: list[Skill], skill_embs: np.ndarray,
@@ -251,7 +232,6 @@ def build_skill_block_a3_planc(
     return block, {"method": "A3+PlanC", "n_skills_used": len(selected),
                     "s_max": s_max, "tau": tau_void, "void": False}
 
-
 METHOD_BUILDERS = {
     "B0": build_skill_block_b0,
     "B2": build_skill_block_b2,
@@ -259,10 +239,7 @@ METHOD_BUILDERS = {
     "A3+PlanC": build_skill_block_a3_planc,
 }
 
-
-# ============================================================
 # Stratified sampling on (id, task_type)
-# ============================================================
 
 def stratified_sample_records(
     records: list[dict], n: int, seed: int,
@@ -298,10 +275,7 @@ def stratified_sample_records(
     selected.sort()
     return selected
 
-
-# ============================================================
 # Plan-C calibration  (re-uses CV machinery from void_case)
-# ============================================================
 
 def calibrate_planc_tau(
     train_per_task: list[dict],
@@ -338,10 +312,7 @@ def calibrate_planc_tau(
         "n_train": int(len(s)),
     }
 
-
-# ============================================================
 # Main eval
-# ============================================================
 
 def run_eval(args) -> dict[str, Any]:
     load_env()
@@ -549,7 +520,6 @@ def run_eval(args) -> dict[str, Any]:
     logger.info(f"\n[final] saved to {out_path}")
     return results
 
-
 def _flush_partial(out_path: Path, results: dict, method: str, per_task: list) -> None:
     snap = dict(results)
     snap["_partial"] = {"method_in_progress": method, "n_done": len(per_task)}
@@ -557,7 +527,6 @@ def _flush_partial(out_path: Path, results: dict, method: str, per_task: list) -
         out_path.write_text(json.dumps(snap, indent=2, default=str))
     except Exception as e:
         logger.warning(f"partial flush failed: {e}")
-
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -577,7 +546,6 @@ def parse_args():
     p.add_argument("--output", type=str,
                    default="experiments/webshop_eval_results.json")
     return p.parse_args()
-
 
 if __name__ == "__main__":
     args = parse_args()

@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""
-SkillOS Dialect Benchmark — reproduce SkillOS benchmark results using DeepSeek.
-
-Reproduces 3 SkillOS benchmarks adapted for our LLM backend:
-1. Math (formal-proof): K_{3,4} spanning trees (answer=432)
-2. Physiology (system-dynamics): Mitral valve regurgitation
-3. Skill Compression: Apply dialects to SkillForge's induced skills
-
-SkillOS Reference Values (Claude Opus 4.6):
-  | Benchmark        | Dialect        | Token Reduction | Quality |
-  |------------------|----------------|-----------------|---------|
-  | Math K_{3,4}     | formal-proof   | -51.3%          | 90/100  |
-  | Physiology       | system-dynamics| -61.1%          | 100/100 |
-  | Code Editing     | strict-patch   | -97.5%          | 2/2     |
-
-We validate: same quality with DeepSeek-V3, measure token reduction.
-"""
+"""SkillOS Dialect Benchmark — reproduce SkillOS benchmark results using DeepSeek."""
 from __future__ import annotations
 
 import json
@@ -45,10 +29,7 @@ from src.skillos.dialect_framework import (
     FORMAL_PROOF_RENDERER_PROMPT,
 )
 
-
-# ============================================================
 # Benchmark 1: Math — K_{3,4} Spanning Trees
-# ============================================================
 
 CORRECT_ANSWER = 432
 
@@ -80,7 +61,6 @@ QED: [conclusion]
 ```
 Rules: definition, matrix_tree_theorem, cofactor_expansion, arithmetic, substitution.
 Use exact numeric values at every step. Output ONLY the proof block."""
-
 
 def verify_math(text: str) -> dict:
     """Verify math answer (adapted from SkillOS benchmark_math.py)."""
@@ -117,10 +97,7 @@ def verify_math(text: str) -> dict:
     result["score"] = score
     return result
 
-
-# ============================================================
 # Benchmark 2: Physiology — Mitral Valve Regurgitation
-# ============================================================
 
 PHYSIOLOGY_EXPECTED = {"velocity": 500, "volume": 60, "fraction": 60, "severity": "severe"}
 
@@ -155,7 +132,6 @@ Solve using ONLY system-dynamics dialect notation. No English prose — only str
 ```
 Map the heart to a hydraulic circuit. Output ONLY the structured computation block."""
 
-
 def verify_physiology(text: str) -> dict:
     """Verify physiology answer."""
     result = {"velocity_correct": False, "volume_correct": False,
@@ -184,10 +160,7 @@ def verify_physiology(text: str) -> dict:
     result["score"] = score
     return result
 
-
-# ============================================================
 # Benchmark 3: Skill Compression
-# ============================================================
 
 def run_skill_compression_benchmark(compiler: DialectCompiler) -> dict:
     """Test dialect compression on SkillForge's skill format."""
@@ -235,10 +208,7 @@ def run_skill_compression_benchmark(compiler: DialectCompiler) -> dict:
 
     return results
 
-
-# ============================================================
 # Benchmark 4: Taxonomy Token Savings
-# ============================================================
 
 def run_taxonomy_benchmark() -> dict:
     """Test hierarchical skill taxonomy token savings."""
@@ -270,10 +240,7 @@ def run_taxonomy_benchmark() -> dict:
         "family_index_qa": family_index,
     }
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     logger.remove()
@@ -297,9 +264,7 @@ def main():
     compiler = DialectCompiler(llm_client=llm)
     all_results = {}
 
-    # ================================================================
     # Benchmark 1: Math (formal-proof dialect)
-    # ================================================================
     logger.info("\n" + "=" * 60)
     logger.info("BENCHMARK 1: Math — K_{3,4} Spanning Trees (formal-proof)")
     logger.info("=" * 60)
@@ -351,9 +316,7 @@ def main():
                 f"Reduction={token_reduction_math:.1f}%")
     logger.info(f"  SkillOS reference: -51.3%, 90/100")
 
-    # ================================================================
     # Benchmark 2: Physiology (system-dynamics dialect)
-    # ================================================================
     logger.info("\n" + "=" * 60)
     logger.info("BENCHMARK 2: Physiology — Mitral Valve (system-dynamics)")
     logger.info("=" * 60)
@@ -400,9 +363,7 @@ def main():
                 f"Reduction={token_reduction_phys:.1f}%")
     logger.info(f"  SkillOS reference: -61.1%, 100/100")
 
-    # ================================================================
     # Benchmark 3: Skill Compression (local, no API)
-    # ================================================================
     logger.info("\n" + "=" * 60)
     logger.info("BENCHMARK 3: Skill Compression (3 dialects × 2 skills)")
     logger.info("=" * 60)
@@ -416,9 +377,7 @@ def main():
             logger.info(f"    {dialect}: {dr['original_tokens']}→{dr['compressed_tokens']} tokens "
                         f"(-{dr['compression_ratio']*100:.1f}%)")
 
-    # ================================================================
     # Benchmark 4: Taxonomy Token Savings (local, no API)
-    # ================================================================
     logger.info("\n" + "=" * 60)
     logger.info("BENCHMARK 4: Hierarchical Taxonomy Token Savings")
     logger.info("=" * 60)
@@ -434,9 +393,7 @@ def main():
     logger.info(f"  SkillOS reference: -61% routing-phase tokens")
     logger.info(f"\n  Domain index:\n{taxonomy_results['domain_index']}")
 
-    # ================================================================
     # Benchmark 5: LLM-powered dialect compilation (burns tokens)
-    # ================================================================
     logger.info("\n" + "=" * 60)
     logger.info("BENCHMARK 5: LLM-Powered Dialect Compilation")
     logger.info("=" * 60)
@@ -479,9 +436,7 @@ def main():
         "reduction_pct": (original_tokens - llm_tokens) / original_tokens * 100 if original_tokens > 0 else 0,
     }
 
-    # ================================================================
     # Final Summary
-    # ================================================================
     elapsed = time.time() - start_time
     stats = llm.stats
 
@@ -547,7 +502,6 @@ def main():
     }
     output_path.write_text(json.dumps(all_results, indent=2, default=str))
     logger.info(f"\nResults saved to: {output_path}")
-
 
 if __name__ == "__main__":
     main()

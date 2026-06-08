@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""
-SkillForge V6 Unified Benchmark Runner — AI-Refined Experience Evolution
-
-4 Benchmarks: Gaia2, LoCoMo, GAIA (HF), ALFWorld
-Train/Test split: first half = train (collect experiences), second half = test (evaluate)
-Concurrency: 50
-
-Ablation groups:
-  A: Baseline (no augmentation)
-  B: Raw experience injection (success+failure, no AI refinement)
-  C: AI-refined experience injection (success+failure, with version-aware AI refinement)
-
-Key contribution: C vs B = value of AI-refined version-aware experience evolution
-"""
+"""SkillForge V6 Unified Benchmark Runner — AI-Refined Experience Evolution"""
 import asyncio
 import json
 import os
@@ -88,7 +75,6 @@ def llm_review_fn(prompt: str) -> str:
         future = executor.submit(_run_in_thread)
         return future.result(timeout=90)
 
-
 # ─── Unified Task Runner ──────────────────────────────────────────────────
 
 async def run_task_generic(task: dict, experience_section: str = "",
@@ -137,13 +123,8 @@ async def run_task_generic(task: dict, experience_section: str = "",
     result["time_cost"] = time.time() - t0
     return result
 
-
 async def _run_gaia2_task(task: dict, experience_section: str, group: str = "train") -> dict:
-    """Run Gaia2 task (CLI tool calling via CodeBuddy agent).
-    
-    Args:
-        group: "train", "A", "B", "C" — each group gets isolated state_dir
-    """
+    """Run Gaia2 task (CLI tool calling via CodeBuddy agent)."""
     import subprocess
     scenario_path = task["metadata"]["scenario_path"]
     scenario = json.load(open(scenario_path))
@@ -235,7 +216,6 @@ Run any command with `--help` for details.
     result["total_actions"] = len(result["actions"])
     return result
 
-
 # ─── Benchmark Loaders ────────────────────────────────────────────────────
 
 def load_gaia2_tasks(n: int = 50) -> list[dict]:
@@ -260,13 +240,11 @@ def load_gaia2_tasks(n: int = 50) -> list[dict]:
         })
     return tasks
 
-
 def load_hf_tasks(benchmark: str, n: int = 50) -> list[dict]:
     """Load tasks from HuggingFace via BenchmarkLoader."""
     from benchmarks.loader import BenchmarkLoader
     loader = BenchmarkLoader({"name": benchmark, "num_samples": n})
     return loader.load()
-
 
 def load_swebench_tasks(n: int = 20) -> list[dict]:
     """Load SWE-bench Verified tasks (subset with available Docker images)."""
@@ -319,7 +297,6 @@ def load_swebench_tasks(n: int = 20) -> list[dict]:
 
     return tasks
 
-
 # ─── Evaluation ───────────────────────────────────────────────────────────
 
 def evaluate_task(result: dict, benchmark: str) -> dict:
@@ -347,7 +324,6 @@ def evaluate_task(result: dict, benchmark: str) -> dict:
         f1 = 0.0
 
     return {"score": max(em, f1), "em": em, "f1": f1, "method": "token_f1"}
-
 
 def _evaluate_gaia2(result: dict) -> dict:
     """Evaluate Gaia2 task using events.jsonl (exact action matching)."""
@@ -422,7 +398,6 @@ def _evaluate_gaia2(result: dict) -> dict:
 
     return {"score": soft_recall, "em": em, "exact_recall": exact_recall,
             "soft_recall": soft_recall, "method": "gaia2_events"}
-
 
 # ─── Main Experiment ──────────────────────────────────────────────────────
 
@@ -556,7 +531,6 @@ async def run_benchmark(benchmark: str, tasks: list[dict]) -> dict:
 
     return full_report
 
-
 async def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
     print("╔════════════════════════════════════════════════════════════════╗")
@@ -622,7 +596,6 @@ async def main():
     with open(f"{RESULTS_DIR}/final_summary.json", "w") as f:
         json.dump(all_reports, f, indent=2, ensure_ascii=False)
     print(f"\n  Saved: {RESULTS_DIR}/final_summary.json")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

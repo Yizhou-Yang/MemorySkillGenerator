@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SkillCurator Full Paper Experiments — overnight run for all paper results.
-
-Covers ALL experiments from paper outline v5:
-  §6.1 Main Experiment (Table 1): B0/B1/B2/A1/A2/A3 on HotpotQA
-  §6.2 δ_attention Independence (Table 2): fixed content, vary format/position
-  §6.3 Ablation (Table 3): progressive removal of components
-  §6.5 Library Health Tracking (Figure 3): N_eff/|S| curves
-  §6.6 Bound Tightening (Figure 4): δ_M proxy over time
-  §6.7 Phenomenon 1: Phase Transition (inverted-U curve)
-  §6.7 Phenomenon 2: Compaction Cliff (token step-down)
-  §6.7 Phenomenon 3: Scissors Effect (effective vs total count)
-
-Token budget: ~2M tokens (well within 20M limit)
-Expected runtime: 2-4 hours
-
-Usage:
-  nohup /usr/bin/python3.9 scripts/run_full_paper_experiments.py > experiments/full_paper_stdout.log 2>&1 &
-"""
+"""SkillCurator Full Paper Experiments — overnight run for all paper results."""
 from __future__ import annotations
 
 import json
@@ -54,10 +36,7 @@ from src.utils.skill_formatter import (
     FormattingConfig,
 )
 
-
-# ============================================================
 # Configuration
-# ============================================================
 
 TRAIN_SAMPLES = 8   # Skills induced from these
 TEST_SAMPLES = 10   # Evaluated on these
@@ -79,10 +58,7 @@ ATTENTION_STRATEGIES = [
     "full_optimized",  # all δ_attention ops combined
 ]
 
-
-# ============================================================
 # Metrics
-# ============================================================
 
 def compute_token_f1(prediction: str, ground_truth: str) -> float:
     if not ground_truth.strip():
@@ -99,7 +75,6 @@ def compute_token_f1(prediction: str, ground_truth: str) -> float:
     recall = num_common / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
-
 def compute_em(prediction: str, ground_truth: str) -> float:
     def normalize(s):
         s = s.lower().strip()
@@ -110,19 +85,14 @@ def compute_em(prediction: str, ground_truth: str) -> float:
         return s.strip()
     return 1.0 if normalize(ground_truth) in normalize(prediction) else 0.0
 
-
 def avg(lst):
     return sum(lst) / len(lst) if lst else 0.0
 
-
-# ============================================================
 # Skill Library Formatting Variants (for ablation)
-# ============================================================
 
 def format_skills_B0(skills: list[Skill], query: str) -> str:
     """B0: No memory — just the query."""
     return ""
-
 
 def format_skills_B1(skills: list[Skill], query: str) -> str:
     """B1: Append-only — all skills in insertion order, no curation."""
@@ -133,7 +103,6 @@ def format_skills_B1(skills: list[Skill], query: str) -> str:
             parts.append(f"Constraints: {'; '.join(s.constraints)}")
         parts.append("")
     return "\n".join(parts)
-
 
 def format_skills_B2(skills: list[Skill], query: str) -> str:
     """B2: SkillOS-style — basic retrieval, no attention optimization."""
@@ -148,7 +117,6 @@ def format_skills_B2(skills: list[Skill], query: str) -> str:
     scored.sort(key=lambda x: x[0], reverse=True)
     top_skills = [s for _, s in scored[:5]]
     return format_skills_B1(top_skills, query)
-
 
 def format_skills_A1(skills: list[Skill], query: str) -> str:
     """A1: Semantic-only — MERGE + Prune, but no attention optimization."""
@@ -166,7 +134,6 @@ def format_skills_A1(skills: list[Skill], query: str) -> str:
     top_skills = [s for _, s in scored[:5]]
     return format_skills_B1(top_skills, query)
 
-
 def format_skills_A2(skills: list[Skill], query: str) -> str:
     """A2: Attention-only — Position Opt + Format + Consistency + Rewrite, no MERGE."""
     # No dedup, but apply attention optimization
@@ -181,7 +148,6 @@ def format_skills_A2(skills: list[Skill], query: str) -> str:
     top_skills = [s for _, s in scored[:5]]
     # Apply sandwich ordering + compact format
     return format_skill_library(top_skills, config=FormattingConfig(strategy="sandwich_compact"))
-
 
 def format_skills_A3(skills: list[Skill], query: str) -> str:
     """A3: Full — MERGE + Prune + Position Opt + Format + Consistency + Rewrite."""
@@ -199,7 +165,6 @@ def format_skills_A3(skills: list[Skill], query: str) -> str:
     top_skills = [s for _, s in scored[:5]]
     # Apply full attention optimization
     return format_skill_library(top_skills, config=FormattingConfig(strategy="sandwich_compact"))
-
 
 def _deduplicate_skills(skills: list[Skill], threshold: float = 0.5) -> list[Skill]:
     """Remove redundant skills (simulate MERGE)."""
@@ -221,7 +186,6 @@ def _deduplicate_skills(skills: list[Skill], threshold: float = 0.5) -> list[Ski
             keep.append(s)
     return keep
 
-
 FORMAT_METHODS = {
     "B0": format_skills_B0,
     "B1": format_skills_B1,
@@ -231,10 +195,7 @@ FORMAT_METHODS = {
     "A3": format_skills_A3,
 }
 
-
-# ============================================================
 # Experiment 1: Main Experiment (§6.1 Table 1)
-# ============================================================
 
 def run_main_experiment(llm_client: LLMClient) -> dict:
     """Run the main ablation: B0/B1/B2/A1/A2/A3 on HotpotQA."""
@@ -328,16 +289,10 @@ def run_main_experiment(llm_client: LLMClient) -> dict:
 
     return results
 
-
-# ============================================================
 # Experiment 2: δ_attention Independence (§6.2 Table 2)
-# ============================================================
 
 def run_attention_independence(llm_client: LLMClient, skill_bank: list[Skill] = None) -> dict:
-    """
-    §6.2: Fix library content, only change format/position → measure SR change.
-    If SR changes significantly → δ_attention is an independent dimension.
-    """
+    """§6.2: Fix library content, only change format/position → measure SR change."""
     logger.info("=" * 70)
     logger.info("EXPERIMENT 2: δ_attention Independence (§6.2 Table 2)")
     logger.info("=" * 70)
@@ -410,7 +365,6 @@ def run_attention_independence(llm_client: LLMClient, skill_bank: list[Skill] = 
 
     return results
 
-
 def _format_with_strategy(skills: list[Skill], strategy: str, query: str) -> str:
     """Format skill library with a specific attention strategy."""
     import random
@@ -480,10 +434,7 @@ def _format_with_strategy(skills: list[Skill], strategy: str, query: str) -> str
 
     return format_skills_B1(skills, query)
 
-
-# ============================================================
 # Experiment 3: Phenomenon Experiments (§6.7)
-# ============================================================
 
 def run_phenomenon_experiments(llm_client: LLMClient) -> dict:
     """Run all three phenomenon experiments."""
@@ -507,12 +458,8 @@ def run_phenomenon_experiments(llm_client: LLMClient) -> dict:
 
     return results
 
-
 def _run_phase_transition(llm_client: LLMClient) -> dict:
-    """
-    Phenomenon 1: Inverted-U performance curve.
-    Accumulate skills, test at different library sizes.
-    """
+    """Phenomenon 1: Inverted-U performance curve."""
     from benchmarks.loader import BenchmarkLoader
 
     # Accumulate a large skill bank
@@ -573,12 +520,8 @@ def _run_phase_transition(llm_client: LLMClient) -> dict:
         "peak_em": max(c["avg_em"] for c in curve) if curve else 0,
     }
 
-
 def _run_compaction_cliff(llm_client: LLMClient) -> dict:
-    """
-    Phenomenon 2: Token consumption drops sharply after compaction.
-    Simulate a task stream with periodic compaction.
-    """
+    """Phenomenon 2: Token consumption drops sharply after compaction."""
     from benchmarks.loader import BenchmarkLoader
 
     loader = BenchmarkLoader({"name": BENCHMARK, "num_samples": 12})
@@ -636,12 +579,8 @@ def _run_compaction_cliff(llm_client: LLMClient) -> dict:
         "total_steps": len(tasks),
     }
 
-
 def _run_scissors_effect(llm_client: LLMClient) -> dict:
-    """
-    Phenomenon 3: Effective count diverges from total count.
-    Track N_eff/|S| over a task stream.
-    """
+    """Phenomenon 3: Effective count diverges from total count."""
     from benchmarks.loader import BenchmarkLoader
 
     loader = BenchmarkLoader({"name": BENCHMARK, "num_samples": 12})
@@ -709,10 +648,7 @@ def _run_scissors_effect(llm_client: LLMClient) -> dict:
         "scissors_gap": (history[-1]["total_count"] - history[-1]["effective_count"]) if history else 0,
     }
 
-
-# ============================================================
 # Experiment 4: Bound Tightening Verification (§6.6)
-# ============================================================
 
 def run_bound_tightening(llm_client: LLMClient) -> dict:
     """Verify Proposition 3: MERGE reduces δ_M."""
@@ -776,10 +712,7 @@ def run_bound_tightening(llm_client: LLMClient) -> dict:
         ],
     }
 
-
-# ============================================================
 # Experiment 5: Cross-Benchmark Validation
-# ============================================================
 
 def run_cross_benchmark(llm_client: LLMClient) -> dict:
     """Run A3 vs B2 on LoCoMo and LongMemEval for generalization."""
@@ -849,10 +782,7 @@ def run_cross_benchmark(llm_client: LLMClient) -> dict:
 
     return results
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     logger.remove()
@@ -880,9 +810,7 @@ def main():
 
     all_results = {"meta": {"start_time": time.strftime("%Y-%m-%d %H:%M:%S")}}
 
-    # ============================================================
     # Run all experiments
-    # ============================================================
 
     experiments = [
         ("main_experiment", run_main_experiment),
@@ -913,9 +841,7 @@ def main():
         output_path.write_text(json.dumps(all_results, indent=2, default=str, ensure_ascii=False))
         logger.info(f"  [Saved intermediate results: {elapsed:.0f}s, {stats['total_tokens']:,} tokens]")
 
-    # ============================================================
     # Final Summary
-    # ============================================================
     elapsed = time.time() - start_time
     stats = llm_client.stats
 
@@ -992,7 +918,6 @@ def main():
     logger.info(f"\n  Final results saved to: {output_path}")
 
     return True
-
 
 if __name__ == "__main__":
     success = main()

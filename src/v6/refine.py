@@ -4,7 +4,6 @@ from json_repair import repair_json
 import json
 from .experience import Experience
 
-
 AI_REVIEW_PROMPT = """You are a skill quality optimizer. REFINE this experience to maximize reusability.
 
 CRITICAL: You must PRESERVE ALL DETAILS. Do not summarize, compress, or remove any steps.
@@ -34,7 +33,6 @@ Failure reason: {failure_reason}
   "quality_score": 0-10
 }}"""
 
-
 CROSS_AGENT_EVAL_PROMPT = """You are an independent quality evaluator for AI agent skills/experiences.
 Evaluate whether this experience is high-quality and worth injecting into future tasks.
 
@@ -63,7 +61,6 @@ Generalized steps: {generalized_steps}
   "reason": "one sentence justification"
 }}"""
 
-
 def _format_patch_history(patch_history: list) -> str:
     if not patch_history:
         return ""
@@ -82,7 +79,6 @@ def _format_patch_history(patch_history: list) -> str:
             lines.append(f"  Removed: {p['removed_steps']}")
     lines.append("\nUse this history for a STRONGER refinement.\n")
     return "\n".join(lines)
-
 
 def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
     """Version-conditioned refinement. Uses json_repair for robust JSON extraction."""
@@ -132,18 +128,8 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
         "refined": False,
     }
 
-
 def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
-    """Cross-agent quality evaluation: an independent LLM judges skill quality.
-
-    This replaces the "immediate failure retry" pattern. In production we don't
-    know if a task succeeded, so we use a separate agent to assess whether the
-    experience is worth injecting into future tasks.
-
-    Returns:
-        dict with keys: total (0-10), verdict ("inject"|"skip"|"low_confidence"),
-        actionability, generalizability, correctness, novelty, reason
-    """
+    """Cross-agent quality evaluation: an independent LLM judges skill quality."""
     default = {"total": 5, "verdict": "inject", "reason": "no evaluator available",
                "actionability": 2, "generalizability": 2, "correctness": 1, "novelty": 0}
 

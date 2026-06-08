@@ -4,7 +4,6 @@ import pytest
 
 from benchmarks.loader import BenchmarkLoader
 
-
 class TestBenchmarkLoader:
     """Benchmark loader tests — loads real data from HuggingFace."""
 
@@ -40,7 +39,6 @@ class TestBenchmarkLoader:
         loader = BenchmarkLoader({"name": "nonexistent"})
         with pytest.raises(ValueError, match="Unsupported benchmark"):
             loader.load()
-
 
 class TestMemoryCompressors:
     """Memory compressor factory tests (no LLM calls)."""

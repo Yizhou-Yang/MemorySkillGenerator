@@ -1,38 +1,36 @@
-# V6 Experiment Runners
+# V6 Experiment Runner
 
-Experiment scripts for running SkillForge V6 ablation (A/B/C groups) on each benchmark.
+Single experiment runner for the SkillForge V6 ablation (A/B/C groups)
+on GAIA / ALFWorld / LoCoMo.
 
-## Files
+## File
 
-| File | Benchmark | Notes |
-|------|-----------|-------|
-| `unified_v6_runner.py` | Gaia2, LoCoMo, GAIA (HF), ALFWorld | Main runner; train/test split = first half / second half |
-| `swebench_dynamic_runner.py` | SWE-bench Verified | Docker container per instance; agent uses Bash to read/edit/test |
-| `alfworld_interactive_runner.py` | ALFWorld | textworld subprocess per game; agent sends text commands |
+| File | Description |
+|------|-------------|
+| `latest_runner.py` | Sequential iterative training + cross-agent skill quality critic. Metrics: EM (GAIA, LoCoMo) and pass@1 (ALFWorld), aligned with competing papers (Voyager, Reflexion, SkillWeaver, Mem0). |
 
 ## Ablation Groups
 
-- **A (Baseline)**: original prompt, no augmentation
-- **B (Raw)**: inject experiences without AI refinement (success+failure)
-- **C (AI-Refined)**: inject experiences after `refine.py` (version-conditioned LLM refinement)
+- **A (Baseline)** — original prompt, no augmentation.
+- **B (Raw)** — inject experiences without AI refinement.
+- **C (AI-Refined)** — inject AI-refined experiences that passed the cross-agent
+  quality critic (`quality >= QUALITY_THRESHOLD = 5`).
 
-All three groups evaluate on the **same** test set with isolated state (per-group state directories
-for Gaia2, fresh containers for SWE-bench).
+## Design Choices
 
-## Configuration
+1. **No oracle-driven retry on QA tasks.** In real deployments we cannot tell
+   whether a GAIA / LoCoMo answer is correct. Instead, every candidate
+   experience is rated 0–10 by an independent LLM critic; only experiences
+   above the threshold enter the library.
+2. **ALFWorld retry kept** because it has a real `won` signal from the
+   environment.
+3. **Metrics** match competing literature: Exact Match (string-normalized
+   equality with substring relaxation) for QA tasks, pass@1 for ALFWorld.
 
-```python
-MODEL = "hy3-preview-ioa"     # CodeBuddy SDK free internal model
-CONCURRENCY = 20               # 3 for SWE-bench (Docker)
-TASK_TIMEOUT = 300             # 5 min per task
-RESULTS_DIR = "/data1/benchmarks/unified_v6_results"
-```
-
-## Environment
+## Run
 
 ```bash
-export CODEBUDDY_API_KEY='...'
-export CODEBUDDY_INTERNET_ENVIRONMENT='ioa'
+python scripts/v6/latest_runner.py
 ```
 
-Results are written to `experiments_results/unified_v6_results/{benchmark}/`.
+Results land in `experiments_results/latest/`.

@@ -22,11 +22,7 @@ from src.models import (
     TrajectoryStep,
 )
 
-
-# ============================================================
 # Fixtures
-# ============================================================
-
 
 def _make_trajectory(
     task_id: str = "test_task_001",
@@ -49,7 +45,6 @@ def _make_trajectory(
         steps=steps,
     )
 
-
 def _make_mock_llm(response_json: dict | str) -> MagicMock:
     """Create a mock LLM client that returns a fixed JSON response."""
     mock = MagicMock()
@@ -58,7 +53,6 @@ def _make_mock_llm(response_json: dict | str) -> MagicMock:
     else:
         mock.chat_json.return_value = response_json
     return mock
-
 
 SAMPLE_MEMORIES_RESPONSE = {
     "memories": [
@@ -83,11 +77,7 @@ SAMPLE_MEMORIES_RESPONSE = {
     ]
 }
 
-
-# ============================================================
 # BaseMemoryCompressor shared helpers
-# ============================================================
-
 
 class TestTrajectoryToText:
     """Tests for BaseMemoryCompressor._trajectory_to_text."""
@@ -116,7 +106,6 @@ class TestTrajectoryToText:
         # Should have Task, Result, empty separator, and no step lines
         non_empty = [l for l in lines if l.strip()]
         assert len(non_empty) == 2  # Task and Result only
-
 
 class TestParseMemoryJson:
     """Tests for BaseMemoryCompressor._parse_memory_json."""
@@ -190,11 +179,7 @@ class TestParseMemoryJson:
         assert "content" not in entries[0].metadata
         assert "category" not in entries[0].metadata
 
-
-# ============================================================
 # Mem0Compressor
-# ============================================================
-
 
 class TestMem0Compressor:
     """Tests for Mem0Compressor with mock LLM."""
@@ -245,11 +230,7 @@ class TestMem0Compressor:
         assert store.num_entries == 1
         mock_llm.chat_json.assert_called_once()
 
-
-# ============================================================
 # AMEMCompressor
-# ============================================================
-
 
 class TestAMEMCompressor:
     """Tests for AMEMCompressor with mock LLM (two-pass)."""
@@ -310,11 +291,7 @@ class TestAMEMCompressor:
         assert store.num_entries >= 1
         assert mock_llm.chat_json.call_count == 2
 
-
-# ============================================================
 # MemoryBankCompressor
-# ============================================================
-
 
 class TestMemoryBankCompressor:
     """Tests for MemoryBankCompressor with mock LLM and tiering logic."""
@@ -391,11 +368,7 @@ class TestMemoryBankCompressor:
         assert len(working) == 0
         assert len(ephemeral) == 2
 
-
-# ============================================================
 # Factory
-# ============================================================
-
 
 class TestCompressorFactory:
     """Tests for the create_compressor factory function."""

@@ -1,30 +1,5 @@
 #!/usr/bin/env python3
-"""
-RL Controller Training Pipeline — enables the full MemSkill training loop.
-
-This script implements the complete pipeline that was previously missing:
-  1. Induce skills from train tasks
-  2. Embed skills + register to RL Controller
-  3. For each test task:
-     a. Embed the query → ControllerState
-     b. Controller selects Top-K skills (Gumbel-Top-K during training)
-     c. Executor uses selected skills to answer
-     d. Compute reward (EM/F1)
-     e. Record PPO transition
-  4. After each episode: compute advantages + PPO update
-  5. Repeat for multiple epochs, track improvement
-
-Reference: MemSkill paper §3.2-3.7
-  - §3.2: Embedding-based compatibility score z_{t,i} = h_t^T u_i
-  - §3.3: Gumbel-Top-K sampling for exploration
-  - §3.7: PPO training with downstream EM/F1 as reward
-  - §3.8: Skill Designer evolution triggered by hard cases
-
-Paper Table 2 Ablation (LoCoMo L-J):
-  Full MemSkill: 50.96
-  w/o controller (random): 45.86 (drop 5.10)
-  → Controller contributes ~5 points after training
-"""
+"""RL Controller Training Pipeline — enables the full MemSkill training loop."""
 from __future__ import annotations
 
 import json
@@ -54,16 +29,10 @@ from src.rl_controller.controller import (
 )
 from src.skill_induction.skill_designer import SkillDesigner
 
-
-# ============================================================
 # Embedding Utilities
-# ============================================================
 
 class TextEmbedder:
-    """
-    Lightweight text embedder using sentence-transformers.
-    Falls back to random embeddings if model unavailable.
-    """
+    """Lightweight text embedder using sentence-transformers."""
 
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2", dim: int = 384):
         self.dim = dim
@@ -101,10 +70,7 @@ class TextEmbedder:
         else:
             return np.stack([self.encode(t) for t in texts])
 
-
-# ============================================================
 # Metrics
-# ============================================================
 
 def compute_em(prediction: str, ground_truth: str) -> float:
     def normalize(s):
@@ -115,7 +81,6 @@ def compute_em(prediction: str, ground_truth: str) -> float:
         s = s.translate(str.maketrans('', '', string.punctuation))
         return s.strip()
     return 1.0 if normalize(ground_truth) in normalize(prediction) else 0.0
-
 
 def compute_token_f1(prediction: str, ground_truth: str) -> float:
     if not ground_truth.strip():
@@ -132,14 +97,10 @@ def compute_token_f1(prediction: str, ground_truth: str) -> float:
     recall = num_common / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
-
 def avg(lst):
     return sum(lst) / len(lst) if lst else 0.0
 
-
-# ============================================================
 # Skill Formatting
-# ============================================================
 
 def format_skill_prompt(skill: Skill) -> str:
     """Format a skill for inclusion in the LLM prompt."""
@@ -152,7 +113,6 @@ def format_skill_prompt(skill: Skill) -> str:
         parts.append("Constraints: " + "; ".join(skill.constraints))
     return "\n".join(parts)
 
-
 def skill_to_text(skill: Skill) -> str:
     """Convert skill to a single text string for embedding."""
     parts = [skill.name, skill.description]
@@ -160,10 +120,7 @@ def skill_to_text(skill: Skill) -> str:
     parts.extend(skill.constraints)
     return " ".join(parts)
 
-
-# ============================================================
 # Core Training Loop
-# ============================================================
 
 def execute_with_skills(
     llm_client: LLMClient,
@@ -190,7 +147,6 @@ def execute_with_skills(
         ]
     return llm_client.chat(messages, temperature=0.3, max_tokens=256)
 
-
 def run_training_epoch(
     llm_client: LLMClient,
     controller: SkillSelectionController,
@@ -201,16 +157,7 @@ def run_training_epoch(
     training: bool = True,
     designer: SkillDesigner | None = None,
 ) -> dict:
-    """
-    Run one training epoch through all tasks.
-
-    For each task:
-    1. Embed query → ControllerState
-    2. Controller selects Top-K skills
-    3. Execute with selected skills
-    4. Compute reward (EM + F1) / 2
-    5. Record PPO transition
-    """
+    """Run one training epoch through all tasks."""
     em_scores = []
     f1_scores = []
     rewards = []
@@ -304,10 +251,7 @@ def run_training_epoch(
         "num_tasks": len(tasks),
     }
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     logger.remove()
@@ -565,7 +509,6 @@ def main():
     }
     output_path.write_text(json.dumps(output, indent=2, default=str))
     logger.info(f"\n  Results saved to: {output_path}")
-
 
 if __name__ == "__main__":
     main()

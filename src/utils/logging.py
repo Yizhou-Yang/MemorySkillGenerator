@@ -1,8 +1,4 @@
-"""
-Logger configuration.
-
-Provides a unified logging setup based on loguru.
-"""
+"""Logger configuration."""
 
 from __future__ import annotations
 
@@ -12,15 +8,8 @@ from loguru import logger
 
 from src.utils.config import PROJECT_ROOT
 
-
 def setup_logger(log_level: str = "INFO", log_file: bool = True) -> None:
-    """
-    Configure the global logger.
-
-    Args:
-        log_level: Logging level (DEBUG / INFO / WARNING / ERROR).
-        log_file: Whether to also write logs to a file.
-    """
+    """Configure the global logger."""
     # Remove the default handler
     logger.remove()
 

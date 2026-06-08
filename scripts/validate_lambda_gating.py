@@ -1,32 +1,5 @@
 #!/usr/bin/env python3
-"""
-SRDP λ-gating 自由验证脚本
-=========================
-
-目的：在不重跑任何 LLM 实验的前提下，验证三个问题：
-  1. 用 SRDP 原生的 λ(x) 软门控 (引用 Memento-2 公式 7-8) 替代固定阈值 τ
-     是否能在 6 个 benchmark 上获得稳定的 zero-fallback 收益？
-  2. K_∅ 是否真的可以做成 benchmark-agnostic 的全局常数？
-  3. LOBO-CV 下，λ-gating 的单一全局 K_∅ 是否优于 fixed-τ 的单一全局 τ？
-
-数据源：experiments/paper_v5_void_results.json (per_task cache 已含 s_max + em_inject + em_void)
-
-聚合方式（两套）：
-  - expected:    EM_final = λ(x) * EM_inject + (1-λ(x)) * EM_void
-                 [理论上界，连续期望值，论文里只能作 discussion]
-  - bernoulli:   以概率 λ 采样 inject 否则 void，平均 N 次
-                 [更接近真实 soft gating，但仍非 hard 评估]
-
-λ 计算（两套）：
-  - lambda_top1: λ = s_max / (s_max + K_∅)        [极简，仅用已缓存字段]
-  - lambda_temp: λ = exp(s_max/h) / (exp(s_max/h) + exp(K_∅/h))  [温度参数版]
-
-输出：
-  - K_∅ sweep 表 (per benchmark)
-  - 全局最优 K_∅ vs per-benchmark 最优 K_∅
-  - LOBO-CV: 用其它 5 个 benchmark 的平均最优 K_∅ 作为 holdout 的 K_∅
-  - 与 fixed-τ LOBO 基线对比 Δ
-"""
+"""SRDP λ-gating 自由验证脚本"""
 
 import json
 import numpy as np
@@ -40,10 +13,8 @@ K_VOID_GRID = [0.0, 0.02, 0.05, 0.08, 0.10, 0.12, 0.15, 0.18, 0.20, 0.25,
                0.30, 0.35, 0.40, 0.45, 0.50, 0.60, 0.80, 1.0, 1.5, 2.0]
 TAU_GRID = [0.0, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.60, 1.01]
 
-
 def load():
     return json.load(open(RESULTS))
-
 
 def get_per_task(data, benchmark, method="A3+void"):
     """返回 (s_max, em_inject, em_void, f1_inject, f1_void) 数组"""
@@ -64,21 +35,17 @@ def get_per_task(data, benchmark, method="A3+void"):
     return dict(s=s, em_i=ei, em_v=ev, f1_i=fi, f1_v=fv,
                 metric=me[benchmark].get("primary_metric", "em"))
 
-
 def lam_top1(s, K_void):
     """λ(x) = s_max / (s_max + K_∅), 当 K_∅=0 时永远 1（全注入），K_∅→∞ 时 0（永远 void）"""
     return s / (s + K_void + 1e-12)
-
 
 def lam_temp(s, K_void, h=0.1):
     """温度版 softmax: λ = sigmoid((s - K_∅)/h)"""
     z = (s - K_void) / h
     return 1.0 / (1.0 + np.exp(-z))
 
-
 def aggregate_expected(em_i, em_v, lam):
     return float(np.mean(lam * em_i + (1.0 - lam) * em_v))
-
 
 def aggregate_bernoulli(em_i, em_v, lam, n_trials=N_BERNOULLI, seed=SEED):
     rng = np.random.default_rng(seed)
@@ -90,17 +57,14 @@ def aggregate_bernoulli(em_i, em_v, lam, n_trials=N_BERNOULLI, seed=SEED):
         scores.append(em.mean())
     return float(np.mean(scores))
 
-
 def aggregate_fixed_tau(em_i, em_v, s, tau):
     """硬阈值：s < tau -> void; s >= tau -> inject"""
     use_inject = s >= tau
     em = np.where(use_inject, em_i, em_v)
     return float(em.mean())
 
-
 def fmt_pct(v, w=5):
     return f"{v*100:>{w}.1f}%"
-
 
 def main():
     data = load()
@@ -128,7 +92,6 @@ def main():
     print(f"# Data: {RESULTS.name}, benchmarks: {len(bench_data)}")
     print(f"{'='*100}\n")
 
-    # ---------------- Stage 1: Per-benchmark best K_∅ vs best τ ----------------
     print("[Stage 1] Per-benchmark BEST hyperparameter (oracle upper bound)")
     print("-" * 100)
     print(f"{'Benchmark':<16} {'B0':>6} {'A3':>6} | "
@@ -187,7 +150,6 @@ def main():
           f"{fmt_pct(avg_l1b)}{'':<10} {'':<5} | "
           f"{fmt_pct(avg_lte)}")
 
-    # ---------------- Stage 2: Single global hyperparameter (no per-bench tuning) ----------------
     print(f"\n\n[Stage 2] Single GLOBAL hyperparameter (avg over benchmarks)")
     print("-" * 100)
     print("Picks ONE value that maximizes the AVG score across ALL benchmarks.")
@@ -238,7 +200,6 @@ def main():
               f"{fmt_pct(l1b)} {mark(l1b)}        | "
               f"{fmt_pct(lte)} {mark(lte)}")
 
-    # ---------------- Stage 3: LOBO-CV ----------------
     print(f"\n\n[Stage 3] LOBO-CV (Leave-One-Benchmark-Out)")
     print("-" * 100)
     print("Pick best hyperparameter from N-1 benchmarks, evaluate on holdout.")
@@ -294,7 +255,6 @@ def main():
         avg = np.mean(v) * 100
         print(f"  {k:<5}: avg Δ = {avg:+.2f} pp | wins {wins}/{len(v)} benchmarks")
 
-    # ---------------- Stage 4: 关键诊断 ----------------
     print(f"\n\n[Stage 4] Verdict")
     print("-" * 100)
     tau_avg = np.mean(lobo_results["tau"]) * 100
@@ -336,15 +296,8 @@ def main():
     out_path.write_text(json.dumps(out, indent=2))
     print(f"\n[saved] {out_path}")
 
-
 def quantile_heuristic_eval():
-    """
-    Stage 5+6: per-benchmark data-driven τ via quantile heuristic.
-    用 5-fold CV 模拟 train/test split：
-      - 在 4 fold 上算 s_max 分布的 q-quantile 作为 τ
-      - 在 holdout fold 上评估 EM (s_max < τ -> void; else inject)
-    跨所有 quantile 比较，给出推荐策略。
-    """
+    """Stage 5+6: per-benchmark data-driven τ via quantile heuristic."""
     print(f"\n\n{'='*100}")
     print(f"[Stage 5] Per-benchmark data-driven τ via Q-QUANTILE heuristic (5-fold CV)")
     print(f"{'='*100}\n")
@@ -426,7 +379,6 @@ def quantile_heuristic_eval():
     delta = (best_q[1] - max(avg_b0, avg_a3)) * 100
     print(f"  Δ = {delta:+.2f} pp")
 
-    # ============== Stage 6: per-bench best q vs single global q ==============
     print(f"\n\n[Stage 6] Per-benchmark BEST quantile vs GLOBAL single quantile")
     print("-" * 100)
     print(f"{'Benchmark':<16} {'max(B0,A3)':>12} {'per-bench best q':>20} {'EM':>8} {'Δ':>7} | "
@@ -481,17 +433,8 @@ def quantile_heuristic_eval():
         print(f"  ❌ per-bench q-quantile 仍亏 {pb_avg_full:+.2f} pp")
         print(f"  → c_∅ 机制本身在当前 retrieval 信号下没有可救药；建议放弃 c_∅ 路线")
 
-
 def robustness_check():
-    """
-    Stage 7: Multi-seed × multi-fold robustness check.
-    回答：+2.11pp (excl locomo) 是真信号还是 fold/seed 噪声？
-    
-    跑 SEEDS × FOLDS 组合，对每个 (seed, k) 独立做 k-fold CV，统计：
-      - per-bench oracle 的 Δ 均值 ± std
-      - global q* 的 Δ 均值 ± std
-      - 推荐 q 的稳定性（不同 seed 下 best q 是否一致）
-    """
+    """Stage 7: Multi-seed × multi-fold robustness check."""
     print(f"\n\n{'='*100}")
     print(f"[Stage 7] ROBUSTNESS CHECK (multi-seed × multi-fold)")
     print(f"{'='*100}\n")
@@ -649,7 +592,6 @@ def robustness_check():
         "per_bench_best_q_choices": pb_best_q_choice,
         "global_q_star_distribution": dict(qc),
     }
-
 
 if __name__ == "__main__":
     main()

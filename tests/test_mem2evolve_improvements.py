@@ -1,12 +1,4 @@
-"""
-Unit tests for Mem2Evolve-inspired improvements:
-- P0: MultiJudgeVerifier (external verifier, echo chamber breaker)
-- P1: MemoryConsolidator (deduplication and merging)
-- P2: SkillRefiner (iterative refinement and retirement)
-- P3: SkillLibrary (retrieval and reuse)
-
-All tests use mock LLM — no network required.
-"""
+"""Unit tests for Mem2Evolve-inspired improvements:"""
 
 from __future__ import annotations
 
@@ -31,11 +23,7 @@ from src.models import (
 from src.skill_induction.skill_library import SkillLibrary
 from src.skill_induction.skill_refiner import SkillRefiner
 
-
-# ============================================================
 # Shared fixtures
-# ============================================================
-
 
 def _make_trajectory(
     task_id: str = "test_task_001",
@@ -54,7 +42,6 @@ def _make_trajectory(
         ],
     )
 
-
 def _make_skill(
     name: str = "Test Skill",
     skill_id: str = "skill_001",
@@ -72,7 +59,6 @@ def _make_skill(
         source_tasks=["task_001"],
         source_variant=TransformVariant.TRAJ_TO_SKILL,
     )
-
 
 def _make_memory_store(num_entries: int = 5) -> MemoryStore:
     """Create a sample memory store with configurable number of entries."""
@@ -94,11 +80,7 @@ def _make_memory_store(num_entries: int = 5) -> MemoryStore:
         source_trajectory_id="traj_001",
     )
 
-
-# ============================================================
 # P0: MultiJudgeVerifier Tests
-# ============================================================
-
 
 class TestMultiJudgeVerifier:
     """Tests for MultiJudgeVerifier with mock LLM."""
@@ -236,11 +218,7 @@ class TestMultiJudgeVerifier:
         assert len(result["scores"]) == 2
         assert mock_llm.chat_json.call_count == 2
 
-
-# ============================================================
 # P1: MemoryConsolidator Tests
-# ============================================================
-
 
 class TestMemoryConsolidator:
     """Tests for MemoryConsolidator (deduplication and merging)."""
@@ -419,11 +397,7 @@ class TestMemoryConsolidator:
         cluster_sizes = sorted([len(c) for c in clusters])
         assert cluster_sizes == [1, 2]
 
-
-# ============================================================
 # P2: SkillRefiner Tests
-# ============================================================
-
 
 class TestSkillRefiner:
     """Tests for SkillRefiner (iterative refinement)."""
@@ -532,11 +506,7 @@ class TestSkillRefiner:
         assert "[thought]" in summary
         assert "[action]" in summary
 
-
-# ============================================================
 # P3: SkillLibrary Tests
-# ============================================================
-
 
 class TestSkillLibrary:
     """Tests for SkillLibrary (retrieval and reuse)."""
@@ -729,11 +699,7 @@ class TestSkillLibrary:
         library = SkillLibrary(storage_path="/tmp/nonexistent_dir_xyz/skills.json")
         assert library.size == 0
 
-
-# ============================================================
 # Integration: P0 + P2 + P3 working together
-# ============================================================
-
 
 class TestIntegrationP0P2P3:
     """Integration tests: MultiJudge + SkillRefiner + SkillLibrary."""

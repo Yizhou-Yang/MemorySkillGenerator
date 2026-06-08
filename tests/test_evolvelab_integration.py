@@ -1,14 +1,4 @@
-"""
-Tests for EvolveLab integration — verifies the adapter layer
-bridges SkillForge and EvolveLab correctly.
-
-Tests cover:
-1. EvolveLab types import and instantiation
-2. Outbound adapter: SkillForge compressor → EvolveLab provider
-3. Inbound adapter: EvolveLab provider → SkillForge compressor
-4. Provider registry and listing
-5. Round-trip data conversion fidelity
-"""
+"""Tests for EvolveLab integration — verifies the adapter layer"""
 
 from __future__ import annotations
 
@@ -27,11 +17,7 @@ from src.models import (
 from src.memory.compressor import BaseMemoryCompressor, Mem0Compressor
 from src.memory.consolidation import MemoryConsolidator
 
-
-# ============================================================
 # Test 1: EvolveLab types import correctly
-# ============================================================
-
 
 class TestEvolveLabImports:
     """Verify EvolveLab core types are importable and functional."""
@@ -132,11 +118,7 @@ class TestEvolveLabImports:
         voyager_config = get_memory_config(MemoryType.VOYAGER)
         assert "db_path" in voyager_config
 
-
-# ============================================================
 # Test 2: Outbound Adapter (SkillForge → EvolveLab)
-# ============================================================
-
 
 def _make_test_trajectory() -> Trajectory:
     """Create a test trajectory for adapter tests."""
@@ -164,7 +146,6 @@ def _make_test_trajectory() -> Trajectory:
         final_answer="Paris",
     )
 
-
 def _make_test_memory_store() -> MemoryStore:
     """Create a test MemoryStore."""
     return MemoryStore(
@@ -185,7 +166,6 @@ def _make_test_memory_store() -> MemoryStore:
             ),
         ],
     )
-
 
 class TestOutboundAdapter:
     """Test SkillForge → EvolveLab adapter."""
@@ -366,11 +346,7 @@ class TestOutboundAdapter:
         adapter.clear()
         assert adapter.num_memories == 0
 
-
-# ============================================================
 # Test 3: Inbound Adapter (EvolveLab → SkillForge)
-# ============================================================
-
 
 class TestInboundAdapter:
     """Test EvolveLab → SkillForge adapter."""
@@ -456,11 +432,7 @@ class TestInboundAdapter:
             assert rt_step.content == orig_step.content
             assert rt_step.step_type == orig_step.step_type
 
-
-# ============================================================
 # Test 4: Provider Registry
-# ============================================================
-
 
 class TestProviderRegistry:
     """Test provider listing and info."""
@@ -490,11 +462,7 @@ class TestProviderRegistry:
         assert "voyager" in types
         assert "expel" in types
 
-
-# ============================================================
 # Test 5: Integration with SkillForge RL Controller
-# ============================================================
-
 
 class TestRLControllerIntegration:
     """Test that EvolveLab adapter works with RL Controller."""
@@ -542,11 +510,7 @@ class TestRLControllerIntegration:
             assert mem.score is not None
             assert isinstance(mem.metadata, dict)
 
-
-# ============================================================
 # Test 6: Benchmark Integration Smoke Test
-# ============================================================
-
 
 class TestBenchmarkIntegration:
     """Smoke test: adapter works in a mini benchmark loop."""

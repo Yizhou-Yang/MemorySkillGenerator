@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Aggregate v5 void-case results into the paper Table 1 + sensitivity sweep.
-
-Inputs:
-    experiments/paper_v5_void_results.json
-
-Outputs:
-    paper/figures/table1_v5_void.md         — full per-benchmark comparison
-    paper/figures/figure_void_sweep.png     — τ_void sensitivity per benchmark
-    paper/figures/figure_void_sweep.pdf
-    paper/figures/table_smax_distribution.md — per-benchmark s_max stats
-    experiments/paper_v5_aggregated.json    — clean dict for downstream use
-"""
+"""Aggregate v5 void-case results into the paper Table 1 + sensitivity sweep."""
 from __future__ import annotations
 
 import json
@@ -30,22 +18,18 @@ import numpy as np
 
 from src.curation.void_case import calibrate_tau_quantile, cv_select_quantile
 
-
 RESULTS_PATH = PROJECT_ROOT / "experiments" / "paper_v5_void_results.json"
 FIGURES_DIR = PROJECT_ROOT / "paper" / "figures"
 EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
-
 
 def load_results() -> dict:
     with open(RESULTS_PATH) as f:
         return json.load(f)
 
-
 def get_primary_metric_score(method_data: dict, primary_metric: str) -> float:
     """Get EM or F1 from a method's primary aggregate."""
     p = method_data["primary"]
     return p["avg_em"] if primary_metric == "em" else p["avg_f1"]
-
 
 def build_table1(results: dict) -> str:
     """Build markdown Table 1: 6 methods × 7 benchmarks main metric."""
@@ -140,7 +124,6 @@ def build_table1(results: dict) -> str:
 
     return "\n".join(lines)
 
-
 def plot_tau_sweep(results: dict, out_path: Path) -> None:
     """Sensitivity sweep: avg metric vs τ for A3+void per benchmark."""
     main = results["main_experiment"]
@@ -180,7 +163,6 @@ def plot_tau_sweep(results: dict, out_path: Path) -> None:
     plt.close()
     print(f"[plot_tau_sweep] saved → {out_path}")
 
-
 def build_smax_table(results: dict) -> str:
     """Per-benchmark s_max distribution (helps choose τ_void)."""
     main = results["main_experiment"]
@@ -205,15 +187,8 @@ def build_smax_table(results: dict) -> str:
         )
     return "\n".join(lines)
 
-
 def calibrate_tau_lobo(results: dict) -> dict:
-    """Leave-one-benchmark-out cross-validation for τ_void.
-
-    For each benchmark b:
-      1. On all OTHER benchmarks, find τ* maximizing mean primary metric.
-      2. Apply τ* on b → record (b, τ*, score).
-    Report mean cross-validated score.
-    """
+    """Leave-one-benchmark-out cross-validation for τ_void."""
     main = results["main_experiment"]
     sweep_taus = results["meta"]["sweep_taus"]
     benches = [b for b in main if "error" not in main[b]
@@ -269,27 +244,14 @@ def calibrate_tau_lobo(results: dict) -> dict:
         "tau_vote_distribution": dict(tau_counter),
     }
 
-
-# ============================================================
 # Plan C: per-benchmark data-driven τ via quantile heuristic
-# ============================================================
 
 def calibrate_tau_plan_c(
     results: dict,
     n_folds: int = 5,
     seeds: tuple[int, ...] = (42, 123, 456, 789, 2024),
 ) -> dict:
-    """Per-benchmark q-quantile calibration with multi-seed robustness.
-
-    For each benchmark:
-      - 5-fold CV × len(seeds) seeds to pick q*(b) maximizing the test-fold
-        primary metric. The chosen τ_b = quantile_q*(train_s_max) is data-
-        driven and contains no test information.
-      - Report mean ± std of the test-fold metric across (seed, fold)
-        configs as the headline number.
-
-    Returns a dict ready to be embedded into the aggregated JSON.
-    """
+    """Per-benchmark q-quantile calibration with multi-seed robustness."""
     main = results["main_experiment"]
     benches = [b for b in main if "error" not in main[b]
                and main[b]["methods"].get("A3+void")
@@ -369,7 +331,6 @@ def calibrate_tau_plan_c(
         "seeds": list(seeds),
     }
 
-
 def build_plan_c_table(plan_c: dict) -> str:
     """Markdown table for Plan C — paper main result."""
     if "error" in plan_c:
@@ -415,7 +376,6 @@ def build_plan_c_table(plan_c: dict) -> str:
             f"{pb['q_star_stability']*100:.0f}% |"
         )
     return "\n".join(lines)
-
 
 def main():
     if not RESULTS_PATH.exists():
@@ -480,7 +440,6 @@ def main():
     with open(out, "w") as f:
         json.dump(agg, f, ensure_ascii=False, indent=2, default=str)
     print(f"\n✓ Aggregated → {out}")
-
 
 if __name__ == "__main__":
     main()

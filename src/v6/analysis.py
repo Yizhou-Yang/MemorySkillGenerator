@@ -5,7 +5,6 @@ from rapidfuzz import fuzz
 from .experience import Experience, FailureTaxonomy
 from .gate import assess_task_complexity
 
-
 def classify_failure(agent_actions: list[dict], oracle_actions: list[dict],
                      score: float, missing: list[str], extra: list[str]) -> FailureTaxonomy:
     """4 categories: tool_failure / over_action / task_mismatch / model_failure."""
@@ -27,7 +26,6 @@ def classify_failure(agent_actions: list[dict], oracle_actions: list[dict],
             root_cause=f"Missed {len(missing)}/{len(oracle_actions)} required steps")
     return FailureTaxonomy(category="model_failure",
         root_cause=f"Correct approach but {len(missing)} missing steps")
-
 
 def _extract_action_key(action: dict) -> str | None:
     """Extract a comparable key from any action format."""
@@ -52,20 +50,12 @@ def _extract_action_key(action: dict) -> str | None:
         return f"{action['app']}.{action['fn']}"
     return None
 
-
 def _match_actions(key_a: str, key_b: str) -> bool:
-    """Fuzzy match two action keys using rapidfuzz token_set_ratio.
-    
-    token_set_ratio handles:
-    - Word reordering: "calendar list" ↔ "list calendar" → high score
-    - Partial overlap: "Calendar.list_events" ↔ "calendar list" → high score  
-    - Substring: "go to desk" ↔ "go to desk 1" → high score
-    """
+    """Fuzzy match two action keys using rapidfuzz token_set_ratio."""
     # Normalize separators
     a = key_a.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ')
     b = key_b.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ')
     return fuzz.token_set_ratio(a, b) >= 60  # 60% threshold
-
 
 def analyze_execution(task_id: str, task_desc: str,
                       agent_actions: list[dict], oracle_actions: list[dict],

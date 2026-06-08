@@ -1,32 +1,5 @@
 #!/usr/bin/env python3
-"""
-MemorySkillGenerator multi-benchmark experiment runner (v7).
-
-Key design for statistical significance (NO artificial noise):
-1. No-skill baseline: control group to prove skill value.
-2. N=10 per benchmark: sufficient for statistical significance.
-3. Natural trajectories: no noise injection — differentiation comes
-   from how each variant processes the naturally verbose trajectory.
-4. Cross-benchmark transfer: HotpotQA skills → MuSiQue tasks.
-5. Fine-grained quality: 5-dimension strict rubric.
-6. Separate Self / Cross / Transfer metrics.
-7. Win Rate: pairwise comparison across all tasks for statistical rigour.
-
-Core hypothesis (why hybrid should win — Evidence-as-Filter v7):
-- traj→skill: sees the FULL verbose trajectory → information overload
-  → produces over-specific or vague skills → low Cross/Transfer
-- memory→skill: sees ONLY compressed memory → clean but uses ALL
-  memories indiscriminately (including low-value ones) → medium Cross
-- hybrid→skill (v7 Tiered Retention): uses trajectory to FILTER and
-  RANK memories with tiered retention (high-gen always kept, medium-gen
-  needs evidence) → memory-level abstraction + better memory selection
-  + preserves general methodology → highest Cross AND Transfer
-
-Transfer pairs:
-- HotpotQA skills → MuSiQue tasks (multi-hop → harder multi-hop)
-- GSM8K skills → TriviaQA tasks (math → factoid, should fail)
-- TriviaQA skills → HotpotQA tasks (single-hop → multi-hop, partial)
-"""
+"""MemorySkillGenerator multi-benchmark experiment runner (v7)."""
 
 from __future__ import annotations
 
@@ -69,17 +42,12 @@ TRANSFER_PAIRS = {
 }
 TRANSFER_NUM_TASKS = 5  # Number of target tasks for transfer evaluation
 
-
 def evaluate_baseline(
     llm_client: LLMClient,
     tasks: list[dict],
     evaluator: SkillEvaluator,
 ) -> float:
-    """
-    Evaluate tasks WITHOUT any skill injection (control group).
-
-    Returns the average LLM-judge score (0-10 normalised to 0-1).
-    """
+    """Evaluate tasks WITHOUT any skill injection (control group)."""
     logger.info("Evaluating no-skill baseline...")
     total_score = 0.0
     count = 0
@@ -110,7 +78,6 @@ def evaluate_baseline(
     logger.info(f"Baseline score: {avg:.1%} ({count} tasks)")
     return round(avg, 4)
 
-
 def load_transfer_tasks(
     source_benchmark: str,
     num_tasks: int = 5,
@@ -132,23 +99,13 @@ def load_transfer_tasks(
         logger.error(f"Failed to load transfer tasks for {target_benchmark}: {exc}")
         return []
 
-
 def evaluate_transfer(
     skills_and_trajs: list[tuple],
     transfer_tasks: list[dict],
     evaluator: SkillEvaluator,
     variant_name: str,
 ) -> float:
-    """
-    Evaluate skills on a DIFFERENT benchmark's tasks (cross-benchmark transfer).
-
-    This is the key metric for differentiating variants:
-    - traj→skill overfits to source benchmark → low transfer
-    - memory→skill denoises → higher transfer
-    - hybrid→skill balances → highest transfer
-
-    Returns average transfer score (0-1).
-    """
+    """Evaluate skills on a DIFFERENT benchmark's tasks (cross-benchmark transfer)."""
     if not transfer_tasks or not skills_and_trajs:
         return 0.0
 
@@ -170,7 +127,6 @@ def evaluate_transfer(
         f"({len(all_scores)} evaluations)"
     )
     return round(avg, 4)
-
 
 def run_single_benchmark(
     benchmark_name: str,
@@ -388,17 +344,10 @@ def run_single_benchmark(
 
     return metrics
 
-
 def _compute_win_rates(
     all_metrics: dict[str, dict[str, dict[str, float]]],
 ) -> dict[str, dict[str, float]]:
-    """
-    Compute pairwise win rates: for each variant pair (A vs B),
-    what fraction of benchmarks does A beat B on each metric?
-
-    Returns a dict like:
-      {"hybrid_to_skill_vs_memory_to_skill": {"self": 1.0, "cross": 0.67, ...}}
-    """
+    """Compute pairwise win rates: for each variant pair (A vs B),"""
     # Collect per-benchmark scores for each variant
     variant_scores: dict[str, dict[str, list[float]]] = {
         v: {"self": [], "cross": [], "transfer": []} for v in VARIANTS
@@ -429,7 +378,6 @@ def _compute_win_rates(
         }
 
     return win_rates
-
 
 def print_results_table(
     all_metrics: dict[str, dict[str, dict[str, float]]],
@@ -631,7 +579,6 @@ def print_results_table(
     lines.append("")
     return "\n".join(lines)
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="MemorySkillGenerator Multi-Benchmark Experiment v6"
@@ -708,7 +655,6 @@ def main() -> None:
     logger.info(f"\nTotal time: {elapsed:.0f}s ({elapsed / 60:.1f} min)")
     logger.info(f"LLM stats: {llm_client.stats}")
     logger.info(f"Results saved to: {experiment_dir}")
-
 
 if __name__ == "__main__":
     main()

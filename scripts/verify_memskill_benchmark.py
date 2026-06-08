@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""
-MemSkill framework reliability verification script.
-
-Verifies framework consistency with the paper without LLM API calls:
-
-1. Math verification: Gumbel-Top-K, joint probability, PPO core formulas
-2. Data loading: verify LoCoMo/LongMemEval datasets load correctly
-3. Pipeline flow: simulate complete Controller->Designer->Executor flow
-4. Paper reference comparison: compare framework output with paper Table 1/2
-
-Paper reference values (MemSkill Table 1, LLaMA-3.3-70B):
-- LoCoMo F1: 38.78, L-J: 50.96
-- LongMemEval F1: 31.65, L-J: 59.41
-- ALFWorld Seen SR: 47.86, Unseen SR: 47.01
-- HotpotQA (100 docs, K=7): 70.70
-
-Ablation reference values (Table 2):
-- w/o controller (random): L-J 45.86 (drop 5.10)
-- w/o designer (static): L-J 44.11 (drop 6.85)
-- Refine-only: L-J 44.90 (drop 6.06)
-"""
+"""MemSkill framework reliability verification script."""
 
 from __future__ import annotations
 
@@ -36,18 +16,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from loguru import logger
 
-# ============================================================
 # Verification 1: Core Math Formulas
-# ============================================================
 
 def verify_joint_log_prob():
-    """
-    Verify joint probability formula (MemSkill Eq.11).
-
-    Paper example:
-    - 5 skills, probabilities [0.4, 0.3, 0.15, 0.1, 0.05]
-    - Select (A, B, C): π = 0.4 × 0.5 × 0.5 = 0.1
-    """
+    """Verify joint probability formula (MemSkill Eq.11)."""
     from src.rl_controller.controller import SkillSelectionController
 
     probs = np.array([0.4, 0.3, 0.15, 0.1, 0.05])
@@ -72,17 +44,8 @@ def verify_joint_log_prob():
     )
     return passed
 
-
 def verify_difficulty_score():
-    """
-    Verify Difficulty Score (MemSkill Eq.5).
-
-    Paper example:
-    - A: r=0.2, c=3 → d=2.4
-    - B: r=0.0, c=1 → d=1.0
-    - C: r=0.7, c=5 → d=1.5
-    - Ordering: A > C > B
-    """
+    """Verify Difficulty Score (MemSkill Eq.5)."""
     from src.skill_induction.skill_designer import HardCase
 
     case_a = HardCase(query="A", reward=0.2, fail_count=3)
@@ -107,13 +70,8 @@ def verify_difficulty_score():
     )
     return passed
 
-
 def verify_gumbel_top_k_distribution():
-    """
-    Verify Gumbel-Top-K sampling distribution correctness.
-
-    If logit gap is large, high logit skills should be selected with probability ~1.
-    """
+    """Verify Gumbel-Top-K sampling distribution correctness."""
     from src.rl_controller.controller import SkillSelectionController
 
     # Extreme case: one logit much larger than others
@@ -153,13 +111,8 @@ def verify_gumbel_top_k_distribution():
     )
     return passed and uniform_passed
 
-
 def verify_exploration_incentive():
-    """
-    Verify Exploration Incentive (MemSkill §3.8.5 Eq.6-8).
-
-    New skill probability mass should be >= τ_t.
-    """
+    """Verify Exploration Incentive (MemSkill §3.8.5 Eq.6-8)."""
     from src.rl_controller.controller import (
         ControllerState,
         SkillSelectionController,
@@ -209,7 +162,6 @@ def verify_exploration_incentive():
     )
     return passed
 
-
 def verify_softmax_stability():
     """Verify softmax numerical stability for extreme values"""
     from src.rl_controller.controller import SkillSelectionController
@@ -237,10 +189,7 @@ def verify_softmax_stability():
     )
     return passed
 
-
-# ============================================================
 # Verification 2: Dataset Loading
-# ============================================================
 
 def verify_locomo_loading():
     """Verify LoCoMo dataset loads correctly"""
@@ -287,7 +236,6 @@ def verify_locomo_loading():
         logger.error(f"[LoCoMo] Load failed: {exc}")
         return False
 
-
 def verify_longmemeval_loading():
     """Verify LongMemEval dataset loads correctly"""
     from benchmarks.loader import BenchmarkLoader
@@ -320,23 +268,10 @@ def verify_longmemeval_loading():
         logger.error(f"[LongMemEval] Load failed: {exc}")
         return False
 
-
-# ============================================================
 # Verification 3: Pipeline Flow Simulation
-# ============================================================
 
 def verify_full_pipeline():
-    """
-    Simulate complete MemSkill pipeline flow.
-
-    Flow: Span split → Controller selects skills → Executor runs → Reward → PPO update → Designer evolution
-
-    Verifies:
-    1. Components cooperate correctly
-    2. Policy changes after PPO update
-    3. Designer triggers and generates proposals correctly
-    4. Rollback mechanism works correctly
-    """
+    """Simulate complete MemSkill pipeline flow."""
     from src.memory.span_processor import SpanProcessor
     from src.rl_controller.controller import (
         ControllerState,
@@ -482,26 +417,10 @@ def verify_full_pipeline():
     logger.info("[Pipeline] Complete flow simulation ✅ PASS")
     return True
 
-
-# ============================================================
 # Verification 4: Ablation Experiment Simulation (vs Paper Table 2)
-# ============================================================
 
 def verify_ablation_behavior():
-    """
-    Simulate ablation experiments, verify component contribution direction matches paper.
-
-    Paper Table 2 (LoCoMo L-J):
-    - Full MemSkill: 50.96
-    - w/o controller (random): 45.86 (drop 5.10)
-    - w/o designer (static): 44.11 (drop 6.85)
-    - Refine-only: 44.90 (drop 6.06)
-
-    We verify:
-    1. Controller selection is better than random (higher top-skill probability)
-    2. Designer-enhanced skill bank is richer than static bank
-    3. Exploration incentive actually improves new skill usage rate
-    """
+    """Simulate ablation experiments, verify component contribution direction matches paper."""
     from src.rl_controller.controller import (
         ControllerState,
         SkillSelectionController,
@@ -603,20 +522,10 @@ def verify_ablation_behavior():
 
     return ctrl_deterministic and explore_helps
 
-
-# ============================================================
 # Verification 5: Span Processing vs Paper Settings
-# ============================================================
 
 def verify_span_processing():
-    """
-    Verify span processing matches paper settings.
-
-    Paper settings:
-    - Span size: 512 tokens
-    - LoCoMo: ~19 sessions per sample
-    - One LLM call per span
-    """
+    """Verify span processing matches paper settings."""
     from src.memory.span_processor import SpanProcessor
 
     # Simulate one LoCoMo sample (19 sessions)
@@ -655,22 +564,10 @@ def verify_span_processing():
 
     return reasonable_count and avg_ok
 
-
-# ============================================================
 # Verification 6: Cross-Model Transfer Framework
-# ============================================================
 
 def verify_transfer_framework():
-    """
-    Verify cross-model transfer evaluation framework correctness.
-
-    Paper key findings:
-    - MemSkill on Qwen outperforms LLaMA (52.07 vs 50.96)
-    - Removing designer drops 17.36 on Qwen (vs 6.85 on LLaMA)
-    - Indicates evolved skills have cross-model semantic value
-
-    We verify the framework correctly computes transfer metrics.
-    """
+    """Verify cross-model transfer evaluation framework correctness."""
     from src.evaluation.transfer_eval import (
         CrossModelTransferEvaluator,
         TransferReport,
@@ -730,10 +627,7 @@ def verify_transfer_framework():
 
     return target_better and ratio_above_1 and table_ok
 
-
-# ============================================================
 # Main Function
-# ============================================================
 
 def main():
     logger.remove()
@@ -845,7 +739,6 @@ def main():
         logger.warning(f"⚠️ {total - passed} verifications failed, needs investigation.")
 
     return passed == total
-
 
 if __name__ == "__main__":
     success = main()

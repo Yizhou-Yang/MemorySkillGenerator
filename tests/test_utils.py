@@ -12,11 +12,7 @@ import pytest
 from src.models import MemoryEntry, MemoryStore, Skill, TransformVariant
 from src.utils.io import load_json, load_jsonl, save_json, save_jsonl
 
-
-# ============================================================
 # IO utilities
-# ============================================================
-
 
 class TestSaveJson:
     """Tests for save_json."""
@@ -58,7 +54,6 @@ class TestSaveJson:
         loaded = json.loads(path.read_text(encoding="utf-8"))
         assert loaded["content"] == data["content"]
 
-
 class TestLoadJson:
     """Tests for load_json."""
 
@@ -85,7 +80,6 @@ class TestLoadJson:
         path = tmp_path / "nonexistent.json"
         with pytest.raises(FileNotFoundError):
             load_json(path)
-
 
 class TestSaveJsonl:
     """Tests for save_jsonl."""
@@ -114,7 +108,6 @@ class TestSaveJsonl:
         path = tmp_path / "deep" / "dir" / "file.jsonl"
         save_jsonl([MemoryEntry(content="test")], path)
         assert path.exists()
-
 
 class TestLoadJsonl:
     """Tests for load_jsonl."""
@@ -145,11 +138,7 @@ class TestLoadJsonl:
         loaded = load_jsonl(path, MemoryEntry)
         assert len(loaded) == 1
 
-
-# ============================================================
 # LLM Client
-# ============================================================
-
 
 class TestLLMClient:
     """Tests for LLMClient initialisation and configuration."""

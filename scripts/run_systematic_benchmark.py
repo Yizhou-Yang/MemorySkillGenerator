@@ -1,26 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SkillForge Systematic Benchmark — comprehensive validation across multiple
-benchmarks with paper reference value comparison.
-
-Validates all components introduced from papers:
-1. HotpotQA (10 samples) — EM/F1, compare with MemSkill Table 1
-2. LoCoMo (15 QA pairs, by category) — F1, compare with MemSkill Table 1
-3. LongMemEval (5 samples) — F1, compare with MemSkill Table 1
-4. Memory Consolidation — compression ratio (Mem2Evolve)
-5. EvolveLab Adapter — end-to-end integration
-6. Skill Designer — hard-case evolution (MemSkill §3.8)
-7. Cross-variant comparison — traj/memory/hybrid skill induction
-
-Paper reference values (MemSkill Table 1, LLaMA-3.3-70B):
-  LoCoMo: F1=38.78, L-J=50.96
-  HotpotQA (100 docs, K=7): EM=70.70
-  LongMemEval: F1=24.31, L-J=42.07
-
-Note: We use DeepSeek-V3 (not LLaMA-3.3-70B), so exact numbers will differ.
-We validate directional correctness and framework reliability.
-"""
+"""SkillForge Systematic Benchmark — comprehensive validation across multiple"""
 from __future__ import annotations
 
 import json
@@ -44,10 +24,7 @@ from src.models import Skill, MemoryStore, TransformVariant
 from src.skill_induction.factory import create_inducer
 from src.trajectory.collector import TrajectoryCollector
 
-
-# ============================================================
 # Configuration
-# ============================================================
 
 HOTPOTQA_TRAIN = 10   # Tasks used to induce skills
 HOTPOTQA_TEST = 10    # Held-out tasks to evaluate skill generalization
@@ -68,10 +45,7 @@ PAPER_REFS = {
     "longmemeval": {"f1": 0.2431, "lj": 0.4207, "source": "MemSkill Table 1, LLaMA-70B"},
 }
 
-
-# ============================================================
 # Metrics
-# ============================================================
 
 def compute_token_f1(prediction: str, ground_truth: str) -> float:
     if not ground_truth.strip():
@@ -88,7 +62,6 @@ def compute_token_f1(prediction: str, ground_truth: str) -> float:
     recall = num_common / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
-
 def compute_em(prediction: str, ground_truth: str) -> float:
     def normalize(s):
         s = s.lower().strip()
@@ -98,7 +71,6 @@ def compute_em(prediction: str, ground_truth: str) -> float:
         s = s.translate(str.maketrans('', '', string.punctuation))
         return s.strip()
     return 1.0 if normalize(ground_truth) in normalize(prediction) else 0.0
-
 
 def format_skill_prompt(skill: Skill) -> str:
     parts = [f"## Skill: {skill.name}", skill.description, ""]
@@ -113,23 +85,13 @@ def format_skill_prompt(skill: Skill) -> str:
             parts.append(f"- {c}")
     return "\n".join(parts)
 
-
 def avg(lst):
     return sum(lst) / len(lst) if lst else 0.0
 
-
-# ============================================================
 # Benchmark 1: HotpotQA (Multi-hop QA)
-# ============================================================
 
 def run_hotpotqa(llm_client: LLMClient) -> dict:
-    """
-    HotpotQA evaluation with proper train/test split.
-
-    Paper methodology: skills are induced from TRAINING tasks, then evaluated
-    on HELD-OUT test tasks to measure generalization.
-    This avoids the "open-book" problem where the skill already contains the answer.
-    """
+    """HotpotQA evaluation with proper train/test split."""
     logger.info("=" * 60)
     logger.info("BENCHMARK 1: HotpotQA Multi-hop QA (Train/Test Split)")
     logger.info("=" * 60)
@@ -247,10 +209,7 @@ def run_hotpotqa(llm_client: LLMClient) -> dict:
         v["avg_f1"] = avg(v["f1"])
     return results
 
-
-# ============================================================
 # Benchmark 2: LoCoMo (Long Conversation Memory)
-# ============================================================
 
 def run_locomo(llm_client: LLMClient) -> dict:
     logger.info("=" * 60)
@@ -317,10 +276,7 @@ def run_locomo(llm_client: LLMClient) -> dict:
         cat["avg_f1"] = avg(cat["f1"])
     return results
 
-
-# ============================================================
 # Benchmark 3: LongMemEval (Ultra-long Dialogue Memory)
-# ============================================================
 
 def run_longmemeval(llm_client: LLMClient) -> dict:
     logger.info("=" * 60)
@@ -367,10 +323,7 @@ def run_longmemeval(llm_client: LLMClient) -> dict:
     results["with_focused"]["avg_f1"] = avg(results["with_focused"]["f1"])
     return results
 
-
-# ============================================================
 # Benchmark 4: Memory Consolidation (Mem2Evolve)
-# ============================================================
 
 def run_consolidation_test(llm_client: LLMClient) -> dict:
     logger.info("=" * 60)
@@ -421,10 +374,7 @@ def run_consolidation_test(llm_client: LLMClient) -> dict:
     logger.info(f"\n  Overall: {all_entries_before} -> {all_entries_after} (ratio={results['overall_ratio']:.2f})")
     return results
 
-
-# ============================================================
 # Benchmark 5: EvolveLab Adapter Integration
-# ============================================================
 
 def run_evolvelab_test(llm_client: LLMClient) -> dict:
     logger.info("=" * 60)
@@ -494,10 +444,7 @@ def run_evolvelab_test(llm_client: LLMClient) -> dict:
     results["all_passed"] = all(t.get("success", True) and t.get("num_memories", 1) > 0 for t in results["tests"])
     return results
 
-
-# ============================================================
 # Benchmark 6: Skill Designer Evolution (MemSkill §3.8)
-# ============================================================
 
 def run_skill_designer_test(llm_client: LLMClient) -> dict:
     logger.info("=" * 60)
@@ -555,10 +502,7 @@ def run_skill_designer_test(llm_client: LLMClient) -> dict:
     logger.info(f"  Final bank: {len(bank)} skills")
     return results
 
-
-# ============================================================
 # Benchmark 7: Cross-variant Skill Quality Comparison
-# ============================================================
 
 def run_variant_comparison(llm_client: LLMClient) -> dict:
     logger.info("=" * 60)
@@ -609,10 +553,7 @@ def run_variant_comparison(llm_client: LLMClient) -> dict:
 
     return results
 
-
-# ============================================================
 # Main
-# ============================================================
 
 def main():
     logger.remove()
@@ -659,9 +600,7 @@ def main():
             logger.error(f"Benchmark {name} failed: {exc}\n{traceback.format_exc()}")
             all_results[name] = {"error": str(exc)}
 
-    # ============================================================
     # Summary Report
-    # ============================================================
     elapsed = time.time() - start_time
     stats = llm_client.stats
 
@@ -732,9 +671,7 @@ def main():
     logger.info(f"  Total tokens: {stats['total_tokens']:,}")
     logger.info(f"  Elapsed time: {elapsed:.1f}s ({elapsed/60:.1f}min)")
 
-    # ============================================================
     # Paper Comparison Table
-    # ============================================================
     logger.info(f"\n{'='*70}")
     logger.info("PAPER COMPARISON TABLE")
     logger.info("=" * 70)
@@ -754,9 +691,7 @@ def main():
         lm = all_results["longmemeval"]
         logger.info(f"{'LongMemEval':<20} {'F1':<10} {lm['with_focused']['avg_f1']:<12.4f} {PAPER_REFS['longmemeval']['f1']:<12.4f} {'DeepSeek-V3 vs LLaMA-70B'}")
 
-    # ============================================================
     # Validation Verdict
-    # ============================================================
     logger.info(f"\n{'='*70}")
     logger.info("VALIDATION VERDICT")
     logger.info("=" * 70)
@@ -830,7 +765,6 @@ def main():
     logger.info(f"\n  Results saved to: {output_path}")
 
     return passed == total
-
 
 if __name__ == "__main__":
     success = main()

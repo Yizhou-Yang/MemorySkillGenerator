@@ -1,13 +1,4 @@
-"""
-MemSkill integration tests -- verifies all components from the MemSkill paper.
-
-Coverage:
-- Phase 1: LoCoMo + LongMemEval benchmark loader
-- Phase 2: RL Controller (embedding-based skill selection + Gumbel-Top-K + PPO)
-- Phase 3: Skill Designer (hard-case buffer + evolution)
-- Phase 4: Span-level processing
-- Phase 5: Cross-model transfer evaluation
-"""
+"""MemSkill integration tests -- verifies all components from the MemSkill paper."""
 
 from __future__ import annotations
 
@@ -18,9 +9,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-# ============================================================
 # Phase 1: Benchmark Loader Tests (LoCoMo + LongMemEval)
-# ============================================================
 
 from benchmarks.loader import BenchmarkLoader, PRIMARY_BENCHMARKS
 
@@ -80,7 +69,6 @@ MOCK_LONGMEMEVAL_ROWS = [
         "focused_input_tokens": 100,
     },
 ]
-
 
 class TestLoCoMoLoader:
     """LoCoMo benchmark loader tests"""
@@ -142,7 +130,6 @@ class TestLoCoMoLoader:
         assert "Hey Mel" in tasks[0]["context"]
         assert "counseling" in tasks[0]["context"]
 
-
 class TestLongMemEvalLoader:
     """LongMemEval benchmark loader tests"""
 
@@ -197,7 +184,6 @@ class TestLongMemEvalLoader:
         tasks = loader.load()
         assert len(tasks) == 2
 
-
 class TestBenchmarkListsUpdated:
     """Verify benchmark lists are correctly updated"""
 
@@ -211,10 +197,7 @@ class TestBenchmarkListsUpdated:
         # Original 7 + 2 new = 9
         assert len(PRIMARY_BENCHMARKS) == 9
 
-
-# ============================================================
 # Phase 2: RL Controller Tests
-# ============================================================
 
 from src.rl_controller.controller import (
     ControllerMLP,
@@ -225,7 +208,6 @@ from src.rl_controller.controller import (
     SkillSelectionController,
     ValueNetwork,
 )
-
 
 class TestControllerMLP:
     """Controller MLP network tests"""
@@ -264,7 +246,6 @@ class TestControllerMLP:
         params = mlp.get_params()
         assert len(params) == 4  # W1, b1, W2, b2
 
-
 class TestValueNetwork:
     """Value Network tests"""
 
@@ -280,7 +261,6 @@ class TestValueNetwork:
         v1 = vn.forward(x)
         v2 = vn.forward(x)
         assert v1 == v2
-
 
 class TestSkillSelectionController:
     """Skill Selection Controller comprehensive tests"""
@@ -531,7 +511,6 @@ class TestSkillSelectionController:
         assert not ctrl._skill_embeddings[0].is_new
         assert not ctrl._skill_embeddings[1].is_new
 
-
 class TestGumbelTopK:
     """Gumbel-Top-K sampling dedicated tests"""
 
@@ -557,10 +536,7 @@ class TestGumbelTopK:
         # First skill should be selected most often
         assert counts[0] > 50, "High logit skill should be selected most often"
 
-
-# ============================================================
 # Phase 3: Skill Designer Tests
-# ============================================================
 
 from src.skill_induction.skill_designer import (
     EvolutionProposal,
@@ -569,7 +545,6 @@ from src.skill_induction.skill_designer import (
     SkillDesigner,
 )
 from src.models import Skill
-
 
 class TestHardCase:
     """Hard Case data structure tests"""
@@ -594,7 +569,6 @@ class TestHardCase:
         case_c = HardCase(query="C", reward=0.7, fail_count=5)  # d=1.5
 
         assert case_a.difficulty_score > case_c.difficulty_score > case_b.difficulty_score
-
 
 class TestHardCaseBuffer:
     """Hard-Case Buffer tests"""
@@ -669,7 +643,6 @@ class TestHardCaseBuffer:
         buf.add(HardCase(query="q1", reward=0.1, step=1))
         buf.clear()
         assert buf.size == 0
-
 
 class TestSkillDesigner:
     """Skill Designer tests"""
@@ -800,13 +773,9 @@ class TestSkillDesigner:
         assert len(proposals) == 1
         assert proposals[0].skill_name == "Temporal Tracker"
 
-
-# ============================================================
 # Phase 4: Span Processor Tests
-# ============================================================
 
 from src.memory.span_processor import SpanProcessor, TextSpan
-
 
 class TestSpanProcessor:
     """Span-level Processor tests"""
@@ -890,17 +859,13 @@ class TestSpanProcessor:
         stats = processor.get_processing_stats([])
         assert stats["num_spans"] == 0
 
-
-# ============================================================
 # Phase 5: Cross-Model Transfer Evaluation Tests
-# ============================================================
 
 from src.evaluation.transfer_eval import (
     CrossModelTransferEvaluator,
     TransferReport,
     TransferResult,
 )
-
 
 class TestTransferResult:
     """TransferResult data structure tests"""
@@ -920,7 +885,6 @@ class TestTransferResult:
             source_f1=0.0, target_f1=0.5,
         )
         assert result.transfer_ratio == 0.0
-
 
 class TestTransferReport:
     """TransferReport aggregation tests"""
@@ -950,7 +914,6 @@ class TestTransferReport:
         report = TransferReport(source_model="A", target_model="B")
         report.compute_aggregates()
         assert report.avg_source_f1 == 0.0
-
 
 class TestCrossModelTransferEvaluator:
     """Cross-model transfer evaluator tests"""
@@ -989,10 +952,7 @@ class TestCrossModelTransferEvaluator:
         f1 = CrossModelTransferEvaluator._compute_token_f1("cat dog", "fish bird")
         assert f1 == 0.0
 
-
-# ============================================================
 # Integration Tests: End-to-End Pipeline Verification
-# ============================================================
 
 class TestEndToEndPipeline:
     """End-to-end pipeline integration tests"""
