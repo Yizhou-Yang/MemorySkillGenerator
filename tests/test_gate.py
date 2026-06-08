@@ -38,8 +38,9 @@ def populated_library():
         missing_steps=[],
         extra_steps=[],
         failure_reason="",
-        failure_taxonomy={"ai_refined": True, "causal_lesson": "Use sieve of Eratosthenes",
-                          "generalized_steps": "1. Generate primes with sieve\n2. Sum the list"},
+        failure_taxonomy={"ai_refined": True,
+                          "causal_lesson": "Used sieve of Eratosthenes for efficient prime generation then summed the list",
+                          "generalized_steps": "1. Generate primes with sieve algorithm\n2. Sum the resulting list"},
     ))
     lib.record(Experience(
         task_id="test_2",
@@ -51,6 +52,9 @@ def populated_library():
         missing_steps=[],
         extra_steps=[],
         failure_reason="",
+        failure_taxonomy={"ai_refined": True,
+                          "causal_lesson": "Navigate to target location first, then interact with object using take command",
+                          "generalized_steps": "1. go to [LOCATION]\n2. take [OBJECT] from [LOCATION]"},
     ))
     return lib
 
@@ -504,24 +508,26 @@ class TestQualityGating:
     """Verify that quality gates prevent overfitting and noise injection."""
 
     def test_quality_success_high_score_refined(self):
-        """AI-refined success with high score → quality."""
+        """AI-refined success with high score and substantive causal_lesson → quality."""
         exp = Experience(
             task_id="t1", task_desc="test", tool_sequence=[], action_commands=["step 1"],
             outcome="success", score=1.0, missing_steps=[], extra_steps=[],
             failure_reason="",
-            failure_taxonomy={"ai_refined": True, "generalized_steps": "1. Do X\n2. Do Y"},
+            failure_taxonomy={"ai_refined": True, "generalized_steps": "1. Do X\n2. Do Y",
+                              "causal_lesson": "Used binary search for O(log n) lookup instead of linear scan"},
         )
         assert _is_quality_success(exp) is True
 
     def test_quality_success_high_score_unrefined(self):
-        """Unrefined success with high score and action commands → quality."""
+        """Unrefined success with high score → NOT quality (raw commands are noise)."""
         exp = Experience(
             task_id="t2", task_desc="test", tool_sequence=[],
             action_commands=["python -c 'print(42)'"],
             outcome="success", score=0.8, missing_steps=[], extra_steps=[],
             failure_reason="",
         )
-        assert _is_quality_success(exp) is True
+        # Unrefined experiences are task-specific noise, not transferable skills
+        assert _is_quality_success(exp) is False
 
     def test_low_score_success_rejected(self):
         """Low-score success → NOT quality (overfitting risk)."""

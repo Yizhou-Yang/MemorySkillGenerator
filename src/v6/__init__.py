@@ -84,8 +84,8 @@ class SkillForgeV6:
             exp.failure_taxonomy["critic_quality"] = verdict.get("total", 5)
             exp.failure_taxonomy["critic_verdict"] = verdict.get("verdict", "inject")
 
-            # Low quality → forced refine/expand (never discard information)
-            if verdict.get("total", 5) < critic_threshold:
+            # Low quality OR noise/info-loss detected → forced refine/expand (never discard)
+            if verdict.get("total", 5) < critic_threshold or verdict.get("verdict") == "low_confidence":
                 refinement = critic_refine_experience(exp, verdict, llm_fn=critic_fn)
                 if refinement.get("enhanced"):
                     # Expand existing fields — never overwrite with shorter content

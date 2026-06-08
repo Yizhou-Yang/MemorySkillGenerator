@@ -9,16 +9,22 @@ def _is_quality_success(exp: Experience) -> bool:
 
     Prevents overfitting by filtering out:
     - Low-score "successes" (partial matches scored as success)
+    - Unrefined experiences (raw action commands are task-specific, not transferable)
     - Empty experiences with no actionable content
+    - Experiences with trivial/empty causal lessons (noise)
     """
     if exp.score < 0.5:
         return False
-    # Must have either AI-refined content or meaningful action commands
     taxonomy = exp.failure_taxonomy
+    # AI-refined with substantive generalized_steps = quality skill
     if taxonomy.get("ai_refined") and taxonomy.get("generalized_steps"):
-        return True
-    if exp.action_commands and any(cmd.strip() for cmd in exp.action_commands):
-        return True
+        # Also check causal_lesson is not empty/trivial
+        causal = taxonomy.get("causal_lesson", "")
+        if len(causal) > 10:  # Must have a real lesson, not empty
+            return True
+    # Unrefined successes: raw action_commands are task-specific noise.
+    # They contain things like "git clone https://specific-repo.git" which
+    # don't generalize. Only AI-refined content is safe to inject.
     return False
 
 
@@ -43,7 +49,11 @@ def _is_quality_failure(exp: Experience) -> bool:
 
 
 def format_success_experience(exp: Experience) -> str:
-    """Format successful experience with version evolution context."""
+    """Format successful experience with version evolution context.
+
+    NOTE: This function is only called for experiences that passed _is_quality_success,
+    which requires ai_refined=True with substantive generalized_steps and causal_lesson.
+    """
     taxonomy = exp.failure_taxonomy
     parts = [f"[Successful approach for similar task]", f"Task: {exp.task_desc}"]
 
@@ -54,8 +64,11 @@ def format_success_experience(exp: Experience) -> str:
         if taxonomy.get("evolution_insight"):
             parts.append(f"Evolution insight: {taxonomy['evolution_insight']}")
     else:
-        steps = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
-        parts.append(f"Steps:\n{steps}")
+        # Safety fallback — should not be reached due to quality gate
+        # but if it is, output minimal non-noise content
+        parts.append(f"Score: {exp.score:.0%}")
+        return "\n".join(parts)
+
     parts.append(f"Score: {exp.score:.0%}")
 
     # Show how this success was achieved (patch history from failures → success)
