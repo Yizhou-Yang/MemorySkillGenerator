@@ -36,7 +36,6 @@ TASK_TIMEOUT_AGENT = 300
 TASK_TIMEOUT_ALFWORLD = 180
 ALFWORLD_RETRY_MAX = 2
 QUALITY_THRESHOLD = 5
-TRAIN_BATCH_SIZE = 5  # Mini-batch concurrent training: tasks within a batch run in parallel
 
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
 
@@ -523,19 +522,35 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
 
     return True, critic_score
 
-# ─── Mini-batch concurrent training ──────────────────────────────────────
+# ─── Sequential training (no oracle-driven retry for QA tasks) ────────────
 
 async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
                            sem: asyncio.Semaphore, game_list: list = None) -> list:
-    """Mini-batch concurrent training: tasks within a batch run in parallel,
-    sharing the experience library snapshot from previous batches.
-    This gives ~TRAIN_BATCH_SIZE x speedup while preserving cross-batch learning."""
+    """Each task uses the current accumulated experience library."""
     all_results = []
 
-    async def _run_single(i: int, task: dict, aug: str):
-        """Execute a single train task and record experience."""
+    for i, task in enumerate(train_tasks):
         async with sem:
-            if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
+            aug = ""
+            if sf.library.experiences:
+                if benchmark == "gaia":
+                    aug = build_augmented_prompt(
+                        task["description"][:300], sf.library, token_budget=1500,
+                        metadata={"benchmark": "gaia"}
+                    )
+                elif benchmark == "alfworld":
+                    task_desc = f"{task.get('description', '')} [type: {task.get('metadata', {}).get('task_type', '')}]"
+                    aug = build_augmented_prompt(
+                        task_desc, sf.library, token_budget=1500,
+                        metadata=task.get("metadata", {})
+                    )
+                else:
+                    aug = build_augmented_prompt(
+                        task["description"][:300], sf.library, token_budget=600,
+                        metadata=task.get("metadata", {})
+                    )
+
+            if benchmark == "gaia" or benchmark == "gaia2" or benchmark == "swebench_dynamic":
                 r = await run_gaia_task(task, experience_section=aug, group="train")
             elif benchmark == "alfworld":
                 game = game_list[i] if game_list else None
@@ -553,7 +568,6 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
             ev = await evaluate_task(r, benchmark, use_llm_judge=False)
             score = ev.get("score", 0.0)
 
-            # ALFWorld retry logic
             if benchmark == "alfworld" and not r.get("won") and ALFWORLD_RETRY_MAX > 0:
                 game = game_list[i] if game_list else None
                 for _ in range(ALFWORLD_RETRY_MAX):
@@ -580,55 +594,12 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
             r["_train_score"] = score
             r["_critic_quality"] = cq
             r["_recorded"] = recorded
-            r["_index"] = i
-            return r
+            all_results.append(r)
 
-    # Process in mini-batches
-    for batch_start in range(0, len(train_tasks), TRAIN_BATCH_SIZE):
-        batch_end = min(batch_start + TRAIN_BATCH_SIZE, len(train_tasks))
-        batch_tasks = train_tasks[batch_start:batch_end]
-
-        # Build augmentation from current library snapshot (shared within batch)
-        coros = []
-        for j, task in enumerate(batch_tasks):
-            i = batch_start + j
-            aug = ""
-            if sf.library.experiences:
-                if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
-                    aug = build_augmented_prompt(
-                        task["description"][:300], sf.library, token_budget=1500,
-                        metadata={"benchmark": benchmark}
-                    )
-                elif benchmark == "alfworld":
-                    task_desc = f"{task.get('description', '')} [type: {task.get('metadata', {}).get('task_type', '')}]"
-                    aug = build_augmented_prompt(
-                        task_desc, sf.library, token_budget=1500,
-                        metadata=task.get("metadata", {})
-                    )
-                else:
-                    aug = build_augmented_prompt(
-                        task["description"][:300], sf.library, token_budget=600,
-                        metadata=task.get("metadata", {})
-                    )
-            coros.append(_run_single(i, task, aug))
-
-        # Run batch concurrently
-        batch_results = await asyncio.gather(*coros, return_exceptions=True)
-
-        # Process results and print progress
-        for r in batch_results:
-            if isinstance(r, Exception):
-                print(f"    ⚠ batch task error: {r}", flush=True)
-                continue
-            i = r.get("_index", 0)
-            score = r.get("_train_score", 0)
-            cq = r.get("_critic_quality", 0)
-            recorded = r.get("_recorded", False)
             tag = "✓" if score >= 0.5 else "✗"
             kept = "kept" if recorded else "drop"
             print(f"    {tag} [{i+1}/{len(train_tasks)}] em={score:.2f} q={cq:.0f} {kept} "
-                  f"lib={len(sf.library.experiences)} | {r.get('task_id', '')[:30]}", flush=True)
-            all_results.append(r)
+                  f"lib={len(sf.library.experiences)} | {task['task_id'][:30]}", flush=True)
 
     return all_results
 
@@ -863,28 +834,18 @@ async def main():
     print(f"\n  Total: {sum(len(t) for t in benchmarks.values())} tasks")
 
     all_reports = {}
-
-    # Run all benchmarks concurrently for maximum speed
-    async def _run_one_benchmark(name, tasks):
-        try:
-            game_list = alfworld_games if name == "alfworld" else None
-            return name, await run_benchmark(name, tasks, game_list=game_list)
-        except Exception as e:
-            import traceback
-            print(f"\n  ERROR on {name}: {e}")
-            traceback.print_exc()
-            return name, {"error": str(e)}
-
-    benchmark_coros = []
     for name, tasks in benchmarks.items():
         if not tasks:
             print(f"\n  SKIP {name}: no tasks")
             continue
-        benchmark_coros.append(_run_one_benchmark(name, tasks))
-
-    results = await asyncio.gather(*benchmark_coros)
-    for name, report in results:
-        all_reports[name] = report
+        try:
+            game_list = alfworld_games if name == "alfworld" else None
+            all_reports[name] = await run_benchmark(name, tasks, game_list=game_list)
+        except Exception as e:
+            import traceback
+            print(f"\n  ERROR on {name}: {e}")
+            traceback.print_exc()
+            all_reports[name] = {"error": str(e)}
 
     print(f"\n\n{'═'*70}")
     print(f"  FINAL SUMMARY (latest — DeepSeek V4 Pro · EM / pass@1)")
