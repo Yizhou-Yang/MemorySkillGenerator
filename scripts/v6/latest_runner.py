@@ -152,10 +152,17 @@ async def llm_critic_skill_quality(exp_summary: str, task_desc: str) -> float:
     prompt = (
         "You are an experienced AI agent reviewer. Rate how USEFUL and "
         "REUSABLE the following candidate skill is for similar future tasks.\n\n"
-        "Score from 0 (useless / harmful) to 10 (highly reusable, clear lesson).\n"
-        "Penalize: vague generalizations, hallucinated steps, contradictions, "
-        "task-specific facts mistaken for procedure.\n"
-        "Reward: clear causal reasoning, transferable structure, honest failure analysis.\n\n"
+        "Score from 0 (useless / harmful) to 10 (highly reusable, clear lesson).\n\n"
+        "Scoring guide:\n"
+        "- SUCCESSFUL skills (8-10): concrete tool sequence that WORKED, "
+        "reproducible steps, clear strategy that transfers to similar tasks.\n"
+        "- FAILED skills with lessons (6-8): identifies WHY it failed, "
+        "what to avoid, what was missing — useful as negative examples.\n"
+        "- LOW quality (0-5): vague generalizations, hallucinated steps, "
+        "task-specific facts mistaken for procedure, no actionable info.\n\n"
+        "Key: A successful execution with clear steps is ALWAYS valuable "
+        "(it shows the correct approach). Do NOT penalize for lacking failure analysis "
+        "when the task succeeded.\n\n"
         f"## Task\n{task_desc[:300]}\n\n## Candidate skill\n{exp_summary[:800]}\n\n"
         "Output ONLY a single integer 0-10:"
     )
@@ -448,12 +455,23 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
     )
 
     # Async critic evaluation (safe in async context)
-    summary = (
-        f"Outcome: {exp.outcome} (score={exp.score:.2f})\n"
-        f"Steps: {' -> '.join(exp.tool_sequence[:8])}\n"
-        f"Missing: {', '.join(exp.missing_steps[:5])}\n"
-        f"Failure: {exp.failure_reason}"
-    )
+    # For successful tasks: highlight WHAT WORKED (tool chain, strategy)
+    # For failed tasks: highlight WHAT WENT WRONG (missing steps, failure reason)
+    if exp.outcome == "success":
+        summary = (
+            f"Outcome: SUCCESS (score={exp.score:.2f})\n"
+            f"Correct tool chain: {' -> '.join(exp.tool_sequence[:10])}\n"
+            f"Steps taken: {'; '.join(exp.action_commands[:5])}\n"
+            f"Strategy: completed all required steps successfully"
+        )
+    else:
+        summary = (
+            f"Outcome: {exp.outcome} (score={exp.score:.2f})\n"
+            f"Steps attempted: {' -> '.join(exp.tool_sequence[:8])}\n"
+            f"Missing: {', '.join(exp.missing_steps[:5]) or 'unknown'}\n"
+            f"Failure reason: {exp.failure_reason or 'incorrect answer'}\n"
+            f"What to avoid: repeating the same approach without addressing gaps"
+        )
     critic_score = await llm_critic_skill_quality(summary, task["description"][:300])
     exp.failure_taxonomy["critic_quality"] = critic_score
 
