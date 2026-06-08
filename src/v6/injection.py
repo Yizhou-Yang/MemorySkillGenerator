@@ -96,6 +96,12 @@ def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
     if taxonomy.get("evolution_trace"):
         parts.append("Evolution: " + " → ".join(taxonomy["evolution_trace"][-3:]))
 
+    # Critic-refined enrichments (recovery strategies, preconditions)
+    if taxonomy.get("recovery_strategies"):
+        parts.append(f"Recovery strategies: {taxonomy['recovery_strategies']}")
+    if taxonomy.get("preconditions"):
+        parts.append(f"Preconditions: {taxonomy['preconditions']}")
+
     result = "\n".join(parts)
     if estimate_token_count(result) > budget_tokens and len(parts) > 5:
         result = "\n".join(parts[:5])

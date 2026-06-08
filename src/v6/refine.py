@@ -136,6 +136,95 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     if llm_fn is None:
         return default
 
+
+CRITIC_REFINE_PROMPT = """You are a skill quality enhancer. A cross-agent critic found this experience LOW QUALITY.
+Your job: ENRICH and EXPAND it so it becomes high-quality. DO NOT compress or remove ANY information.
+
+## Original Experience
+Task: {task_desc}
+Outcome: {outcome} (score: {score:.0%})
+Steps taken:
+{steps}
+Causal lesson: {causal_lesson}
+Generalized steps: {generalized_steps}
+Avoidance note: {avoidance_note}
+
+## Critic Feedback
+Score: {critic_total}/10
+Reason: {critic_reason}
+Weak dimensions: {weak_dimensions}
+
+## Your Job
+1. KEEP every original step and detail intact — do NOT summarize or compress
+2. ADD missing context: what environment setup is needed? what preconditions?
+3. ADD concrete failure modes: what could go wrong at each step?
+4. ADD recovery strategies: if step N fails, what should the agent try?
+5. EXPAND causal reasoning: make the WHY more specific and actionable
+6. ADD transfer conditions: under what exact conditions does this apply?
+
+## Response (JSON only)
+{{
+  "enhanced_steps": "ALL original steps PLUS added context/failure-modes/recovery — must be LONGER than input",
+  "enhanced_causal_lesson": "deeper causal analysis — more specific than original",
+  "enhanced_avoidance": "concrete pitfalls with specific indicators",
+  "enhanced_transferability": "exact conditions and task types where this applies",
+  "recovery_strategies": "what to do when each step fails",
+  "preconditions": "environment/state requirements before attempting this approach",
+  "quality_score": 0-10
+}}"""
+
+
+def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None) -> dict:
+    """When critic scores low, REFINE the experience (never discard).
+    Enriches with failure modes, recovery strategies, preconditions.
+    Never compresses or removes information."""
+    if llm_fn is None:
+        return {"enhanced": False}
+
+    steps_str = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
+    causal = exp.failure_taxonomy.get("causal_lesson", "")
+    generalized = exp.failure_taxonomy.get("generalized_steps", "")
+    avoidance = exp.failure_taxonomy.get("avoidance_note", "")
+
+    # Identify weak dimensions for targeted improvement
+    weak = []
+    if critic_verdict.get("actionability", 3) < 2:
+        weak.append("actionability (steps not concrete enough)")
+    if critic_verdict.get("generalizability", 3) < 2:
+        weak.append("generalizability (too task-specific)")
+    if critic_verdict.get("correctness", 2) < 1:
+        weak.append("correctness (logic may be flawed)")
+    if critic_verdict.get("novelty", 2) < 1:
+        weak.append("novelty (too obvious)")
+
+    prompt = CRITIC_REFINE_PROMPT.format(
+        task_desc=exp.task_desc,
+        outcome=exp.outcome,
+        score=exp.score,
+        steps=steps_str or "(no steps recorded)",
+        causal_lesson=causal or "(none)",
+        generalized_steps=generalized or "(none)",
+        avoidance_note=avoidance or "(none)",
+        critic_total=critic_verdict.get("total", 0),
+        critic_reason=critic_verdict.get("reason", "low quality"),
+        weak_dimensions=", ".join(weak) if weak else "general quality",
+    )
+
+    try:
+        response = llm_fn(prompt)
+        repaired = repair_json(response, return_objects=True)
+        if isinstance(repaired, dict):
+            repaired["enhanced"] = True
+            return repaired
+        if isinstance(repaired, list) and repaired and isinstance(repaired[0], dict):
+            result = repaired[0]
+            result["enhanced"] = True
+            return result
+    except Exception:
+        pass
+
+    return {"enhanced": False}
+
     steps_str = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
     causal = exp.failure_taxonomy.get("causal_lesson", "")
     generalized = exp.failure_taxonomy.get("generalized_steps", "")

@@ -7,7 +7,7 @@ from .gate import assess_task_complexity, should_augment, classify_task_type
 from .injection import (build_augmented_prompt, format_success_experience,
                         format_failure_experience, estimate_token_count)
 from .analysis import analyze_execution, classify_failure
-from .refine import ai_review_experience, cross_agent_evaluate_skill, _format_patch_history
+from .refine import ai_review_experience, cross_agent_evaluate_skill, critic_refine_experience, _format_patch_history
 
 class SkillForgeV6:
     """Orchestrates: record_experience → version tracking → AI refine → injection."""
@@ -79,15 +79,46 @@ class SkillForgeV6:
                 for p in exp.patch_history if p.get("fixed_missing") or p.get("score_delta", 0) > 0
             ]
 
-        # Cross-agent critic gate (optional)
+        # Cross-agent critic: ALWAYS evaluate, low-score triggers forced refine (never discard)
         if critic_fn is not None:
-            from .refine import cross_agent_evaluate_skill
+            from .refine import cross_agent_evaluate_skill, critic_refine_experience
             verdict = cross_agent_evaluate_skill(exp, llm_fn=critic_fn)
             exp.failure_taxonomy["critic_quality"] = verdict.get("total", 5)
             exp.failure_taxonomy["critic_verdict"] = verdict.get("verdict", "inject")
+
+            # Low quality → forced refine/expand (never discard information)
             if verdict.get("total", 5) < critic_threshold:
-                exp.failure_taxonomy["excluded"] = True
-                return exp  # Not added to library, but returned for logging
+                refinement = critic_refine_experience(exp, verdict, llm_fn=critic_fn)
+                if refinement.get("enhanced"):
+                    # Expand existing fields — never overwrite with shorter content
+                    existing_steps = exp.failure_taxonomy.get("generalized_steps", "")
+                    enhanced_steps = refinement.get("enhanced_steps", "")
+                    if len(enhanced_steps) > len(existing_steps):
+                        exp.failure_taxonomy["generalized_steps"] = enhanced_steps
+
+                    existing_causal = exp.failure_taxonomy.get("causal_lesson", "")
+                    enhanced_causal = refinement.get("enhanced_causal_lesson", "")
+                    if len(enhanced_causal) > len(existing_causal):
+                        exp.failure_taxonomy["causal_lesson"] = enhanced_causal
+
+                    existing_avoid = exp.failure_taxonomy.get("avoidance_note", "")
+                    enhanced_avoid = refinement.get("enhanced_avoidance", "")
+                    if len(enhanced_avoid) > len(existing_avoid):
+                        exp.failure_taxonomy["avoidance_note"] = enhanced_avoid
+
+                    existing_transfer = exp.failure_taxonomy.get("transferability", "")
+                    enhanced_transfer = refinement.get("enhanced_transferability", "")
+                    if len(enhanced_transfer) > len(existing_transfer):
+                        exp.failure_taxonomy["transferability"] = enhanced_transfer
+
+                    # Add new fields (recovery strategies, preconditions)
+                    if refinement.get("recovery_strategies"):
+                        exp.failure_taxonomy["recovery_strategies"] = refinement["recovery_strategies"]
+                    if refinement.get("preconditions"):
+                        exp.failure_taxonomy["preconditions"] = refinement["preconditions"]
+
+                    exp.failure_taxonomy["critic_refined"] = True
+                    exp.failure_taxonomy["critic_quality_post_refine"] = refinement.get("quality_score", 5)
 
         self.library.record(exp)
         return exp
