@@ -427,7 +427,8 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
     if benchmark == "swebench_dynamic":
         # SWE-bench: use LLM judge to assess if the response contains a valid patch
         response = (result.get("response") or "").strip()
-        expected = (result.get("expected") or "").strip()
+        raw_expected = result.get("expected", "")
+        expected = str(raw_expected).strip() if not isinstance(raw_expected, list) else ", ".join(raw_expected)
         if not response:
             return {"score": 0.0, "em": 0.0, "method": "swebench_empty"}
         # Check if response contains a diff/patch
@@ -482,7 +483,13 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
 
     # Oracle actions: use expected answer as reference
     expected = result.get("expected", task.get("expected", ""))
-    oracle_actions = [{"output": expected[:200]}] if expected else []
+    if isinstance(expected, list):
+        # gaia2: expected is a list of oracle actions (dicts)
+        oracle_actions = expected
+    elif expected:
+        oracle_actions = [{"output": str(expected)[:200]}]
+    else:
+        oracle_actions = []
 
     # Use the task_id from the task dict (consistent across retries for patch_history)
     task_id = task["task_id"]
