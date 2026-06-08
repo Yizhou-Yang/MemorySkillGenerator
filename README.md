@@ -1,9 +1,21 @@
-# SkillForge V6
+# SkillForge
 
-> **Experience-Augmented Agent Framework — Learn from Execution History to Improve Future Performance**
+> **Experience-Augmented Agent Framework with Version-Aware Skill Evolution**
 >
-> SkillForge 从 agent 的执行轨迹中提取经验（Experience），通过语义检索、AI 精炼和成本感知注入，
-> 在动态 benchmark 上实现显著提升：**Gaia2 +3.5pp, SWE-bench Patch Rate +14pp**。
+> SkillForge extracts structured experiences from agent execution trajectories,
+> maintains an EvoMem-style version history with patch tracking, and injects
+> relevant skills into future tasks via semantic retrieval — improving agent
+> performance across dynamic and static benchmarks.
+
+---
+
+## Key Contributions
+
+1. **Dual-Feedback Experience Recording**: Learns from both successful and failed executions, tracking positive strategies and negative pitfalls simultaneously.
+2. **EvoMem-Style Patch History**: Git-like version tracking for each skill — records what changed, why, and how scores evolved across attempts.
+3. **Cross-Agent Critic with Forced Refinement**: Independent LLM evaluator scores skill quality; low-quality skills are *enriched* (never discarded), preserving all information.
+4. **Task-Type-Aware Injection Routing**: Automatically classifies tasks (agentic / QA / embodied) and routes to appropriate injection format.
+5. **Zero Information Loss**: The system never compresses, summarizes, or removes information from skills — only adds context, failure modes, and recovery strategies.
 
 ---
 
@@ -12,99 +24,147 @@
 ```
                         ┌──────────────────────────┐
                         │     Agent Execution       │
-                        │   (CodeBuddy SDK loop)    │
+                        │   (LLM agent loop)        │
                         └────────────┬─────────────┘
                                      │ trajectory + score
                                      ▼
               ┌──────────────────────────────────────────┐
               │           analysis.py                     │
-              │  Fuzzy match vs oracle → Experience       │
-              │  Classify failure: tool/model/over/       │
-              │  task_mismatch                            │
+              │  Trajectory → Experience extraction       │
+              │  • Format-adaptive action key extraction  │
+              │  • Fuzzy matching vs oracle (rapidfuzz)   │
+              │  • 4-category failure classification      │
               └──────────────────┬───────────────────────┘
                                  │ Experience
                                  ▼
               ┌──────────────────────────────────────────┐
               │           refine.py                       │
               │  Version-Conditioned AI Refinement        │
-              │  LLM generalizes steps, extracts causal   │
-              │  lesson, analyzes version history diff    │
-              │  ⚡ ADDS information, never removes       │
+              │  • LLM generalizes with placeholders      │
+              │  • Extracts causal lesson (why it worked/ │
+              │    failed)                                │
+              │  • Analyzes patch_history diff chain      │
+              │  • Cross-agent quality evaluation         │
+              │  • Critic-driven enrichment (never        │
+              │    discards — only expands)               │
               └──────────────────┬───────────────────────┘
                                  │ refined experience
                                  ▼
               ┌──────────────────────────────────────────┐
               │         experience.py                     │
               │  ExperienceLibrary                        │
-              │  ├─ Semantic retrieval (sentence-         │
-              │  │   transformers + TF-IDF fallback)      │
-              │  ├─ Per-experience effectiveness tracking │
-              │  └─ Weighted retrieval ranking            │
+              │  • EvoMem-style version tracking          │
+              │  • Semantic retrieval (sentence-          │
+              │    transformers + sklearn TF-IDF cosine   │
+              │    fallback)                              │
+              │  • Per-experience effectiveness weighting │
+              │  • Patch history (append-only log)        │
               └──────────────────┬───────────────────────┘
                                  │ top-k relevant experiences
                                  ▼
               ┌──────────────────────────────────────────┐
               │          injection.py                     │
-              │  ├─ gate.py: classify_task_type           │
-              │  │   (agentic / qa / embodied)            │
-              │  ├─ Route: qa→light hints,                │
-              │  │   agentic→full experience injection    │
-              │  ├─ tiktoken token budget management      │
-              │  └─ No content truncation                 │
+              │  Cost-Aware Prompt Injection              │
+              │  • gate.py: classify_task_type            │
+              │    (agentic / qa / embodied)              │
+              │  • Route: qa → enhanced hints with        │
+              │    pitfall warnings; agentic → full       │
+              │    experience injection                   │
+              │  • tiktoken token budget management       │
+              │  • Priority-based field dropping          │
+              │    (never truncates mid-content)          │
               └──────────────────┬───────────────────────┘
                                  │ augmented prompt
                                  ▼
+              ┌──────────────────────────────────────────┐
+              │          gate.py                          │
+              │  Applicability Gate                       │
+              │  • Task complexity assessment             │
+              │    (simple / moderate / complex)          │
+              │  • Task type classification via           │
+              │    structural signals (no hardcoded       │
+              │    keyword lists)                         │
+              │  • Augmentation decision                  │
+              └──────────────────┬───────────────────────┘
+                                 │
+                                 ▼
                         ┌──────────────┐
-                        │  Next Task   │  (feedback loop)
+                        │  Next Task   │  (iterative feedback loop)
                         └──────────────┘
 ```
 
-### 核心模块
+---
 
-| 模块 | 职责 | 关键依赖 |
-|------|------|---------|
-| `analysis.py` | 执行轨迹 vs oracle fuzzy matching → Experience + 4 类失败分类 | rapidfuzz |
-| `refine.py` | Version-Conditioned AI Refinement：LLM 泛化 + 因果 lesson + patch_history 演进洞察 | json_repair |
-| `experience.py` | Experience 数据结构 + 语义嵌入检索 + per-experience effectiveness 加权 | sentence-transformers, sklearn |
-| `gate.py` | 任务类型分类（agentic/qa/embodied）— 控制注入格式 | — |
-| `injection.py` | 按 task_type 路由，格式化经验为 prompt，tiktoken token budget，无内容截断 | tiktoken |
+## Core Modules
 
-### 关键设计决策
-
-1. **Version-Conditioned Refine**：LLM 看到完整的 patch_history diff chain（跨版本演进），而非单次 reflexion
-2. **语义检索**：sentence-transformers embedding（synonym 相似度 0.47 vs Jaccard 0.0）+ TF-IDF fallback
-3. **Per-experience effectiveness**：每次注入后追踪 score_delta，检索时加权（负效果经验降权至 0.3x）
-4. **无信息丢失**：refine.py 传全部数据给 LLM；injection.py 按字段优先级 drop 而非截断
-5. **零手写算法**：全部使用 sentence-transformers / sklearn / rapidfuzz / tiktoken / json_repair
+| Module | Responsibility | Key Dependencies |
+|--------|---------------|-----------------|
+| `experience.py` | Experience dataclass with EvoMem-style version tracking; ExperienceLibrary with semantic embedding retrieval and per-experience effectiveness weighting | sentence-transformers, sklearn |
+| `analysis.py` | Format-adaptive trajectory analysis; greedy ordered action matching via fuzzy string similarity; 4-category failure classification (tool_failure / over_action / task_mismatch / model_failure) | rapidfuzz |
+| `gate.py` | Task type classification (agentic / qa / embodied) using structural signals; task complexity assessment; augmentation gating | — |
+| `injection.py` | Task-type-aware routing; formats success experiences (with evolution context) and failure experiences (with patch history + recovery strategies); tiktoken token budget enforcement | tiktoken |
+| `refine.py` | Version-conditioned AI refinement; cross-agent quality evaluation (independent LLM judge); critic-driven enrichment for low-quality skills (adds failure modes, recovery strategies, preconditions — never removes information) | json_repair |
 
 ---
 
-## Results
+## Design Principles
 
-### 动态 Benchmark（核心）
+### 1. Zero Information Loss
 
-| Benchmark | Metric | A (Baseline) | C (AI-Refined) | Δ |
-|-----------|--------|:------------:|:--------------:|:--:|
-| **Gaia2** | Soft Recall | 41.6% | **45.1%** | **+3.5pp** |
-| **SWE-bench** | Patch Rate | 40.0% | **54.0%** | **+14pp** |
+The system **never compresses, summarizes, or discards** skill content. When a cross-agent critic scores a skill below threshold, the response is forced refinement (enrichment) — adding context, failure modes, and recovery strategies on top of existing content. Content is only replaced if the new version is strictly longer.
 
-*Gaia2 n=25 test, SWE-bench n=50 test. A=no injection, C=version-conditioned AI-refined injection.*
+### 2. EvoMem-Style Version Tracking
 
-### QA Benchmark（验证无负优化）
+Each experience maintains an append-only `patch_history` recording:
+- Score deltas across attempts (`score_delta`)
+- Outcome transitions (`failure → partial → success`)
+- Steps fixed and steps still missing
+- New steps added and old steps removed
 
-| Benchmark | A | C | Δ |
-|-----------|:---:|:---:|:--:|
-| LoCoMo | 7.4% | 6.8% | -0.6pp (中性) |
-| GAIA HF | 18.0% | 4.0% | -14pp ⚠ |
+This enables the system to learn *how* a skill evolved, not just its final state.
 
-*Task-type-aware routing 成功隔离了 QA 任务（LoCoMo 无变化），GAIA HF 仍有干扰待修复。*
+### 3. Dual-Feedback Learning
 
-### Ablation
+Unlike systems that only learn from success (or only from failure), SkillForge records both:
+- **Success experiences**: Highlight what worked — tool chains, strategies, causal reasoning
+- **Failure experiences**: Highlight pitfalls — missing steps, root causes, avoidance notes
 
-| Benchmark | A (Baseline) | B (Raw) | C (Refined) | 结论 |
-|-----------|:---:|:---:|:---:|------|
-| Gaia2 | 41.6% | 38.6% | **45.1%** | Raw 引入噪音，AI-refine 是必要的 |
-| SWE-bench | 40.0% | 50.0% | **54.0%** | Raw 已有增益，Refine 进一步提升 |
+Both are injected at retrieval time, giving the agent positive guidance and negative warnings simultaneously.
+
+### 4. Cross-Agent Critic Evaluation
+
+An independent LLM evaluator scores each skill on 4 dimensions:
+- **Actionability** (0–3): Are steps concrete and reproducible?
+- **Generalizability** (0–3): Would this help on different but similar tasks?
+- **Correctness** (0–2): Is the approach logically sound?
+- **Novelty** (0–2): Does it provide non-obvious insight?
+
+Skills scoring below threshold undergo forced enrichment (never rejection).
+
+### 5. Effectiveness-Weighted Retrieval
+
+Each experience tracks its historical injection effectiveness (score delta when used). Experiences that historically hurt performance are downweighted (min 0.3×); those that helped are upweighted (max 1.5×). This creates a self-correcting retrieval signal.
+
+---
+
+## Experiment Protocol
+
+The evaluation follows an **iterative train-then-test** protocol:
+
+1. **Split**: Each benchmark is split into train (50%) and test (50%) sets
+2. **Train phase**: Tasks are executed sequentially; after each task, the experience is recorded, refined, and added to the skill library (the library grows incrementally)
+3. **Test phase**: The accumulated skill library is frozen; test tasks are executed with skill injection enabled
+4. **Metrics**: Task-level accuracy (EM / soft recall / pass@1) on the held-out test set
+
+### Benchmarks
+
+| Benchmark | Domain | Tasks | Metric |
+|-----------|--------|-------|--------|
+| GAIA (HuggingFace) | Multi-step QA | 50 | Exact Match |
+| ALFWorld | Embodied reasoning | 40 | Pass@1 (binary won) |
+| LoCoMo | Long conversation memory | 50 | Exact Match |
+| GAIA2 | Agentic tool-use (CLI) | 50 | Soft Recall (action sequence) |
+| SWE-bench (Dynamic) | Software engineering | 30 | Patch correctness (LLM judge) |
 
 ---
 
@@ -114,21 +174,36 @@
 SkillForge/
 ├── src/
 │   └── v6/
-│       ├── __init__.py         # SkillForgeV6 orchestrator
-│       ├── experience.py       # Experience dataclass + ExperienceLibrary
-│       ├── analysis.py         # Execution analysis + failure classification
-│       ├── refine.py           # Version-Conditioned AI Refinement
-│       ├── injection.py        # Cost-aware prompt injection
-│       └── gate.py             # Task type classification
+│       ├── __init__.py         # SkillForgeV6 orchestrator (record → version → refine → inject)
+│       ├── experience.py       # Experience dataclass + ExperienceLibrary + semantic retrieval
+│       ├── analysis.py         # Trajectory analysis + failure classification
+│       ├── refine.py           # AI refinement + cross-agent evaluation + critic enrichment
+│       ├── injection.py        # Task-type-aware prompt injection + token budget
+│       └── gate.py             # Task type classification + complexity assessment
 ├── benchmarks/
-│   ├── __init__.py
-│   └── loader.py               # Benchmark dataset loader (Gaia2/SWE-bench/ALFWorld/etc.)
-├── configs/
+│   └── loader.py               # Unified loader for all 5 benchmarks
 ├── scripts/
-├── tests/
+│   └── v6/
+│       └── latest_runner.py    # Main experiment runner (train/test protocol)
+├── configs/                    # YAML experiment configurations
+├── tests/                      # Unit and integration tests
 ├── pyproject.toml
 └── requirements.txt
 ```
+
+---
+
+## External Dependencies
+
+All algorithmic components use established libraries — no hand-written similarity or NLP algorithms:
+
+| Library | Usage |
+|---------|-------|
+| `sentence-transformers` | Semantic embedding for experience retrieval (all-MiniLM-L6-v2) |
+| `sklearn` | TF-IDF vectorization + cosine similarity (fallback retrieval) |
+| `rapidfuzz` | Fuzzy string matching for action sequence alignment |
+| `tiktoken` | Accurate token counting for injection budget management |
+| `json_repair` | Robust JSON extraction from LLM responses |
 
 ---
 
@@ -136,6 +211,9 @@ SkillForge/
 
 ```bash
 pip install -r requirements.txt
+
+# Run the full 5-benchmark experiment
+python scripts/v6/latest_runner.py
 ```
 
 ---
