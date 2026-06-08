@@ -10,7 +10,10 @@ def classify_failure(agent_actions: list[dict], oracle_actions: list[dict],
     """4 categories: tool_failure / over_action / task_mismatch / model_failure."""
     error_count = 0
     for a in agent_actions:
-        output = str(a.get("output", "") or a.get("observation", "")).lower()
+        if isinstance(a, str):
+            output = a.lower()
+        else:
+            output = str(a.get("output", "") or a.get("observation", "")).lower()
         if any(kw in output for kw in ("error", "traceback", "exception", "timeout",
                                         "permission denied", "not found", "refused")):
             error_count += 1
@@ -62,11 +65,12 @@ def analyze_execution(task_id: str, task_desc: str,
                       token_cost: int = 0, time_cost: float = 0.0,
                       augmentation_used: str = "") -> Experience:
     """Format-adaptive: extracts action keys from any format, then fuzzy matches."""
-    agent_keys = [k for a in agent_actions if (k := _extract_action_key(a)) is not None]
-    agent_cmds = [str(a.get('command', '') or a.get('input', {}).get('command', '')
+    agent_keys = [k for a in agent_actions if isinstance(a, dict) and (k := _extract_action_key(a)) is not None]
+    agent_cmds = [str(a.get('command', '') or (a.get('input', {}).get('command', '') if isinstance(a.get('input'), dict) else a.get('input', ''))
                       or a.get('output', '')[:200])
+                  if isinstance(a, dict) else str(a)[:200]
                   for a in agent_actions]
-    oracle_keys = [k for o in oracle_actions if (k := _extract_action_key(o)) is not None]
+    oracle_keys = [k for o in oracle_actions if isinstance(o, dict) and (k := _extract_action_key(o)) is not None]
 
     # Greedy ordered matching
     matched, used = 0, set()

@@ -136,6 +136,33 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     if llm_fn is None:
         return default
 
+    steps_str = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
+    causal = exp.failure_taxonomy.get("causal_lesson", "")
+    generalized = exp.failure_taxonomy.get("generalized_steps", "")
+
+    prompt = CROSS_AGENT_EVAL_PROMPT.format(
+        task_desc=exp.task_desc,
+        steps=steps_str or "(no steps recorded)",
+        outcome=exp.outcome,
+        causal_lesson=causal or "(none)",
+        generalized_steps=generalized or "(none)",
+    )
+
+    try:
+        response = llm_fn(prompt)
+        repaired = repair_json(response, return_objects=True)
+        if isinstance(repaired, dict):
+            repaired.setdefault("verdict", "inject" if repaired.get("total", 0) >= 5 else "skip")
+            return repaired
+        if isinstance(repaired, list) and repaired and isinstance(repaired[0], dict):
+            result = repaired[0]
+            result.setdefault("verdict", "inject" if result.get("total", 0) >= 5 else "skip")
+            return result
+    except Exception:
+        pass
+
+    return default
+
 
 CRITIC_REFINE_PROMPT = """You are a skill quality enhancer. A cross-agent critic found this experience LOW QUALITY.
 Your job: ENRICH and EXPAND it so it becomes high-quality. DO NOT compress or remove ANY information.
@@ -224,30 +251,3 @@ def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None)
         pass
 
     return {"enhanced": False}
-
-    steps_str = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
-    causal = exp.failure_taxonomy.get("causal_lesson", "")
-    generalized = exp.failure_taxonomy.get("generalized_steps", "")
-
-    prompt = CROSS_AGENT_EVAL_PROMPT.format(
-        task_desc=exp.task_desc,
-        steps=steps_str or "(no steps recorded)",
-        outcome=exp.outcome,
-        causal_lesson=causal or "(none)",
-        generalized_steps=generalized or "(none)",
-    )
-
-    try:
-        response = llm_fn(prompt)
-        repaired = repair_json(response, return_objects=True)
-        if isinstance(repaired, dict):
-            repaired.setdefault("verdict", "inject" if repaired.get("total", 0) >= 5 else "skip")
-            return repaired
-        if isinstance(repaired, list) and repaired and isinstance(repaired[0], dict):
-            result = repaired[0]
-            result.setdefault("verdict", "inject" if result.get("total", 0) >= 5 else "skip")
-            return result
-    except Exception:
-        pass
-
-    return default
