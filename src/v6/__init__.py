@@ -38,14 +38,15 @@ class SkillForgeV6:
                           token_cost: int = 0, time_cost: float = 0.0,
                           augmentation_used: str = "",
                           baseline_score: float | None = None,
-                          llm_reviewer=None):
+                          llm_reviewer=None,
+                          critic_fn=None, critic_threshold: int = 5):
         exp = analyze_execution(task_id, task_desc, agent_actions, oracle_actions,
                                 token_cost=token_cost, time_cost=time_cost,
                                 augmentation_used=augmentation_used)
         if baseline_score is not None and augmentation_used:
             exp.augmentation_helped = exp.score > baseline_score
 
-        # Version history
+        # Version history — find previous attempts at same/similar task
         prev = self._find_previous_versions(task_id, task_desc)
         if prev:
             latest = prev[-1]
@@ -78,7 +79,18 @@ class SkillForgeV6:
                 for p in exp.patch_history if p.get("fixed_missing") or p.get("score_delta", 0) > 0
             ]
 
+        # Cross-agent critic gate (optional)
+        if critic_fn is not None:
+            from .refine import cross_agent_evaluate_skill
+            verdict = cross_agent_evaluate_skill(exp, llm_fn=critic_fn)
+            exp.failure_taxonomy["critic_quality"] = verdict.get("total", 5)
+            exp.failure_taxonomy["critic_verdict"] = verdict.get("verdict", "inject")
+            if verdict.get("total", 5) < critic_threshold:
+                exp.failure_taxonomy["excluded"] = True
+                return exp  # Not added to library, but returned for logging
+
         self.library.record(exp)
+        return exp
 
     def _find_previous_versions(self, task_id: str, task_desc: str) -> list[Experience]:
         exact = [e for e in self.library.experiences if e.task_id == task_id]

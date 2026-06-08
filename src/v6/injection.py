@@ -17,7 +17,7 @@ def estimate_token_count(text: str) -> int:
     return len(_enc.encode(text, disallowed_special=()))
 
 def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
-    """Format successful experience. AI-refined preferred. No content truncation."""
+    """Format successful experience with version evolution context."""
     taxonomy = exp.failure_taxonomy
     parts = [f"[Successful approach for similar task]", f"Task: {exp.task_desc}"]
 
@@ -32,6 +32,17 @@ def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
         parts.append(f"Steps:\n{steps}")
     parts.append(f"Score: {exp.score:.0%}")
 
+    # Show how this success was achieved (patch history from failures → success)
+    if exp.patch_history:
+        evolution = []
+        for p in exp.patch_history[-2:]:
+            if p.get("fixed_missing"):
+                evolution.append(f"Previously missing {p['fixed_missing']} → now fixed")
+            elif p.get("score_delta", 0) > 0:
+                evolution.append(f"Improved from v{p.get('from_version','?')} (+{p['score_delta']:.0%})")
+        if evolution:
+            parts.append("How it was fixed: " + "; ".join(evolution))
+
     result = "\n".join(parts)
     # Budget: drop low-priority fields (never truncate mid-content)
     if estimate_token_count(result) > budget_tokens and len(parts) > 4:
@@ -39,7 +50,7 @@ def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
     return result
 
 def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
-    """Format failed experience. Full information preserved."""
+    """Format failed experience with patch history (EvoMem-style version tracking)."""
     taxonomy = exp.failure_taxonomy
     parts = [f"[⚠️ Lesson from similar failed task]", f"Task: {exp.task_desc}"]
 
@@ -63,6 +74,27 @@ def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
         if exp.action_commands:
             steps = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
             parts.append(f"Attempted:\n{steps}")
+
+    # EvoMem-style patch history: show how this skill evolved across attempts
+    if exp.patch_history:
+        patch_lines = ["Version history (what changed across attempts):"]
+        for p in exp.patch_history[-3:]:  # Last 3 patches max
+            delta = p.get("score_delta", 0)
+            patch_lines.append(
+                f"  v{p.get('from_version','?')}→v{p.get('to_version','?')}: "
+                f"{p.get('outcome_change', '')} (Δ={delta:+.0%})"
+            )
+            if p.get("fixed_missing"):
+                patch_lines.append(f"    Fixed: {p['fixed_missing']}")
+            if p.get("new_missing"):
+                patch_lines.append(f"    Still missing: {p['new_missing']}")
+            if p.get("new_steps"):
+                patch_lines.append(f"    Added: {p['new_steps']}")
+        parts.append("\n".join(patch_lines))
+
+    # Evolution trace summary
+    if taxonomy.get("evolution_trace"):
+        parts.append("Evolution: " + " → ".join(taxonomy["evolution_trace"][-3:]))
 
     result = "\n".join(parts)
     if estimate_token_count(result) > budget_tokens and len(parts) > 5:

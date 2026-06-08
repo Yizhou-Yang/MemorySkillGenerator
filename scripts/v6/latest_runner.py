@@ -25,7 +25,8 @@ os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
 
 from v6 import (SkillForgeV6, ExperienceLibrary, Experience,
-                build_augmented_prompt, ai_review_experience)
+                build_augmented_prompt, ai_review_experience,
+                cross_agent_evaluate_skill)
 from benchmarks.loader import BenchmarkLoader
 
 MODEL = "deepseek-v4-pro"
@@ -76,23 +77,46 @@ def llm_review_fn(prompt: str) -> str:
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(_run_in_thread).result(timeout=120)
 
-async def _llm_short_call(prompt: str, max_turns: int = 1, timeout: int = 30) -> str:
-    opt = CodeBuddyAgentOptions(
-        permission_mode="bypassPermissions", model=MODEL, max_turns=max_turns, cwd="/tmp"
-    )
-    result = ""
+def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
+    """Run CodeBuddy query in a fresh event loop (thread-safe, avoids cancel scope issues)."""
+    async def _inner():
+        opt = CodeBuddyAgentOptions(
+            permission_mode="bypassPermissions", model=MODEL, max_turns=max_turns, cwd="/tmp"
+        )
+        text = ""
+        actions = []
+        try:
+            async with asyncio.timeout(timeout):
+                async for msg in query(prompt=prompt, options=opt):
+                    if isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if isinstance(block, ToolUseBlock):
+                                actions.append({"tool": block.name, "input": str(block.input)[:200]})
+                            elif hasattr(block, 'text') and block.text:
+                                if '429' in block.text and '额度' in block.text:
+                                    return {"text": "", "actions": actions, "error": "429_rate_limit"}
+                                text += block.text
+                        if text and max_turns <= 2:
+                            break
+        except Exception as e:
+            return {"text": text, "actions": actions, "error": str(e)[:200] if not text else None}
+        return {"text": text, "actions": actions, "error": None}
+
+    loop = asyncio.new_event_loop()
     try:
-        async with asyncio.timeout(timeout):
-            async for msg in query(prompt=prompt, options=opt):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if hasattr(block, 'text') and block.text:
-                            result += block.text
-                    if result:
-                        break
-    except Exception:
-        pass
-    return result.strip()
+        return loop.run_until_complete(_inner())
+    finally:
+        loop.close()
+
+async def _llm_call(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
+    """Async wrapper: runs query in isolated thread to avoid anyio conflicts."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _query_sync, prompt, max_turns, timeout)
+
+async def _llm_short_call(prompt: str, max_turns: int = 1, timeout: int = 30) -> str:
+    """Short LLM call returning text only."""
+    r = await _llm_call(prompt, max_turns=max_turns, timeout=timeout)
+    return (r.get("text") or "").strip()
 
 async def llm_extract_answer(response: str, question: str) -> str:
     if len(response.split()) < 30:
@@ -182,32 +206,15 @@ async def run_gaia_task(task: dict, experience_section: str = "",
         system += f"\n\n{experience_section}"
 
     prompt = f"{system}\n\n{description}\n\nProvide your final answer concisely."
-    opt = CodeBuddyAgentOptions(
-        permission_mode="bypassPermissions", model=MODEL, max_turns=30, cwd="/tmp"
-    )
 
     result = {"task_id": task_id, "expected": expected, "response": "",
               "error": None, "time_cost": 0, "augmented": bool(experience_section),
               "group": group, "actions": []}
     t0 = time.time()
-    try:
-        async with asyncio.timeout(TASK_TIMEOUT_AGENT):
-            async for msg in query(prompt=prompt, options=opt):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, ToolUseBlock):
-                            result["actions"].append({
-                                "tool": block.name, "input": str(block.input)[:200]
-                            })
-                        elif hasattr(block, 'text') and block.text:
-                            if '429' in block.text and '额度' in block.text:
-                                result["error"] = "429_rate_limit"
-                                break
-                            result["response"] += block.text
-    except TimeoutError:
-        result["error"] = "timeout"
-    except Exception as e:
-        result["error"] = str(e)[:200]
+    r = await _llm_call(prompt, max_turns=30, timeout=TASK_TIMEOUT_AGENT)
+    result["response"] = r.get("text", "")
+    result["actions"] = r.get("actions", [])
+    result["error"] = r.get("error")
     result["time_cost"] = time.time() - t0
     return result
 
@@ -364,29 +371,13 @@ async def run_locomo_task(task: dict, experience_section: str = "",
         system += f"\n\n{experience_section}"
     prompt = f"[System]\n{system}\n\n{description}\n\nAnswer concisely:"
 
-    opt = CodeBuddyAgentOptions(
-        permission_mode="bypassPermissions", model=MODEL, max_turns=2, cwd="/tmp"
-    )
     result = {"task_id": task_id, "expected": expected, "response": "",
               "error": None, "time_cost": 0, "augmented": bool(experience_section),
               "group": group}
     t0 = time.time()
-    try:
-        async with asyncio.timeout(TASK_TIMEOUT_QA):
-            async for msg in query(prompt=prompt, options=opt):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if hasattr(block, 'text') and block.text:
-                            if '429' in block.text and '额度' in block.text:
-                                result["error"] = "429_rate_limit"
-                                break
-                            result["response"] += block.text
-                    if result["response"] or result["error"]:
-                        break
-    except TimeoutError:
-        result["error"] = "timeout"
-    except Exception as e:
-        result["error"] = str(e)[:200]
+    r = await _llm_call(prompt, max_turns=2, timeout=TASK_TIMEOUT_QA)
+    result["response"] = r.get("text", "")
+    result["error"] = r.get("error")
     result["time_cost"] = time.time() - t0
     return result
 
@@ -423,72 +414,43 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
 
 async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
                                     score: float, benchmark: str, aug_used: str):
-    """Build candidate Experience, ask cross-agent critic for quality,"""
+    """Record experience via sf.record_experience() to trigger version history
+    and patch tracking (EvoMem-style). Cross-agent critic gates library entry."""
     response = result.get("response", "")
     actions = result.get("actions", [])
 
+    # Build agent_actions in the format expected by analyze_execution
     if benchmark == "gaia":
-        tool_seq = [a.get("tool", "answer") for a in actions] if actions else ["answer"]
-        action_cmds = [f"{a.get('tool', '')}: {a.get('input', '')[:100]}" for a in actions]
-        if not action_cmds:
-            action_cmds = [response[:300]]
+        agent_actions = actions if actions else [{"output": response[:300]}]
     elif benchmark == "alfworld":
         trajectory = result.get("trajectory", [])
-        tool_seq = [t[0] for t in trajectory] if trajectory else ["none"]
-        action_cmds = [f"{t[0]} → {t[1][:50]}" for t in trajectory] if trajectory else ["none"]
+        agent_actions = [{"command": t[0], "output": t[1][:100]} for t in trajectory] if trajectory else []
     else:
-        tool_seq = ["answer"]
-        action_cmds = [response[:300]]
+        agent_actions = [{"output": response[:300]}]
 
-    outcome = "success" if score >= 0.8 else "partial" if score >= 0.3 else "failure"
-    missing = [] if score >= 0.5 else ["correct_answer"]
+    # Oracle actions: use expected answer as reference
+    expected = result.get("expected", task.get("expected", ""))
+    oracle_actions = [{"output": expected[:200]}] if expected else []
 
-    exp = Experience(
-        task_id=result.get("task_id", task["task_id"]),
+    # Use the task_id from the task dict (consistent across retries)
+    task_id = task["task_id"]
+
+    exp = sf.record_experience(
+        task_id=task_id,
         task_desc=task["description"][:300],
-        tool_sequence=tool_seq,
-        action_commands=action_cmds,
-        outcome=outcome,
-        score=score,
-        missing_steps=missing,
-        extra_steps=[],
-        failure_reason="" if outcome == "success" else f"Score={score:.2f}",
-        failure_taxonomy={
-            "category": "success" if outcome == "success" else "model_failure",
-            "root_cause": "" if outcome == "success" else f"score={score:.2f}",
-        },
+        agent_actions=agent_actions,
+        oracle_actions=oracle_actions,
         token_cost=len(response) // 4 + len(actions) * 50,
         time_cost=result.get("time_cost", 0),
-        task_complexity="complex" if benchmark == "gaia" else "moderate",
         augmentation_used=aug_used[:100] if aug_used else "",
-        timestamp=time.time(),
+        llm_reviewer=llm_review_fn,
+        critic_fn=llm_review_fn,
+        critic_threshold=QUALITY_THRESHOLD,
     )
 
-    review = ai_review_experience(exp, llm_fn=llm_review_fn)
-    exp.failure_taxonomy.update({
-        "ai_refined": review.get("refined", False),
-        "causal_lesson": review.get("causal_lesson", ""),
-        "avoidance_note": review.get("avoidance_note", ""),
-        "transferability": review.get("transferability", ""),
-        "generalized_steps": review.get("generalized_steps", ""),
-        "evolution_insight": review.get("evolution_insight", ""),
-        "quality_score": review.get("quality_score", 0),
-    })
-
-    summary = (
-        f"Outcome: {outcome} (score={score:.2f})\n"
-        f"Steps: {' -> '.join(tool_seq[:8])}\n"
-        f"Lesson: {review.get('causal_lesson', '')}\n"
-        f"Avoidance: {review.get('avoidance_note', '')}\n"
-        f"Transfer: {review.get('transferability', '')}"
-    )
-    critic_score = await llm_critic_skill_quality(summary, task["description"])
-    exp.failure_taxonomy["critic_quality"] = critic_score
-
-    if critic_score >= QUALITY_THRESHOLD:
-        sf.library.record(exp)
-        return True, critic_score
-    return False, critic_score
+    critic_score = exp.failure_taxonomy.get("critic_quality", 5) if exp else 5
+    recorded = not exp.failure_taxonomy.get("excluded", False) if exp else False
+    return recorded, critic_score
 
 # ─── Sequential training (no oracle-driven retry for QA tasks) ────────────
 
