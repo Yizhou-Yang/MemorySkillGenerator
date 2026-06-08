@@ -16,7 +16,6 @@ def estimate_token_count(text: str) -> int:
             return len(text) // 4  # fallback
     return len(_enc.encode(text, disallowed_special=()))
 
-
 def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
     """Format successful experience. AI-refined preferred. No content truncation."""
     taxonomy = exp.failure_taxonomy
@@ -38,7 +37,6 @@ def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
     if estimate_token_count(result) > budget_tokens and len(parts) > 4:
         result = "\n".join(parts[:4])
     return result
-
 
 def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
     """Format failed experience. Full information preserved."""
@@ -71,40 +69,69 @@ def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
         result = "\n".join(parts[:5])
     return result
 
-
-def _build_qa_hint(task_desc: str, library: ExperienceLibrary, token_budget: int = 400) -> str:
-    """Lightweight hints for QA tasks."""
+def _build_qa_hint(task_desc: str, library: ExperienceLibrary, token_budget: int = 600) -> str:
+    """Enhanced hints for QA tasks — includes both reasoning patterns and pitfall warnings."""
     candidates = library.retrieve_similar(task_desc, top_k=5)
     if not candidates:
         return ""
+    
     hints = []
+    pitfalls = []
+    
     for exp in candidates:
         ft = exp.failure_taxonomy
-        if not ft.get("ai_refined"):
-            continue
-        for text in [ft.get("transferability", ""), ft.get("causal_lesson", "")]:
-            if not text or len(text) < 20:
-                continue
-            hints.append(text)
-            break
-    if not hints:
+        
+        # Successful experiences → reasoning hints
+        if exp.outcome == "success" and exp.score >= 0.5:
+            if ft.get("ai_refined") and ft.get("generalized_steps"):
+                hints.append(f"✓ {ft.get('causal_lesson', '')}")
+            elif exp.action_commands:
+                # Extract the key reasoning from the successful answer
+                answer_preview = exp.action_commands[0][:150] if exp.action_commands else ""
+                if answer_preview:
+                    hints.append(f"✓ Similar question answered: {exp.task_desc[:80]}")
+        
+        # Failed experiences → pitfall warnings
+        elif exp.outcome == "failure" and ft.get("ai_refined"):
+            causal = ft.get("causal_lesson", "")
+            avoidance = ft.get("avoidance_note", "")
+            if avoidance and len(avoidance) > 20:
+                pitfalls.append(f"⚠ {avoidance}")
+            elif causal and len(causal) > 20 and "mismatch" not in causal.lower():
+                pitfalls.append(f"⚠ {causal}")
+    
+    sections = []
+    if hints:
+        seen = set()
+        unique_hints = [h for h in hints if not (h[:40].lower() in seen or seen.add(h[:40].lower()))]
+        if unique_hints:
+            sections.append("## Reasoning Patterns from Similar Tasks")
+            sections.extend(f"- {h}" for h in unique_hints[:3])
+    
+    if pitfalls:
+        seen = set()
+        unique_pitfalls = [p for p in pitfalls if not (p[:40].lower() in seen or seen.add(p[:40].lower()))]
+        if unique_pitfalls:
+            sections.append("\n## Common Pitfalls to Avoid")
+            sections.extend(f"- {p}" for p in unique_pitfalls[:2])
+    
+    if not sections:
         return ""
-    seen = set()
-    unique = [h for h in hints if not (h[:40].lower() in seen or seen.add(h[:40].lower()))]
-    if not unique:
-        return ""
-    return "## Reasoning Hints\n" + "\n".join(f"- {h}" for h in unique[:3])
-
+    
+    result = "\n".join(sections)
+    if estimate_token_count(result) > token_budget:
+        result = "\n".join(sections[:4])
+    return result
 
 def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
                            token_budget: int = 2000,
                            top_k_success: int = 2, top_k_failure: int = 2,
                            expected: str = "", metadata: dict | None = None) -> str:
-    """Route: qa→hints, agentic/embodied→full injection with gate."""
+    """Route: qa→enhanced hints, agentic/embodied→full injection with gate."""
     task_type = classify_task_type(task_desc, expected=expected, metadata=metadata)
 
     if task_type == "qa":
-        return _build_qa_hint(task_desc, library, token_budget=min(token_budget, 400))
+        return _build_qa_hint(task_desc, library, token_budget=min(token_budget, 600))
 
     do_augment, reason = should_augment(task_desc, library)
     if not do_augment:

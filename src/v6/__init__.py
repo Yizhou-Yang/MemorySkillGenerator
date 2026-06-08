@@ -7,7 +7,7 @@ from .gate import assess_task_complexity, should_augment, classify_task_type
 from .injection import (build_augmented_prompt, format_success_experience,
                         format_failure_experience, estimate_token_count)
 from .analysis import analyze_execution, classify_failure
-from .refine import ai_review_experience, _format_patch_history
+from .refine import ai_review_experience, cross_agent_evaluate_skill, _format_patch_history
 
 
 class SkillForgeV6:
