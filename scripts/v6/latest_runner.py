@@ -540,22 +540,10 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
         async with sem:
             aug = ""
             if sf.library.experiences:
-                if benchmark == "gaia":
-                    aug = build_augmented_prompt(
-                        task["description"][:300], sf.library, token_budget=1500,
-                        metadata={"benchmark": "gaia"}
-                    )
-                elif benchmark == "alfworld":
-                    task_desc = f"{task.get('description', '')} [type: {task.get('metadata', {}).get('task_type', '')}]"
-                    aug = build_augmented_prompt(
-                        task_desc, sf.library, token_budget=1500,
-                        metadata=task.get("metadata", {})
-                    )
-                else:
-                    aug = build_augmented_prompt(
-                        task["description"][:300], sf.library, token_budget=600,
-                        metadata=task.get("metadata", {})
-                    )
+                aug = build_augmented_prompt(
+                    task["description"][:300], sf.library,
+                    metadata=task.get("metadata", {"benchmark": benchmark})
+                )
 
             if benchmark == "gaia" or benchmark == "gaia2" or benchmark == "swebench_dynamic":
                 r = await run_gaia_task(task, experience_section=aug, group="train")
@@ -581,7 +569,7 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
                     await critic_filter_and_record(sf, task, r, score, benchmark, aug)
                     retry_aug = build_augmented_prompt(
                         f"{task.get('description', '')} [type: {task.get('metadata', {}).get('task_type', '')}]",
-                        sf.library, token_budget=2000,
+                        sf.library,
                         metadata=task.get("metadata", {"benchmark": benchmark})
                     )
                     if not retry_aug or retry_aug == aug or not game:
@@ -659,7 +647,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
     os.makedirs(f"{RESULTS_DIR}/{benchmark}", exist_ok=True)
 
     print(f"\n  Phase 1: Sequential iterative training ({len(train_tasks)} tasks)...")
-    sf = SkillForgeV6(token_budget=2000)
+    sf = SkillForgeV6()
     sem = asyncio.Semaphore(CONCURRENCY)
 
     train_results = await train_sequential(
@@ -708,14 +696,14 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
         async with sem:
             if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
                 aug = build_augmented_prompt(task["description"][:300], raw_library,
-                                            token_budget=2000, metadata={"benchmark": benchmark})
+                                            metadata={"benchmark": benchmark})
                 return await run_gaia_task(task, aug, "B")
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
                 if not game:
                     return {"task_id": task["task_id"], "error": "no_game", "score": 0.0}
                 td = f"{results_a[i].get('task', '')} [type: {game['type']}]"
-                aug = build_augmented_prompt(td, raw_library, token_budget=1500,
+                aug = build_augmented_prompt(td, raw_library,
                                             metadata={"task_type": game["type"]})
                 return await run_alfworld_task(
                     game["file"], game["type"],
@@ -723,7 +711,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
                     group="B"
                 )
             aug = build_augmented_prompt(task["description"][:300], raw_library,
-                                        token_budget=600, metadata=task.get("metadata", {}))
+                                        metadata=task.get("metadata", {}))
             return await run_locomo_task(task, aug, "B")
     results_b = await asyncio.gather(*[run_test_b(i, t) for i, t in enumerate(test_tasks)])
 
@@ -732,14 +720,14 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
         async with sem:
             if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
                 aug = build_augmented_prompt(task["description"][:300], sf.library,
-                                            token_budget=2000, metadata={"benchmark": benchmark})
+                                            metadata={"benchmark": benchmark})
                 return await run_gaia_task(task, aug, "C")
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
                 if not game:
                     return {"task_id": task["task_id"], "error": "no_game", "score": 0.0}
                 td = f"{results_a[i].get('task', '')} [type: {game['type']}]"
-                aug = build_augmented_prompt(td, sf.library, token_budget=1500,
+                aug = build_augmented_prompt(td, sf.library,
                                             metadata={"task_type": game["type"]})
                 return await run_alfworld_task(
                     game["file"], game["type"],
@@ -747,7 +735,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
                     group="C"
                 )
             aug = build_augmented_prompt(task["description"][:300], sf.library,
-                                        token_budget=600, metadata=task.get("metadata", {}))
+                                        metadata=task.get("metadata", {}))
             return await run_locomo_task(task, aug, "C")
     results_c = await asyncio.gather(*[run_test_c(i, t) for i, t in enumerate(test_tasks)])
 

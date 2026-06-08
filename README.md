@@ -64,15 +64,14 @@
                                  ▼
               ┌──────────────────────────────────────────┐
               │          injection.py                     │
-              │  Cost-Aware Prompt Injection              │
+              │  Full-Context Prompt Injection            │
               │  • gate.py: classify_task_type            │
               │    (agentic / qa / embodied)              │
               │  • Route: qa → enhanced hints with        │
               │    pitfall warnings; agentic → full       │
               │    experience injection                   │
-              │  • tiktoken token budget management       │
-              │  • Priority-based field dropping          │
-              │    (never truncates mid-content)          │
+              │  • Zero information loss — injects all    │
+              │    relevant experience without truncation │
               └──────────────────┬───────────────────────┘
                                  │ augmented prompt
                                  ▼
@@ -102,7 +101,7 @@
 | `experience.py` | Experience dataclass with EvoMem-style version tracking; ExperienceLibrary with semantic embedding retrieval and per-experience effectiveness weighting | sentence-transformers, sklearn |
 | `analysis.py` | Format-adaptive trajectory analysis; greedy ordered action matching via fuzzy string similarity; 4-category failure classification (tool_failure / over_action / task_mismatch / model_failure) | rapidfuzz |
 | `gate.py` | Task type classification (agentic / qa / embodied) using structural signals; task complexity assessment; augmentation gating | — |
-| `injection.py` | Task-type-aware routing; formats success experiences (with evolution context) and failure experiences (with patch history + recovery strategies); tiktoken token budget enforcement | tiktoken |
+| `injection.py` | Task-type-aware routing; formats success experiences (with evolution context) and failure experiences (with patch history + recovery strategies); full-context injection without truncation | — |
 | `refine.py` | Version-conditioned AI refinement; cross-agent quality evaluation (independent LLM judge); critic-driven enrichment for low-quality skills (adds failure modes, recovery strategies, preconditions — never removes information) | json_repair |
 
 ---
@@ -178,7 +177,7 @@ SkillForge/
 │       ├── experience.py       # Experience dataclass + ExperienceLibrary + semantic retrieval
 │       ├── analysis.py         # Trajectory analysis + failure classification
 │       ├── refine.py           # AI refinement + cross-agent evaluation + critic enrichment
-│       ├── injection.py        # Task-type-aware prompt injection + token budget
+│       ├── injection.py        # Task-type-aware prompt injection (full context)
 │       └── gate.py             # Task type classification + complexity assessment
 ├── benchmarks/
 │   └── loader.py               # Unified loader for all 5 benchmarks
@@ -202,7 +201,6 @@ All algorithmic components use established libraries — no hand-written similar
 | `sentence-transformers` | Semantic embedding for experience retrieval (all-MiniLM-L6-v2) |
 | `sklearn` | TF-IDF vectorization + cosine similarity (fallback retrieval) |
 | `rapidfuzz` | Fuzzy string matching for action sequence alignment |
-| `tiktoken` | Accurate token counting for injection budget management |
 | `json_repair` | Robust JSON extraction from LLM responses |
 
 ---

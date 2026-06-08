@@ -1,22 +1,10 @@
-"""Cost-Aware Prompt Injection — routes by task type, enforces token budget."""
+"""Prompt Injection — full experience context injection for all task types."""
 from __future__ import annotations
-import tiktoken
 from .experience import Experience, ExperienceLibrary
 from .gate import should_augment, classify_task_type
 
-# Lazy-loaded tokenizer (cl100k_base covers GPT-3.5/4/most models)
-_enc = None
-def estimate_token_count(text: str) -> int:
-    """Accurate token count via tiktoken."""
-    global _enc
-    if _enc is None:
-        try:
-            _enc = tiktoken.get_encoding("cl100k_base")
-        except Exception:
-            return len(text) // 4  # fallback
-    return len(_enc.encode(text, disallowed_special=()))
 
-def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
+def format_success_experience(exp: Experience) -> str:
     """Format successful experience with version evolution context."""
     taxonomy = exp.failure_taxonomy
     parts = [f"[Successful approach for similar task]", f"Task: {exp.task_desc}"]
@@ -43,13 +31,10 @@ def format_success_experience(exp: Experience, budget_tokens: int = 800) -> str:
         if evolution:
             parts.append("How it was fixed: " + "; ".join(evolution))
 
-    result = "\n".join(parts)
-    # Budget: drop low-priority fields (never truncate mid-content)
-    if estimate_token_count(result) > budget_tokens and len(parts) > 4:
-        result = "\n".join(parts[:4])
-    return result
+    return "\n".join(parts)
 
-def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
+
+def format_failure_experience(exp: Experience) -> str:
     """Format failed experience with patch history (EvoMem-style version tracking)."""
     taxonomy = exp.failure_taxonomy
     parts = [f"[⚠️ Lesson from similar failed task]", f"Task: {exp.task_desc}"]
@@ -102,104 +87,42 @@ def format_failure_experience(exp: Experience, budget_tokens: int = 600) -> str:
     if taxonomy.get("preconditions"):
         parts.append(f"Preconditions: {taxonomy['preconditions']}")
 
-    result = "\n".join(parts)
-    if estimate_token_count(result) > budget_tokens and len(parts) > 5:
-        result = "\n".join(parts[:5])
-    return result
+    return "\n".join(parts)
 
-def _build_qa_hint(task_desc: str, library: ExperienceLibrary, token_budget: int = 600) -> str:
-    """Enhanced hints for QA tasks — includes both reasoning patterns and pitfall warnings."""
-    candidates = library.retrieve_similar(task_desc, top_k=5)
-    if not candidates:
-        return ""
-    
-    hints = []
-    pitfalls = []
-    
-    for exp in candidates:
-        ft = exp.failure_taxonomy
-        
-        # Successful experiences → reasoning hints
-        if exp.outcome == "success" and exp.score >= 0.5:
-            if ft.get("ai_refined") and ft.get("generalized_steps"):
-                hints.append(f"✓ {ft.get('causal_lesson', '')}")
-            elif exp.action_commands:
-                # Extract the key reasoning from the successful answer
-                answer_preview = exp.action_commands[0][:150] if exp.action_commands else ""
-                if answer_preview:
-                    hints.append(f"✓ Similar question answered: {exp.task_desc[:80]}")
-        
-        # Failed experiences → pitfall warnings
-        elif exp.outcome == "failure" and ft.get("ai_refined"):
-            causal = ft.get("causal_lesson", "")
-            avoidance = ft.get("avoidance_note", "")
-            if avoidance and len(avoidance) > 20:
-                pitfalls.append(f"⚠ {avoidance}")
-            elif causal and len(causal) > 20 and "mismatch" not in causal.lower():
-                pitfalls.append(f"⚠ {causal}")
-    
-    sections = []
-    if hints:
-        seen = set()
-        unique_hints = [h for h in hints if not (h[:40].lower() in seen or seen.add(h[:40].lower()))]
-        if unique_hints:
-            sections.append("## Reasoning Patterns from Similar Tasks")
-            sections.extend(f"- {h}" for h in unique_hints[:3])
-    
-    if pitfalls:
-        seen = set()
-        unique_pitfalls = [p for p in pitfalls if not (p[:40].lower() in seen or seen.add(p[:40].lower()))]
-        if unique_pitfalls:
-            sections.append("\n## Common Pitfalls to Avoid")
-            sections.extend(f"- {p}" for p in unique_pitfalls[:2])
-    
-    if not sections:
-        return ""
-    
-    result = "\n".join(sections)
-    if estimate_token_count(result) > token_budget:
-        result = "\n".join(sections[:4])
-    return result
 
 def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
-                           token_budget: int = 2000,
                            top_k_success: int = 2, top_k_failure: int = 2,
-                           expected: str = "", metadata: dict | None = None) -> str:
-    """Route: qa→enhanced hints, agentic/embodied→full injection with gate."""
-    task_type = classify_task_type(task_desc, expected=expected, metadata=metadata)
+                           expected: str = "", metadata: dict | None = None,
+                           **kwargs) -> str:
+    """Build augmented prompt with full experience injection.
 
-    if task_type == "qa":
-        return _build_qa_hint(task_desc, library, token_budget=min(token_budget, 600))
-
+    All task types (qa, agentic, embodied) receive the same full-context
+    injection. The previous qa→lightweight hints routing was removed because
+    experiments showed no meaningful difference between dynamic and static
+    benchmarks — both benefit equally from full experience context.
+    """
     do_augment, reason = should_augment(task_desc, library)
     if not do_augment:
-        return f"<!-- augmentation skipped: {reason} -->"
+        return ""
 
     sections = []
-    remaining = token_budget
 
     successes = library.retrieve_similar(task_desc, top_k=top_k_success, outcome_filter="success")
     if successes:
         sections.append("## Relevant Experience (from similar successful tasks)\n")
         for exp in successes:
-            entry = format_success_experience(exp, budget_tokens=remaining // 3)
+            entry = format_success_experience(exp)
             sections.append(entry + "\n")
-            remaining -= estimate_token_count(entry)
-            if remaining <= 200:
-                break
 
     failures = library.retrieve_similar(task_desc, top_k=top_k_failure,
                                          outcome_filter="failure", exclude_tool_failures=True)
     if not failures:
         failures = library.retrieve_similar(task_desc, top_k=top_k_failure,
                                              outcome_filter="partial", exclude_tool_failures=True)
-    if failures and remaining > 200:
+    if failures:
         sections.append("## Lessons from Similar Failed Attempts\n")
         for exp in failures:
-            entry = format_failure_experience(exp, budget_tokens=remaining // 2)
+            entry = format_failure_experience(exp)
             sections.append(entry + "\n")
-            remaining -= estimate_token_count(entry)
-            if remaining <= 0:
-                break
 
     return "\n".join(sections) if sections else ""

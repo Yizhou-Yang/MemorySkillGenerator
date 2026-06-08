@@ -5,16 +5,15 @@ import json
 from .experience import Experience, ExperienceLibrary, FailureTaxonomy
 from .gate import assess_task_complexity, should_augment, classify_task_type
 from .injection import (build_augmented_prompt, format_success_experience,
-                        format_failure_experience, estimate_token_count)
+                        format_failure_experience)
 from .analysis import analyze_execution, classify_failure
 from .refine import ai_review_experience, cross_agent_evaluate_skill, critic_refine_experience, _format_patch_history
 
 class SkillForgeV6:
     """Orchestrates: record_experience → version tracking → AI refine → injection."""
 
-    def __init__(self, library_path: str | None = None, token_budget: int = 2000):
+    def __init__(self, library_path: str | None = None):
         self.library = ExperienceLibrary()
-        self.token_budget = token_budget
         self._gate_log: list[dict] = []
         if library_path:
             self.library.load(library_path)
@@ -27,9 +26,8 @@ class SkillForgeV6:
         if not do_augment:
             self._gate_log.append(meta)
             return "", meta
-        augmentation = build_augmented_prompt(task_desc, self.library,
-                                              token_budget=self.token_budget, **kwargs)
-        meta["token_estimate"] = estimate_token_count(augmentation)
+        augmentation = build_augmented_prompt(task_desc, self.library, **kwargs)
+        meta["token_estimate"] = len(augmentation)
         self._gate_log.append(meta)
         return augmentation, meta
 
