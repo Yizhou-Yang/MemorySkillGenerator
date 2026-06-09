@@ -560,7 +560,9 @@ async def run_locomo_task(task: dict, experience_section: str = "",
               "error": None, "time_cost": 0, "augmented": bool(experience_section),
               "group": group}
     t0 = time.time()
-    r = await _llm_call(prompt, max_turns=10, timeout=TASK_TIMEOUT_QA)
+    # LoCoMo is pure reading comprehension — answer is always in conversation history.
+    # max_turns=1 prevents model from using web search tools which pollute the answer.
+    r = await _llm_call(prompt, max_turns=1, timeout=TASK_TIMEOUT_QA)
     result["response"] = r.get("text", "")
     result["error"] = r.get("error")
     result["time_cost"] = time.time() - t0
@@ -1070,9 +1072,11 @@ async def main():
     print(f"║  Model: {MODEL:<22} | Concurrency: {CONCURRENCY:<3}              ║")
     print("╚════════════════════════════════════════════════════════════════════╝")
 
-    print("\n  Loading benchmarks...")
+    # Only rerun failed benchmarks (locomo, gaia2, swebench_dynamic)
+    BENCHMARKS_TO_RUN = ["locomo", "gaia2", "swebench_dynamic"]
+    print(f"\n  Loading benchmarks (rerun: {BENCHMARKS_TO_RUN})...")
     benchmarks = {}
-    for name in ["gaia", "alfworld", "locomo", "gaia2", "swebench_dynamic"]:
+    for name in BENCHMARKS_TO_RUN:
         config = {"name": name, "num_samples": TASK_LIMITS[name]}
         if name == "gaia2":
             config["scenario_dir"] = "/tmp/harbor-datasets/datasets/gaia2-cli"
@@ -1081,9 +1085,7 @@ async def main():
         benchmarks[name] = tasks
         print(f"    {name}: {len(tasks)} tasks")
 
-    print("  Loading ALFWorld game files...")
-    alfworld_games = get_alfworld_games(TASK_LIMITS["alfworld"])
-    print(f"    ALFWorld games: {len(alfworld_games)}")
+    alfworld_games = []
     print(f"\n  Total: {sum(len(t) for t in benchmarks.values())} tasks")
 
     all_reports = {}
