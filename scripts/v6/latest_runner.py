@@ -874,7 +874,9 @@ def get_alfworld_games(n: int = 40) -> list:
             if not game_file:
                 game_file_path = row.get("game_file_path", "")
                 if game_file_path:
-                    game_file = os.path.join(ALFWORLD_DATA, "json_2.1.1", game_file_path, "game.z8")
+                    # game_file_path already includes filename (e.g. "task/trial/game.tw-pddl")
+                    # Files are under valid_unseen/ for eval_out_of_distribution split
+                    game_file = os.path.join(ALFWORLD_DATA, "json_2.1.1", "valid_unseen", game_file_path)
             games.append({
                 "file": game_file,
                 "type": row.get("task_type", "unknown"),
