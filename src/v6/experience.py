@@ -130,14 +130,14 @@ class ExperienceLibrary:
     def retrieve_similar(self, task_desc: str, top_k: int = 3,
                          outcome_filter: str | None = None,
                          exclude_tool_failures: bool = False,
-                         min_similarity: float = 0.25) -> list[Experience]:
+                         min_similarity: float = 0.1) -> list[Experience]:
         """Retrieve top-k similar experiences above minimum similarity threshold.
 
         Args:
-            min_similarity: Minimum cosine similarity to include (default 0.25).
-                Prevents injection of irrelevant experiences that would cause
-                overfitting or noise. Empirically, 0.25 filters out clearly
-                unrelated tasks while keeping transferable experiences.
+            min_similarity: Minimum cosine similarity to include (default 0.1).
+                Low threshold ensures early-stage experiences (when library is small)
+                are still retrievable. With 1M context, injecting slightly less
+                relevant experiences is acceptable — the model can ignore them.
         """
         candidates = self.experiences
         if outcome_filter:

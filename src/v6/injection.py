@@ -41,8 +41,8 @@ def _is_quality_failure(exp: Experience) -> bool:
     # AI-refined failures always have quality content
     if taxonomy.get("ai_refined") and taxonomy.get("causal_lesson"):
         causal = taxonomy["causal_lesson"]
-        # Filter out trivial/generic causal lessons
-        if len(causal) > 20:
+        # Filter out only completely empty/trivial causal lessons
+        if len(causal) > 5:
             return True
     # Unrefined failures are noise — they contain raw error messages
     # and task-specific action sequences that don't generalize
