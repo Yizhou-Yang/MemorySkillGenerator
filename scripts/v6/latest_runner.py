@@ -91,7 +91,7 @@ def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, ToolUseBlock):
-                                actions.append({"tool": block.name, "input": str(block.input)[:200]})
+                                actions.append({"tool": block.name, "input": str(block.input)})
                             elif hasattr(block, 'text') and block.text:
                                 if '429' in block.text and '额度' in block.text:
                                     return {"text": "", "actions": actions, "error": "429_rate_limit"}
@@ -123,7 +123,7 @@ async def llm_extract_answer(response: str, question: str) -> str:
         return response
     prompt = (
         "Extract ONLY the final answer from this response. Output just the answer, nothing else.\n\n"
-        f"Question: {question[:200]}\n\nResponse: {response[:1000]}\n\n"
+        f"Question: {question}\n\nResponse: {response}\n\n"
         "Final answer (concise, just the key fact/number/name):"
     )
     out = await _llm_short_call(prompt, max_turns=1, timeout=30)
@@ -134,8 +134,8 @@ async def llm_judge_answer(response: str, expected: str, question: str) -> float
         return 0.0
     prompt = (
         "Judge if the response correctly answers the question. Score 0.0 to 1.0.\n\n"
-        f"Question: {question[:300]}\nExpected answer: {expected[:200]}\n"
-        f"Model response: {response[:500]}\n\n"
+        f"Question: {question}\nExpected answer: {expected}\n"
+        f"Model response: {response}\n\n"
         "Score (0.0=wrong, 0.5=partially, 1.0=fully correct). Output ONLY a number:"
     )
     out = await _llm_short_call(prompt, max_turns=1, timeout=30)
@@ -163,7 +163,7 @@ async def llm_critic_skill_quality(exp_summary: str, task_desc: str) -> float:
         "Key: A successful execution with clear steps is ALWAYS valuable "
         "(it shows the correct approach). Do NOT penalize for lacking failure analysis "
         "when the task succeeded.\n\n"
-        f"## Task\n{task_desc[:300]}\n\n## Candidate skill\n{exp_summary[:800]}\n\n"
+        f"## Task\n{task_desc}\n\n## Candidate skill\n{exp_summary}\n\n"
         "Output ONLY a single integer 0-10:"
     )
     out = await _llm_short_call(prompt, max_turns=1, timeout=30)
@@ -439,21 +439,15 @@ async def llm_decide_alfworld_action(observation: str, task: str,
     obs_simple = re.sub(r'_bar__(?:minus|plus)_\d+_dot_\d+(?:_bar__(?:minus|plus)_\d+_dot_\d+)*', '', observation)
     obs_simple = re.sub(r'_+', ' ', obs_simple)
 
-    # Build history window (last 12 steps)
+    # Build history window — full history, no truncation (1M context budget)
     n = len(history)
-    start = max(0, n - 12)
     history_lines = []
-    if start > 0:
-        history_lines.append(f"[... {start} earlier step(s) elided ...]")
-    for i in range(start, n):
+    for i in range(n):
         history_lines.append(f"[Action {i+1}] {history[i][0]}")
-        history_lines.append(f"[Obs {i+1}] {history[i][1][:200]}")
+        history_lines.append(f"[Obs {i+1}] {history[i][1]}")
     history_str = "\n".join(history_lines) if history_lines else "(no actions taken yet)"
 
-    admissible_show = admissible_actions[:40]
-    admissible_str = ", ".join(f"'{a}'" for a in admissible_show)
-    if len(admissible_actions) > 40:
-        admissible_str += f", ... ({len(admissible_actions) - 40} more)"
+    admissible_str = ", ".join(f"'{a}'" for a in admissible_actions)
 
     sys_prompt = ALFWORLD_REACT_SYSTEM
     if experience_section:
@@ -461,9 +455,9 @@ async def llm_decide_alfworld_action(observation: str, task: str,
 
     user_msg = (
         f"Task: {task}\n\n"
-        f"[Initial Obs] {initial_obs[:400]}\n\n"
-        f"Recent history:\n{history_str}\n\n"
-        f"[Current Obs] {obs_simple[:500]}\n\n"
+        f"[Initial Obs] {initial_obs}\n\n"
+        f"Full history:\n{history_str}\n\n"
+        f"[Current Obs] {obs_simple}\n\n"
         f"Admissible commands: [{admissible_str}]\n\n"
         f"Now output:\nThought: ...\nAction: ..."
     )
@@ -508,8 +502,8 @@ async def run_alfworld_task(game_file: str, game_type: str,
             # Avoid infinite loops: if same action repeated with "Nothing happens"
             if action == last_action and "nothing happens" in obs.lower():
                 nothing_count += 1
-                if nothing_count >= 2:
-                    # Force a different action
+                if nothing_count >= 1:
+                    # Force a different action immediately — don't waste steps
                     alternatives = [a for a in admissible if a != action]
                     action = alternatives[0] if alternatives else "look"
                     nothing_count = 0
@@ -519,7 +513,7 @@ async def run_alfworld_task(game_file: str, game_type: str,
 
             info = env.step(action)
             obs = info["obs"]
-            trajectory.append((action, obs[:300]))
+            trajectory.append((action, obs))
             if info.get("won") or info.get("done"):
                 break
 
@@ -602,7 +596,7 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         matched = 0
         agent_strs = []
         if agent_actions:
-            agent_strs = [f"{a.get('tool','')}: {a.get('input','')[:200]}" for a in agent_actions]
+            agent_strs = [f"{a.get('tool','')}: {a.get('input','')}" for a in agent_actions]
         # Also include the full response text for semantic matching
         all_agent_text = " ".join(agent_strs).lower() + " " + response
 
@@ -685,8 +679,8 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         if use_llm_judge:
             judge_prompt = (
                 f"Evaluate if this response correctly addresses the software issue.\n\n"
-                f"Issue description: {expected[:500]}\n\n"
-                f"Agent response (code changes): {response[:1500]}\n\n"
+                f"Issue description: {expected}\n\n"
+                f"Agent response (code changes): {response}\n\n"
                 f"Score 0.0 to 1.0: Does the response identify the correct file/function "
                 f"and propose a logically sound fix? "
                 f"0.0=completely wrong, 0.3=identifies area but wrong fix, "
@@ -736,12 +730,12 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
 
     # Build agent_actions in the format expected by analyze_execution
     if benchmark == "gaia":
-        agent_actions = actions if actions else [{"output": response[:300]}]
+        agent_actions = actions if actions else [{"output": response}]
     elif benchmark == "alfworld":
         trajectory = result.get("trajectory", [])
-        agent_actions = [{"command": t[0], "output": t[1][:100]} for t in trajectory] if trajectory else []
+        agent_actions = [{"command": t[0], "output": t[1]} for t in trajectory] if trajectory else []
     else:
-        agent_actions = [{"output": response[:300]}]
+        agent_actions = [{"output": response}]
 
     # Oracle actions: use expected answer as reference
     expected = result.get("expected", task.get("expected", ""))
@@ -749,7 +743,7 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
         # gaia2: expected is a list of oracle actions (dicts)
         oracle_actions = expected
     elif expected:
-        oracle_actions = [{"output": str(expected)[:200]}]
+        oracle_actions = [{"output": str(expected)}]
     else:
         oracle_actions = []
 
@@ -760,12 +754,12 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
     # Version history + patch_history still works (no LLM needed)
     exp = sf.record_experience(
         task_id=task_id,
-        task_desc=task["description"][:300],
+        task_desc=task["description"],
         agent_actions=agent_actions,
         oracle_actions=oracle_actions,
         token_cost=len(response) // 4 + len(actions) * 50,
         time_cost=result.get("time_cost", 0),
-        augmentation_used=aug_used[:100] if aug_used else "",
+        augmentation_used=aug_used if aug_used else "",
     )
 
     # Async critic evaluation (safe in async context)
@@ -774,19 +768,19 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
     if exp.outcome == "success":
         summary = (
             f"Outcome: SUCCESS (score={exp.score:.2f})\n"
-            f"Correct tool chain: {' -> '.join(exp.tool_sequence[:10])}\n"
-            f"Steps taken: {'; '.join(exp.action_commands[:5])}\n"
+            f"Correct tool chain: {' -> '.join(exp.tool_sequence)}\n"
+            f"Steps taken: {'; '.join(exp.action_commands)}\n"
             f"Strategy: completed all required steps successfully"
         )
     else:
         summary = (
             f"Outcome: {exp.outcome} (score={exp.score:.2f})\n"
-            f"Steps attempted: {' -> '.join(exp.tool_sequence[:8])}\n"
-            f"Missing: {', '.join(exp.missing_steps[:5]) or 'unknown'}\n"
+            f"Steps attempted: {' -> '.join(exp.tool_sequence)}\n"
+            f"Missing: {', '.join(exp.missing_steps) or 'unknown'}\n"
             f"Failure reason: {exp.failure_reason or 'incorrect answer'}\n"
             f"What to avoid: repeating the same approach without addressing gaps"
         )
-    critic_score = await llm_critic_skill_quality(summary, task["description"][:300])
+    critic_score = await llm_critic_skill_quality(summary, task["description"])
     exp.failure_taxonomy["critic_quality"] = critic_score
 
     return True, critic_score
@@ -803,7 +797,7 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
             aug = ""
             if sf.library.experiences:
                 aug = build_augmented_prompt(
-                    task["description"][:300], sf.library,
+                    task["description"], sf.library,
                     metadata=task.get("metadata", {"benchmark": benchmark})
                 )
 
@@ -957,7 +951,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
     async def run_test_b(i, task):
         async with sem:
             if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
-                aug = build_augmented_prompt(task["description"][:300], raw_library,
+                aug = build_augmented_prompt(task["description"], raw_library,
                                             metadata={"benchmark": benchmark})
                 return await run_gaia_task(task, aug, "B")
             if benchmark == "alfworld":
@@ -972,7 +966,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
                     experience_section=f"\n## Experience\n{aug}" if aug else "",
                     group="B"
                 )
-            aug = build_augmented_prompt(task["description"][:300], raw_library,
+            aug = build_augmented_prompt(task["description"], raw_library,
                                         metadata=task.get("metadata", {}))
             return await run_locomo_task(task, aug, "B")
     results_b = await asyncio.gather(*[run_test_b(i, t) for i, t in enumerate(test_tasks)])
@@ -981,7 +975,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
     async def run_test_c(i, task):
         async with sem:
             if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
-                aug = build_augmented_prompt(task["description"][:300], sf.library,
+                aug = build_augmented_prompt(task["description"], sf.library,
                                             metadata={"benchmark": benchmark})
                 return await run_gaia_task(task, aug, "C")
             if benchmark == "alfworld":
@@ -996,7 +990,7 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
                     experience_section=f"\n## Experience\n{aug}" if aug else "",
                     group="C"
                 )
-            aug = build_augmented_prompt(task["description"][:300], sf.library,
+            aug = build_augmented_prompt(task["description"], sf.library,
                                         metadata=task.get("metadata", {}))
             return await run_locomo_task(task, aug, "C")
     results_c = await asyncio.gather(*[run_test_c(i, t) for i, t in enumerate(test_tasks)])
