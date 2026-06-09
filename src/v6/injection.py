@@ -8,19 +8,17 @@ def _is_quality_success(exp: Experience) -> bool:
     """Check if a success experience is high-quality enough to inject.
 
     Prevents overfitting by filtering out:
-    - Low-score "successes" (partial matches scored as success)
-    - Unrefined experiences (raw action commands are task-specific, not transferable)
+    - Very low-score "successes" (clearly wrong partial matches)
     - Empty experiences with no actionable content
-    - Experiences with trivial/empty causal lessons (noise)
     """
-    if exp.score < 0.5:
+    if exp.score < 0.3:
         return False
     taxonomy = exp.failure_taxonomy
     # AI-refined with substantive generalized_steps = quality skill
     if taxonomy.get("ai_refined") and taxonomy.get("generalized_steps"):
-        # Also check causal_lesson is not empty/trivial
+        # Also check causal_lesson is not completely empty
         causal = taxonomy.get("causal_lesson", "")
-        if len(causal) > 10:  # Must have a real lesson, not empty
+        if len(causal) > 5:  # Must have a real lesson, not empty
             return True
     # Allow high-score unrefined successes — they still carry useful signal
     # even without AI refinement (1M context can absorb the noise)

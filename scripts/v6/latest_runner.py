@@ -311,7 +311,7 @@ for line in sys.stdin:
         gs = env.reset()
         step_count = 0
         adm = list(gs.admissible_commands or [])
-        _out.write(json.dumps({{"type":"obs","obs":gs.feedback,"actions":adm[:30],
+        _out.write(json.dumps({{"type":"obs","obs":gs.feedback,"actions":adm,
                                 "won":bool(gs.won),"done":bool(gs.won)}}) + "\\n"); _out.flush()
     elif c["action"] == "step":
         gs, score, done = env.step(c["command"])
@@ -319,7 +319,7 @@ for line in sys.stdin:
         adm = list(gs.admissible_commands or [])
         won = bool(gs.won)
         done = done or won or step_count >= max_steps
-        _out.write(json.dumps({{"type":"obs","obs":gs.feedback,"actions":adm[:30],
+        _out.write(json.dumps({{"type":"obs","obs":gs.feedback,"actions":adm,
                                 "won":won,"done":done}}) + "\\n"); _out.flush()
     elif c["action"] == "quit":
         break
