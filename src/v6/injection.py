@@ -22,9 +22,10 @@ def _is_quality_success(exp: Experience) -> bool:
         causal = taxonomy.get("causal_lesson", "")
         if len(causal) > 10:  # Must have a real lesson, not empty
             return True
-    # Unrefined successes: raw action_commands are task-specific noise.
-    # They contain things like "git clone https://specific-repo.git" which
-    # don't generalize. Only AI-refined content is safe to inject.
+    # Allow high-score unrefined successes — they still carry useful signal
+    # even without AI refinement (1M context can absorb the noise)
+    if exp.score >= 0.8:
+        return True
     return False
 
 
@@ -74,7 +75,7 @@ def format_success_experience(exp: Experience) -> str:
     # Show how this success was achieved (patch history from failures → success)
     if exp.patch_history:
         evolution = []
-        for p in exp.patch_history[-2:]:
+        for p in exp.patch_history:
             if p.get("fixed_missing"):
                 evolution.append(f"Previously missing {p['fixed_missing']} → now fixed")
             elif p.get("score_delta", 0) > 0:
@@ -114,7 +115,7 @@ def format_failure_experience(exp: Experience) -> str:
     # EvoMem-style patch history: show how this skill evolved across attempts
     if exp.patch_history:
         patch_lines = ["Version history (what changed across attempts):"]
-        for p in exp.patch_history[-3:]:  # Last 3 patches max
+        for p in exp.patch_history:  # Full history — 1M context can handle it
             delta = p.get("score_delta", 0)
             patch_lines.append(
                 f"  v{p.get('from_version','?')}→v{p.get('to_version','?')}: "
@@ -130,7 +131,7 @@ def format_failure_experience(exp: Experience) -> str:
 
     # Evolution trace summary
     if taxonomy.get("evolution_trace"):
-        parts.append("Evolution: " + " → ".join(taxonomy["evolution_trace"][-3:]))
+        parts.append("Evolution: " + " → ".join(taxonomy["evolution_trace"]))
 
     # Critic-refined enrichments (recovery strategies, preconditions)
     if taxonomy.get("recovery_strategies"):
@@ -142,7 +143,7 @@ def format_failure_experience(exp: Experience) -> str:
 
 
 def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
-                           top_k_success: int = 2, top_k_failure: int = 2,
+                           top_k_success: int = 5, top_k_failure: int = 5,
                            expected: str = "", metadata: dict | None = None,
                            **kwargs) -> str:
     """Build augmented prompt with full experience injection.
