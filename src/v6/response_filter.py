@@ -147,6 +147,8 @@ class AIResponseProcessor:
         # Loop detection: track recent (action_id, params_raw) tuples
         self._recent_actions: list[tuple[str, str]] = []
         self._loop_threshold: int = 3  # Trigger after 3 identical calls
+        self._same_tool_threshold: int = 6  # Trigger after 6 calls to same tool (even with different params)
+        self._search_tool_ids: set[str] = set()  # Tool IDs that are "search" operations
 
     @property
     def consecutive_failures(self) -> int:
@@ -176,26 +178,70 @@ class AIResponseProcessor:
 
     @property
     def is_looping(self) -> bool:
-        """Check if agent is stuck in a loop (repeating same action+params)."""
+        """Check if agent is stuck in a loop.
+
+        Detects two patterns:
+        1. Exact repetition: same (action_id, params) N times in a row
+        2. Same-tool spinning: same action_id called M times in last M+2 turns
+           (even with different params — e.g. searching contacts with different queries
+           but never finding what's needed)
+        """
         if len(self._recent_actions) < self._loop_threshold:
             return False
+
+        # Pattern 1: Exact repetition (3 identical calls)
         last_n = self._recent_actions[-self._loop_threshold:]
-        return len(set(last_n)) == 1
+        if len(set(last_n)) == 1:
+            return True
+
+        # Pattern 2: Same tool spinning (6 calls to same tool in last 8 turns)
+        if len(self._recent_actions) >= self._same_tool_threshold:
+            last_m = self._recent_actions[-self._same_tool_threshold:]
+            tool_ids = [a[0] for a in last_m]
+            # If >80% of recent calls are to the same tool, it's spinning
+            from collections import Counter
+            most_common_tool, count = Counter(tool_ids).most_common(1)[0]
+            if count >= self._same_tool_threshold - 1:  # 5 out of 6
+                return True
+
+        return False
 
     def get_loop_break_prompt(self) -> str:
         """Generate a prompt to break the agent out of a detected loop."""
         if not self._recent_actions:
             return ""
         last_action, last_params = self._recent_actions[-1]
-        prompt = (
-            f"\n\nWARNING: You have called {last_action} with the same parameters "
-            f"{self._loop_threshold} times in a row. This is not working.\n"
-            "You MUST try a DIFFERENT approach:\n"
-            "- Use a different operation ID\n"
-            "- Use different parameter values\n"
-            "- Try a completely different strategy to achieve your goal\n\n"
-            "What is your DIFFERENT next operation? (NEXT_OP + PARAMS only):"
-        )
+
+        # Analyze what kind of loop it is
+        last_m = self._recent_actions[-min(self._same_tool_threshold, len(self._recent_actions)):]
+        tool_ids = [a[0] for a in last_m]
+        from collections import Counter
+        most_common_tool, count = Counter(tool_ids).most_common(1)[0]
+
+        if count >= self._same_tool_threshold - 1:
+            # Same-tool spinning — agent is stuck searching
+            prompt = (
+                f"\n\nSTOP: You have called {most_common_tool} {count} times without success. "
+                "This approach is NOT working.\n"
+                "MANDATORY: You must now try a COMPLETELY DIFFERENT strategy:\n"
+                "- If searching contacts: try listing ALL contacts with increasing offset (0, 10, 20, 30...)\n"
+                "  and manually scan the results for the person you need.\n"
+                "- If a search API doesn't find someone, the person might be listed under a different name.\n"
+                "- Try browsing contacts page by page: offset:0, offset:10, offset:20, etc.\n"
+                "- Look at ALL fields in the results (name, job_title, city, email) to identify the right person.\n\n"
+                "Your DIFFERENT next operation (NEXT_OP + PARAMS only):"
+            )
+        else:
+            # Exact repetition
+            prompt = (
+                f"\n\nWARNING: You have called {last_action} with the same parameters "
+                f"{self._loop_threshold} times in a row. This is not working.\n"
+                "You MUST try a DIFFERENT approach:\n"
+                "- Use a different operation ID\n"
+                "- Use different parameter values\n"
+                "- Try a completely different strategy to achieve your goal\n\n"
+                "What is your DIFFERENT next operation? (NEXT_OP + PARAMS only):"
+            )
         # Clear loop history to give agent a fresh start
         self._recent_actions = []
         return prompt
