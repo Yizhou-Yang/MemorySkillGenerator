@@ -543,17 +543,24 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "5. CALENDAR LOOKUP — USE DATE RANGE:\n"
             "   - For 'Thursday/Saturday/etc' queries: use date range query with start/end datetime\n"
             "   - NEVER use text search for date-based lookups\n"
-            "6. CONTEXT BUDGET AWARENESS:\n"
-            "   - Tasks often have a TWIST in the second half ('If X, then Y')\n"
-            "   - Complete the primary actions FAST (within 15 turns)\n"
-            "   - Reserve remaining turns for handling the twist\n"
-            "   - If stuck on any sub-task for >5 turns: SKIP IT and move on\n"
+            "6. TWIST-AWARE EXECUTION (CRITICAL):\n"
+            "   - If the task says 'If X happens, then Y' or mentions rescheduling/cancellation:\n"
+            "     a) Complete the primary actions first (create event, send email, etc.)\n"
+            "     b) IMMEDIATELY notify the user with op-001 that primary actions are done\n"
+            "     c) Then WAIT for a reply using op-000 with timeout_seconds:60\n"
+            "     d) When you receive a notification/reply, process it (reschedule, etc.)\n"
+            "     e) Only output ALL_DONE after handling the twist\n"
+            "   - DO NOT output ALL_DONE until you have waited for and processed any expected replies\n"
             "7. ERROR RECOVERY: If a tool returns an error:\n"
             "   - Fix the parameter. NEVER retry with exact same parameters.\n"
-            "8. After ALL steps done: op-001 to notify user, then output ALL_DONE.\n"
-            "9. To wait for a reply/notification: op-000 with timeout_seconds:30.\n"
-            "10. When you get a notification, act on it immediately.\n"
-            "11. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
+            "8. COMPLETION SEQUENCE (in this exact order):\n"
+            "   a) Complete all primary actions\n"
+            "   b) op-001: notify user that primary actions are done\n"
+            "   c) op-000: wait for any expected replies (timeout_seconds:60)\n"
+            "   d) Process any replies/notifications that come in\n"
+            "   e) Only then output ALL_DONE\n"
+            "9. When you get a notification, act on it immediately.\n"
+            "10. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
             f"OPERATIONS:\n{tool_text}\n\n"
             "START NOW. Output ONLY: NEXT_OP + PARAMS."
         )
@@ -564,9 +571,26 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
         # Multi-turn interaction loop
         # Since CodeBuddy SDK doesn't support multi-turn chat natively,
         # we accumulate conversation history in the user prompt.
-        # Multi-turn interaction loop
+        # Detect if task has a twist (conditional second phase)
+        has_twist = any(kw in task_content.lower() for kw in [
+            "if my friend", "if that doesn't work", "if he can't",
+            "if she can't", "if they can't", "reschedule",
+            "if the order", "if it doesn't", "if not",
+        ])
+
+        twist_reminder = ""
+        if has_twist:
+            twist_reminder = (
+                "\n\n⚠️ IMPORTANT: This task has a CONDITIONAL SECOND PHASE. "
+                "After completing the primary actions, you MUST:\n"
+                "1. Notify the user (op-001)\n"
+                "2. Wait for replies (op-000 timeout_seconds:60)\n"
+                "3. Handle any incoming notifications before outputting ALL_DONE\n"
+            )
+
         conversation_history = (
-            f"TASK: {task_content}\n\n"
+            f"TASK: {task_content}\n"
+            f"{twist_reminder}\n"
             "Output your first operation now (NEXT_OP + PARAMS only):"
         )
 
