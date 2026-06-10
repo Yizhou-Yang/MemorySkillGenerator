@@ -256,6 +256,47 @@ class ARESession:
             return parsed
         return value
 
+    def _complete_matching_oracle_event(self, tool_name: str) -> None:
+        """Find and complete a matching OracleEvent to advance the dependency chain.
+
+        ARE uses dependency-driven event scheduling: ENV events (e.g., a friend's
+        email reply) only fire after their prerequisite AGENT OracleEvents are
+        marked as completed (event_time set). In oracle_mode=False, OracleEvents
+        are ignored by process_event(), so we must manually mark them when the
+        agent performs the matching action.
+        """
+        from are.simulation.types import OracleEvent, EventType
+
+        # Extract app_name and function_name from tool_name (e.g., "Emails__send_email")
+        if "__" not in tool_name:
+            return
+        app_name, func_name = tool_name.split("__", 1)
+
+        eq = self._env.event_queue
+        all_events = list(eq.list_view())
+        if hasattr(eq, "future_events"):
+            all_events.extend(eq.future_events)
+
+        for event in all_events:
+            if not isinstance(event, OracleEvent):
+                continue
+            if not hasattr(event, "action_desc") or event.action_desc is None:
+                continue
+            if event.action_desc.app == app_name and event.action_desc.function == func_name:
+                # Mark this oracle event as completed
+                current_time = self._env.time_manager.time()
+                event.event_time = current_time
+                # Schedule ready successors
+                for succ in event.successors:
+                    if succ.is_ready():
+                        succ.event_time = current_time + (succ.event_relative_time or 1.0)
+                        eq.put(succ)
+                logger.debug(
+                    "Completed OracleEvent %s (app=%s, func=%s)",
+                    event.event_id[:30], app_name, func_name,
+                )
+                return
+
     def call_tool(self, tool_name: str, kwargs: dict) -> dict:
         """Execute an ARE tool and return the result.
 
@@ -285,7 +326,10 @@ class ARESession:
             self._last_tool_time = time.monotonic()
             return response
 
-        # Tick to process triggered events
+        # Advance the oracle dependency chain for this tool call
+        self._complete_matching_oracle_event(tool_name)
+
+        # Tick to process triggered events (including newly scheduled ENV events)
         self._env.tick()
 
         notifications = self._drain_notifications()

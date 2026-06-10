@@ -535,26 +535,59 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "2. ONE operation per turn. Never output multiple NEXT_OP lines.\n"
             "3. Use ONLY real data from results. Never invent names, IDs, or emails.\n"
             "4. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
-            "OPERATIONAL BEST PRACTICES:\n"
-            "• Searching: Use the shortest distinctive keyword (1-2 words). If 0 results,\n"
-            "  try a different single word. Never repeat the same query or use long phrases.\n"
-            "  Browsing/listing shares the same data across apps — don't switch between them.\n"
-            "• Date lookups: When finding events on a specific day, query by date range\n"
-            "  (start/end datetime), not by text search (text searches titles, not dates).\n"
-            "• Collections: To find one item from many (codes, products, etc.), list ALL\n"
-            "  items first and scan results — don't query items one by one.\n"
-            "• Budget: Max 5 attempts per sub-task. If stuck, skip and proceed.\n"
-            "  Complete primary actions within 20 turns total.\n"
-            "• Errors: If a tool errors, fix the parameter type/format. Never retry same params.\n"
-            "• Independence: Each task is self-contained. Only use names/IDs from the current\n"
-            "  task description and tool results. Nothing carries over from previous tasks.\n\n"
-            "COMPLETION PROTOCOL:\n"
-            "Tasks often have two phases. Phase 1: execute primary actions. Phase 2: handle\n"
-            "replies or conditional follow-ups ('if X, then Y'). The correct sequence is:\n"
-            "  Phase 1 actions → op-001 (notify user) → op-000 (wait for reply, timeout:60)\n"
-            "  → process any reply → only then ALL_DONE.\n"
-            "If the task mentions conditions like 'if he can't make it', 'reschedule',\n"
-            "'accept any suggested date' — you MUST wait for a reply before finishing.\n\n"
+            "OPERATIONAL BEST PRACTICES (MANDATORY — violations waste turns):\n"
+            "\n"
+            "SEARCHING (contacts, users, items):\n"
+            "• Use ONE short keyword (1 word). 'Film Producer in Stockholm' → search 'Film'.\n"
+            "  Multi-word queries almost always return 0 results.\n"
+            "• If 0 results: try ONE different single word (job title OR first name, not both).\n"
+            "• If still 0: list/browse with offset:0, scan results manually.\n"
+            "• NEVER: repeat the same query | use 3+ word phrases | try >5 total attempts.\n"
+            "• Contact/user apps share the same data. Don't switch between similar apps.\n"
+            "\n"
+            "USER ID RESOLUTION (for chats/messages):\n"
+            "• To find a user_id: first search contacts by name (shortest keyword),\n"
+            "  then use the contact's user_id field from the result.\n"
+            "• If user lookup returns no match, try first name only or last name only.\n"
+            "• The user_id is typically a UUID, NOT a phone number or contact_id.\n"
+            "\n"
+            "DATE & CALENDAR:\n"
+            "• To find events on a specific day: use date-range query with\n"
+            "  start_datetime=YYYY-MM-DD 00:00:00, end_datetime=YYYY-MM-DD 23:59:59.\n"
+            "• NEVER use text search for date-based lookups (it searches titles, not dates).\n"
+            "• 'This Thursday' means the NEXT Thursday from today's date. Calculate carefully.\n"
+            "\n"
+            "COLLECTIONS & BATCH OPERATIONS:\n"
+            "• To find one item from many (discount codes, products): list ALL items first,\n"
+            "  then scan results. NEVER query items one by one (wastes N turns vs 1-2).\n"
+            "\n"
+            "PARAMETER FORMATS:\n"
+            "• recipients, attendees, user_ids: ALWAYS use JSON array format: [\"value1\",\"value2\"]\n"
+            "• If a tool errors on type: the value was likely parsed as string instead of list.\n"
+            "  Fix by ensuring proper JSON array syntax.\n"
+            "\n"
+            "BUDGET & EFFICIENCY:\n"
+            "• Max 5 attempts per sub-task (searching, looking up, etc.). If stuck, proceed.\n"
+            "• Complete ALL primary actions within 20 turns.\n"
+            "• If a tool errors: fix the parameter format. NEVER retry with identical params.\n"
+            "\n"
+            "TASK INDEPENDENCE:\n"
+            "• Each task is self-contained. Only use names/IDs from the current task\n"
+            "  description and tool results. Nothing carries over from previous tasks.\n"
+            "\n"
+            "COMPLETION PROTOCOL (CRITICAL — skipping this loses 50%+ of points):\n"
+            "Many tasks have TWO phases:\n"
+            "  Phase 1: Execute primary actions (create event, send email/message, etc.)\n"
+            "  Phase 2: Wait for reply and handle follow-up ('if X, then Y')\n"
+            "The REQUIRED sequence after Phase 1:\n"
+            "  1. op-001 (notify user that primary actions are done)\n"
+            "  2. op-000 with timeout_seconds:60 (WAIT for async reply)\n"
+            "  3. When reply arrives: read it, extract proposed changes\n"
+            "  4. Execute changes (delete old event, create new one, send confirmation)\n"
+            "  5. Only then output ALL_DONE\n"
+            "If the task mentions ANY of: 'if he/she/they can't make it', 'reschedule',\n"
+            "'accept any suggested', 'if that doesn't work', 'if the order gets canceled'\n"
+            "→ you MUST call op-000 after op-001. NEVER skip this step.\n\n"
             f"OPERATIONS:\n{tool_text}\n\n"
             "START NOW. Output ONLY: NEXT_OP + PARAMS."
         )
@@ -1546,6 +1579,42 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
         )
     critic_score = await llm_critic_skill_quality(summary, task["description"])
     exp.failure_taxonomy["critic_quality"] = critic_score
+
+    # AI refine the experience — MANDATORY for injection quality gate.
+    # Without refinement, _is_quality_success/_is_quality_failure will filter
+    # out ALL experiences, making augmented_prompt always empty.
+    # Retry up to 3 times — refine MUST succeed.
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            refined = ai_review_experience(exp, llm_fn=llm_review_fn)
+            if refined and refined.get("refined"):
+                exp.failure_taxonomy["ai_refined"] = True
+                exp.failure_taxonomy["generalized_steps"] = refined.get("generalized_steps", "")
+                exp.failure_taxonomy["causal_lesson"] = refined.get("causal_lesson", "")
+                exp.failure_taxonomy["avoidance_note"] = refined.get("avoidance_note", "")
+                exp.failure_taxonomy["transferability"] = refined.get("transferability", "")
+                exp.failure_taxonomy["evolution_insight"] = refined.get("evolution_insight", "")
+                break  # Success — exit retry loop
+            else:
+                # LLM returned but didn't produce refined output — retry
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 * (attempt + 1))  # Backoff
+                    continue
+                raise RuntimeError(
+                    f"ai_review_experience returned unrefined result after {max_retries} attempts "
+                    f"for task {task_id}: {refined}"
+                )
+        except RuntimeError:
+            raise  # Re-raise our own error
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 * (attempt + 1))  # Backoff before retry
+                continue
+            raise RuntimeError(
+                f"ai_review_experience FAILED after {max_retries} attempts "
+                f"for task {task_id}: {e}"
+            ) from e
 
     return True, critic_score
 
