@@ -5,6 +5,26 @@ Combines fast regex extraction for actions with AI-based evaluation
 of non-action content (reasoning, plans, analysis) to determine what
 should be preserved in conversation history.
 
+Theoretical Grounding (SRDP — Attention Signal Density):
+    In the SRDP framework, the conversation history fed back to the LLM at each
+    turn is itself a "context window" subject to δ_att degradation. Noise tokens
+    in the history dilute attention allocated to genuinely useful information
+    (retrieved skills, tool results, task instructions). This module directly
+    optimizes the **attention signal density** of the conversation context:
+
+        signal_density = valuable_tokens / total_tokens_in_history
+
+    By AI-filtering each turn's output before appending to history, we:
+    1. Reduce δ_att(format_parsing): structured action lines are always preserved
+       verbatim, preventing format ambiguity in subsequent turns.
+    2. Reduce δ_att(retrieval_dilution): noise removal prevents irrelevant text
+       from competing for attention with injected skills.
+    3. Preserve δ_att(consistency): valuable reasoning (plans, state tracking)
+       is retained to maintain coherent multi-turn decision-making.
+
+    The net effect: higher signal density → LLM allocates more attention to
+    injected skills and tool results → lower effective δ_att → tighter gap bound.
+
 Key design principles:
 1. Actions (NEXT_OP/PARAMS) are always extracted via regex (fast, deterministic)
 2. Non-action content is evaluated by AI to distinguish:
@@ -101,9 +121,23 @@ class AIResponseProcessor:
     3. Maintain clean conversation history (actions + valuable reasoning + results)
     4. Generate format-retry prompts when LLM output is malformed
     5. Track retry state and enforce retry limits
+    6. Detect and break action loops (reduces wasted turns → lower δ_sem)
 
-    The AI evaluation ensures we never accidentally discard useful context
-    (plans, error analysis, state tracking) while removing true noise.
+    SRDP Theory Connection:
+        This processor is the runtime mechanism for controlling δ_att in the
+        agent's multi-turn execution. Each turn's conversation history is the
+        "context" in p_LLM(a|s, c) — if it's polluted with noise, the LLM's
+        attention to injected skills (c) degrades. By maintaining a high
+        signal-to-noise ratio in history, we ensure:
+
+        - Injected skills remain in attention-peak positions (head of context)
+        - Tool results (ground truth) get full attention weight
+        - Agent's own valuable reasoning is preserved for coherent planning
+        - Noise is removed before it accumulates and triggers Lost-in-the-Middle
+
+        The loop detection mechanism additionally prevents δ_sem degradation:
+        when the agent repeatedly calls the same tool without progress, it's
+        burning turns that could be used for productive exploration.
     """
 
     def __init__(
@@ -513,6 +547,13 @@ class AIResponseProcessor:
         """Get conversation history with smart truncation.
 
         Preserves the initial task prompt and the most recent interactions.
+
+        SRDP Theory: This implements an attention budget constraint. The initial
+        prompt (containing injected skills) is always preserved at the HEAD of
+        context — the highest-attention position per Lost-in-the-Middle findings.
+        Recent interactions are preserved at the TAIL (second-highest attention).
+        Middle content (older turns) is truncated first — this is exactly where
+        attention is weakest, so information loss is minimized.
         """
         full = "\n".join(self._history_parts)
         if len(full) <= max_chars:

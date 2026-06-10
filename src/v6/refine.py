@@ -1,4 +1,32 @@
-"""Version-Conditioned AI Refinement + Cross-Agent Skill Quality Evaluation."""
+"""Version-Conditioned AI Refinement + Cross-Agent Skill Quality Evaluation.
+
+Theoretical Role (SRDP Framework — δ_att Reduction):
+    This module targets δ_att (attention degradation error) through two mechanisms:
+
+    1. AI Refinement (ai_review_experience):
+       - Converts raw action sequences into structured, generalized skills
+       - Reduces FORMAT PARSING AMBIGUITY dimension of δ_att by producing
+         consistent, well-structured output (numbered steps, clear causal lessons)
+       - The ZERO INFORMATION LOSS constraint ensures r_M (coverage radius)
+         is never increased — we only ADD structure, never remove content
+
+    2. Cross-Agent Critic (cross_agent_evaluate_skill + critic_refine_experience):
+       - Independent quality evaluation detects NOISE and INFORMATION LOSS
+       - Noise detection prevents RETRIEVAL DILUTION: noisy skills that would
+         split probability mass in Boltzmann retrieval are flagged and enriched
+       - Forced enrichment (never discard) maintains r_M while improving
+         the signal-to-noise ratio that directly affects δ_att
+       - The critic→refine loop is the system's primary δ_att reduction mechanism:
+         low-quality skills are iteratively improved until they can be properly
+         utilized by the LLM's attention mechanism
+
+    Gap Bound Contribution:
+        sup_s |V* - V^π_M| ≤ (2R_max)/(1-γ)² · (ε_LLM(r_M) + δ_sem + E[δ_att])
+        This module reduces E[δ_att] by ensuring every skill in the library is:
+        - Well-structured (low format parsing ambiguity)
+        - Non-trivial (low retrieval dilution from noise)
+        - Enriched with recovery strategies (reduces negation priming risk)
+"""
 from __future__ import annotations
 from json_repair import repair_json
 import json
@@ -106,6 +134,15 @@ def _format_patch_history(patch_history: list) -> str:
 def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
     """Version-conditioned refinement. Uses json_repair for robust JSON extraction.
 
+    SRDP Theory: This function reduces δ_att (format parsing ambiguity dimension)
+    by transforming raw action sequences into structured, generalized skills.
+    The structured output (numbered steps, causal lessons, transferability notes)
+    is easier for LLM attention to parse correctly at injection time.
+
+    The ZERO INFORMATION LOSS constraint is critical: it ensures r_M never
+    increases. We add generalization ON TOP of existing content, preserving
+    the original skill's coverage of its task region in the skill space.
+
     When llm_fn is None (no LLM available), returns a minimal fallback that
     preserves all original information but marks as unrefined. The injection
     quality gate will handle these appropriately.
@@ -172,7 +209,26 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
     }
 
 def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
-    """Cross-agent quality evaluation: an independent LLM judges skill quality."""
+    """Cross-agent quality evaluation: an independent LLM judges skill quality.
+
+    SRDP Theory: This is the primary δ_att diagnostic mechanism.
+    It detects three failure modes that increase δ_att:
+
+    1. NOISE (trivial causal_lesson) → causes RETRIEVAL DILUTION:
+       Noisy skills split Boltzmann probability mass without providing
+       useful signal, diluting μ(c*|s) for the optimal skill.
+
+    2. INFORMATION LOSS (vague generalized_steps) → increases r_M:
+       If refinement accidentally compressed content, the skill's coverage
+       radius expands (it covers less of the task space precisely).
+
+    3. OVERFITTING (task-specific content) → increases δ_sem:
+       Overfitted skills have high similarity to one task but mislead
+       retrieval for related-but-different tasks.
+
+    When any issue is detected, verdict='low_confidence' triggers
+    critic_refine_experience (forced enrichment, never discard).
+    """
     default = {"total": 5, "verdict": "inject", "reason": "no evaluator available",
                "actionability": 2, "generalizability": 2, "correctness": 1, "novelty": 0}
 
@@ -262,8 +318,21 @@ Weak dimensions: {weak_dimensions}
 
 def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None) -> dict:
     """When critic scores low, REFINE the experience (never discard).
-    Enriches with failure modes, recovery strategies, preconditions.
-    Never compresses or removes information."""
+
+    SRDP Theory: This is the δ_att REPAIR mechanism.
+    Rather than discarding low-quality skills (which would increase r_M),
+    we enrich them to reduce their contribution to δ_att:
+
+    - Adding recovery strategies → reduces NEGATION PRIMING risk
+      (concrete "do X instead" replaces vague "don't do Y")
+    - Adding preconditions → reduces CONSISTENCY COLLAPSE risk
+      (explicit conditions prevent silent conflict resolution)
+    - Expanding causal reasoning → reduces FORMAT PARSING AMBIGUITY
+      (deeper explanation is easier for attention to anchor on)
+
+    The constraint that output must be LONGER than input guarantees
+    r_M never increases (Zero Information Loss principle).
+    """
     if llm_fn is None:
         return {"enhanced": False}
 

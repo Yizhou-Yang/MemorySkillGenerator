@@ -566,7 +566,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "Output your first operation now (NEXT_OP + PARAMS only):"
         )
 
-        max_turns = 50
+        max_turns = 100
         all_responses = []
         reasoning_trace = []  # Collect AI-filtered valuable reasoning across turns
 
@@ -666,14 +666,14 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             )
             conversation_history += history_entry
 
-            # Truncate conversation if too long (keep last 20000 chars)
-            if len(conversation_history) > 25000:
+            # Truncate conversation if too long (keep last 40000 chars)
+            if len(conversation_history) > 50000:
                 task_header = f"TASK: {task_content}\n\n"
                 remaining = conversation_history[len(task_header):]
                 conversation_history = (
                     task_header
                     + "[Earlier steps truncated]\n...\n"
-                    + remaining[-20000:]
+                    + remaining[-40000:]
                 )
         # Collect all responses into result
         result["response"] = "\n---\n".join(all_responses)

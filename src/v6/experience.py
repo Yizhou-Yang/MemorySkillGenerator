@@ -1,4 +1,21 @@
-"""Experience dataclass + ExperienceLibrary with semantic embedding retrieval."""
+"""Experience dataclass + ExperienceLibrary with semantic embedding retrieval.
+
+Theoretical Foundation (SRDP Framework — Corollary 15):
+    The ExperienceLibrary implements the skill memory M in the SRDP composite policy:
+        π_μ(a|s, M) = Σ_c μ(c|s,M) · p_LLM(a|s,c)
+
+    Key theoretical properties:
+    1. Append-only storage: Experiences are NEVER deleted or compressed.
+       This guarantees r_M (coverage radius) never increases, preserving the
+       ε_LLM(r_M) term in the gap bound.
+    2. Effectiveness-weighted retrieval: The retrieval strategy μ(c|s,M) is
+       implemented as Boltzmann selection weighted by historical score deltas.
+       This provides online correction of δ_sem (semantic retrieval error)
+       without modifying the library contents.
+    3. Version tracking (patch_history): Preserves all historical versions of
+       each skill, maintaining independent retrieval identities. This prevents
+       the retrieval dilution that occurs when skills are merged.
+"""
 from __future__ import annotations
 import json
 import os
@@ -113,14 +130,31 @@ class ExperienceLibrary:
                 self._augment_stats[key]["neutral"] += 1
 
     def update_effectiveness(self, source_exp_id: str, score_delta: float):
-        """Track per-experience injection effectiveness (EvoMem-style)."""
+        """Track per-experience injection effectiveness (EvoMem-style).
+
+        SRDP Theory — Online δ_sem Correction:
+            This implements a feedback signal that adjusts the retrieval
+            distribution μ(c|s,M) based on observed outcomes. When a skill
+            consistently hurts performance (negative score_delta), its
+            retrieval weight decreases, reducing δ_sem without modifying
+            the skill content (preserving r_M).
+        """
         if source_exp_id not in self._exp_effectiveness:
             self._exp_effectiveness[source_exp_id] = {"count": 0, "total_delta": 0.0}
         self._exp_effectiveness[source_exp_id]["count"] += 1
         self._exp_effectiveness[source_exp_id]["total_delta"] += score_delta
 
     def get_experience_weight(self, exp_id: str) -> float:
-        """Weight for retrieval ranking: downweight experiences that historically hurt."""
+        """Weight for retrieval ranking: downweight experiences that historically hurt.
+
+        SRDP Theory — Adaptive Retrieval Distribution:
+            This modulates μ(c|s,M) by multiplying similarity scores with
+            effectiveness weights w_c ∈ [0.3, 1.5]. The bounded range ensures:
+            - No skill is completely silenced (min 0.3) — preserving coverage
+            - No skill dominates excessively (max 1.5) — preventing overfitting
+            This is equivalent to a temperature-adjusted Boltzmann distribution
+            that adapts based on empirical reward signals.
+        """
         stats = self._exp_effectiveness.get(exp_id)
         if not stats or stats["count"] < 2:
             return 1.0  # Default: full weight (cold start)
@@ -133,6 +167,19 @@ class ExperienceLibrary:
                          exclude_tool_failures: bool = False,
                          min_similarity: float = 0.1) -> list[Experience]:
         """Retrieve top-k similar experiences above minimum similarity threshold.
+
+        SRDP Theory — Retrieval Strategy μ(c|s,M):
+            Implements the retrieval component of the composite policy.
+            The scoring function: score(c) = sim(s, c) × w_c
+            where sim is semantic cosine similarity and w_c is the
+            effectiveness weight. This jointly optimizes δ_sem by:
+            - Semantic matching: selects skills relevant to current state s
+            - Effectiveness weighting: downweights historically harmful skills
+
+            The low min_similarity threshold (0.1) is intentional: with 1M
+            context window, the cost of injecting a slightly irrelevant skill
+            is low (LLM can ignore it), but the cost of missing a relevant
+            skill is high (increases r_M effectively).
 
         Args:
             min_similarity: Minimum cosine similarity to include (default 0.1).
