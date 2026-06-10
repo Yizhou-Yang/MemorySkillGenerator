@@ -28,6 +28,7 @@ class Experience:
     task_complexity: str = ""
     augmentation_used: str = ""
     augmentation_helped: bool | None = None
+    reasoning_trace: list[str] = field(default_factory=list)  # AI-filtered valuable reasoning from each turn
     version: int = 1
     patch_history: list = field(default_factory=list)
     timestamp: float = 0.0
@@ -196,6 +197,7 @@ class ExperienceLibrary:
                     "task_complexity": e.task_complexity,
                     "augmentation_used": e.augmentation_used,
                     "augmentation_helped": e.augmentation_helped,
+                    "reasoning_trace": e.reasoning_trace,
                     "timestamp": e.timestamp,
                     "version": e.version, "patch_history": e.patch_history,
                 }
@@ -214,11 +216,13 @@ class ExperienceLibrary:
                 d.setdefault("task_complexity", "")
                 d.setdefault("augmentation_used", "")
                 d.setdefault("augmentation_helped", None)
+                d.setdefault("reasoning_trace", [])
                 d.setdefault("version", 1)
                 d.setdefault("patch_history", [])
                 self.experiences.append(Experience(**d))
         else:
             for d in data.get("experiences", []):
+                d.setdefault("reasoning_trace", [])
                 d.setdefault("version", 1)
                 d.setdefault("patch_history", [])
                 self.experiences.append(Experience(**d))

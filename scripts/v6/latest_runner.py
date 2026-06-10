@@ -27,6 +27,7 @@ from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, 
 from v6 import (SkillForgeV6, ExperienceLibrary, Experience,
                 build_augmented_prompt, ai_review_experience,
                 cross_agent_evaluate_skill)
+from v6.response_filter import AIResponseProcessor
 from benchmarks.loader import BenchmarkLoader
 
 MODEL = "deepseek-v4-pro"
@@ -514,29 +515,39 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
 
         # Build system prompt - MUST be very directive to prevent LLM from explaining
         system_prompt = (
-            "You execute tasks by calling operations one at a time. Output ONLY:\n"
-            "NEXT_OP: <id>\n"
+            "You are a task executor. You call ONE operation per turn.\n\n"
+            "OUTPUT FORMAT (exactly 2 lines, nothing else):\n"
+            "NEXT_OP: <op-id>\n"
             "PARAMS: <key>:<value> | <key>:<value>\n\n"
-            "FORMAT EXAMPLES:\n"
-            "  NEXT_OP: op-024\n"
-            "  PARAMS: query:Stockholm | offset:0\n\n"
-            "  NEXT_OP: op-075\n"
-            "  PARAMS: title:Meeting | start_datetime:2024-10-19 08:00:00 | end_datetime:2024-10-19 20:00:00 | attendees:[\"John\"]\n\n"
-            "  NEXT_OP: op-000\n"
-            "  PARAMS: timeout_seconds:10\n\n"
-            "RULES:\n"
-            "- Output ONLY NEXT_OP + PARAMS. No explanation, no planning, no markdown.\n"
-            "- Use exact data from results (real names, IDs, emails). NEVER invent data.\n"
-            "- SEARCH STRATEGY: If a contact search returns empty, try:\n"
-            "  1. Search by first name only\n"
-            "  2. Search by last name only\n"
-            "  3. Search by job title or city\n"
-            "  4. List all contacts with offset:0, then offset:10, etc.\n"
-            "- After completing ALL task steps, use op-001 (send_message_to_user) to confirm, then output ALL_DONE.\n"
-            "- To wait for environment reply/notification, use op-000 with timeout_seconds:30.\n"
-            "- When you receive a notification (e.g. someone replies), adapt your plan accordingly.\n\n"
+            "EXAMPLES:\n"
+            "NEXT_OP: op-024\n"
+            "PARAMS: query:Stockholm\n\n"
+            "NEXT_OP: op-075\n"
+            "PARAMS: title:Meeting | start_datetime:2024-10-19 08:00:00 | end_datetime:2024-10-19 20:00:00 | attendees:[\"John\"]\n\n"
+            "NEXT_OP: op-076\n"
+            "PARAMS: event_id:ABC123\n\n"
+            "NEXT_OP: op-000\n"
+            "PARAMS: timeout_seconds:30\n\n"
+            "CRITICAL RULES:\n"
+            "1. Output EXACTLY 2 lines per turn: NEXT_OP + PARAMS. NO other text whatsoever.\n"
+            "2. ONE operation per turn. Never output multiple NEXT_OP lines.\n"
+            "3. Use ONLY real data from results. Never invent names, IDs, or emails.\n"
+            "4. CONTACT SEARCH STRATEGY (if search returns empty):\n"
+            "   a) Try partial name: query:Åke or query:Lindström\n"
+            "   b) Try job title: query:Film Producer\n"
+            "   c) Try city: query:Stockholm\n"
+            "   d) Browse all contacts with offset:0, offset:10, offset:20...\n"
+            "   e) NEVER repeat the same failed search. Always try something different.\n"
+            "5. ERROR RECOVERY: If a tool returns an error:\n"
+            "   - Read the error message carefully\n"
+            "   - Fix the parameter (e.g. wrong type, missing field)\n"
+            "   - NEVER retry with the exact same parameters\n"
+            "6. After ALL steps done: op-001 to notify user, then output ALL_DONE.\n"
+            "7. To wait for a reply/notification: op-000 with timeout_seconds:30.\n"
+            "8. When you get a notification (someone replies/suggests changes), act on it immediately.\n"
+            "9. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
             f"OPERATIONS:\n{tool_text}\n\n"
-            "REMEMBER: Output ONLY NEXT_OP and PARAMS lines. Nothing else."
+            "START NOW. Output ONLY: NEXT_OP + PARAMS."
         )
 
         if experience_section:
@@ -548,13 +559,29 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
         # Multi-turn interaction loop
         conversation_history = (
             f"TASK: {task_content}\n\n"
-            "Previous results: (none)\n\n"
-            "Your next operation (output ONLY NEXT_OP and PARAMS):"
+            "Output your first operation now (NEXT_OP + PARAMS only):"
         )
 
         max_turns = 50
         all_responses = []
-        no_op_retries = 0  # Track consecutive failures to output NEXT_OP
+        reasoning_trace = []  # Collect AI-filtered valuable reasoning across turns
+
+        # AI Response Processor — filters noise from LLM output, keeps valuable reasoning
+        async def _ai_filter_fn(prompt: str) -> str:
+            """Lightweight LLM call for AI response filtering."""
+            r = await _llm_call_notool(
+                "You are a JSON-only response evaluator. Output valid JSON only.",
+                prompt, timeout=30
+            )
+            return r.get("text", "")
+
+        processor = AIResponseProcessor(
+            valid_action_ids=set(tool_id_map.keys()),
+            llm_fn=_ai_filter_fn,
+            enable_ai_filter=True,
+            min_text_length_for_ai=80,  # Only AI-eval if >80 chars of non-action text
+        )
+        processor.set_task_context(task_content[:500])
 
         for turn in range(max_turns):
             # Call LLM in pure-text mode (no CodeBuddy tools)
@@ -566,59 +593,36 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
                 )
 
             response_text = r.get("text", "")
-            # Filter out "Tool not found" error messages from CodeBuddy
-            response_text = re.sub(r'Tool \S+ not found in agent cli\.', '', response_text).strip()
             all_responses.append(response_text)
 
-            # Check if agent signals completion
-            if "ALL_DONE" in response_text:
+            # Process response through AI filter
+            processed = await processor.process_response(response_text)
+
+            # Check completion
+            if processed.is_completion:
                 break
 
-            # Parse NEXT_OP from response
-            op_match = re.search(r'NEXT_OP:\s*(op-\d{3})', response_text)
-            if not op_match:
-                no_op_retries += 1
-                # Give up to 2 retries — remind LLM to output format
-                if no_op_retries <= 2 and turn < max_turns - 1:
-                    conversation_history += (
-                        "\n\nERROR: You must output NEXT_OP and PARAMS. "
-                        "Do NOT explain. Output ONLY:\n"
-                        "NEXT_OP: <id>\nPARAMS: <key>:<value>\n\n"
-                        "Your next operation:"
-                    )
+            # Handle invalid responses (no action found)
+            if not processed.valid:
+                if processed.error_type == "no_action":
+                    if processor.consecutive_failures <= 3 and turn < max_turns - 1:
+                        retry = processor.get_retry_prompt(processed)
+                        conversation_history += retry
+                        continue
+                    break
+                elif processed.error_type == "invalid_id":
+                    retry = processor.get_retry_prompt(processed)
+                    conversation_history += retry
                     continue
-                break
-            else:
-                no_op_retries = 0  # Reset on success
 
-            tool_id = op_match.group(1)
-            if tool_id not in tool_id_map:
-                # Invalid tool ID
-                conversation_history += (
-                    f"\n\nERROR: Invalid ID '{tool_id}'. Check OPERATIONS list.\n\n"
-                    "Your next operation (output ONLY NEXT_OP and PARAMS):"
-                )
-                continue
+            tool_id = processed.action_id
+            tool_args = processed.params_parsed
 
-            # Parse PARAMS
-            params_match = re.search(r'PARAMS:\s*(.*?)(?:\n|$)', response_text)
-            tool_args = {}
-            if params_match:
-                params_str = params_match.group(1).strip()
-                if params_str and params_str != "(none)":
-                    for part in params_str.split("|"):
-                        part = part.strip()
-                        if ":" in part:
-                            key, val = part.split(":", 1)
-                            key = key.strip()
-                            val = val.strip()
-                            # Try to parse JSON values (arrays, objects)
-                            if val.startswith("[") or val.startswith("{"):
-                                try:
-                                    val = json.loads(val)
-                                except json.JSONDecodeError:
-                                    pass
-                            tool_args[key] = val
+            # Loop detection: if agent is repeating the same call, break the loop
+            if processor.is_looping:
+                loop_prompt = processor.get_loop_break_prompt()
+                conversation_history += loop_prompt
+                continue  # Skip execution, force agent to try something different
 
             # Execute the tool
             are_tool_name = tool_id_map[tool_id]
@@ -644,21 +648,22 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
                 r_data = tr if isinstance(tr, dict) else json.loads(str(tr))
                 if isinstance(r_data, dict) and r_data.get("notifications"):
                     for n in r_data["notifications"]:
-                        notifications.append(f"NOTIFICATION: {n.get('message', str(n))}")
+                        notifications.append(n.get('message', str(n)))
             except (json.JSONDecodeError, TypeError):
                 pass
 
-            notif_text = "\n".join(notifications) if notifications else ""
+            # Collect valuable reasoning for experience recording
+            if processed.valuable_reasoning:
+                reasoning_trace.append(processed.valuable_reasoning)
 
-            conversation_history += (
-                f"\n\nRESULT ({tool_id}):\n{result_str}"
-                + (f"\n{notif_text}" if notif_text else "")
-                + "\n\nYour next operation (output ONLY NEXT_OP and PARAMS):"
+            # Build history entry with AI-filtered valuable reasoning
+            history_entry = processor.build_history_entry(
+                processed, result_str, notifications
             )
+            conversation_history += history_entry
 
             # Truncate conversation if too long (keep last 20000 chars)
             if len(conversation_history) > 25000:
-                # Keep the task at the top
                 task_header = f"TASK: {task_content}\n\n"
                 remaining = conversation_history[len(task_header):]
                 conversation_history = (
@@ -669,6 +674,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
         # Collect all responses into result
         result["response"] = "\n---\n".join(all_responses)
         result["event_log"] = session.event_log
+        result["reasoning_trace"] = reasoning_trace  # Pass to experience recording
 
     except APIUnavailableError:
         raise
@@ -1414,6 +1420,7 @@ async def critic_filter_and_record(sf: SkillForgeV6, task: dict, result: dict,
         token_cost=len(response) // 4 + len(actions) * 50,
         time_cost=result.get("time_cost", 0),
         augmentation_used=aug_used if aug_used else "",
+        reasoning_trace=result.get("reasoning_trace", []),
     )
 
     # Async critic evaluation (safe in async context)

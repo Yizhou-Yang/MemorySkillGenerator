@@ -8,6 +8,7 @@ from .injection import (build_augmented_prompt, format_success_experience,
                         format_failure_experience)
 from .analysis import analyze_execution, classify_failure
 from .refine import ai_review_experience, cross_agent_evaluate_skill, critic_refine_experience, _format_patch_history
+from .response_filter import AIResponseProcessor, ProcessedResponse
 
 class SkillForgeV6:
     """Orchestrates: record_experience → version tracking → AI refine → injection."""
@@ -35,12 +36,16 @@ class SkillForgeV6:
                           agent_actions: list[dict], oracle_actions: list[dict],
                           token_cost: int = 0, time_cost: float = 0.0,
                           augmentation_used: str = "",
+                          reasoning_trace: list[str] | None = None,
                           baseline_score: float | None = None,
                           llm_reviewer=None,
                           critic_fn=None, critic_threshold: int = 5):
         exp = analyze_execution(task_id, task_desc, agent_actions, oracle_actions,
                                 token_cost=token_cost, time_cost=time_cost,
                                 augmentation_used=augmentation_used)
+        # Attach reasoning trace from response_filter (AI-evaluated valuable reasoning)
+        if reasoning_trace:
+            exp.reasoning_trace = reasoning_trace
         if baseline_score is not None and augmentation_used:
             exp.augmentation_helped = exp.score > baseline_score
 

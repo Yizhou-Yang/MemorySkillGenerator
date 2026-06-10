@@ -129,12 +129,21 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
     steps_str = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
     missing_str = ", ".join(exp.missing_steps) if exp.missing_steps else "(none)"
 
+    # Include reasoning trace if available (from response_filter AI evaluation)
+    reasoning_section = ""
+    if exp.reasoning_trace:
+        reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:10])  # Cap at 10
+        reasoning_section = f"\nAgent's reasoning during execution:\n{reasoning_lines}\n"
+
     prompt = AI_REVIEW_PROMPT.format(
         task_desc=exp.task_desc, outcome=exp.outcome, score=exp.score,
         steps=steps_str, missing=missing_str,
         failure_reason=exp.failure_reason or "(none)",
         version_history_section=_format_patch_history(exp.patch_history),
     )
+    # Append reasoning trace to prompt if available
+    if reasoning_section:
+        prompt += reasoning_section
 
     try:
         response = llm_fn(prompt)
@@ -174,6 +183,12 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     causal = exp.failure_taxonomy.get("causal_lesson", "")
     generalized = exp.failure_taxonomy.get("generalized_steps", "")
 
+    # Include reasoning trace for richer evaluation context
+    reasoning_context = ""
+    if exp.reasoning_trace:
+        reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:8])
+        reasoning_context = f"\nAgent reasoning during execution:\n{reasoning_lines}"
+
     prompt = CROSS_AGENT_EVAL_PROMPT.format(
         task_desc=exp.task_desc,
         steps=steps_str or "(no steps recorded)",
@@ -181,6 +196,8 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
         causal_lesson=causal or "(none)",
         generalized_steps=generalized or "(none)",
     )
+    if reasoning_context:
+        prompt += reasoning_context
 
     try:
         response = llm_fn(prompt)
@@ -266,6 +283,12 @@ def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None)
     if critic_verdict.get("novelty", 2) < 1:
         weak.append("novelty (too obvious)")
 
+    # Include reasoning trace for richer refinement context
+    reasoning_context = ""
+    if exp.reasoning_trace:
+        reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:10])
+        reasoning_context = f"\n\nAgent's reasoning during execution:\n{reasoning_lines}"
+
     prompt = CRITIC_REFINE_PROMPT.format(
         task_desc=exp.task_desc,
         outcome=exp.outcome,
@@ -278,6 +301,8 @@ def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None)
         critic_reason=critic_verdict.get("reason", "low quality"),
         weak_dimensions=", ".join(weak) if weak else "general quality",
     )
+    if reasoning_context:
+        prompt += reasoning_context
 
     try:
         response = llm_fn(prompt)
