@@ -28,6 +28,7 @@ from v6 import (SkillForgeV6, ExperienceLibrary, Experience,
                 build_augmented_prompt, ai_review_experience,
                 cross_agent_evaluate_skill)
 from v6.response_filter import AIResponseProcessor
+from v6.seed_skills import inject_seed_skills
 from benchmarks.loader import BenchmarkLoader
 
 MODEL = "deepseek-v4-pro"
@@ -513,7 +514,10 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
 
         tool_text = "\n".join(tool_lines)
 
-        # Build system prompt - MUST be very directive to prevent LLM from explaining
+        # Build system prompt - ONLY universal behavioral rules here.
+        # Task-specific strategies (contact search, calendar lookup, discount scanning)
+        # are injected via the skill/experience layer (RELEVANT EXPERIENCE section).
+        # This separation enables clean ablation: baseline vs baseline+skills.
         system_prompt = (
             "You are a task executor. You call ONE operation per turn.\n\n"
             "OUTPUT FORMAT (exactly 2 lines, nothing else):\n"
@@ -528,39 +532,20 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "PARAMS: event_id:ABC123\n\n"
             "NEXT_OP: op-000\n"
             "PARAMS: timeout_seconds:30\n\n"
-            "CRITICAL RULES:\n"
+            "RULES:\n"
             "1. Output EXACTLY 2 lines per turn: NEXT_OP + PARAMS. NO other text.\n"
             "2. ONE operation per turn. Never output multiple NEXT_OP lines.\n"
             "3. Use ONLY real data from results. Never invent names, IDs, or emails.\n"
-            "4. FINDING CONTACTS — STRICT BUDGET (MAX 5 TURNS TOTAL):\n"
-            "   a) Search with SHORT keyword: 'Film', 'Producer', 'Nalani' (NOT full phrases)\n"
-            "   b) If empty: try ONE different short keyword\n"
-            "   c) If still empty: browse offset:0 (check all fields in results)\n"
-            "   d) If still not found: browse offset:10\n"
-            "   e) STOP after 5 search/browse attempts. Use whatever info you have.\n"
-            "   FORBIDDEN: Never browse more than 3 pages. Never repeat a keyword.\n"
-            "   FORBIDDEN: Never switch between contact apps (they share the same data).\n"
-            "5. CALENDAR LOOKUP — USE DATE RANGE:\n"
-            "   - For 'Thursday/Saturday/etc' queries: use date range query with start/end datetime\n"
-            "   - NEVER use text search for date-based lookups\n"
-            "6. TWIST-AWARE EXECUTION (CRITICAL):\n"
-            "   - If the task says 'If X happens, then Y' or mentions rescheduling/cancellation:\n"
-            "     a) Complete the primary actions first (create event, send email, etc.)\n"
-            "     b) IMMEDIATELY notify the user with op-001 that primary actions are done\n"
-            "     c) Then WAIT for a reply using op-000 with timeout_seconds:60\n"
-            "     d) When you receive a notification/reply, process it (reschedule, etc.)\n"
-            "     e) Only output ALL_DONE after handling the twist\n"
-            "   - DO NOT output ALL_DONE until you have waited for and processed any expected replies\n"
-            "7. ERROR RECOVERY: If a tool returns an error:\n"
-            "   - Fix the parameter. NEVER retry with exact same parameters.\n"
-            "8. COMPLETION SEQUENCE (in this exact order):\n"
-            "   a) Complete all primary actions\n"
-            "   b) op-001: notify user that primary actions are done\n"
-            "   c) op-000: wait for any expected replies (timeout_seconds:60)\n"
-            "   d) Process any replies/notifications that come in\n"
-            "   e) Only then output ALL_DONE\n"
-            "9. When you get a notification, act on it immediately.\n"
-            "10. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
+            "4. EFFICIENCY: If a search returns 0 results, try a DIFFERENT shorter keyword.\n"
+            "   Never repeat the same query. Max 5 attempts per sub-task, then move on.\n"
+            "5. TWIST AWARENESS: Tasks may have a conditional second phase ('If X, then Y').\n"
+            "   After primary actions: notify user (op-001) → wait (op-000 timeout:60) →\n"
+            "   handle any reply → only then ALL_DONE.\n"
+            "6. BUDGET: Complete primary actions within 20 turns. If stuck >5 turns on\n"
+            "   any sub-task, SKIP it and proceed with available information.\n"
+            "7. ERROR RECOVERY: If a tool errors, fix the parameter. Never retry same params.\n"
+            "8. When you get a notification, act on it immediately.\n"
+            "9. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
             f"OPERATIONS:\n{tool_text}\n\n"
             "START NOW. Output ONLY: NEXT_OP + PARAMS."
         )
@@ -1625,6 +1610,12 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
 
     print(f"\n  Phase 1: Sequential iterative training ({len(train_tasks)} tasks)...")
     sf = SkillForgeV6()
+    # Inject seed skills — task-specific strategies from failed traces.
+    # These are the SKILL LAYER contribution (not system prompt).
+    # They only affect groups B/C (augmented), not group A (baseline).
+    n_seeds = inject_seed_skills(sf.library)
+    if n_seeds:
+        print(f"    Injected {n_seeds} seed skills into experience library")
     # GAIA2 tasks load full scenarios (~2.6MB each) — limit concurrency
     concurrency = 3 if benchmark == "gaia2" else CONCURRENCY
     sem = asyncio.Semaphore(concurrency)
