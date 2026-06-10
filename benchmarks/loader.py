@@ -86,77 +86,33 @@ class BenchmarkLoader:
     # Gaia2 — Agentic CLI Tool-Calling (soft recall)
 
     def _load_gaia2(self) -> list[dict[str, Any]]:
-        """Load Gaia2 scenarios from local JSON files for CLI tool-calling evaluation."""
+        """Load Gaia2 scenarios from harbor CLI dataset directory.
+
+        Uses the ARE (Agent Runtime Environment) integration for real tool-calling
+        evaluation. Each task includes the scenario path for launching ARE sessions.
+        """
         scenario_dir = self.config.get(
-            "scenario_dir", "/data1/benchmarks/gaia2/scenarios"
+            "scenario_dir", "/tmp/harbor-datasets/datasets/gaia2-cli"
         )
-        logger.info(f"Loading Gaia2 scenarios from {scenario_dir}...")
+        logger.info(f"Loading Gaia2 from CLI directory: {scenario_dir}...")
 
-        scenario_files = sorted(
-            glob.glob(os.path.join(scenario_dir, "**/scenario.json"), recursive=True)
-        )
-        if not scenario_files:
-            logger.warning(f"No Gaia2 scenarios found in {scenario_dir}")
-            return []
+        # Use the ARE integration loader
+        try:
+            from scripts.v6.are_integration import load_gaia2_tasks_from_cli_dir
+        except ImportError:
+            # Fallback: try relative import path
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "are_integration",
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "v6", "are_integration.py")
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            load_gaia2_tasks_from_cli_dir = mod.load_gaia2_tasks_from_cli_dir
 
-        app_to_cli = {
-            'Calendar': 'calendar', 'Contacts': 'contacts',
-            'Emails': 'emails', 'Messages': 'messages',
-            'Chats': 'chats', 'RentAFlat': 'rent-a-flat',
-            'City': 'city', 'Cabs': 'cabs', 'Shopping': 'shopping',
-        }
-
-        tasks: list[dict[str, Any]] = []
-        for scenario_path in scenario_files:
-            if len(tasks) >= self.num_samples:
-                break
-            try:
-                with open(scenario_path) as f:
-                    scenario = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                continue
-
-            task_prompt = ""
-            for event in scenario.get("events", []):
-                if event.get("event_type") == "USER":
-                    for arg in event.get("action", {}).get("args", []):
-                        if arg.get("name") == "content":
-                            task_prompt = arg["value"]
-                            break
-                    if task_prompt:
-                        break
-            if not task_prompt:
-                continue
-
-            oracle_actions = []
-            for event in scenario.get("events", []):
-                if event.get("event_type") == "AGENT":
-                    action = event.get("action", {})
-                    oracle_actions.append({
-                        "app": action.get("app", ""),
-                        "fn": action.get("fn", ""),
-                        "args": action.get("args", []),
-                    })
-
-            tools = [app_to_cli[app["name"]]
-                     for app in scenario.get("apps", [])
-                     if app.get("name") in app_to_cli]
-
-            scenario_id = os.path.splitext(os.path.basename(scenario_path))[0]
-            tasks.append({
-                "task_id": f"gaia2_{scenario_id}",
-                "description": task_prompt,
-                "expected": oracle_actions,
-                "context": "",
-                "metadata": {
-                    "benchmark": "gaia2",
-                    "scenario_path": scenario_path,
-                    "tools": tools,
-                    "apps": [app["name"] for app in scenario.get("apps", [])],
-                    "num_oracle_actions": len(oracle_actions),
-                },
-            })
-
+        tasks = load_gaia2_tasks_from_cli_dir(scenario_dir, num_samples=self.num_samples)
+        if not tasks:
+            logger.warning(f"No Gaia2 tasks loaded from {scenario_dir}")
         return tasks
 
     # SWE-bench Dynamic — Docker-based Code Bug-Fixing (pass@1)
@@ -667,7 +623,7 @@ class BenchmarkLoader:
 
                 description = (
                     f"Answer the following question based on the conversation history.\n\n"
-                    f"Conversation:\n{dialogue_context[:8000]}\n\n"
+                    f"Conversation:\n{dialogue_context}\n\n"
                     f"Question: {question}"
                 )
 
@@ -675,7 +631,7 @@ class BenchmarkLoader:
                     "task_id": f"locomo_s{sample_idx}_q{qa_idx}",
                     "description": description,
                     "expected": answer,
-                    "context": dialogue_context[:8000],
+                    "context": dialogue_context,
                     "metadata": {
                         "sample_idx": sample_idx,
                         "qa_idx": qa_idx,

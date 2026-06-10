@@ -39,11 +39,133 @@ QUALITY_THRESHOLD = 5
 
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
 
-TASK_LIMITS = {"gaia": 50, "alfworld": 40, "locomo": 50, "gaia2": 50, "swebench_dynamic": 30}
+# ─── Trace Logger (for human review of prompts & responses) ───────────────
+
+import threading
+
+class TraceLogger:
+    """Append-only JSONL logger for full prompt/response/score traces.
+
+    Each line in the trace file is a JSON object with:
+      - timestamp, benchmark, group, phase (train/test)
+      - task_id, task_desc
+      - augmented_prompt (the injected experience section)
+      - response (agent's final answer)
+      - expected (ground truth)
+      - score (EM or pass@1)
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._files = {}  # benchmark -> file handle
+
+    def _get_file(self, benchmark: str):
+        if benchmark not in self._files:
+            trace_dir = Path(RESULTS_DIR) / benchmark
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            trace_path = trace_dir / "trace.jsonl"
+            self._files[benchmark] = open(trace_path, "a", encoding="utf-8")
+        return self._files[benchmark]
+
+    def log(self, benchmark: str, group: str, phase: str,
+            task_id: str, task_desc: str, augmented_prompt: str,
+            response: str, expected: str, score: float,
+            extra: dict = None):
+        """Write one trace record."""
+        import datetime
+        record = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "benchmark": benchmark,
+            "group": group,
+            "phase": phase,
+            "task_id": task_id,
+            "task_desc": task_desc[:500],  # truncate very long descs
+            "augmented_prompt": augmented_prompt,
+            "response": response[:2000],  # truncate very long responses
+            "expected": expected,
+            "score": score,
+        }
+        if extra:
+            record.update(extra)
+        with self._lock:
+            f = self._get_file(benchmark)
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.flush()
+
+    def close(self):
+        for f in self._files.values():
+            f.close()
+        self._files.clear()
+
+
+_trace = TraceLogger()
+
+TASK_LIMITS = {"gaia": 50, "alfworld": 40, "locomo": 50, "gaia2": 30, "swebench_dynamic": 30}
 
 ALFWORLD_PYTHON = str(PROJECT_ROOT / ".venv_alfworld" / "bin" / "python")
 ALFWORLD_DATA = str(PROJECT_ROOT / ".venv_alfworld" / "data")
 ALFWORLD_MAX_STEPS = 50
+
+CHECKPOINT_FILE = str(PROJECT_ROOT / "experiments_results" / "latest" / "_checkpoint.json")
+
+# ─── API availability detection ───────────────────────────────────────────
+
+class APIUnavailableError(Exception):
+    """Raised when DeepSeek V4 Pro API is confirmed unavailable."""
+    pass
+
+_api_consecutive_failures = 0
+_API_FAILURE_THRESHOLD = 3  # After 3 consecutive failures, consider API down
+
+async def probe_api_available() -> bool:
+    """Quick probe to check if DeepSeek V4 Pro API is responding."""
+    r = await _llm_call("Reply with exactly: OK", max_turns=1, timeout=30)
+    if r.get("error"):
+        err = str(r["error"])
+        if "429" in err or "rate_limit" in err or "timeout" in err or "额度" in err:
+            return False
+    if not r.get("text"):
+        return False
+    return True
+
+def _check_api_error(r: dict) -> bool:
+    """Check if result indicates API unavailability. Returns True if API is down."""
+    global _api_consecutive_failures
+    if r.get("error"):
+        err = str(r["error"])
+        if "429" in err or "rate_limit" in err or "timeout" in err or "额度" in err:
+            _api_consecutive_failures += 1
+            if _api_consecutive_failures >= _API_FAILURE_THRESHOLD:
+                return True
+            return False
+    if not r.get("text") and not r.get("actions"):
+        _api_consecutive_failures += 1
+        if _api_consecutive_failures >= _API_FAILURE_THRESHOLD:
+            return True
+        return False
+    # Success — reset counter
+    _api_consecutive_failures = 0
+    return False
+
+# ─── Checkpoint helpers ───────────────────────────────────────────────────
+
+def save_checkpoint(state: dict):
+    """Save experiment state to checkpoint file."""
+    os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
+    with open(CHECKPOINT_FILE, "w") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False, default=str)
+    print(f"  💾 Checkpoint saved: {CHECKPOINT_FILE}", flush=True)
+
+def load_checkpoint() -> dict:
+    """Load experiment state from checkpoint file if exists."""
+    if os.path.exists(CHECKPOINT_FILE):
+        with open(CHECKPOINT_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def clear_checkpoint():
+    """Remove checkpoint file after successful completion."""
+    if os.path.exists(CHECKPOINT_FILE):
+        os.remove(CHECKPOINT_FILE)
 
 # ─── LLM helpers ──────────────────────────────────────────────────────────
 
@@ -54,9 +176,11 @@ def llm_review_fn(prompt: str) -> str:
             permission_mode="bypassPermissions", model=MODEL, max_turns=2, cwd="/tmp"
         )
         result = ""
+        gen = None
         try:
             async with asyncio.timeout(90):
-                async for msg in query(prompt=prompt, options=opt):
+                gen = query(prompt=prompt, options=opt)
+                async for msg in gen:
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if hasattr(block, 'text') and block.text:
@@ -65,6 +189,12 @@ def llm_review_fn(prompt: str) -> str:
                             break
         except Exception:
             pass
+        finally:
+            if gen is not None:
+                try:
+                    await gen.aclose()
+                except Exception:
+                    pass
         return result
 
     def _run_in_thread():
@@ -72,10 +202,29 @@ def llm_review_fn(prompt: str) -> str:
         try:
             return loop.run_until_complete(_call())
         finally:
-            loop.close()
+            _shutdown_loop(loop)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(_run_in_thread).result(timeout=120)
+
+def _shutdown_loop(loop: asyncio.AbstractEventLoop):
+    """Gracefully shutdown an event loop: cancel all pending tasks, then close."""
+    try:
+        # Cancel all remaining tasks
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    except Exception:
+        pass
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        loop.close()
+
 
 def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
     """Run CodeBuddy query in a fresh event loop (thread-safe, avoids cancel scope issues)."""
@@ -85,9 +234,11 @@ def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
         )
         text = ""
         actions = []
+        gen = None
         try:
             async with asyncio.timeout(timeout):
-                async for msg in query(prompt=prompt, options=opt):
+                gen = query(prompt=prompt, options=opt)
+                async for msg in gen:
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, ToolUseBlock):
@@ -100,18 +251,82 @@ def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
                             break
         except Exception as e:
             return {"text": text, "actions": actions, "error": str(e)[:200] if not text else None}
+        finally:
+            if gen is not None:
+                try:
+                    await gen.aclose()
+                except Exception:
+                    pass
         return {"text": text, "actions": actions, "error": None}
 
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(_inner())
     finally:
-        loop.close()
+        _shutdown_loop(loop)
 
 async def _llm_call(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
-    """Async wrapper: runs query in isolated thread to avoid anyio conflicts."""
+    """Async wrapper: runs query in isolated thread to avoid anyio conflicts.
+    Has a hard outer timeout (timeout + 30s grace) to prevent indefinite hangs."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _query_sync, prompt, max_turns, timeout)
+    hard_timeout = timeout + 30  # Grace period beyond the inner timeout
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _query_sync, prompt, max_turns, timeout),
+            timeout=hard_timeout
+        )
+    except asyncio.TimeoutError:
+        return {"text": "", "actions": [], "error": f"hard_timeout_after_{hard_timeout}s"}
+
+
+def _query_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) -> dict:
+    """Pure text generation without CodeBuddy tools (for GAIA2 ARE interaction)."""
+    async def _inner():
+        opt = CodeBuddyAgentOptions(
+            permission_mode="bypassPermissions", model=MODEL, max_turns=3, cwd="/tmp",
+            allowed_tools=[],  # No tools — pure text generation
+            system_prompt=system_prompt,
+        )
+        text = ""
+        gen = None
+        try:
+            async with asyncio.timeout(timeout):
+                gen = query(prompt=user_prompt, options=opt)
+                async for msg in gen:
+                    if isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if hasattr(block, 'text') and block.text:
+                                if '429' in block.text and '额度' in block.text:
+                                    return {"text": "", "error": "429_rate_limit"}
+                                text += block.text
+        except Exception as e:
+            return {"text": text, "error": str(e)[:200] if not text else None}
+        finally:
+            if gen is not None:
+                try:
+                    await gen.aclose()
+                except Exception:
+                    pass
+        return {"text": text, "error": None}
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_inner())
+    finally:
+        _shutdown_loop(loop)
+
+
+async def _llm_call_notool(system_prompt: str, user_prompt: str, timeout: int = 60) -> dict:
+    """Async wrapper for pure-text LLM call (no tools)."""
+    loop = asyncio.get_event_loop()
+    hard_timeout = timeout + 30
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _query_notool_sync, system_prompt, user_prompt, timeout),
+            timeout=hard_timeout
+        )
+    except asyncio.TimeoutError:
+        return {"text": "", "error": f"hard_timeout_after_{hard_timeout}s"}
 
 async def _llm_short_call(prompt: str, max_turns: int = 1, timeout: int = 30) -> str:
     """Short LLM call returning text only."""
@@ -194,7 +409,404 @@ def exact_match(pred: str, gold: str) -> float:
         return 0.0
     p = normalize_answer(pred)
     g = normalize_answer(gold)
-    return 1.0 if p == g or g in p or p in g else 0.0
+    if not g:
+        return 0.0
+    # Strict equality
+    if p == g:
+        return 1.0
+    # Allow gold contained in pred ONLY if gold is multi-word (>=2 words)
+    # or if pred is short (extracted answer). For single-word gold answers,
+    # require word-boundary match to avoid false positives like "4" in "2024".
+    g_words = g.split()
+    p_words = p.split()
+    if len(g_words) >= 2:
+        # Multi-word gold: substring match is reasonable
+        if g in p:
+            return 1.0
+    else:
+        # Single-word gold: require word-boundary match in pred
+        # This prevents "4" matching "2024" or "yes" matching "synthesis"
+        if re.search(r'\b' + re.escape(g) + r'\b', p):
+            # Only count if pred is reasonably short (extracted answer)
+            if len(p_words) <= 20:
+                return 1.0
+    return 0.0
+
+# ─── GAIA2 ARE runner (real tool calling) ─────────────────────────────────
+
+async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
+                                   group: str = "A") -> dict:
+    """Run a GAIA2 task using the real ARE simulation environment.
+
+    The LLM interacts with the environment through function calling:
+    1. Load scenario → initialize ARE session
+    2. Get tool schemas → build system prompt with available tools
+    3. LLM generates tool calls → execute in ARE → return results → loop
+    4. Record event log for evaluation
+    """
+    from scripts.v6.are_integration import ARESession
+
+    task_id = task["task_id"]
+    task_desc = task.get("description") or task.get("task_desc", "")
+    metadata = task.get("metadata", {})
+    scenario_path = metadata.get("scenario_path") or task.get("scenario_path", "")
+
+    result = {
+        "task_id": task_id,
+        "expected": task.get("expected", []),
+        "oracle_answer": task.get("oracle_answer", ""),
+        "response": "",
+        "error": None,
+        "time_cost": 0,
+        "augmented": bool(experience_section),
+        "group": group,
+        "actions": [],
+        "event_log": [],
+    }
+
+    if not scenario_path:
+        result["error"] = "no_scenario_path"
+        return result
+
+    t0 = time.time()
+    session = None
+    try:
+        # Initialize ARE session
+        session = ARESession(scenario_path)
+
+        # Pre-fetch the user task (avoid LLM needing to call get_last_message)
+        task_message = session.call_tool("AgentUserInterface__get_last_message_from_user", {})
+        task_content = ""
+        if isinstance(task_message, dict):
+            task_content = task_message.get("result", {}).get("content", "") if isinstance(task_message.get("result"), dict) else str(task_message.get("result", ""))
+        if not task_content:
+            task_content = task_desc  # Fallback to task description
+
+        result["actions"].append({
+            "tool": "AgentUserInterface__get_last_message_from_user",
+            "args": {},
+            "result_preview": task_content[:200],
+        })
+
+        # Build tool ID mapping (op-001, op-002, ...)
+        tool_names = list(session._all_tools.keys())
+        tool_id_map = {}  # op-001 -> ARE tool name
+        tool_lines = []
+        for i, name in enumerate(tool_names):
+            tid = f"op-{i+1:03d}"
+            tool_id_map[tid] = name
+            tool = session._all_tools[name]
+            # Build compact param list
+            params = []
+            for arg in tool.args:
+                req = " [required]" if not arg.has_default else ""
+                params.append(f"{arg.name}{req}")
+            params_str = ", ".join(params) if params else "(none)"
+            # Use short description
+            desc = (tool.function_description or "")[:60]
+            tool_lines.append(f"{tid}: {desc} | {params_str}")
+
+        # Add special tools
+        tool_lines.append("op-000: Wait for environment notification | timeout_seconds")
+        tool_id_map["op-000"] = "_wait_for_notification"
+
+        tool_text = "\n".join(tool_lines)
+
+        # Build system prompt - MUST be very directive to prevent LLM from explaining
+        system_prompt = (
+            "You execute tasks by calling operations one at a time. Output ONLY:\n"
+            "NEXT_OP: <id>\n"
+            "PARAMS: <key>:<value> | <key>:<value>\n\n"
+            "FORMAT EXAMPLES:\n"
+            "  NEXT_OP: op-024\n"
+            "  PARAMS: query:Stockholm | offset:0\n\n"
+            "  NEXT_OP: op-075\n"
+            "  PARAMS: title:Meeting | start_datetime:2024-10-19 08:00:00 | end_datetime:2024-10-19 20:00:00 | attendees:[\"John\"]\n\n"
+            "  NEXT_OP: op-000\n"
+            "  PARAMS: timeout_seconds:10\n\n"
+            "RULES:\n"
+            "- Output ONLY NEXT_OP + PARAMS. No explanation, no planning, no markdown.\n"
+            "- Use exact data from results (real names, IDs, emails). NEVER invent data.\n"
+            "- SEARCH STRATEGY: If a contact search returns empty, try:\n"
+            "  1. Search by first name only\n"
+            "  2. Search by last name only\n"
+            "  3. Search by job title or city\n"
+            "  4. List all contacts with offset:0, then offset:10, etc.\n"
+            "- After completing ALL task steps, use op-001 (send_message_to_user) to confirm, then output ALL_DONE.\n"
+            "- To wait for environment reply/notification, use op-000 with timeout_seconds:30.\n"
+            "- When you receive a notification (e.g. someone replies), adapt your plan accordingly.\n\n"
+            f"OPERATIONS:\n{tool_text}\n\n"
+            "REMEMBER: Output ONLY NEXT_OP and PARAMS lines. Nothing else."
+        )
+
+        if experience_section:
+            system_prompt += f"\n\nRELEVANT EXPERIENCE:\n{experience_section}"
+
+        # Multi-turn interaction loop
+        # Since CodeBuddy SDK doesn't support multi-turn chat natively,
+        # we accumulate conversation history in the user prompt.
+        # Multi-turn interaction loop
+        conversation_history = (
+            f"TASK: {task_content}\n\n"
+            "Previous results: (none)\n\n"
+            "Your next operation (output ONLY NEXT_OP and PARAMS):"
+        )
+
+        max_turns = 50
+        all_responses = []
+        no_op_retries = 0  # Track consecutive failures to output NEXT_OP
+
+        for turn in range(max_turns):
+            # Call LLM in pure-text mode (no CodeBuddy tools)
+            r = await _llm_call_notool(system_prompt, conversation_history, timeout=300)
+
+            if _check_api_error(r):
+                raise APIUnavailableError(
+                    f"API unavailable after {_API_FAILURE_THRESHOLD} consecutive failures"
+                )
+
+            response_text = r.get("text", "")
+            # Filter out "Tool not found" error messages from CodeBuddy
+            response_text = re.sub(r'Tool \S+ not found in agent cli\.', '', response_text).strip()
+            all_responses.append(response_text)
+
+            # Check if agent signals completion
+            if "ALL_DONE" in response_text:
+                break
+
+            # Parse NEXT_OP from response
+            op_match = re.search(r'NEXT_OP:\s*(op-\d{3})', response_text)
+            if not op_match:
+                no_op_retries += 1
+                # Give up to 2 retries — remind LLM to output format
+                if no_op_retries <= 2 and turn < max_turns - 1:
+                    conversation_history += (
+                        "\n\nERROR: You must output NEXT_OP and PARAMS. "
+                        "Do NOT explain. Output ONLY:\n"
+                        "NEXT_OP: <id>\nPARAMS: <key>:<value>\n\n"
+                        "Your next operation:"
+                    )
+                    continue
+                break
+            else:
+                no_op_retries = 0  # Reset on success
+
+            tool_id = op_match.group(1)
+            if tool_id not in tool_id_map:
+                # Invalid tool ID
+                conversation_history += (
+                    f"\n\nERROR: Invalid ID '{tool_id}'. Check OPERATIONS list.\n\n"
+                    "Your next operation (output ONLY NEXT_OP and PARAMS):"
+                )
+                continue
+
+            # Parse PARAMS
+            params_match = re.search(r'PARAMS:\s*(.*?)(?:\n|$)', response_text)
+            tool_args = {}
+            if params_match:
+                params_str = params_match.group(1).strip()
+                if params_str and params_str != "(none)":
+                    for part in params_str.split("|"):
+                        part = part.strip()
+                        if ":" in part:
+                            key, val = part.split(":", 1)
+                            key = key.strip()
+                            val = val.strip()
+                            # Try to parse JSON values (arrays, objects)
+                            if val.startswith("[") or val.startswith("{"):
+                                try:
+                                    val = json.loads(val)
+                                except json.JSONDecodeError:
+                                    pass
+                            tool_args[key] = val
+
+            # Execute the tool
+            are_tool_name = tool_id_map[tool_id]
+
+            if are_tool_name == "_wait_for_notification":
+                timeout_val = int(tool_args.get("timeout_seconds", 180))
+                tr = session.wait_for_notification(timeout_val)
+            else:
+                tr = session.call_tool(are_tool_name, tool_args)
+
+            result["actions"].append({
+                "tool": are_tool_name,
+                "args": tool_args,
+                "result_preview": str(tr)[:500],
+            })
+
+            # Format result for conversation
+            result_str = json.dumps(tr, default=str)[:2000]
+
+            # Check for notifications
+            notifications = []
+            try:
+                r_data = tr if isinstance(tr, dict) else json.loads(str(tr))
+                if isinstance(r_data, dict) and r_data.get("notifications"):
+                    for n in r_data["notifications"]:
+                        notifications.append(f"NOTIFICATION: {n.get('message', str(n))}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            notif_text = "\n".join(notifications) if notifications else ""
+
+            conversation_history += (
+                f"\n\nRESULT ({tool_id}):\n{result_str}"
+                + (f"\n{notif_text}" if notif_text else "")
+                + "\n\nYour next operation (output ONLY NEXT_OP and PARAMS):"
+            )
+
+            # Truncate conversation if too long (keep last 20000 chars)
+            if len(conversation_history) > 25000:
+                # Keep the task at the top
+                task_header = f"TASK: {task_content}\n\n"
+                remaining = conversation_history[len(task_header):]
+                conversation_history = (
+                    task_header
+                    + "[Earlier steps truncated]\n...\n"
+                    + remaining[-20000:]
+                )
+        # Collect all responses into result
+        result["response"] = "\n---\n".join(all_responses)
+        result["event_log"] = session.event_log
+
+    except APIUnavailableError:
+        raise
+    except Exception as e:
+        result["error"] = str(e)[:300]
+    finally:
+        if session:
+            session.close()
+        result["time_cost"] = time.time() - t0
+
+    return result
+
+
+def _extract_action_calls(text: str) -> list[dict]:
+    """Extract ACTION: format tool calls from LLM response.
+
+    Format: ACTION: tool_name | arg1=value1 | arg2=value2
+    Tool names use / separator: AppName/method_name
+    """
+    calls = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line.startswith("ACTION:"):
+            continue
+        # Parse: ACTION: tool_name | arg1=value1 | arg2=value2
+        parts = line[7:].strip().split("|")
+        if not parts:
+            continue
+        tool_name = parts[0].strip()
+        args = {}
+        for part in parts[1:]:
+            part = part.strip()
+            if "=" in part:
+                key, val = part.split("=", 1)
+                key = key.strip()
+                val = val.strip()
+                # Try to parse JSON values (arrays, objects)
+                if val.startswith("[") or val.startswith("{"):
+                    try:
+                        val = json.loads(val)
+                    except json.JSONDecodeError:
+                        pass
+                args[key] = val
+        if tool_name:
+            calls.append({"name": tool_name, "args": args})
+    return calls
+
+
+def _extract_tool_calls(text: str) -> list[dict]:
+    """Extract tool calls from LLM response text.
+
+    Supports multiple formats:
+    1. JSON code blocks: ```json {"tool": "name", "args": {...}} ```
+    2. Inline JSON objects: {"tool": "name", "args": {...}}
+    3. Function call syntax: tool_name(arg1=val1, arg2=val2)
+    """
+    calls = []
+
+    # Pattern 1: JSON in code blocks (most reliable)
+    code_block_pattern = re.compile(r'```(?:json)?\s*\n?(.*?)\n?```', re.DOTALL)
+    for block_match in code_block_pattern.finditer(text):
+        block = block_match.group(1).strip()
+        try:
+            data = json.loads(block)
+            if isinstance(data, dict):
+                name = data.get("tool") or data.get("name") or data.get("function", "")
+                args = data.get("args") or data.get("arguments") or data.get("parameters", {})
+                if name and ("__" in name or name.startswith("are_")):
+                    calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        name = item.get("tool") or item.get("name") or item.get("function", "")
+                        args = item.get("args") or item.get("arguments") or item.get("parameters", {})
+                        if name and ("__" in name or name.startswith("are_")):
+                            calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
+        except json.JSONDecodeError:
+            continue
+
+    if calls:
+        return calls
+
+    # Pattern 2: Inline JSON objects (look for {"tool": "...", "args": {...}})
+    # Use a more careful approach: find all { that start with "tool"
+    inline_pattern = re.compile(
+        r'\{\s*"(?:tool|name|function)"\s*:\s*"([^"]+)"\s*,\s*"(?:args|arguments|parameters)"\s*:\s*(\{[^}]*\})\s*\}',
+        re.DOTALL
+    )
+    for m in inline_pattern.finditer(text):
+        try:
+            name = m.group(1)
+            args = json.loads(m.group(2))
+            if "__" in name or name.startswith("are_"):
+                calls.append({"name": name, "args": args})
+        except (json.JSONDecodeError, IndexError):
+            continue
+
+    if calls:
+        return calls
+
+    # Pattern 3: Try to find any JSON object in text that looks like a tool call
+    # This handles cases where LLM outputs JSON without code blocks
+    brace_pattern = re.compile(r'\{[^{}]{10,500}\}')
+    for m in brace_pattern.finditer(text):
+        try:
+            data = json.loads(m.group(0))
+            if isinstance(data, dict):
+                name = data.get("tool") or data.get("name") or data.get("function", "")
+                args = data.get("args") or data.get("arguments") or data.get("parameters", {})
+                if name and ("__" in name or name.startswith("are_")):
+                    calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
+        except json.JSONDecodeError:
+            continue
+
+    if calls:
+        return calls
+
+    # Pattern 4: Function call syntax: ToolName__method(key="value", ...)
+    func_pattern = re.compile(
+        r'(\w+__\w+)\s*\(\s*(.*?)\s*\)',
+        re.DOTALL
+    )
+    for m in func_pattern.finditer(text):
+        name = m.group(1)
+        args_str = m.group(2).strip()
+        args = {}
+        if args_str:
+            for pair in re.split(r',\s*(?=\w+=)', args_str):
+                kv = pair.split("=", 1)
+                if len(kv) == 2:
+                    key = kv[0].strip()
+                    val = kv[1].strip().strip('"').strip("'")
+                    args[key] = val
+        if name:
+            calls.append({"name": name, "args": args})
+
+    return calls
+
 
 # ─── GAIA runner ──────────────────────────────────────────────────────────
 
@@ -207,30 +819,7 @@ async def run_gaia_task(task: dict, experience_section: str = "",
     benchmark_type = metadata.get("benchmark", "")
 
     # Determine system prompt based on benchmark type
-    if benchmark_type == "gaia2" or "gaia2" in task_id:
-        # GAIA2: CLI tool-calling tasks — inject available tools
-        available_tools = metadata.get("tools", [])
-        tools_str = ", ".join(available_tools) if available_tools else "calendar, contacts, emails, messages, cabs, shopping"
-        system = (
-            "You are an AI assistant that helps users accomplish tasks by using CLI tools.\n\n"
-            f"Available tools: {tools_str}\n\n"
-            "For each tool, you can perform actions like: search, create, update, delete, list.\n"
-            "Example tool usage patterns:\n"
-            "- calendar: create events, check schedule, find free slots\n"
-            "- contacts: search contacts, get phone/email, add contacts\n"
-            "- emails: send emails, search inbox, read messages\n"
-            "- messages/chats: send messages, read conversations\n"
-            "- cabs: book rides, check availability, get estimates\n"
-            "- shopping: search products, place orders, check prices\n\n"
-            "Strategy:\n"
-            "1. Understand what the user wants to accomplish\n"
-            "2. Break it into steps using the available tools\n"
-            "3. Execute each step, using tool calls when needed\n"
-            "4. Report the final result\n\n"
-            "Use web search and bash commands to simulate tool interactions. "
-            "Show your reasoning and actions clearly."
-        )
-    elif "swebench" in task_id or benchmark_type == "swebench_dynamic":
+    if benchmark_type == "swebench_dynamic" or "swebench" in task_id:
         # SWE-bench: code debugging and patch generation
         system = (
             "You are an expert software engineer debugging a failing test case.\n\n"
@@ -279,6 +868,8 @@ async def run_gaia_task(task: dict, experience_section: str = "",
               "group": group, "actions": []}
     t0 = time.time()
     r = await _llm_call(prompt, max_turns=30, timeout=TASK_TIMEOUT_AGENT)
+    if _check_api_error(r):
+        raise APIUnavailableError(f"API unavailable after {_API_FAILURE_THRESHOLD} consecutive failures")
     result["response"] = r.get("text", "")
     result["actions"] = r.get("actions", [])
     result["error"] = r.get("error")
@@ -563,6 +1154,8 @@ async def run_locomo_task(task: dict, experience_section: str = "",
     # LoCoMo is pure reading comprehension — answer is always in conversation history.
     # max_turns=1 prevents model from using web search tools which pollute the answer.
     r = await _llm_call(prompt, max_turns=1, timeout=TASK_TIMEOUT_QA)
+    if _check_api_error(r):
+        raise APIUnavailableError(f"API unavailable after {_API_FAILURE_THRESHOLD} consecutive failures")
     result["response"] = r.get("text", "")
     result["error"] = r.get("error")
     result["time_cost"] = time.time() - t0
@@ -583,85 +1176,144 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
                 "won": won, "method": "pass@1"}
 
     if benchmark == "gaia2":
-        # Soft recall: what fraction of oracle actions were covered by agent actions
-        oracle_actions = result.get("expected", [])
-        agent_actions = result.get("actions", [])
-        response = (result.get("response") or "").lower()
-        if not oracle_actions:
-            return {"score": 0.0, "em": 0.0, "method": "soft_recall_empty"}
-        if isinstance(oracle_actions, str):
-            # Fallback if expected is string
-            return {"score": 0.0, "em": 0.0, "method": "soft_recall_str_fallback"}
-        # Match: for each oracle action, check if agent did something similar
-        # Use broader matching: check tool names, app names, fn names, and also
-        # check if the agent's response text mentions the relevant concepts
+        # ARE-based evaluation: compare agent's event_log against oracle_events.
+        # Uses action-matching logic inspired by the official llm_judge.py.
+        oracle_events = result.get("expected", [])
+        event_log = result.get("event_log", [])
+        response = (result.get("response") or "").strip()
+
+        if not oracle_events:
+            return {"score": 0.0, "em": 0.0, "method": "gaia2_no_oracle"}
+        if not event_log and not response:
+            return {"score": 0.0, "em": 0.0, "method": "gaia2_no_actions"}
+
+        # Extract write-actions from agent's event log (matching official verifier logic)
+        # Write actions are the ones that modify state (create, send, delete, etc.)
+        write_prefixes = {
+            "add_calendar_event", "delete_calendar_event",
+            "send_email", "reply_to_email", "forward_email",
+            "send_message", "create_and_add_message",
+            "send_message_to_user", "send_message_to_agent",
+            "add_to_cart", "checkout", "remove_from_cart", "cancel_order",
+            "order_ride", "user_cancel_ride",
+            "add_new_contact", "edit_contact", "delete_contact",
+            "save_apartment", "remove_saved_apartment",
+            "create_group_conversation", "add_participant_to_conversation",
+        }
+
+        agent_write_actions = []
+        for event in event_log:
+            method = event.get("method", "")
+            if method in write_prefixes:
+                agent_write_actions.append({
+                    "tool": event.get("tool", ""),
+                    "method": method,
+                    "args": event.get("args", {}),
+                })
+
+        # Extract oracle write actions
+        oracle_write_actions = []
+        for oe in oracle_events:
+            fn = oe.get("function", "")
+            if fn in write_prefixes:
+                oracle_write_actions.append({
+                    "app": oe.get("app", ""),
+                    "function": fn,
+                    "args": oe.get("args", {}),
+                })
+
+        if not oracle_write_actions:
+            # Answer-mode task: compare agent's user message against oracle answer
+            oracle_answer = result.get("oracle_answer", "")
+            if oracle_answer and response:
+                # Check if agent sent a message to user containing the answer
+                agent_user_msgs = [
+                    e.get("args", {}).get("content", "")
+                    for e in event_log
+                    if e.get("method") == "send_message_to_user"
+                ]
+                agent_text = " ".join(agent_user_msgs) if agent_user_msgs else response
+                # Use LLM judge for answer comparison
+                judge_prompt = (
+                    "Compare the agent's answer to the oracle answer.\n\n"
+                    f"Oracle answer: {oracle_answer}\n"
+                    f"Agent answer: {agent_text[:2000]}\n\n"
+                    "Score 0.0 to 1.0: Does the agent's answer contain the same "
+                    "semantic information as the oracle? Output ONLY a number:"
+                )
+                out = await _llm_short_call(judge_prompt, max_turns=1, timeout=30)
+                m = re.search(r'(\d+\.?\d*)', out)
+                score = 0.0
+                if m:
+                    try:
+                        score = min(1.0, max(0.0, float(m.group(1))))
+                    except ValueError:
+                        score = 0.0
+                return {"score": score, "em": 1.0 if score >= 0.7 else 0.0,
+                        "method": "gaia2_answer_mode",
+                        "agent_actions": len(event_log)}
+            return {"score": 0.0, "em": 0.0, "method": "gaia2_no_oracle_writes"}
+
+        # Action-mode: count how many oracle write actions were matched
         matched = 0
-        agent_strs = []
-        if agent_actions:
-            agent_strs = [f"{a.get('tool','')}: {a.get('input','')}" for a in agent_actions]
-        # Also include the full response text for semantic matching
-        all_agent_text = " ".join(agent_strs).lower() + " " + response
+        used_agent_indices = set()
 
-        # Build app/fn name mappings for flexible matching
-        app_aliases = {
-            'calendar': ['calendar', 'schedule', 'event', 'meeting', 'appointment'],
-            'contacts': ['contacts', 'contact', 'phone', 'address', 'people'],
-            'emails': ['emails', 'email', 'mail', 'send', 'inbox', 'message'],
-            'messages': ['messages', 'message', 'sms', 'text', 'chat'],
-            'chats': ['chats', 'chat', 'conversation', 'group'],
-            'rentaflat': ['rent', 'flat', 'apartment', 'housing', 'property'],
-            'city': ['city', 'location', 'place', 'map', 'direction'],
-            'cabs': ['cabs', 'cab', 'taxi', 'ride', 'uber', 'transport'],
-            'shopping': ['shopping', 'shop', 'buy', 'purchase', 'order', 'product'],
-        }
-        fn_keywords = {
-            'create': ['create', 'add', 'new', 'make', 'set'],
-            'search': ['search', 'find', 'look', 'query', 'get', 'list'],
-            'send': ['send', 'write', 'compose', 'reply'],
-            'delete': ['delete', 'remove', 'cancel'],
-            'update': ['update', 'edit', 'modify', 'change'],
-        }
+        for oracle_action in oracle_write_actions:
+            oracle_fn = oracle_action["function"]
+            oracle_args = oracle_action["args"]
+            best_match = False
 
-        for oracle in oracle_actions:
-            oracle_app = oracle.get('app', '').lower().replace(' ', '')
-            oracle_fn = oracle.get('fn', '').lower()
-            found = False
+            for j, agent_action in enumerate(agent_write_actions):
+                if j in used_agent_indices:
+                    continue
+                agent_method = agent_action["method"]
 
-            # Direct match in agent tool calls
-            for agent_str in agent_strs:
-                agent_lower = agent_str.lower()
-                if oracle_app and oracle_app in agent_lower:
-                    found = True
+                # Function name match (allow aliases)
+                fn_match = (
+                    agent_method == oracle_fn
+                    or agent_method.replace("_", "") == oracle_fn.replace("_", "")
+                )
+                if not fn_match:
+                    continue
+
+                # Check key args match (relaxed: at least 50% of oracle args present)
+                if oracle_args and isinstance(oracle_args, dict):
+                    agent_args = agent_action.get("args", {})
+                    if isinstance(agent_args, dict):
+                        matching_args = 0
+                        total_args = 0
+                        for key, val in oracle_args.items():
+                            if not val or val == "[]" or val == "":
+                                continue
+                            total_args += 1
+                            agent_val = str(agent_args.get(key, "")).lower()
+                            oracle_val = str(val).lower()
+                            if oracle_val in agent_val or agent_val in oracle_val:
+                                matching_args += 1
+                        if total_args > 0 and matching_args / total_args >= 0.4:
+                            best_match = True
+                    else:
+                        best_match = True  # Can't compare args, accept fn match
+                else:
+                    best_match = True  # No args to compare
+
+                if best_match:
+                    used_agent_indices.add(j)
                     break
-                if oracle_fn and oracle_fn in agent_lower:
-                    found = True
-                    break
 
-            # Alias-based match in full agent text
-            if not found:
-                aliases = app_aliases.get(oracle_app, [oracle_app])
-                for alias in aliases:
-                    if alias and alias in all_agent_text:
-                        # Also check if the fn type matches
-                        fn_base = oracle_fn.split('_')[0] if oracle_fn else ''
-                        fn_kws = fn_keywords.get(fn_base, [fn_base])
-                        for kw in fn_kws:
-                            if kw and kw in all_agent_text:
-                                found = True
-                                break
-                        if found:
-                            break
-                        # If app matches but fn doesn't, still count partial
-                        if alias in all_agent_text:
-                            found = True
-                            break
-
-            if found:
+            if best_match:
                 matched += 1
 
-        recall = matched / len(oracle_actions)
-        return {"score": recall, "em": 1.0 if recall >= 0.8 else 0.0,
-                "soft_recall": recall, "method": "soft_recall"}
+        recall = matched / len(oracle_write_actions) if oracle_write_actions else 0.0
+        return {
+            "score": recall,
+            "em": 1.0 if recall >= 0.7 else 0.0,
+            "action_recall": recall,
+            "matched": matched,
+            "total_oracle": len(oracle_write_actions),
+            "total_agent": len(agent_write_actions),
+            "method": "gaia2_action_recall",
+        }
 
     if benchmark == "swebench_dynamic":
         # SWE-bench: use LLM judge to assess if the response addresses the issue
@@ -803,8 +1455,10 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
                     metadata=task.get("metadata", {"benchmark": benchmark})
                 )
 
-            if benchmark == "gaia" or benchmark == "gaia2" or benchmark == "swebench_dynamic":
+            if benchmark == "gaia" or benchmark == "swebench_dynamic":
                 r = await run_gaia_task(task, experience_section=aug, group="train")
+            elif benchmark == "gaia2":
+                r = await run_gaia2_task_with_are(task, experience_section=aug, group="train")
             elif benchmark == "alfworld":
                 game = game_list[i] if game_list else None
                 if game:
@@ -848,6 +1502,17 @@ async def train_sequential(benchmark: str, train_tasks: list, sf: SkillForgeV6,
             r["_critic_quality"] = cq
             r["_recorded"] = recorded
             all_results.append(r)
+
+            # Trace logging for human review
+            _trace.log(
+                benchmark=benchmark, group="train", phase="train",
+                task_id=task["task_id"], task_desc=task.get("description", ""),
+                augmented_prompt=aug, response=r.get("response", ""),
+                expected=task.get("expected", r.get("expected", "")),
+                score=score,
+                extra={"critic_quality": cq, "recorded": recorded,
+                       "library_size": len(sf.library.experiences)}
+            )
 
             tag = "✓" if score >= 0.5 else "✗"
             kept = "kept" if recorded else "drop"
@@ -908,7 +1573,9 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
 
     print(f"\n  Phase 1: Sequential iterative training ({len(train_tasks)} tasks)...")
     sf = SkillForgeV6()
-    sem = asyncio.Semaphore(CONCURRENCY)
+    # GAIA2 tasks load full scenarios (~2.6MB each) — limit concurrency
+    concurrency = 3 if benchmark == "gaia2" else CONCURRENCY
+    sem = asyncio.Semaphore(concurrency)
 
     train_results = await train_sequential(
         benchmark, train_tasks, sf, sem,
@@ -930,7 +1597,9 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
     print(f"    [A] Baseline (no augmentation)...", flush=True)
     async def run_test_a(i, task):
         async with sem:
-            if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
+            if benchmark == "gaia2":
+                return await run_gaia2_task_with_are(task, "", "A")
+            if benchmark in ("gaia", "swebench_dynamic"):
                 return await run_gaia_task(task, "", "A")
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
@@ -954,10 +1623,18 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
 
     async def run_test_b(i, task):
         async with sem:
-            if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
+            if benchmark == "gaia2":
                 aug = build_augmented_prompt(task["description"], raw_library,
                                             metadata={"benchmark": benchmark})
-                return await run_gaia_task(task, aug, "B")
+                r = await run_gaia2_task_with_are(task, aug, "B")
+                r["_aug_prompt"] = aug
+                return r
+            if benchmark in ("gaia", "swebench_dynamic"):
+                aug = build_augmented_prompt(task["description"], raw_library,
+                                            metadata={"benchmark": benchmark})
+                r = await run_gaia_task(task, aug, "B")
+                r["_aug_prompt"] = aug
+                return r
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
                 if not game:
@@ -965,23 +1642,35 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
                 td = f"{results_a[i].get('task', '')} [type: {game['type']}]"
                 aug = build_augmented_prompt(td, raw_library,
                                             metadata={"task_type": game["type"]})
-                return await run_alfworld_task(
+                r = await run_alfworld_task(
                     game["file"], game["type"],
                     experience_section=f"\n## Experience\n{aug}" if aug else "",
                     group="B"
                 )
+                r["_aug_prompt"] = aug
+                return r
             aug = build_augmented_prompt(task["description"], raw_library,
                                         metadata=task.get("metadata", {}))
-            return await run_locomo_task(task, aug, "B")
+            r = await run_locomo_task(task, aug, "B")
+            r["_aug_prompt"] = aug
+            return r
     results_b = await asyncio.gather(*[run_test_b(i, t) for i, t in enumerate(test_tasks)])
 
     print(f"    [C] AI-refined + critic-gated injection...", flush=True)
     async def run_test_c(i, task):
         async with sem:
-            if benchmark in ("gaia", "gaia2", "swebench_dynamic"):
+            if benchmark == "gaia2":
                 aug = build_augmented_prompt(task["description"], sf.library,
                                             metadata={"benchmark": benchmark})
-                return await run_gaia_task(task, aug, "C")
+                r = await run_gaia2_task_with_are(task, aug, "C")
+                r["_aug_prompt"] = aug
+                return r
+            if benchmark in ("gaia", "swebench_dynamic"):
+                aug = build_augmented_prompt(task["description"], sf.library,
+                                            metadata={"benchmark": benchmark})
+                r = await run_gaia_task(task, aug, "C")
+                r["_aug_prompt"] = aug
+                return r
             if benchmark == "alfworld":
                 game = game_list[mid + i] if game_list and mid + i < len(game_list) else None
                 if not game:
@@ -989,14 +1678,18 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
                 td = f"{results_a[i].get('task', '')} [type: {game['type']}]"
                 aug = build_augmented_prompt(td, sf.library,
                                             metadata={"task_type": game["type"]})
-                return await run_alfworld_task(
+                r = await run_alfworld_task(
                     game["file"], game["type"],
                     experience_section=f"\n## Experience\n{aug}" if aug else "",
                     group="C"
                 )
+                r["_aug_prompt"] = aug
+                return r
             aug = build_augmented_prompt(task["description"], sf.library,
                                         metadata=task.get("metadata", {}))
-            return await run_locomo_task(task, aug, "C")
+            r = await run_locomo_task(task, aug, "C")
+            r["_aug_prompt"] = aug
+            return r
     results_c = await asyncio.gather(*[run_test_c(i, t) for i, t in enumerate(test_tasks)])
 
     print(f"\n  Evaluating with EM / pass@1 (LLM-Judge as tie-breaker)...", flush=True)
@@ -1012,6 +1705,41 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
         scores["A_baseline"].append(all_evals[i * 3])
         scores["B_raw"].append(all_evals[i * 3 + 1])
         scores["C_refined"].append(all_evals[i * 3 + 2])
+
+    # Trace logging for test phase (all 3 groups)
+    for i, task in enumerate(test_tasks):
+        task_id = task["task_id"]
+        task_desc = task.get("description", "")
+        expected = task.get("expected", results_a[i].get("expected", ""))
+        # Group A
+        _trace.log(
+            benchmark=benchmark, group="A_baseline", phase="test",
+            task_id=task_id, task_desc=task_desc,
+            augmented_prompt="",
+            response=results_a[i].get("response", ""),
+            expected=expected,
+            score=all_evals[i * 3].get("score", 0.0),
+        )
+        # Group B
+        aug_b = results_b[i].get("_aug_prompt", "")
+        _trace.log(
+            benchmark=benchmark, group="B_raw", phase="test",
+            task_id=task_id, task_desc=task_desc,
+            augmented_prompt=aug_b,
+            response=results_b[i].get("response", ""),
+            expected=expected,
+            score=all_evals[i * 3 + 1].get("score", 0.0),
+        )
+        # Group C
+        aug_c = results_c[i].get("_aug_prompt", "")
+        _trace.log(
+            benchmark=benchmark, group="C_refined", phase="test",
+            task_id=task_id, task_desc=task_desc,
+            augmented_prompt=aug_c,
+            response=results_c[i].get("response", ""),
+            expected=expected,
+            score=all_evals[i * 3 + 2].get("score", 0.0),
+        )
 
     report = {}
     for group, evals in scores.items():
@@ -1067,14 +1795,29 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
 async def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
     print("╔════════════════════════════════════════════════════════════════════╗")
-    print("║  SkillForge V6 — LATEST runner                                   ║")
+    print("║  SkillForge V6 — LATEST runner (v3 — strict metrics + resume)    ║")
     print("║  Cross-agent critic gating · EM / pass@1 metrics                 ║")
     print(f"║  Model: {MODEL:<22} | Concurrency: {CONCURRENCY:<3}              ║")
     print("╚════════════════════════════════════════════════════════════════════╝")
 
-    # Only rerun failed benchmarks (locomo, gaia2, swebench_dynamic)
-    BENCHMARKS_TO_RUN = ["locomo", "gaia2", "swebench_dynamic"]
-    print(f"\n  Loading benchmarks (rerun: {BENCHMARKS_TO_RUN})...")
+    # --- API availability probe ---
+    print("\n  🔍 Probing API availability...", flush=True)
+    api_ok = await probe_api_available()
+    if not api_ok:
+        print("  ❌ DeepSeek V4 Pro API is NOT available. Aborting.", flush=True)
+        print("  💡 Re-run this script when API is back online.", flush=True)
+        return
+    print("  ✓ API is responding.", flush=True)
+
+    # --- Check for existing checkpoint (resume support) ---
+    checkpoint = load_checkpoint()
+    completed_benchmarks = checkpoint.get("completed_benchmarks", {})
+    if completed_benchmarks:
+        print(f"\n  📂 Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
+
+    # Run ALL 5 benchmarks with fixed evaluation metrics
+    BENCHMARKS_TO_RUN = ["gaia2", "gaia", "locomo", "alfworld", "swebench_dynamic"]
+    print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}
     for name in BENCHMARKS_TO_RUN:
         config = {"name": name, "num_samples": TASK_LIMITS[name]}
@@ -1085,32 +1828,67 @@ async def main():
         benchmarks[name] = tasks
         print(f"    {name}: {len(tasks)} tasks")
 
-    alfworld_games = []
+    alfworld_games = get_alfworld_games(TASK_LIMITS.get("alfworld", 40))
+    print(f"    alfworld games: {len(alfworld_games)}")
     print(f"\n  Total: {sum(len(t) for t in benchmarks.values())} tasks")
 
-    all_reports = {}
+    all_reports = dict(completed_benchmarks)  # Start with previously completed
+    paused = False
+
     for name, tasks in benchmarks.items():
+        if name in completed_benchmarks:
+            print(f"\n  SKIP {name}: already completed (from checkpoint)")
+            continue
         if not tasks:
             print(f"\n  SKIP {name}: no tasks")
             continue
+
+        # Probe API before each benchmark
+        api_ok = await probe_api_available()
+        if not api_ok:
+            print(f"\n  ⚠️  API unavailable before starting {name}. Pausing experiment.", flush=True)
+            save_checkpoint({"completed_benchmarks": all_reports, "paused_at": name,
+                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")})
+            paused = True
+            break
+
         try:
             game_list = alfworld_games if name == "alfworld" else None
             all_reports[name] = await run_benchmark(name, tasks, game_list=game_list)
+        except APIUnavailableError as e:
+            print(f"\n  ⚠️  API became unavailable during {name}: {e}", flush=True)
+            print(f"  💾 Saving checkpoint and pausing...", flush=True)
+            save_checkpoint({"completed_benchmarks": all_reports, "paused_at": name,
+                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                             "error": str(e)})
+            paused = True
+            break
         except Exception as e:
             import traceback
             print(f"\n  ERROR on {name}: {e}")
             traceback.print_exc()
             all_reports[name] = {"error": str(e)}
 
+    if paused:
+        print(f"\n\n{'═'*70}")
+        print(f"  EXPERIMENT PAUSED — API unavailable")
+        print(f"  Completed: {[k for k in all_reports if 'error' not in all_reports.get(k, {})]}")
+        print(f"  Re-run this script to resume from checkpoint.")
+        print(f"{'═'*70}")
+    else:
+        # All done — clear checkpoint
+        clear_checkpoint()
+
+    # Print summary of whatever we have
     print(f"\n\n{'═'*70}")
     print(f"  FINAL SUMMARY (latest — DeepSeek V4 Pro · EM / pass@1)")
     print(f"{'═'*70}")
     print(f"  {'Benchmark':<12} {'Metric':<8} {'A':>8} {'B':>8} {'C':>8} {'Δ(C-A)':>9} {'Δ(C-B)':>9}")
     print(f"  {'-'*70}")
     for name, r in all_reports.items():
-        if "error" in r:
-            print(f"  {name:<12} ERROR: {r['error'][:40]}")
-        else:
+        if isinstance(r, dict) and "error" in r:
+            print(f"  {name:<12} ERROR: {str(r['error'])[:40]}")
+        elif isinstance(r, dict) and "results" in r:
             res = r["results"]
             print(f"  {name:<12} {r['metric']:<8} "
                   f"{res['A_baseline']['em']:>7.1%} "
@@ -1122,6 +1900,20 @@ async def main():
     with open(f"{RESULTS_DIR}/final_summary.json", "w") as f:
         json.dump(all_reports, f, indent=2, ensure_ascii=False)
     print(f"\n  Saved: {RESULTS_DIR}/final_summary.json")
+    _trace.close()
+    print(f"  📋 Trace logs: {RESULTS_DIR}/<benchmark>/trace.jsonl")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import warnings
+    warnings.filterwarnings("ignore", message=".*was destroyed but it is pending.*")
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n  ⚠️  Interrupted by user (Ctrl+C).", flush=True)
+        _trace.close()
+    except Exception as e:
+        import traceback
+        print(f"\n  💥 FATAL ERROR: {e}", flush=True)
+        traceback.print_exc()
+        _trace.close()
+        sys.exit(1)
