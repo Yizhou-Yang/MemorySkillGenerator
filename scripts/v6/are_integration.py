@@ -264,6 +264,10 @@ class ARESession:
         marked as completed (event_time set). In oracle_mode=False, OracleEvents
         are ignored by process_event(), so we must manually mark them when the
         agent performs the matching action.
+
+        IMPORTANT: OracleEvents with dependencies are NOT in the event_queue until
+        their dependencies are satisfied. We must search scenario.events (the full
+        event graph) to find all matching OracleEvents.
         """
         from are.simulation.types import OracleEvent, EventType
 
@@ -272,10 +276,12 @@ class ARESession:
             return
         app_name, func_name = tool_name.split("__", 1)
 
+        # Search ALL scenario events (not just the queue — most OracleEvents
+        # with dependencies haven't been placed in the queue yet)
+        all_events = list(self._scenario.events) if hasattr(self._scenario, "events") else []
+
         eq = self._env.event_queue
-        all_events = list(eq.list_view())
-        if hasattr(eq, "future_events"):
-            all_events.extend(eq.future_events)
+        current_time = self._env.time_manager.time()
 
         for event in all_events:
             if not isinstance(event, OracleEvent):
@@ -283,19 +289,54 @@ class ARESession:
             if not hasattr(event, "action_desc") or event.action_desc is None:
                 continue
             if event.action_desc.app == app_name and event.action_desc.function == func_name:
-                # Mark this oracle event as completed
-                current_time = self._env.time_manager.time()
-                event.event_time = current_time
-                # Schedule ready successors
-                for succ in event.successors:
-                    if succ.is_ready():
-                        succ.event_time = current_time + (succ.event_relative_time or 1.0)
-                        eq.put(succ)
+                # Mark this oracle event as completed (even if already marked by
+                # a predecessor's successor scheduling — we still need to process
+                # its successors recursively)
+                if event.event_time is None or event.event_time == 0.0:
+                    event.event_time = current_time
+
+                # Recursively schedule all ready successors
+                self._schedule_ready_successors(event, eq, current_time)
+
                 logger.debug(
                     "Completed OracleEvent %s (app=%s, func=%s)",
                     event.event_id[:30], app_name, func_name,
                 )
                 return
+
+    def _schedule_ready_successors(self, event: Any, eq: Any, current_time: float,
+                                   visited: set | None = None) -> None:
+        """Recursively schedule all ready successors of an event.
+
+        When a successor becomes ready and is an OracleEvent, we also mark it
+        as completed and recurse into its successors. This ensures the entire
+        dependency chain is resolved in one pass.
+        """
+        from are.simulation.types import OracleEvent, EventType
+
+        if visited is None:
+            visited = set()
+        if id(event) in visited:
+            return
+        visited.add(id(event))
+
+        for succ in event.successors:
+            if id(succ) in visited:
+                continue
+            if not succ.is_ready():
+                continue
+
+            # Set event_time if not already set
+            if succ.event_time is None or succ.event_time == 0.0:
+                succ.event_time = current_time + 0.001
+
+            if isinstance(succ, OracleEvent):
+                # OracleEvent successors won't be processed by tick() in
+                # oracle_mode=False, so we must recursively handle them
+                self._schedule_ready_successors(succ, eq, current_time, visited)
+            else:
+                # ENV or other event types — put into queue for tick() to process
+                eq.put(succ)
 
     def call_tool(self, tool_name: str, kwargs: dict) -> dict:
         """Execute an ARE tool and return the result.
