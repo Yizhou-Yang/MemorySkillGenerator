@@ -538,14 +538,17 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "3. Use ONLY real data from results. Never invent names, IDs, or emails.\n"
             "4. EFFICIENCY: If a search returns 0 results, try a DIFFERENT shorter keyword.\n"
             "   Never repeat the same query. Max 5 attempts per sub-task, then move on.\n"
-            "5. TWIST AWARENESS: Tasks may have a conditional second phase ('If X, then Y').\n"
-            "   After primary actions: notify user (op-001) → wait (op-000 timeout:60) →\n"
-            "   handle any reply → only then ALL_DONE.\n"
-            "6. BUDGET: Complete primary actions within 20 turns. If stuck >5 turns on\n"
+            "5. BUDGET: Complete primary actions within 20 turns. If stuck >5 turns on\n"
             "   any sub-task, SKIP it and proceed with available information.\n"
-            "7. ERROR RECOVERY: If a tool errors, fix the parameter. Never retry same params.\n"
-            "8. When you get a notification, act on it immediately.\n"
-            "9. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
+            "6. ERROR RECOVERY: If a tool errors, fix the parameter. Never retry same params.\n"
+            "7. When you get a notification, act on it immediately.\n"
+            "8. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
+            "⚠️ CRITICAL TWIST RULE (violating this is the #1 cause of task failure):\n"
+            "Tasks with conditional language ('if he can\'t make it', 'reschedule', 'accept\n"
+            "any suggested date', 'if not') have TWO phases. After completing Phase 1\n"
+            "(primary actions + notify user via op-001), you MUST call op-000 with\n"
+            "timeout_seconds:60 to WAIT for a reply. Only after processing the reply\n"
+            "can you output ALL_DONE. Skipping op-000 after op-001 loses ~50% of points.\n\n"
             f"OPERATIONS:\n{tool_text}\n\n"
             "START NOW. Output ONLY: NEXT_OP + PARAMS."
         )
@@ -558,19 +561,34 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
         # we accumulate conversation history in the user prompt.
         # Detect if task has a twist (conditional second phase)
         has_twist = any(kw in task_content.lower() for kw in [
-            "if my friend", "if that doesn't work", "if he can't",
-            "if she can't", "if they can't", "reschedule",
+            "if my friend", "if he can't", "if she can't",
+            "if they can't", "if that doesn't work", "if the person",
             "if the order", "if it doesn't", "if not",
+            "reschedule", "accept any suggested", "proposes",
+            "can't make it", "declines", "an alternative",
+            "if there's", "if you can't", "handle the twist",
+            "let me know when", "send him an email after",
+            "after scheduling", "after you",
+        ])
+        # Also check task_desc (metadata description) as backup
+        task_desc_lower = task_desc.lower()
+        has_twist = has_twist or any(kw in task_desc_lower for kw in [
+            "if my friend", "if he can't", "if she can't",
+            "if they can't", "reschedule", "accept any suggested",
+            "can't make it",
         ])
 
         twist_reminder = ""
         if has_twist:
             twist_reminder = (
-                "\n\n⚠️ IMPORTANT: This task has a CONDITIONAL SECOND PHASE. "
-                "After completing the primary actions, you MUST:\n"
-                "1. Notify the user (op-001)\n"
-                "2. Wait for replies (op-000 timeout_seconds:60)\n"
-                "3. Handle any incoming notifications before outputting ALL_DONE\n"
+                "\n\n⚠️ CRITICAL: This task has a CONDITIONAL SECOND PHASE (twist).\n"
+                "After completing primary actions, this EXACT sequence is REQUIRED:\n"
+                "  1. Notify user that primary actions are done (op-001)\n"
+                "  2. IMMEDIATELY call op-000 with timeout_seconds:60 to wait for reply\n"
+                "  3. When notification arrives: read it, extract the proposed change\n"
+                "  4. Execute the change (delete old event, create new one, send email)\n"
+                "  5. Only then output ALL_DONE\n"
+                "NEVER skip op-000 after op-001. This loses 50%+ of points.\n"
             )
 
         conversation_history = (
@@ -583,6 +601,10 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
         all_responses = []
         reasoning_trace = []  # Collect AI-filtered valuable reasoning across turns
 
+        # Twist enforcement: track whether op-001 was called and op-000 followed
+        op001_called_at_turn = -1  # Turn number when op-001 was called
+        op000_called = False       # Whether op-000 has been called since last op-001
+        primary_actions_done = False  # Heuristic: agent has done create+delete+send actions
         # AI Response Processor — filters noise from LLM output, keeps valuable reasoning
         async def _ai_filter_fn(prompt: str) -> str:
             """Lightweight LLM call for AI response filtering."""
@@ -615,8 +637,21 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             # Process response through AI filter
             processed = await processor.process_response(response_text)
 
-            # Check completion
+            # Check completion — but BLOCK if twist is pending
             if processed.is_completion:
+                # If task has a twist and op-001 was called but op-000 was NOT called,
+                # the agent is trying to finish prematurely. Block it.
+                if (has_twist and op001_called_at_turn >= 0 and not op000_called):
+                    # Reject ALL_DONE — force agent to call op-000
+                    conversation_history += (
+                        "\n\n🛑 ALL_DONE REJECTED: You have NOT waited for the reply yet.\n"
+                        "This task has a conditional second phase. You MUST:\n"
+                        "NEXT_OP: op-000\n"
+                        "PARAMS: timeout_seconds:60\n\n"
+                        "Do NOT output ALL_DONE until you have called op-000 and "
+                        "processed any incoming notifications.\n"
+                    )
+                    continue  # Force another turn instead of breaking
                 break
 
             # Handle invalid responses (no action found)
@@ -645,10 +680,20 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             are_tool_name = tool_id_map[tool_id]
 
             if are_tool_name == "_wait_for_notification":
+                op000_called = True
                 timeout_val = int(tool_args.get("timeout_seconds", 180))
                 tr = session.wait_for_notification(timeout_val)
+            elif "send_message_to_user" in are_tool_name:
+                op001_called_at_turn = turn
+                op000_called = False  # Reset - must call op-000 after this
+                tr = session.call_tool(are_tool_name, tool_args)
             else:
                 tr = session.call_tool(are_tool_name, tool_args)
+                # Detect primary actions completion heuristically
+                if not primary_actions_done:
+                    method_lower = are_tool_name.lower()
+                    if any(kw in method_lower for kw in ["send_email", "add_calendar", "create_event"]):
+                        primary_actions_done = True
 
             result["actions"].append({
                 "tool": are_tool_name,
@@ -680,6 +725,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
 
             # Turn budget tracking: inject remaining turns reminder at key thresholds
             remaining_turns = max_turns - turn - 1
+            budget_warning = ""
             if remaining_turns in (75, 50, 30, 15, 5):
                 budget_warning = f"\n[⏱ {remaining_turns} turns remaining. "
                 if remaining_turns <= 15:
@@ -688,6 +734,26 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
                     budget_warning += "Prioritize core actions. Don't waste turns on exhaustive searches.]"
                 else:
                     budget_warning += "On track. Remember to reserve turns for any twist/follow-up.]"
+
+            # Twist enforcement: if op-001 called but no op-000 within 1+ turns → force reminder
+            if (has_twist and op001_called_at_turn >= 0 and not op000_called
+                    and turn - op001_called_at_turn >= 1):
+                gap = turn - op001_called_at_turn
+                urgency = (
+                    "IMMEDIATELY" if gap >= 2 else
+                    "NOW - do not output any other operation"
+                )
+                twist_enforce = (
+                    f"\n\n🛑 TWIST PROTOCOL VIOLATION: You called op-001 {gap} turns ago "
+                    f"but have NOT called op-000 (wait for reply). "
+                    f"The task has a conditional second phase. Next operation MUST be:\n"
+                    f"NEXT_OP: op-000\n"
+                    f"PARAMS: timeout_seconds:60\n"
+                    f"This is REQUIRED before ALL_DONE. Call op-000 {urgency}."
+                )
+                budget_warning = twist_enforce + (budget_warning or "")
+
+            if budget_warning:
                 history_entry += budget_warning
 
             conversation_history += history_entry
