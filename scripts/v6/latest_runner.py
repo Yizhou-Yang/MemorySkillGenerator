@@ -521,7 +521,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "PARAMS: <key>:<value> | <key>:<value>\n\n"
             "EXAMPLES:\n"
             "NEXT_OP: op-024\n"
-            "PARAMS: query:Stockholm\n\n"
+            "PARAMS: query:Film\n\n"
             "NEXT_OP: op-075\n"
             "PARAMS: title:Meeting | start_datetime:2024-10-19 08:00:00 | end_datetime:2024-10-19 20:00:00 | attendees:[\"John\"]\n\n"
             "NEXT_OP: op-076\n"
@@ -529,27 +529,31 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "NEXT_OP: op-000\n"
             "PARAMS: timeout_seconds:30\n\n"
             "CRITICAL RULES:\n"
-            "1. Output EXACTLY 2 lines per turn: NEXT_OP + PARAMS. NO other text whatsoever.\n"
+            "1. Output EXACTLY 2 lines per turn: NEXT_OP + PARAMS. NO other text.\n"
             "2. ONE operation per turn. Never output multiple NEXT_OP lines.\n"
             "3. Use ONLY real data from results. Never invent names, IDs, or emails.\n"
-            "4. FINDING CONTACTS (IMPORTANT — follow this exact strategy):\n"
-            "   Step 1: Search by keyword (query:Film Producer, query:Stockholm, etc.)\n"
-            "   Step 2: If search returns empty, BROWSE contacts systematically:\n"
-            "     - Call list_contacts with offset:0, then offset:10, offset:20, offset:30...\n"
-            "     - ALWAYS increment offset by 10. NEVER go backwards.\n"
-            "     - In each result, check EVERY contact's job_title and city fields.\n"
-            "     - When you find a match, note their name and email, then proceed.\n"
-            "   Step 3: NEVER search the same keyword twice. NEVER repeat an offset.\n"
-            "5. ERROR RECOVERY: If a tool returns an error:\n"
-            "   - Read the error message carefully\n"
-            "   - Fix the parameter (e.g. wrong type, missing field)\n"
-            "   - NEVER retry with the exact same parameters\n"
-            "6. PROGRESS: Do not spend more than 10 turns searching for a contact.\n"
-            "   If you haven't found them after browsing offset 0-50, try the other contacts app.\n"
-            "7. After ALL steps done: op-001 to notify user, then output ALL_DONE.\n"
-            "8. To wait for a reply/notification: op-000 with timeout_seconds:30.\n"
-            "9. When you get a notification (someone replies/suggests changes), act on it immediately.\n"
-            "10. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
+            "4. FINDING CONTACTS — STRICT BUDGET (MAX 5 TURNS TOTAL):\n"
+            "   a) Search with SHORT keyword: 'Film', 'Producer', 'Nalani' (NOT full phrases)\n"
+            "   b) If empty: try ONE different short keyword\n"
+            "   c) If still empty: browse offset:0 (check all fields in results)\n"
+            "   d) If still not found: browse offset:10\n"
+            "   e) STOP after 5 search/browse attempts. Use whatever info you have.\n"
+            "   FORBIDDEN: Never browse more than 3 pages. Never repeat a keyword.\n"
+            "   FORBIDDEN: Never switch between contact apps (they share the same data).\n"
+            "5. CALENDAR LOOKUP — USE DATE RANGE:\n"
+            "   - For 'Thursday/Saturday/etc' queries: use date range query with start/end datetime\n"
+            "   - NEVER use text search for date-based lookups\n"
+            "6. CONTEXT BUDGET AWARENESS:\n"
+            "   - Tasks often have a TWIST in the second half ('If X, then Y')\n"
+            "   - Complete the primary actions FAST (within 15 turns)\n"
+            "   - Reserve remaining turns for handling the twist\n"
+            "   - If stuck on any sub-task for >5 turns: SKIP IT and move on\n"
+            "7. ERROR RECOVERY: If a tool returns an error:\n"
+            "   - Fix the parameter. NEVER retry with exact same parameters.\n"
+            "8. After ALL steps done: op-001 to notify user, then output ALL_DONE.\n"
+            "9. To wait for a reply/notification: op-000 with timeout_seconds:30.\n"
+            "10. When you get a notification, act on it immediately.\n"
+            "11. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
             f"OPERATIONS:\n{tool_text}\n\n"
             "START NOW. Output ONLY: NEXT_OP + PARAMS."
         )
@@ -664,6 +668,19 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             history_entry = processor.build_history_entry(
                 processed, result_str, notifications
             )
+
+            # Turn budget tracking: inject remaining turns reminder at key thresholds
+            remaining_turns = max_turns - turn - 1
+            if remaining_turns in (75, 50, 30, 15, 5):
+                budget_warning = f"\n[⏱ {remaining_turns} turns remaining. "
+                if remaining_turns <= 15:
+                    budget_warning += "URGENT: Complete primary task NOW. Skip any stuck sub-tasks.]"
+                elif remaining_turns <= 30:
+                    budget_warning += "Prioritize core actions. Don't waste turns on exhaustive searches.]"
+                else:
+                    budget_warning += "On track. Remember to reserve turns for any twist/follow-up.]"
+                history_entry += budget_warning
+
             conversation_history += history_entry
 
             # Truncate conversation if too long (keep last 40000 chars)
