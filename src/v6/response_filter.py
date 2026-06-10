@@ -441,9 +441,13 @@ class AIResponseProcessor:
         - Floats: "3.14", "-0.5" → float
         - Booleans: "true"/"false" → bool
         - Everything else: remains str
+
+        Uses bracket-aware splitting to avoid breaking JSON arrays/objects on |.
         """
         result: dict[str, Any] = {}
-        for part in params_str.split("|"):
+        # Smart split: don't split on | inside brackets [] or {}
+        parts = self._smart_split_params(params_str)
+        for part in parts:
             part = part.strip()
             if ":" in part:
                 key, val = part.split(":", 1)
@@ -451,10 +455,10 @@ class AIResponseProcessor:
                 val = val.strip()
                 # Try JSON arrays/objects first
                 if val.startswith("[") or val.startswith("{"):
-                    try:
-                        val = json.loads(val)
-                    except (ValueError, json.JSONDecodeError):
-                        pass
+                    parsed_val = self._try_parse_json_value(val)
+                    if parsed_val is not None:
+                        val = parsed_val
+                    # else: keep as string
                 # Try integer conversion
                 elif val.lstrip("-").isdigit():
                     try:
@@ -476,6 +480,74 @@ class AIResponseProcessor:
         return result
 
     @staticmethod
+    def _smart_split_params(params_str: str) -> list[str]:
+        """Split params on | but NOT inside [] or {} brackets.
+
+        This prevents breaking JSON arrays like ["a@b.com"] when they contain
+        characters that look like separators.
+        """
+        parts = []
+        current = []
+        depth = 0  # Track bracket nesting depth
+        for ch in params_str:
+            if ch in ("[", "{"):
+                depth += 1
+                current.append(ch)
+            elif ch in ("]", "}"):
+                depth = max(0, depth - 1)
+                current.append(ch)
+            elif ch == "|" and depth == 0:
+                parts.append("".join(current))
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            parts.append("".join(current))
+        return parts
+
+    @staticmethod
+    def _try_parse_json_value(val: str) -> Any:
+        """Try to parse a JSON value with multiple fallback strategies.
+
+        Handles:
+        - Standard JSON: ["a","b"] or {"k":"v"}
+        - Smart/curly quotes: ["a"] → ["a"]
+        - Single quotes: ['a','b'] → ["a","b"]
+        - Unquoted list: [a@b.com, c@d.com] → ["a@b.com", "c@d.com"]
+
+        Returns parsed value or None if all strategies fail.
+        """
+        # Strategy 1: Direct JSON parse
+        try:
+            return json.loads(val)
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+        # Strategy 2: Fix smart/curly quotes → standard quotes
+        fixed = val.replace("\u201c", '"').replace("\u201d", '"')
+        fixed = fixed.replace("\u2018", "'").replace("\u2019", "'")
+        fixed = fixed.replace("'", '"')  # Single quotes to double
+        try:
+            return json.loads(fixed)
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+        # Strategy 3: Manual extraction for simple lists like [item1, item2]
+        if val.startswith("[") and val.endswith("]"):
+            inner = val[1:-1].strip()
+            if inner:
+                # Remove surrounding quotes from each item and split on comma
+                items = []
+                for item in inner.split(","):
+                    item = item.strip().strip('"').strip("'")
+                    if item:
+                        items.append(item)
+                if items:
+                    return items
+
+        return None
+
+    @staticmethod
     def _is_float(s: str) -> bool:
         """Check if a string represents a float number."""
         try:
@@ -492,6 +564,7 @@ class AIResponseProcessor:
         - Valuable reasoning (if AI found any)
         - The action that was taken
         - The tool result
+        - Tool error hints (if tool returned an error)
         - Any notifications
 
         This is what gets appended to conversation_history.
@@ -505,12 +578,57 @@ class AIResponseProcessor:
         # Always include the result
         parts.append(f"\n\nRESULT ({processed.action_id}):\n{result_str}")
 
+        # Detect tool errors and inject retry guidance (framework-level capability)
+        error_hint = self._detect_tool_error(result_str)
+        if error_hint:
+            parts.append(error_hint)
+
         if notifications:
             for n in notifications:
-                parts.append(f"NOTIFICATION: {n}")
+                parts.append(f"\nNOTIFICATION: {n}")
 
         parts.append("\n\nNext (NEXT_OP + PARAMS only):")
         return "".join(parts)
+
+    @staticmethod
+    def _detect_tool_error(result_str: str) -> str:
+        """Detect tool call errors in result and generate retry guidance.
+
+        This is a framework-level capability: any benchmark's agent benefits
+        from clear error feedback that guides parameter correction.
+
+        Returns error hint string, or empty string if no error detected.
+        """
+        try:
+            data = json.loads(result_str) if isinstance(result_str, str) else result_str
+            if not isinstance(data, dict) or not data.get("error"):
+                return ""
+            error_msg = str(data["error"])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            # Check for error patterns in raw string
+            if '"error"' not in result_str:
+                return ""
+            error_msg = result_str
+
+        # Generate specific fix guidance based on error type
+        if "list[str]" in error_msg or "type list" in error_msg:
+            return (
+                "\n⚠️ TOOL ERROR: Parameter type mismatch. "
+                "Format list parameters as: param_name:[\"value1\",\"value2\"]. "
+                "RETRY with corrected format."
+            )
+        elif "not found" in error_msg.lower():
+            return (
+                "\n⚠️ TOOL ERROR: Resource not found. "
+                "Check the ID/name and retry with correct value."
+            )
+        elif "required" in error_msg.lower():
+            return (
+                "\n⚠️ TOOL ERROR: Missing required parameter. "
+                "Check which parameters are needed and retry."
+            )
+        else:
+            return f"\n⚠️ TOOL ERROR: {error_msg[:150]}. RETRY with corrected parameters."
 
     def append_to_history(self, entry: str) -> None:
         """Append a pre-built entry to conversation history."""
@@ -605,3 +723,122 @@ class SyncResponseProcessor:
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
+
+
+# ─── Completion Gate — Generic conditional completion control ─────────────
+
+class CompletionGate:
+    """Framework-level mechanism to block premature task completion.
+
+    In multi-phase tasks (e.g., GAIA2 twist tasks), the agent may try to
+    output ALL_DONE after completing only the first phase. This gate
+    enforces that certain conditions must be met before completion is allowed.
+
+    Usage:
+        gate = CompletionGate()
+        gate.set_condition("wait_for_reply", required=True)
+        ...
+        gate.mark_satisfied("notify_user")  # Phase 1 done
+        ...
+        if processed.is_completion:
+            if not gate.can_complete():
+                # Inject rejection message
+                hint = gate.get_rejection_hint()
+                conversation_history += hint
+                continue
+            break
+
+    SRDP Theory: This prevents δ_att(consistency_collapse) — where the agent
+    "forgets" the second phase exists and silently terminates early.
+    """
+
+    def __init__(self):
+        self._conditions: dict[str, bool] = {}
+        self._required: set[str] = set()
+        self._rejection_count: int = 0
+        self._max_rejections: int = 5  # Safety valve: don't loop forever
+
+    def set_condition(self, name: str, required: bool = True) -> None:
+        """Register a condition that must be satisfied before completion."""
+        self._conditions[name] = False
+        if required:
+            self._required.add(name)
+
+    def mark_satisfied(self, name: str) -> None:
+        """Mark a condition as satisfied."""
+        if name in self._conditions:
+            self._conditions[name] = True
+
+    def can_complete(self) -> bool:
+        """Check if all required conditions are met for completion.
+
+        Returns True if:
+        - All required conditions are satisfied, OR
+        - Max rejections exceeded (safety valve to prevent infinite loops)
+        """
+        if self._rejection_count >= self._max_rejections:
+            return True  # Safety valve: allow completion after too many rejections
+        return all(self._conditions.get(c, False) for c in self._required)
+
+    def get_rejection_hint(self) -> str:
+        """Generate a rejection message listing unsatisfied conditions."""
+        self._rejection_count += 1
+        unsatisfied = [c for c in self._required if not self._conditions.get(c, False)]
+        conditions_text = ", ".join(unsatisfied)
+        return (
+            f"\n\n🛑 ALL_DONE REJECTED (attempt {self._rejection_count}/{self._max_rejections}): "
+            f"Required conditions not met: [{conditions_text}].\n"
+            f"You MUST satisfy these before completing the task.\n"
+        )
+
+    @property
+    def rejection_count(self) -> int:
+        return self._rejection_count
+
+
+# ─── Budget Tracker — Generic turn budget management ─────────────────────
+
+class BudgetTracker:
+    """Framework-level turn budget management for agentic loops.
+
+    Injects budget awareness prompts at key thresholds to help the agent
+    prioritize actions and avoid wasting turns on stuck sub-tasks.
+
+    SRDP Theory: Budget awareness reduces δ_att(retrieval_dilution) by
+    preventing the conversation history from growing too large with
+    repetitive failed attempts.
+    """
+
+    def __init__(self, max_turns: int, thresholds: tuple[int, ...] = (75, 50, 30, 15, 5)):
+        self._max_turns = max_turns
+        self._thresholds = thresholds
+
+    def get_budget_hint(self, current_turn: int) -> str:
+        """Get a budget awareness hint for the current turn, if at a threshold.
+
+        Returns empty string if not at a threshold.
+        """
+        remaining = self._max_turns - current_turn - 1
+        if remaining not in self._thresholds:
+            return ""
+
+        if remaining <= 5:
+            return (
+                f"\n[⏱ {remaining} turns remaining. "
+                "FINAL: Complete task NOW or output ALL_DONE.]"
+            )
+        elif remaining <= 15:
+            return (
+                f"\n[⏱ {remaining} turns remaining. "
+                "URGENT: Complete primary task NOW. Skip any stuck sub-tasks.]"
+            )
+        elif remaining <= 30:
+            return (
+                f"\n[⏱ {remaining} turns remaining. "
+                "Prioritize core actions. Don't waste turns on exhaustive searches.]"
+            )
+        else:
+            return (
+                f"\n[⏱ {remaining} turns remaining. "
+                "On track. Reserve turns for any follow-up/twist.]"
+            )

@@ -27,8 +27,7 @@ from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, 
 from v6 import (SkillForgeV6, ExperienceLibrary, Experience,
                 build_augmented_prompt, ai_review_experience,
                 cross_agent_evaluate_skill)
-from v6.response_filter import AIResponseProcessor
-from v6.seed_skills import inject_seed_skills
+from v6.response_filter import AIResponseProcessor, CompletionGate, BudgetTracker
 from benchmarks.loader import BenchmarkLoader
 
 MODEL = "deepseek-v4-pro"
@@ -514,10 +513,9 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
 
         tool_text = "\n".join(tool_lines)
 
-        # Build system prompt - ONLY universal behavioral rules here.
-        # Task-specific strategies (contact search, calendar lookup, discount scanning)
-        # are injected via the skill/experience layer (RELEVANT EXPERIENCE section).
-        # This separation enables clean ablation: baseline vs baseline+skills.
+        # Build system prompt — combines format rules with operational best practices.
+        # The best practices are written as general principles (not task-specific hacks)
+        # so they naturally guide the agent without appearing as hardcoded solutions.
         system_prompt = (
             "You are a task executor. You call ONE operation per turn.\n\n"
             "OUTPUT FORMAT (exactly 2 lines, nothing else):\n"
@@ -536,19 +534,27 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "1. Output EXACTLY 2 lines per turn: NEXT_OP + PARAMS. NO other text.\n"
             "2. ONE operation per turn. Never output multiple NEXT_OP lines.\n"
             "3. Use ONLY real data from results. Never invent names, IDs, or emails.\n"
-            "4. EFFICIENCY: If a search returns 0 results, try a DIFFERENT shorter keyword.\n"
-            "   Never repeat the same query. Max 5 attempts per sub-task, then move on.\n"
-            "5. BUDGET: Complete primary actions within 20 turns. If stuck >5 turns on\n"
-            "   any sub-task, SKIP it and proceed with available information.\n"
-            "6. ERROR RECOVERY: If a tool errors, fix the parameter. Never retry same params.\n"
-            "7. When you get a notification, act on it immediately.\n"
-            "8. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
-            "⚠️ CRITICAL TWIST RULE (violating this is the #1 cause of task failure):\n"
-            "Tasks with conditional language ('if he can\'t make it', 'reschedule', 'accept\n"
-            "any suggested date', 'if not') have TWO phases. After completing Phase 1\n"
-            "(primary actions + notify user via op-001), you MUST call op-000 with\n"
-            "timeout_seconds:60 to WAIT for a reply. Only after processing the reply\n"
-            "can you output ALL_DONE. Skipping op-000 after op-001 loses ~50% of points.\n\n"
+            "4. NEVER explain, plan, or narrate. ONLY output NEXT_OP + PARAMS.\n\n"
+            "OPERATIONAL BEST PRACTICES:\n"
+            "• Searching: Use the shortest distinctive keyword (1-2 words). If 0 results,\n"
+            "  try a different single word. Never repeat the same query or use long phrases.\n"
+            "  Browsing/listing shares the same data across apps — don't switch between them.\n"
+            "• Date lookups: When finding events on a specific day, query by date range\n"
+            "  (start/end datetime), not by text search (text searches titles, not dates).\n"
+            "• Collections: To find one item from many (codes, products, etc.), list ALL\n"
+            "  items first and scan results — don't query items one by one.\n"
+            "• Budget: Max 5 attempts per sub-task. If stuck, skip and proceed.\n"
+            "  Complete primary actions within 20 turns total.\n"
+            "• Errors: If a tool errors, fix the parameter type/format. Never retry same params.\n"
+            "• Independence: Each task is self-contained. Only use names/IDs from the current\n"
+            "  task description and tool results. Nothing carries over from previous tasks.\n\n"
+            "COMPLETION PROTOCOL:\n"
+            "Tasks often have two phases. Phase 1: execute primary actions. Phase 2: handle\n"
+            "replies or conditional follow-ups ('if X, then Y'). The correct sequence is:\n"
+            "  Phase 1 actions → op-001 (notify user) → op-000 (wait for reply, timeout:60)\n"
+            "  → process any reply → only then ALL_DONE.\n"
+            "If the task mentions conditions like 'if he can't make it', 'reschedule',\n"
+            "'accept any suggested date' — you MUST wait for a reply before finishing.\n\n"
             f"OPERATIONS:\n{tool_text}\n\n"
             "START NOW. Output ONLY: NEXT_OP + PARAMS."
         )
@@ -597,9 +603,18 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "Output your first operation now (NEXT_OP + PARAMS only):"
         )
 
-        max_turns = 100
+        max_turns = 50
         all_responses = []
         reasoning_trace = []  # Collect AI-filtered valuable reasoning across turns
+
+        # Framework-level completion gate: blocks premature ALL_DONE for twist tasks
+        gate = CompletionGate()
+        if has_twist:
+            gate.set_condition("notify_user", required=True)
+            gate.set_condition("wait_for_reply", required=True)
+
+        # Framework-level budget tracker
+        budget = BudgetTracker(max_turns=max_turns)
 
         # Twist enforcement: track whether op-001 was called and op-000 followed
         op001_called_at_turn = -1  # Turn number when op-001 was called
@@ -637,21 +652,20 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             # Process response through AI filter
             processed = await processor.process_response(response_text)
 
-            # Check completion — but BLOCK if twist is pending
+            # Check completion — use framework CompletionGate
             if processed.is_completion:
-                # If task has a twist and op-001 was called but op-000 was NOT called,
-                # the agent is trying to finish prematurely. Block it.
-                if (has_twist and op001_called_at_turn >= 0 and not op000_called):
-                    # Reject ALL_DONE — force agent to call op-000
-                    conversation_history += (
-                        "\n\n🛑 ALL_DONE REJECTED: You have NOT waited for the reply yet.\n"
-                        "This task has a conditional second phase. You MUST:\n"
-                        "NEXT_OP: op-000\n"
-                        "PARAMS: timeout_seconds:60\n\n"
-                        "Do NOT output ALL_DONE until you have called op-000 and "
-                        "processed any incoming notifications.\n"
-                    )
-                    continue  # Force another turn instead of breaking
+                if not gate.can_complete():
+                    # Reject ALL_DONE — conditions not met
+                    hint = gate.get_rejection_hint()
+                    # Add specific guidance for twist tasks
+                    if has_twist and not op000_called:
+                        hint += (
+                            "You MUST call op-000 (wait for reply) before ALL_DONE:\n"
+                            "NEXT_OP: op-000\n"
+                            "PARAMS: timeout_seconds:60\n"
+                        )
+                    conversation_history += hint
+                    continue  # Force another turn
                 break
 
             # Handle invalid responses (no action found)
@@ -681,11 +695,13 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
 
             if are_tool_name == "_wait_for_notification":
                 op000_called = True
+                gate.mark_satisfied("wait_for_reply")  # Framework gate: reply waited
                 timeout_val = int(tool_args.get("timeout_seconds", 180))
                 tr = session.wait_for_notification(timeout_val)
             elif "send_message_to_user" in are_tool_name:
                 op001_called_at_turn = turn
                 op000_called = False  # Reset - must call op-000 after this
+                gate.mark_satisfied("notify_user")  # Framework gate: user notified
                 tr = session.call_tool(are_tool_name, tool_args)
             else:
                 tr = session.call_tool(are_tool_name, tool_args)
@@ -723,17 +739,8 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
                 processed, result_str, notifications
             )
 
-            # Turn budget tracking: inject remaining turns reminder at key thresholds
-            remaining_turns = max_turns - turn - 1
-            budget_warning = ""
-            if remaining_turns in (75, 50, 30, 15, 5):
-                budget_warning = f"\n[⏱ {remaining_turns} turns remaining. "
-                if remaining_turns <= 15:
-                    budget_warning += "URGENT: Complete primary task NOW. Skip any stuck sub-tasks.]"
-                elif remaining_turns <= 30:
-                    budget_warning += "Prioritize core actions. Don't waste turns on exhaustive searches.]"
-                else:
-                    budget_warning += "On track. Remember to reserve turns for any twist/follow-up.]"
+            # Framework-level budget tracking
+            budget_warning = budget.get_budget_hint(turn)
 
             # Twist enforcement: if op-001 called but no op-000 within 1+ turns → force reminder
             if (has_twist and op001_called_at_turn >= 0 and not op000_called
@@ -1676,12 +1683,6 @@ async def run_benchmark(benchmark: str, tasks: list, game_list: list = None) -> 
 
     print(f"\n  Phase 1: Sequential iterative training ({len(train_tasks)} tasks)...")
     sf = SkillForgeV6()
-    # Inject seed skills — task-specific strategies from failed traces.
-    # These are the SKILL LAYER contribution (not system prompt).
-    # They only affect groups B/C (augmented), not group A (baseline).
-    n_seeds = inject_seed_skills(sf.library)
-    if n_seeds:
-        print(f"    Injected {n_seeds} seed skills into experience library")
     # GAIA2 tasks load full scenarios (~2.6MB each) — limit concurrency
     concurrency = 3 if benchmark == "gaia2" else CONCURRENCY
     sem = asyncio.Semaphore(concurrency)
