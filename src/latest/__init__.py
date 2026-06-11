@@ -1,4 +1,4 @@
-"""SkillForge V6 — orchestrator module."""
+"""SkillForge Latest — orchestrator module."""
 from __future__ import annotations
 import json
 
@@ -10,7 +10,7 @@ from .analysis import analyze_execution, classify_failure
 from .refine import ai_review_experience, cross_agent_evaluate_skill, critic_refine_experience, _format_patch_history
 from .response_filter import AIResponseProcessor, ProcessedResponse
 
-class SkillForgeV6:
+class SkillForgeLatest:
     """Orchestrates: record_experience → version tracking → AI refine → injection."""
 
     def __init__(self, library_path: str | None = None):

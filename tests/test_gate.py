@@ -13,9 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from v6.gate import assess_task_complexity, should_augment, classify_task_type
-from v6.experience import ExperienceLibrary, Experience
-from v6.injection import build_augmented_prompt, _is_quality_success, _is_quality_failure
+from latest.gate import assess_task_complexity, should_augment, classify_task_type
+from latest.experience import ExperienceLibrary, Experience
+from latest.injection import build_augmented_prompt, _is_quality_success, _is_quality_failure
 
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────
@@ -440,7 +440,7 @@ class TestInjectionIntegration:
 
     def test_injection_with_empty_library(self, empty_library):
         """Empty library → empty augmentation for all task types."""
-        from v6.injection import build_augmented_prompt
+        from latest.injection import build_augmented_prompt
 
         descs = [
             ("Answer the question: What is 2+2?", {"benchmark": "gaia"}),
@@ -455,7 +455,7 @@ class TestInjectionIntegration:
 
     def test_injection_with_populated_library(self, populated_library):
         """Populated library → non-empty augmentation for semantically similar tasks."""
-        from v6.injection import build_augmented_prompt
+        from latest.injection import build_augmented_prompt
 
         # These are semantically similar to library contents
         similar_descs = [
@@ -480,7 +480,7 @@ class TestInjectionIntegration:
 
     def test_uniform_injection_qa_vs_agentic(self, populated_library):
         """QA and agentic tasks get the SAME injection format (no routing difference)."""
-        from v6.injection import build_augmented_prompt
+        from latest.injection import build_augmented_prompt
 
         # Use a task that's similar to library content (math calculation)
         task = "Calculate the sum of prime numbers below 50"

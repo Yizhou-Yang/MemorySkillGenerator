@@ -28,41 +28,41 @@ class TestModuleImports:
     """Verify all core modules can be imported without errors."""
 
     def test_import_experience(self):
-        from v6.experience import Experience, ExperienceLibrary, compute_similarity, FailureTaxonomy
+        from latest.experience import Experience, ExperienceLibrary, compute_similarity, FailureTaxonomy
         assert Experience is not None
         assert ExperienceLibrary is not None
         assert compute_similarity is not None
 
     def test_import_analysis(self):
-        from v6.analysis import analyze_execution, classify_failure
+        from latest.analysis import analyze_execution, classify_failure
         assert analyze_execution is not None
         assert classify_failure is not None
 
     def test_import_gate(self):
-        from v6.gate import classify_task_type, assess_task_complexity, should_augment
+        from latest.gate import classify_task_type, assess_task_complexity, should_augment
         assert classify_task_type is not None
         assert assess_task_complexity is not None
         assert should_augment is not None
 
     def test_import_injection(self):
-        from v6.injection import (build_augmented_prompt, format_success_experience,
+        from latest.injection import (build_augmented_prompt, format_success_experience,
                                   format_failure_experience)
         assert build_augmented_prompt is not None
         assert format_success_experience is not None
         assert format_failure_experience is not None
 
     def test_import_refine(self):
-        from v6.refine import (ai_review_experience, cross_agent_evaluate_skill,
+        from latest.refine import (ai_review_experience, cross_agent_evaluate_skill,
                                critic_refine_experience)
         assert ai_review_experience is not None
         assert cross_agent_evaluate_skill is not None
         assert critic_refine_experience is not None
 
     def test_import_orchestrator(self):
-        from v6 import (SkillForgeV6, ExperienceLibrary, Experience,
+        from latest import (SkillForgeLatest, ExperienceLibrary, Experience,
                         build_augmented_prompt, ai_review_experience,
                         cross_agent_evaluate_skill)
-        assert SkillForgeV6 is not None
+        assert SkillForgeLatest is not None
 
     def test_import_benchmark_loader(self):
         from benchmarks.loader import BenchmarkLoader
@@ -166,8 +166,8 @@ class TestPipelineIntegration:
 
     @pytest.fixture
     def sf(self):
-        from v6 import SkillForgeV6
-        return SkillForgeV6()
+        from latest import SkillForgeLatest
+        return SkillForgeLatest()
 
     def test_record_experience_success(self, sf):
         """Recording a successful experience must work."""
@@ -242,7 +242,7 @@ class TestPipelineIntegration:
 
     def test_injection_after_recording(self, sf):
         """After recording experiences, injection must produce non-empty augmentation."""
-        from v6 import build_augmented_prompt
+        from latest import build_augmented_prompt
         # Record a success
         sf.record_experience(
             task_id="inject_test_001",
@@ -263,7 +263,7 @@ class TestPipelineIntegration:
 
     def test_injection_with_empty_library(self, sf):
         """Injection with empty library must return empty string, not error."""
-        from v6 import build_augmented_prompt
+        from latest import build_augmented_prompt
         aug = build_augmented_prompt("Some task", sf.library, token_budget=2000)
         assert isinstance(aug, str)
 
@@ -276,7 +276,7 @@ class TestGateClassification:
     """Task type classification must work for all benchmark types."""
 
     def test_classify_gaia_as_agentic(self):
-        from v6.gate import classify_task_type
+        from latest.gate import classify_task_type
         result = classify_task_type(
             "Answer the following question: How many papers were published on arxiv about LLMs in 2024?",
             metadata={"benchmark": "gaia"}
@@ -284,7 +284,7 @@ class TestGateClassification:
         assert result == "agentic"
 
     def test_classify_alfworld_as_embodied(self):
-        from v6.gate import classify_task_type
+        from latest.gate import classify_task_type
         result = classify_task_type(
             "pick up the apple from the counter and put it in the fridge",
             expected="go to counter\ntake apple\ngo to fridge\nput apple",
@@ -292,7 +292,7 @@ class TestGateClassification:
         assert result == "embodied"
 
     def test_classify_locomo_as_qa(self):
-        from v6.gate import classify_task_type
+        from latest.gate import classify_task_type
         result = classify_task_type(
             "Based on the conversation history, what restaurant did Alice recommend?",
             metadata={"benchmark": "locomo"}
@@ -300,7 +300,7 @@ class TestGateClassification:
         assert result == "qa"
 
     def test_classify_gaia2_as_agentic(self):
-        from v6.gate import classify_task_type
+        from latest.gate import classify_task_type
         result = classify_task_type(
             "Book a meeting with my friend who is a Film Producer",
             metadata={"benchmark": "gaia2", "tools": ["calendar", "contacts"]}
@@ -308,7 +308,7 @@ class TestGateClassification:
         assert result == "agentic"
 
     def test_classify_swebench_as_agentic(self):
-        from v6.gate import classify_task_type
+        from latest.gate import classify_task_type
         result = classify_task_type(
             "Fix the following issue in the astropy/astropy repository.",
             metadata={"benchmark": "swebench"}
@@ -324,7 +324,7 @@ class TestAnalysis:
     """Trajectory analysis must handle all action formats."""
 
     def test_bash_action_matching(self):
-        from v6.analysis import analyze_execution
+        from latest.analysis import analyze_execution
         exp = analyze_execution(
             task_id="bash_test",
             task_desc="List files",
@@ -335,7 +335,7 @@ class TestAnalysis:
 
     def test_app_fn_action_matching(self):
         """GAIA2-style app.fn actions must be matchable."""
-        from v6.analysis import analyze_execution
+        from latest.analysis import analyze_execution
         exp = analyze_execution(
             task_id="appfn_test",
             task_desc="Send a message",
@@ -346,7 +346,7 @@ class TestAnalysis:
 
     def test_failure_classification(self):
         """Failed executions must be classified into one of 4 categories."""
-        from v6.analysis import analyze_execution
+        from latest.analysis import analyze_execution
         exp = analyze_execution(
             task_id="fail_class_test",
             task_desc="Complex multi-step task",
@@ -369,8 +369,8 @@ class TestRefine:
 
     def test_ai_review_without_llm(self):
         """ai_review_experience with llm_fn=None must return valid dict."""
-        from v6.refine import ai_review_experience
-        from v6.experience import Experience
+        from latest.refine import ai_review_experience
+        from latest.experience import Experience
         exp = Experience(
             task_id="refine_test", task_desc="Test task",
             tool_sequence=["ls", "cat"], action_commands=["ls -la", "cat file.txt"],
@@ -386,8 +386,8 @@ class TestRefine:
 
     def test_cross_agent_eval_without_llm(self):
         """cross_agent_evaluate_skill with llm_fn=None must return default."""
-        from v6.refine import cross_agent_evaluate_skill
-        from v6.experience import Experience
+        from latest.refine import cross_agent_evaluate_skill
+        from latest.experience import Experience
         exp = Experience(
             task_id="eval_test", task_desc="Test task",
             tool_sequence=[], action_commands=[],
@@ -402,8 +402,8 @@ class TestRefine:
 
     def test_critic_refine_without_llm(self):
         """critic_refine_experience with llm_fn=None must return {enhanced: False}."""
-        from v6.refine import critic_refine_experience
-        from v6.experience import Experience
+        from latest.refine import critic_refine_experience
+        from latest.experience import Experience
         exp = Experience(
             task_id="critic_test", task_desc="Test task",
             tool_sequence=[], action_commands=[],
@@ -423,7 +423,7 @@ class TestExperienceLibrary:
     """ExperienceLibrary retrieval must work correctly."""
 
     def test_record_and_retrieve(self):
-        from v6.experience import ExperienceLibrary, Experience
+        from latest.experience import ExperienceLibrary, Experience
         lib = ExperienceLibrary()
         exp = Experience(
             task_id="lib_test", task_desc="Parse a CSV file",
@@ -438,7 +438,7 @@ class TestExperienceLibrary:
         assert results[0].task_id == "lib_test"
 
     def test_outcome_filter(self):
-        from v6.experience import ExperienceLibrary, Experience
+        from latest.experience import ExperienceLibrary, Experience
         lib = ExperienceLibrary()
         lib.record(Experience(
             task_id="s1", task_desc="Task A", tool_sequence=[], action_commands=[],
@@ -455,7 +455,7 @@ class TestExperienceLibrary:
 
     def test_effectiveness_weighting(self):
         """Experiences that historically hurt should be downweighted."""
-        from v6.experience import ExperienceLibrary
+        from latest.experience import ExperienceLibrary
         lib = ExperienceLibrary()
         # Simulate negative effectiveness
         lib.update_effectiveness("bad_exp", -0.5)
@@ -464,7 +464,7 @@ class TestExperienceLibrary:
         assert weight < 1.0  # Should be downweighted
 
     def test_save_and_load(self, tmp_path):
-        from v6.experience import ExperienceLibrary, Experience
+        from latest.experience import ExperienceLibrary, Experience
         lib = ExperienceLibrary()
         lib.record(Experience(
             task_id="save_test", task_desc="Test save",

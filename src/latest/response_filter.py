@@ -1,4 +1,4 @@
-"""SkillForge V6 — AI-Driven Response Processor & Conversation History Manager.
+"""SkillForge Latest — AI-Driven Response Processor & Conversation History Manager.
 
 Framework-level module for cleaning LLM responses in agentic loops.
 Combines fast regex extraction for actions with AI-based evaluation
@@ -34,7 +34,7 @@ Key design principles:
 4. The AI evaluator uses the same model (deepseek-v4-pro) for consistency
 
 Usage:
-    from v6.response_filter import AIResponseProcessor
+    from latest.response_filter import AIResponseProcessor
 
     processor = AIResponseProcessor(
         action_pattern=r'NEXT_OP:\\s*(?P<action>op-\\d{3})',
@@ -725,120 +725,10 @@ class SyncResponseProcessor:
         return getattr(self._inner, name)
 
 
-# ─── Completion Gate — Generic conditional completion control ─────────────
-
-class CompletionGate:
-    """Framework-level mechanism to block premature task completion.
-
-    In multi-phase tasks (e.g., GAIA2 twist tasks), the agent may try to
-    output ALL_DONE after completing only the first phase. This gate
-    enforces that certain conditions must be met before completion is allowed.
-
-    Usage:
-        gate = CompletionGate()
-        gate.set_condition("wait_for_reply", required=True)
-        ...
-        gate.mark_satisfied("notify_user")  # Phase 1 done
-        ...
-        if processed.is_completion:
-            if not gate.can_complete():
-                # Inject rejection message
-                hint = gate.get_rejection_hint()
-                conversation_history += hint
-                continue
-            break
-
-    SRDP Theory: This prevents δ_att(consistency_collapse) — where the agent
-    "forgets" the second phase exists and silently terminates early.
-    """
-
-    def __init__(self):
-        self._conditions: dict[str, bool] = {}
-        self._required: set[str] = set()
-        self._rejection_count: int = 0
-        self._max_rejections: int = 5  # Safety valve: don't loop forever
-
-    def set_condition(self, name: str, required: bool = True) -> None:
-        """Register a condition that must be satisfied before completion."""
-        self._conditions[name] = False
-        if required:
-            self._required.add(name)
-
-    def mark_satisfied(self, name: str) -> None:
-        """Mark a condition as satisfied."""
-        if name in self._conditions:
-            self._conditions[name] = True
-
-    def can_complete(self) -> bool:
-        """Check if all required conditions are met for completion.
-
-        Returns True if:
-        - All required conditions are satisfied, OR
-        - Max rejections exceeded (safety valve to prevent infinite loops)
-        """
-        if self._rejection_count >= self._max_rejections:
-            return True  # Safety valve: allow completion after too many rejections
-        return all(self._conditions.get(c, False) for c in self._required)
-
-    def get_rejection_hint(self) -> str:
-        """Generate a rejection message listing unsatisfied conditions."""
-        self._rejection_count += 1
-        unsatisfied = [c for c in self._required if not self._conditions.get(c, False)]
-        conditions_text = ", ".join(unsatisfied)
-        return (
-            f"\n\n🛑 ALL_DONE REJECTED (attempt {self._rejection_count}/{self._max_rejections}): "
-            f"Required conditions not met: [{conditions_text}].\n"
-            f"You MUST satisfy these before completing the task.\n"
-        )
-
-    @property
-    def rejection_count(self) -> int:
-        return self._rejection_count
-
-
-# ─── Budget Tracker — Generic turn budget management ─────────────────────
-
-class BudgetTracker:
-    """Framework-level turn budget management for agentic loops.
-
-    Injects budget awareness prompts at key thresholds to help the agent
-    prioritize actions and avoid wasting turns on stuck sub-tasks.
-
-    SRDP Theory: Budget awareness reduces δ_att(retrieval_dilution) by
-    preventing the conversation history from growing too large with
-    repetitive failed attempts.
-    """
-
-    def __init__(self, max_turns: int, thresholds: tuple[int, ...] = (75, 50, 30, 15, 5)):
-        self._max_turns = max_turns
-        self._thresholds = thresholds
-
-    def get_budget_hint(self, current_turn: int) -> str:
-        """Get a budget awareness hint for the current turn, if at a threshold.
-
-        Returns empty string if not at a threshold.
-        """
-        remaining = self._max_turns - current_turn - 1
-        if remaining not in self._thresholds:
-            return ""
-
-        if remaining <= 5:
-            return (
-                f"\n[⏱ {remaining} turns remaining. "
-                "FINAL: Complete task NOW or output ALL_DONE.]"
-            )
-        elif remaining <= 15:
-            return (
-                f"\n[⏱ {remaining} turns remaining. "
-                "URGENT: Complete primary task NOW. Skip any stuck sub-tasks.]"
-            )
-        elif remaining <= 30:
-            return (
-                f"\n[⏱ {remaining} turns remaining. "
-                "Prioritize core actions. Don't waste turns on exhaustive searches.]"
-            )
-        else:
-            return (
-                f"\n[⏱ {remaining} turns remaining. "
-                "On track. Reserve turns for any follow-up/twist.]"
-            )
+# ─── Re-exports for backward compatibility ────────────────────────────────
+# These classes have been extracted into their own modules per the single-
+# responsibility principle. They are re-exported here so existing imports
+# from `latest.response_filter` continue to work.
+from .completion_gate import CompletionGate    # noqa: F401
+from .budget_tracker import BudgetTracker      # noqa: F401
+from .no_repeat_guard import NoRepeatGuard     # noqa: F401

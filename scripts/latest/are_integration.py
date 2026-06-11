@@ -471,6 +471,9 @@ def load_gaia2_tasks_from_cli_dir(
 ) -> list[dict]:
     """Load GAIA2 tasks from the harbor CLI dataset directory.
 
+    Uses stratified sampling to ensure representation from all configs
+    (search, execution, adaptability, ambiguity, time).
+
     Each task directory contains:
       - instruction.md: System prompt for the agent
       - task_metadata.json: Metadata (config, difficulty, apps, etc.)
@@ -485,11 +488,11 @@ def load_gaia2_tasks_from_cli_dir(
         return []
 
     task_dirs = sorted(base_dir.iterdir())
-    tasks = []
+
+    # First pass: load ALL tasks grouped by config
+    tasks_by_config: dict[str, list[dict]] = {}
 
     for task_dir in task_dirs:
-        if len(tasks) >= num_samples:
-            break
         if not task_dir.is_dir():
             continue
 
@@ -539,7 +542,7 @@ def load_gaia2_tasks_from_cli_dir(
         difficulty = metadata.get("difficulty", "unknown")
         source_id = metadata.get("source_id", task_dir.name)
 
-        tasks.append({
+        task = {
             "task_id": f"gaia2_{source_id}",
             "description": task_desc,
             "expected": oracle_events,  # List of oracle action dicts
@@ -556,7 +559,31 @@ def load_gaia2_tasks_from_cli_dir(
                 "top_action_functions": metadata.get("top_action_functions", []),
                 "event_count": metadata.get("event_count", 0),
             },
-        })
+        }
 
-    logger.info("Loaded %d GAIA2 tasks from %s", len(tasks), base_dir)
+        if config not in tasks_by_config:
+            tasks_by_config[config] = []
+        tasks_by_config[config].append(task)
+
+    # Stratified sampling: equal samples from each config
+    if not tasks_by_config:
+        return []
+
+    n_configs = len(tasks_by_config)
+    per_config = max(1, num_samples // n_configs)
+    remainder = num_samples - per_config * n_configs
+
+    tasks = []
+    for config in sorted(tasks_by_config.keys()):
+        available = tasks_by_config[config]
+        take = min(per_config + (1 if remainder > 0 else 0), len(available))
+        if remainder > 0:
+            remainder -= 1
+        tasks.extend(available[:take])
+
+    logger.info(
+        "Loaded %d GAIA2 tasks from %s (stratified: %s)",
+        len(tasks), base_dir,
+        {k: min(per_config + 1, len(v)) for k, v in sorted(tasks_by_config.items())}
+    )
     return tasks

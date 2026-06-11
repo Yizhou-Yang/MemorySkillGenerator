@@ -98,13 +98,13 @@ class BenchmarkLoader:
 
         # Use the ARE integration loader
         try:
-            from scripts.v6.are_integration import load_gaia2_tasks_from_cli_dir
+            from scripts.latest.are_integration import load_gaia2_tasks_from_cli_dir
         except ImportError:
             # Fallback: try relative import path
             import importlib.util
             spec = importlib.util.spec_from_file_location(
                 "are_integration",
-                os.path.join(os.path.dirname(__file__), "..", "scripts", "v6", "are_integration.py")
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "latest", "are_integration.py")
             )
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)

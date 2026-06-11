@@ -226,8 +226,9 @@ def format_failure_experience(exp: Experience) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
-                           top_k_success: int = 5, top_k_failure: int = 5,
+                           top_k_success: int = 3, top_k_failure: int = 2,
                            expected: str = "", metadata: dict | None = None,
+                           max_chars: int = 6000,
                            **kwargs) -> str:
     """Build augmented prompt with dual-channel experience injection.
 
@@ -236,6 +237,8 @@ def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
     - δ_sem managed: effectiveness-weighted retrieval (in ExperienceLibrary)
       ensures historically-helpful experiences rank higher
     - δ_att reduced: quality gating + dual-channel separation + structured format
+    - Context budget: hard cap at max_chars to prevent prompt explosion
+      that drowns task instructions (observed: 23K+ chars after 8 tasks)
 
     All task types (qa, agentic, embodied) receive the same full-context
     injection. Experiments showed no meaningful difference between dynamic
@@ -246,6 +249,7 @@ def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
         return ""
 
     sections = []
+    current_len = 0
 
     # ── Channel 1: Positive guidance (success experiences) ──────────────
     # Theory: These provide action templates the LLM can directly follow.
@@ -254,24 +258,39 @@ def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
                                          outcome_filter="success")
     quality_successes = [exp for exp in successes if _is_quality_success(exp)][:top_k_success]
     if quality_successes:
-        sections.append("## Relevant Experience (from similar successful tasks)\n")
+        header = "## Relevant Experience (from similar successful tasks)\n"
+        sections.append(header)
+        current_len += len(header)
         for exp in quality_successes:
-            entry = format_success_experience(exp)
-            sections.append(entry + "\n")
+            entry = format_success_experience(exp) + "\n"
+            if current_len + len(entry) > max_chars:
+                break
+            sections.append(entry)
+            current_len += len(entry)
 
     # ── Channel 2: Negative guidance (failure lessons) ──────────────────
     # Theory: These provide causal failure analysis to prevent repeating mistakes.
     # Separated from Channel 1 to prevent consistency collapse.
-    failures = library.retrieve_similar(task_desc, top_k=top_k_failure * 2,
-                                         outcome_filter="failure", exclude_tool_failures=True)
-    if not failures:
+    if current_len < max_chars:
         failures = library.retrieve_similar(task_desc, top_k=top_k_failure * 2,
-                                             outcome_filter="partial", exclude_tool_failures=True)
-    quality_failures = [exp for exp in failures if _is_quality_failure(exp)][:top_k_failure]
-    if quality_failures:
-        sections.append("## Lessons from Similar Failed Attempts\n")
-        for exp in quality_failures:
-            entry = format_failure_experience(exp)
-            sections.append(entry + "\n")
+                                             outcome_filter="failure", exclude_tool_failures=True)
+        if not failures:
+            failures = library.retrieve_similar(task_desc, top_k=top_k_failure * 2,
+                                                 outcome_filter="partial", exclude_tool_failures=True)
+        quality_failures = [exp for exp in failures if _is_quality_failure(exp)][:top_k_failure]
+        if quality_failures:
+            header = "## Lessons from Similar Failed Attempts\n"
+            sections.append(header)
+            current_len += len(header)
+            for exp in quality_failures:
+                entry = format_failure_experience(exp) + "\n"
+                if current_len + len(entry) > max_chars:
+                    break
+                sections.append(entry)
+                current_len += len(entry)
 
-    return "\n".join(sections) if sections else ""
+    result = "\n".join(sections) if sections else ""
+    # Final safety truncation (should rarely trigger due to per-entry checks)
+    if len(result) > max_chars:
+        result = result[:max_chars].rsplit("\n", 1)[0]
+    return result
