@@ -15,6 +15,11 @@ Theoretical Foundation (SRDP Framework — Corollary 15):
     3. Version tracking (patch_history): Preserves all historical versions of
        each skill, maintaining independent retrieval identities. This prevents
        the retrieval dilution that occurs when skills are merged.
+    4. Intermediate state tracking (intermediate_states): EvoMem-style within-task
+       patch memory. Records agent's intermediate conclusions and their corrections
+       (self-correction diffs) during a single task execution. This captures the
+       "patch-based intermediate conclusion state table" that EvoMem showed is
+       critical for multi-step reasoning tasks where step N may revise step 1.
 """
 from __future__ import annotations
 import json
@@ -27,6 +32,29 @@ class FailureTaxonomy:
     root_cause: str = ""
     is_tool_chain: bool = False
     recoverable: bool = True
+
+@dataclass
+class IntermediateState:
+    """EvoMem-style within-task patch: a snapshot of agent's intermediate conclusion.
+
+    Records what the agent concluded at a given step, and if it later revised
+    that conclusion, what it changed to and why. This forms the "backtrackable
+    intermediate conclusion state table" that enables agents to learn from
+    their own self-correction patterns.
+
+    Key distinction from EvoMem:
+    - EvoMem tracks: memory_state update patches (what changed in agent's memory)
+    - SkillForge tracks: intermediate reasoning conclusion corrections
+      (what the agent THOUGHT was true, and how that changed)
+    """
+    turn: int                              # Turn number when this conclusion was formed
+    conclusion: str                        # What the agent concluded at this step
+    conclusion_type: str = ""              # "extraction" | "plan" | "assumption" | "answer_candidate"
+    revised_at_turn: int = -1              # Turn when this conclusion was revised (-1 if never)
+    revised_conclusion: str = ""           # What the conclusion was revised to
+    revision_rationale: str = ""           # Why the agent revised (self-correction reasoning)
+    revision_trigger: str = ""             # "self_correction" | "tool_result" | "oracle_hint"
+    is_error_patch: bool = False           # True if the original conclusion was WRONG (not just refined)
 
 @dataclass
 class Experience:
@@ -49,6 +77,7 @@ class Experience:
     version: int = 1
     patch_history: list = field(default_factory=list)
     timestamp: float = 0.0
+    intermediate_states: list[dict] = field(default_factory=list)  # EvoMem-style within-task patches
 
 # ══════════════════════════════════════════════════════════════════════════
 #  Similarity: semantic embedding with TF-cosine fallback
@@ -247,6 +276,7 @@ class ExperienceLibrary:
                     "reasoning_trace": e.reasoning_trace,
                     "timestamp": e.timestamp,
                     "version": e.version, "patch_history": e.patch_history,
+                    "intermediate_states": e.intermediate_states,
                 }
                 for e in self.experiences
             ],
@@ -266,12 +296,14 @@ class ExperienceLibrary:
                 d.setdefault("reasoning_trace", [])
                 d.setdefault("version", 1)
                 d.setdefault("patch_history", [])
+                d.setdefault("intermediate_states", [])
                 self.experiences.append(Experience(**d))
         else:
             for d in data.get("experiences", []):
                 d.setdefault("reasoning_trace", [])
                 d.setdefault("version", 1)
                 d.setdefault("patch_history", [])
+                d.setdefault("intermediate_states", [])
                 self.experiences.append(Experience(**d))
             self._augment_stats = data.get("augment_stats", {})
             self._exp_effectiveness = data.get("exp_effectiveness", {})

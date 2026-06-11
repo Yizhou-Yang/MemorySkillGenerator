@@ -37,8 +37,8 @@ from scripts.latest.eval import (
 # --- Sub-runners (per-benchmark EvoArena-style within-agent injection) ---
 from scripts.latest.gaia_runner import run_gaia_task, run_gaia_task_controlled
 from scripts.latest.gaia2_runner import run_gaia2_task_with_are
-from scripts.latest.terminal_bench_runner import run_terminal_bench_task, run_terminal_bench_task_controlled
-from scripts.latest.swe_chain_runner import run_swe_chain_task, run_swe_chain_task_controlled
+from scripts.latest.terminal_bench_2_runner import run_terminal_bench_2_task, run_terminal_bench_2_task_controlled
+from scripts.latest.locomo_runner import run_locomo_task, run_locomo_task_controlled
 from scripts.latest.persona_mem_runner import run_persona_mem_task, run_persona_mem_task_controlled
 
 MODEL = "deepseek-v4-pro"
@@ -50,8 +50,8 @@ RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
 TASK_LIMITS = {
     "gaia": 30,
     "gaia2": 30,
-    "terminal_bench_evo": 30,
-    "swe_chain_evo": 30,
+    "terminal_bench_2": 30,
+    "locomo": 30,
     "persona_mem_evo": 30,
 }
 
@@ -64,9 +64,8 @@ _trace = TraceLogger(RESULTS_DIR)
 async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True) -> dict:
     """Primary metric per benchmark:
        - gaia2: GAIA2 official judge (action sequence + gate matching)
-       - swe_chain_evo: pass@1 (patch correctness via LLM judge)
-       - terminal_bench_evo: exact match on command output
-       - gaia / persona_mem_evo: exact match with LLM-Judge tie-breaker
+       - terminal_bench_2: exact match on command output
+       - gaia / locomo / persona_mem_evo: exact match with LLM-Judge tie-breaker
     """
     if benchmark == "gaia2":
         oracle_events = result.get("expected", [])
@@ -100,42 +99,7 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
             print(f"[GAIA2 judge] Official judge failed: {e}")
             return {"score": 0.0, "em": 0.0, "method": "gaia2_judge_error", "error": str(e)[:200]}
 
-    if benchmark == "swe_chain_evo":
-        response = (result.get("response") or "").strip()
-        raw_expected = result.get("expected", "")
-        expected = str(raw_expected).strip() if not isinstance(raw_expected, list) else ", ".join(raw_expected)
-        if not response:
-            return {"score": 0.0, "em": 0.0, "method": "swe_chain_empty"}
-        has_code = ("diff" in response or "---" in response or "+++" in response
-                    or "patch" in response.lower() or "```" in response
-                    or "def " in response or "class " in response
-                    or "import " in response or "fix" in response.lower())
-        if not has_code:
-            return {"score": 0.0, "em": 0.0, "method": "swe_chain_no_code"}
-        if use_llm_judge:
-            judge_prompt = (
-                f"Evaluate if this response correctly addresses the software issue.\n\n"
-                f"Issue description: {expected}\n\n"
-                f"Agent response (code changes): {response}\n\n"
-                f"Score 0.0 to 1.0: Does the response identify the correct file/function "
-                f"and propose a logically sound fix? "
-                f"0.0=completely wrong, 0.3=identifies area but wrong fix, "
-                f"0.5=partial fix, 0.7=mostly correct, 1.0=fully correct.\n"
-                f"Output ONLY a number:"
-            )
-            out = await _llm_short_call(judge_prompt, max_turns=1, timeout=30)
-            m = re.search(r'(\d+\.?\d*)', out)
-            score = 0.0
-            if m:
-                try:
-                    score = min(1.0, max(0.0, float(m.group(1))))
-                except ValueError:
-                    score = 0.0
-            return {"score": score, "em": 1.0 if score >= 0.7 else 0.0,
-                    "llm_judge": score, "method": "swe_chain_llm_judge"}
-        return {"score": 0.5, "em": 0.0, "method": "swe_chain_has_code"}
-
-    if benchmark == "terminal_bench_evo":
+    if benchmark == "terminal_bench_2":
         expected = (result.get("expected") or "").strip()
         response = (result.get("response") or "").strip()
         if not expected or not response:
@@ -189,22 +153,22 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         del _trace._files[benchmark]
 
     test_tasks = tasks
-    concurrency = 3 if benchmark in ("gaia2", "terminal_bench_evo", "swe_chain_evo") else CONCURRENCY
+    concurrency = 3 if benchmark in ("gaia2", "terminal_bench_2", "locomo") else CONCURRENCY
     sem = asyncio.Semaphore(concurrency)
 
     # --- Dispatch table (benchmark -> runner functions) ---
     BASELINE_RUNNER = {
         "gaia": run_gaia_task,
         "gaia2": run_gaia2_task_with_are,
-        "terminal_bench_evo": run_terminal_bench_task,
-        "swe_chain_evo": run_swe_chain_task,
+        "terminal_bench_2": run_terminal_bench_2_task,
+        "locomo": run_locomo_task,
         "persona_mem_evo": run_persona_mem_task,
     }
     CONTROLLED_RUNNER = {
         "gaia": run_gaia_task_controlled,
         "gaia2": run_gaia2_task_with_are,  # gaia2 ARE runner supports within_task_patch_mode directly
-        "terminal_bench_evo": run_terminal_bench_task_controlled,
-        "swe_chain_evo": run_swe_chain_task_controlled,
+        "terminal_bench_2": run_terminal_bench_2_task_controlled,
+        "locomo": run_locomo_task_controlled,
         "persona_mem_evo": run_persona_mem_task_controlled,
     }
 
@@ -376,7 +340,7 @@ async def main():
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
     BENCHMARKS_TO_RUN = [
-        "gaia", "gaia2", "terminal_bench_evo", "swe_chain_evo", "persona_mem_evo"
+        "gaia", "gaia2", "terminal_bench_2", "locomo", "persona_mem_evo"
     ]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}

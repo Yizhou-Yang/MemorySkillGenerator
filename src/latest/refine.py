@@ -72,6 +72,58 @@ Failure reason: {failure_reason}
   "quality_score": 0-10
 }}"""
 
+# ── FAILURE-SPECIFIC refinement prompt ──────────────────────────────────────
+# Activated when the initial refinement produces empty causal_lesson or avoidance_note.
+# This prompt is stricter: it demands STRATEGIC-LEVEL analysis (not factual-level).
+# The core insight: failure experiences are valuable ONLY if they explain WHY the
+# STRATEGY failed (e.g., "PDF text extraction failed because the file was scanned
+# images, not digital text") rather than WHAT fact was wrong (e.g., "the answer is
+# Rockhopper penguin, not Emperor penguin"). Factual errors have zero cross-task
+# transfer value and become noise when injected.
+AI_REVIEW_FAILURE_RETRY_PROMPT = """You are a FAILURE ANALYSIS specialist. The first refinement attempt produced
+a trivial or empty causal lesson. You MUST extract a STRATEGIC-LEVEL analysis.
+
+## CRITICAL DISTINCTION
+- FACTUAL failure (USELESS, do NOT output): "The answer is X, not Y"
+  → This has ZERO transfer value. Skip this entirely.
+- STRATEGIC failure (VALUABLE, MUST output): "The tool chain failed because step N
+  used a method that doesn't work for this data type."
+  → This is transferable to other tasks.
+
+## Experience
+Task: {task_desc}
+Outcome: {outcome} (score: {score:.0%})
+Steps taken:
+{steps}
+Missing steps: {missing}
+Failure reason: {failure_reason}
+{previous_result_section}
+
+## MANDATORY OUTPUT REQUIREMENTS
+1. **causal_lesson**: MUST explain the STRATEGIC reason for failure.
+   - BAD: "the count was wrong" (factual, useless)
+   - GOOD: "web search returned stale data because the query lacked a date filter" (strategic, transferable)
+   - GOOD: "PDF extraction failed because the tool was used on scanned images instead of digital text" (strategic)
+   - GOOD: "multi-hop question failed because step 2 depended on a wrong assumption from step 1" (strategic)
+2. **avoidance_note**: MUST name a SPECIFIC action pattern to avoid, with indicators.
+   - BAD: "be more careful" (vague, useless)
+   - GOOD: "do not use WebFetch on PDFs containing scanned images; check for [OCR needed] indicator first"
+3. **generalized_steps**: MUST be PROCEDURAL patterns, NOT raw search queries.
+   - BAD: "1. search 'Unlambda evaluation order 1960s article'" (raw query, useless)
+   - GOOD: "1. search for [TECHNICAL_TERM] combined with [TIME_PERIOD] and [DOCUMENT_TYPE]"
+   - Replace ALL concrete values with [PLACEHOLDER] descriptions of what they REPRESENT.
+   - Do NOT just wrap the original query in brackets — describe the SEMANTIC ROLE of each term.
+
+## Response (JSON only)
+{{
+  "generalized_steps": "ALL steps rewritten with [SEMANTIC_PLACEHOLDERS] — describe WHAT each term represents",
+  "causal_lesson": "STRATEGIC reason for failure — NOT factual — one specific, transferable sentence",
+  "avoidance_note": "SPECIFIC action pattern to avoid with concrete indicators",
+  "transferability": "EXACT task types and conditions where this lesson applies",
+  "evolution_insight": "what version history reveals (empty string if no history)",
+  "quality_score": 0-10
+}}"""
+
 CROSS_AGENT_EVAL_PROMPT = """You are an independent quality evaluator for AI agent skills/experiences.
 Evaluate whether this experience is high-quality and worth injecting into future tasks.
 
@@ -132,34 +184,31 @@ def _format_patch_history(patch_history: list) -> str:
     return "\n".join(lines)
 
 def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
-    """Version-conditioned refinement. Uses json_repair for robust JSON extraction.
+    """Version-conditioned refinement with quality self-check for failures.
 
     SRDP Theory: This function reduces δ_att (format parsing ambiguity dimension)
     by transforming raw action sequences into structured, generalized skills.
-    The structured output (numbered steps, causal lessons, transferability notes)
-    is easier for LLM attention to parse correctly at injection time.
+
+    QUALITY SELF-CHECK (for failures only):
+    If the first refinement produces empty causal_lesson or avoidance_note,
+    the experience is re-refined using AI_REVIEW_FAILURE_RETRY_PROMPT which
+    demands STRATEGIC-LEVEL analysis instead of factual-level noise.
 
     The ZERO INFORMATION LOSS constraint is critical: it ensures r_M never
     increases. We add generalization ON TOP of existing content, preserving
     the original skill's coverage of its task region in the skill space.
 
     When llm_fn is None (no LLM available), returns a minimal fallback that
-    preserves all original information but marks as unrefined. The injection
-    quality gate will handle these appropriately.
+    preserves all original information but marks as unrefined.
     """
     if llm_fn is None:
-        # Fallback: preserve original data, mark as unrefined.
-        # NOTE: These experiences will be filtered by _is_quality_failure at injection
-        # time if they're failures. For successes, the raw action_commands are preserved.
-        # This is intentional: without AI refinement, we cannot guarantee quality,
-        # so the injection gate handles it.
         return {
             "generalized_steps": "\n".join(exp.action_commands),
-            "causal_lesson": "",  # Empty = no noise (not "Completed all required steps")
+            "causal_lesson": "",
             "avoidance_note": exp.failure_reason if exp.outcome != "success" else "",
             "transferability": "",
             "evolution_insight": "",
-            "quality_score": 0,  # 0 = unrefined, will trigger critic if available
+            "quality_score": 0,
             "refined": False,
         }
 
@@ -169,19 +218,58 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
     # Include reasoning trace if available (from response_filter AI evaluation)
     reasoning_section = ""
     if exp.reasoning_trace:
-        reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:10])  # Cap at 10
+        reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:10])
         reasoning_section = f"\nAgent's reasoning during execution:\n{reasoning_lines}\n"
 
+    # ── First refinement attempt ────────────────────────────────────────────
     prompt = AI_REVIEW_PROMPT.format(
         task_desc=exp.task_desc, outcome=exp.outcome, score=exp.score,
         steps=steps_str, missing=missing_str,
         failure_reason=exp.failure_reason or "(none)",
         version_history_section=_format_patch_history(exp.patch_history),
     )
-    # Append reasoning trace to prompt if available
     if reasoning_section:
         prompt += reasoning_section
 
+    result = _call_refine_llm(prompt, llm_fn)
+
+    # ── Quality self-check for failures ─────────────────────────────────────
+    # If the failure experience has empty causal_lesson or avoidance_note,
+    # the AI failed to extract strategic-level insight. Retry with a stricter
+    # prompt that explicitly forbids factual-level analysis.
+    if (exp.outcome != "success" and result and result.get("refined") and
+            (not result.get("causal_lesson", "").strip() or
+             not result.get("avoidance_note", "").strip())):
+        # Show what we got from first attempt
+        prev_section = (
+            f"\n## Previous refinement attempt (REJECTED - missing strategic analysis)\n"
+            f"Previous causal_lesson: '{result.get('causal_lesson', '') or '(EMPTY)'}'\n"
+            f"Previous avoidance_note: '{result.get('avoidance_note', '') or '(EMPTY)'}'\n"
+            f"Previous generalized_steps: '{result.get('generalized_steps', '')[:300]}'\n"
+            f"\nThe above was rejected because it lacked STRATEGIC-LEVEL analysis.\n"
+        )
+        retry_prompt = AI_REVIEW_FAILURE_RETRY_PROMPT.format(
+            task_desc=exp.task_desc, outcome=exp.outcome, score=exp.score,
+            steps=steps_str, missing=missing_str,
+            failure_reason=exp.failure_reason or "(none)",
+            previous_result_section=prev_section,
+        )
+        if reasoning_section:
+            retry_prompt += reasoning_section
+
+        retry_result = _call_refine_llm(retry_prompt, llm_fn)
+        if retry_result and retry_result.get("refined"):
+            # Use retry result but keep the original generalized_steps if retry is worse
+            if (retry_result.get("causal_lesson", "").strip() and
+                    retry_result.get("avoidance_note", "").strip()):
+                return retry_result
+        # If retry also failed, return the first result but mark as low quality
+
+    return result if result else _unrefined_fallback(exp)
+
+
+def _call_refine_llm(prompt: str, llm_fn) -> dict | None:
+    """Call LLM for refinement and parse JSON response. Returns None on failure."""
     try:
         response = llm_fn(prompt)
         repaired = repair_json(response, return_objects=True)
@@ -196,11 +284,14 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
             return result
     except Exception:
         pass
+    return None
 
-    # LLM call failed — return unrefined fallback (no noise)
+
+def _unrefined_fallback(exp: Experience) -> dict:
+    """Minimal fallback preserving original data, marked as unrefined."""
     return {
         "generalized_steps": "\n".join(exp.action_commands),
-        "causal_lesson": "",  # Empty = no noise
+        "causal_lesson": "",
         "avoidance_note": exp.failure_reason if exp.outcome != "success" else "",
         "transferability": "",
         "evolution_insight": "",

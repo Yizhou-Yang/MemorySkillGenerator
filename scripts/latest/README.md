@@ -12,9 +12,16 @@ on GAIA / ALFWorld / LoCoMo.
 ## Ablation Groups
 
 - **A (Baseline)** — original prompt, no augmentation.
-- **B (Raw)** — inject experiences without AI refinement.
-- **C (AI-Refined)** — inject AI-refined experiences that passed the cross-agent
-  quality critic (`quality >= QUALITY_THRESHOLD = 5`).
+- **B (EvoArena EvoMem)** — within-task self-correction patch memory. During
+  multi-turn agent execution, captured self-corrections (e.g., "Wait, I need
+  to reconsider...") are injected back into the conversation history so the
+  agent can reference its own corrections. Pure EvoArena EvoMem replication —
+  no cross-task injection, no library retrieval.
+- **C (EvoArena + SkillForge)** — EvoArena EvoMem within-task patches with
+  failure-aware attention routing + critic quality gate. Error patches → 
+  [Avoid This Pitfall] avoidance framing. Refinement patches → [Refined
+  Strategy] procedural template framing. Critic gate filters trivial
+  corrections (rationale < 10 chars).
 
 ## Design Choices
 

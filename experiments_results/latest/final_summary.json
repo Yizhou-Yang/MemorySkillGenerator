@@ -1,57 +1,52 @@
 {
-  "gaia2": {
-    "partial": true,
-    "metric": "soft_recall (GAIA-aligned: matched_fraction, no COUNT GATE)",
-    "tasks_completed": 22,
-    "tasks_non_zero": 4,
-    "avg_score": 0.089,
-    "pass_at_1": 0.182,
-    "scoring_method": "matched_oracle_actions / total_oracle_actions (partial-credit, GAIA-aligned)",
-    "scoring_note": "Uses matched_fraction directly as score. Does NOT zero-out on count mismatch (unlike official GAIA2 CLI which requires exact count match). This aligns with GAIA which gives partial credit for partial completion.",
+  "locomo": {
+    "benchmark": "locomo",
+    "model": "deepseek-v4-pro",
+    "metric": "EM",
+    "n_train": 25,
+    "n_test": 25,
+    "design": [
+      "sequential_iterative_training",
+      "cross_agent_critic_gating",
+      "exact_match_pass_at_1_metrics",
+      "alfworld_oracle_retry_only",
+      "skillforge_within_task_patch_memory",
+      "failure_aware_attention_routing"
+    ],
+    "train_stats": {
+      "avg_score": 0.28,
+      "success_rate": 0.28,
+      "library_size": 5,
+      "avg_critic_quality": 1.32
+    },
     "results": {
-      "A_baseline": {"em": 0.089, "note": "No A/B/C split available (crashed before Phase 2)"},
-      "B_raw": {"em": 0.089},
-      "C_refined": {"em": 0.089}
+      "A_baseline": {
+        "avg_score": 0.24,
+        "em": 0.0,
+        "n": 25
+      },
+      "B_raw": {
+        "avg_score": 0.12,
+        "em": 0.04,
+        "n": 25
+      },
+      "C_refined": {
+        "avg_score": 0.24,
+        "em": 0.04,
+        "n": 25
+      },
+      "D_skillforge": {
+        "avg_score": 0.23600000000000002,
+        "em": 0.04,
+        "n": 25
+      }
     },
-    "delta_refined_vs_baseline": 0.0,
+    "delta_refined_vs_baseline": 0.04,
     "delta_refined_vs_raw": 0.0,
-    "per_task_scores": {
-      "gaia2_0601": 0.727,
-      "gaia2_0602": 0.375,
-      "gaia2_0603": 0.600,
-      "gaia2_0604": 0.0,
-      "gaia2_0605": 0.0,
-      "gaia2_0606": 0.0,
-      "gaia2_0607": 0.0,
-      "gaia2_0608": 0.0,
-      "gaia2_0609": 0.250,
-      "gaia2_0610": 0.0,
-      "gaia2_0132": 0.0,
-      "gaia2_0137": 0.0,
-      "gaia2_0138": 0.0,
-      "gaia2_0139": 0.0,
-      "gaia2_0140": 0.0,
-      "gaia2_0141": 0.0,
-      "gaia2_0143": 0.0,
-      "gaia2_0144": 0.0,
-      "gaia2_0145": 0.0,
-      "gaia2_0146": 0.0,
-      "gaia2_0052": 0.0,
-      "gaia2_0053": 0.0
-    },
-    "note": "Partial results from 22 unique tasks (experiment crashed at task 26 due to ai_review_experience RuntimeError). First 3 tasks scored well (avg 56.7%) before augmented_prompt explosion degraded performance. With GAIA-aligned scoring, tasks that did most steps correctly but failed COUNT GATE (e.g., 0608 at ~7/8 matched) would still get ~87% instead of 0%.",
-    "fixes_applied": {
-      "ai_review_non_fatal": "src/v6/refine.py: RuntimeError → graceful fallback (return raw experience) on 3rd failure",
-      "augmented_prompt_cap": "src/v6/injection.py: max_chars=6000 hard trunk, top_k_success=3, top_k_failure=2",
-      "system_prompt_src": "src/v6/agent_prompt.py: extracted from runner, with anti-repeat Rule 5 + twist detection",
-      "gaia2_scoring": "src/v6/gaia2_judge.py: removed COUNT GATE, score = matched_fraction (partial-credit)",
-      "runtime_dedup": "latest_runner.py: skip execution if (tool_id, args) already seen in current task",
-      "loop_hard_limit": "latest_runner.py: 3 consecutive loop breaks → force task termination"
-    },
-    "known_issues": {
-      "augmented_prompt_explosion": "After task 5, injected experience grew to 23K+ chars (FIXED: max_chars=6000)",
-      "death_loop": "Task 0141 repeated op-001 14 times (FIXED: anti-loop hard limit + runtime dedup)",
-      "count_gate_false_negatives": "Tasks like 0608 had ~7/8 correct steps but scored 0% (FIXED: GAIA-aligned scoring)"
-    }
+    "delta_skillforge_vs_baseline": 0.04,
+    "delta_skillforge_vs_refined": 0.0
+  },
+  "gaia": {
+    "error": "cannot import name 'format_evoarena_patch_log' from 'latest.injection' (/root/workspace/SkillForge/src/latest/injection.py)"
   }
 }

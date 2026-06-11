@@ -11,26 +11,34 @@ from typing import Any
 from datasets import load_dataset
 from loguru import logger
 
-# Primary benchmarks (online/dynamic evaluation)
+# Primary benchmarks — EvoMem-style agent delegation
+# Each benchmark maps to a specific agent backend.
+# terminal_bench_evo and swe_chain_evo REQUIRE Docker containers (Harbor / OpenHands sandbox).
+# persona_mem_evo is pure text QA, no Docker needed.
 PRIMARY_BENCHMARKS = [
-    "gaia2",
-    "swebench_dynamic",
+    "gaia",                  # Memento-Skills agent (web search + multi-step QA)
+    "gaia2",                 # Terminus 2 agent (Docker-based terminal tasks)
+    "locomo",                # A-Mem agent (conversation memory QA)
+    "terminal_bench_2",      # Terminus 2 agent (Docker-based, Harbor orchestration)
+    "persona_mem_evo",       # A-Mem agent (persona-based conversation memory)
+]
+
+# Legacy benchmarks — static datasets, loadable but not in active rotation
+LEGACY_BENCHMARKS = [
+    "gaia2",  # still loadable as secondary
+    "terminal_bench_evo",  # renamed to terminal_bench_2
+    "swe_chain_evo",       # not published, moved to legacy
+    "alfworld",
     "alfworld_interactive",
+    "swebench",
+    "swebench_dynamic",
     "hotpotqa",
+    "hotpotqa_hard",
     "2wikimultihopqa",
     "aime",
     "travelplanner",
     "webshop",
-    "locomo",
     "longmemeval",
-]
-
-# Legacy benchmarks (static, disabled but still loadable)
-LEGACY_BENCHMARKS = [
-    "gaia",
-    "alfworld",
-    "swebench",
-    "hotpotqa_hard",
     "triviaqa",
     "gsm8k",
     "musique",
@@ -49,8 +57,10 @@ class BenchmarkLoader:
         loader_map = {
             # Primary benchmarks (online/dynamic)
             "gaia2": self._load_gaia2,
-            "swebench_dynamic": self._load_swebench_dynamic,
+            "terminal_bench_2": self._load_terminal_bench_evo,
+            "persona_mem_evo": self._load_persona_mem_evo,
             "alfworld_interactive": self._load_alfworld_interactive,
+            "swebench_dynamic": self._load_swebench_dynamic,
             "hotpotqa": self._load_hotpotqa,
             "2wikimultihopqa": self._load_2wikimultihopqa,
             "aime": self._load_aime,
@@ -60,6 +70,8 @@ class BenchmarkLoader:
             "longmemeval": self._load_longmemeval,
             # Legacy (static, still loadable)
             "gaia": self._load_gaia,
+            "terminal_bench_evo": self._load_terminal_bench_evo,
+            "swe_chain_evo": self._load_swe_chain_evo,
             "alfworld": self._load_alfworld,
             "hotpotqa_hard": self._load_hotpotqa_hard,
             "triviaqa": self._load_triviaqa,
@@ -643,6 +655,333 @@ class BenchmarkLoader:
                     },
                 })
 
+        return tasks
+
+    # Terminal-Bench-Evo — CLI/Terminal Command Tasks (via Terminus 2 agent)
+    # CRITICAL: This benchmark REQUIRES Docker containers and Harbor orchestration.
+    # Each task runs inside an isolated container. Without Docker, we can only
+    # evaluate the LLM's ability to generate correct commands (prompt-only mode),
+    # not full agentic execution.
+    # Source: harbor-framework/terminal-bench + terminal_bench/agents/terminus_2
+    # Production usage: harbor run --dataset terminal-bench@2.0 --agent terminus-2
+
+    def _load_terminal_bench_evo(self) -> list[dict[str, Any]]:
+        """Load Terminal-Bench-Evo tasks from local JSON dataset.
+
+        Task format:
+          {
+            "task_id": str,
+            "instruction": str,
+            "expected_command": str,
+            "expected_output": str,
+            "files": {filename: content, ...} (optional)
+          }
+
+        Dataset path: config["data_path"] or
+          /tmp/harbor-datasets/datasets/terminal-bench/tasks.json
+        """
+        logger.info("Loading Terminal-Bench-Evo from local dataset...")
+        data_path = self.config.get(
+            "data_path",
+            "/tmp/harbor-datasets/datasets/terminal-bench/tasks.json",
+        )
+        if not os.path.exists(data_path):
+            logger.warning(
+                f"Terminal-Bench dataset not found at {data_path}. "
+                "Creating empty task list. Download tasks from laude-institute/t-bench."
+            )
+            return []
+
+        with open(data_path) as f:
+            raw = json.load(f)
+
+        tasks: list[dict[str, Any]] = []
+        for idx, item in enumerate(raw):
+            if len(tasks) >= self.num_samples:
+                break
+            tasks.append({
+                "task_id": item.get("task_id", f"terminal_bench_{idx}"),
+                "description": item.get("instruction", ""),
+                "expected": item.get("expected_output", ""),
+                "context": json.dumps(item.get("files", {})),
+                "metadata": {
+                    "expected_command": item.get("expected_command", ""),
+                    "num_files": len(item.get("files", {})),
+                },
+                "task_type": "terminal",
+            })
+        return tasks
+
+    # SWE-Chain-Evo — Code Engineering Tasks (via OpenHands agent)
+    # CRITICAL: This benchmark REQUIRES Docker sandbox (OpenHands runtime).
+    # Each task runs inside an isolated container with repo checkout, code editing,
+    # test execution, etc. Without Docker, we can only evaluate the LLM's ability
+    # to generate correct patches (prompt-only mode), not full agentic execution.
+
+    def _load_swe_chain_evo(self) -> list[dict[str, Any]]:
+        """Load SWE-Chain-Evo tasks from local JSON dataset.
+
+        Task format (same as SWE-bench Lite):
+          {
+            "instance_id": str,
+            "repo": str,
+            "problem_statement": str,
+            "patch": str,
+            "base_commit": str,
+            "hints_text": str (optional)
+          }
+
+        Dataset path: config["data_path"] or
+          /tmp/harbor-datasets/datasets/swe-chain/tasks.json
+        """
+        logger.info("Loading SWE-Chain-Evo from local dataset...")
+        data_path = self.config.get(
+            "data_path",
+            "/tmp/harbor-datasets/datasets/swe-chain/tasks.json",
+        )
+        if not os.path.exists(data_path):
+            logger.warning(
+                f"SWE-Chain dataset not found at {data_path}. "
+                "Creating empty task list."
+            )
+            return []
+
+        with open(data_path) as f:
+            raw = json.load(f)
+
+        tasks: list[dict[str, Any]] = []
+        for idx, item in enumerate(raw):
+            if len(tasks) >= self.num_samples:
+                break
+            repo = item.get("repo", "")
+            problem = item.get("problem_statement", "")
+            instance_id = item.get("instance_id", str(idx))
+            hints = item.get("hints_text", "") or ""
+            description = (
+                f"Fix the following issue in the {repo} repository.\n\n"
+                f"Issue:\n{problem}"
+            )
+            if hints:
+                description += f"\n\nHints:\n{hints}"
+            tasks.append({
+                "task_id": f"swe_chain_{instance_id}",
+                "description": description,
+                "expected": item.get("patch", ""),
+                "context": "",
+                "metadata": {
+                    "repo": repo,
+                    "instance_id": instance_id,
+                    "base_commit": item.get("base_commit", ""),
+                    "has_hints": bool(hints),
+                },
+                "task_type": "code_engineering",
+            })
+        return tasks
+
+    # PersonaMem-Evo — Persona Memory QA (A-Mem style)
+    # Dataset: bowen-upenn/PersonaMem-v2 (HuggingFace)
+    # benchmark_text split: 5000 tasks with persona-based conversation memory QA.
+    # Each task: related_conversation_snippet (message list), user_query, correct_answer,
+    # short_persona/expanded_persona (persona traits).
+
+    @staticmethod
+    def _parse_conversation_messages(conv_data: Any) -> str:
+        """Parse conversation message list into readable text, handling both
+        Python repr strings and already-parsed objects."""
+        if isinstance(conv_data, list):
+            messages = conv_data
+        elif isinstance(conv_data, str):
+            try:
+                messages = json.loads(conv_data)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    import ast
+                    messages = ast.literal_eval(conv_data)
+                except (ValueError, SyntaxError):
+                    return conv_data
+        else:
+            return str(conv_data)
+
+        if not isinstance(messages, list):
+            return str(conv_data)
+
+        lines: list[str] = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                role = msg.get("role", "unknown").capitalize()
+                content = msg.get("content", "")
+                # Trim very long messages to keep context manageable
+                if len(content) > 2000:
+                    content = content[:2000] + "..."
+                lines.append(f"{role}: {content}")
+            else:
+                lines.append(str(msg))
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _extract_query_text(user_query: Any) -> str:
+        """Extract question text from user_query field (dict or JSON string)."""
+        if isinstance(user_query, dict):
+            return user_query.get("content", "")
+        if isinstance(user_query, str):
+            try:
+                data = json.loads(user_query)
+                if isinstance(data, dict):
+                    return data.get("content", "")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            try:
+                import ast
+                data = ast.literal_eval(user_query)
+                if isinstance(data, dict):
+                    return data.get("content", "")
+            except (ValueError, SyntaxError):
+                pass
+        return str(user_query)
+
+    @staticmethod
+    def _extract_persona_traits(short_persona: Any, expanded_persona: Any) -> list[str]:
+        """Extract persona traits from short_persona/expanded_persona fields.
+
+        Handles both already-parsed dicts and Python repr strings from HF datasets.
+        """
+        traits: list[str] = []
+
+        def _try_parse(val: Any) -> dict | None:
+            """Try to parse a value into a dict, handling both JSON and Python repr."""
+            if isinstance(val, dict):
+                return val
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                try:
+                    import ast
+                    parsed = ast.literal_eval(val)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except (ValueError, SyntaxError):
+                    pass
+            return None
+
+        # short_persona: {"persona": "A liberal Democrat from Kansas..."}
+        sp = _try_parse(short_persona)
+        if sp and sp.get("persona"):
+            traits.append(sp["persona"])
+
+        # expanded_persona: {"short_persona": {...}, "name": "...", ...}
+        ep = _try_parse(expanded_persona) if not isinstance(expanded_persona, dict) else expanded_persona
+        if isinstance(ep, dict):
+            name = ep.get("name", "")
+            if name:
+                traits.append(f"Name: {name}")
+            # Also extract the inner short_persona from expanded_persona
+            inner_sp = _try_parse(ep.get("short_persona", {}))
+            if inner_sp and inner_sp.get("persona"):
+                # Avoid duplicating if already added
+                if inner_sp["persona"] not in traits:
+                    traits.insert(0, inner_sp["persona"])
+
+        return traits
+
+    def _load_persona_mem_evo(self) -> list[dict[str, Any]]:
+        """Load PersonaMem-Evo tasks from HuggingFace PersonaMem-v2 dataset.
+
+        Uses the benchmark_text split by default. Falls back to local JSON
+        if HuggingFace is unavailable (config["data_path"] override).
+        """
+        # Allow local JSON override for offline/testing
+        data_path = self.config.get("data_path", "")
+        if data_path and os.path.exists(data_path):
+            logger.info("Loading PersonaMem-Evo from local dataset (override)...")
+            with open(data_path) as f:
+                raw = json.load(f)
+            tasks: list[dict[str, Any]] = []
+            for idx, item in enumerate(raw):
+                if len(tasks) >= self.num_samples:
+                    break
+                conversation = item.get("conversation", "")
+                question = item.get("question", "")
+                description = (
+                    f"Answer the following question based on the conversation history.\n\n"
+                    f"Conversation:\n{conversation}\n\n"
+                    f"Question: {question}"
+                )
+                tasks.append({
+                    "task_id": item.get("task_id", f"persona_mem_{idx}"),
+                    "description": description,
+                    "expected": item.get("answer", ""),
+                    "context": conversation,
+                    "metadata": {
+                        "persona_traits": item.get("persona_traits", []),
+                        "conversation_length": len(conversation),
+                    },
+                    "task_type": "persona_memory",
+                })
+            return tasks
+
+        logger.info("Loading PersonaMem-Evo from HuggingFace (bowen-upenn/PersonaMem-v2)...")
+        try:
+            raw_dataset = load_dataset(
+                "bowen-upenn/PersonaMem-v2",
+                "benchmark",
+                split="benchmark_text",
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to load PersonaMem-v2 from HuggingFace: {e}. "
+                "Creating empty task list."
+            )
+            return []
+
+        tasks: list[dict[str, Any]] = []
+        for idx, row in enumerate(raw_dataset):
+            if idx >= self.num_samples:
+                break
+
+            # Parse conversation from related_conversation_snippet
+            conv_snippet = row.get("related_conversation_snippet", "")
+            conversation = self._parse_conversation_messages(conv_snippet)
+
+            # Extract question from user_query
+            question = self._extract_query_text(row.get("user_query", ""))
+
+            # Extract persona traits
+            persona_traits = self._extract_persona_traits(
+                row.get("short_persona", {}),
+                row.get("expanded_persona", {}),
+            )
+
+            persona_id = row.get("persona_id", idx)
+            correct_answer = row.get("correct_answer", "")
+            topic = row.get("topic_query", "")
+            pref_type = row.get("pref_type", "")
+            conversation_scenario = row.get("conversation_scenario", "")
+
+            description = (
+                f"Answer the following question based on the conversation history.\n\n"
+                f"Conversation:\n{conversation}\n\n"
+                f"Question: {question}"
+            )
+
+            tasks.append({
+                "task_id": f"persona_mem_p{persona_id}_t{idx}",
+                "description": description,
+                "expected": correct_answer,
+                "context": conversation,
+                "metadata": {
+                    "persona_id": persona_id,
+                    "persona_traits": persona_traits,
+                    "conversation_length": len(conversation),
+                    "topic": topic,
+                    "pref_type": pref_type,
+                    "scenario": conversation_scenario,
+                },
+                "task_type": "persona_memory",
+            })
+
+        logger.info(f"Loaded {len(tasks)} PersonaMem-v2 tasks from HuggingFace")
         return tasks
 
     # LongMemEval — Ultra-long Dialogue Memory (F1 + LLM-Judge)

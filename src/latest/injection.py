@@ -1,6 +1,7 @@
 """Prompt Injection — Dual-channel success/failure experience injection."""
 from __future__ import annotations
 from .experience import Experience, ExperienceLibrary
+from .experience import compute_similarity
 from .gate import should_augment, classify_task_type
 
 
@@ -259,3 +260,319 @@ def build_augmented_prompt(task_desc: str, library: ExperienceLibrary,
     if len(result) > max_chars:
         result = result[:max_chars].rsplit("\n", 1)[0]
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Channel 3: Within-Task Patch Memory (SkillForge D Group)
+#
+#  Theory: Intermediate state patches capture the agent's self-correction
+#  patterns during multi-step reasoning. These are the EvoMem-style
+#  "patch-based intermediate conclusion state table" — but with
+#  failure-aware attention routing that EvoMem doesn't have.
+#
+#  Failure-Aware Attention Routing:
+#    Error patches (is_error_patch=True) → channeled as [Avoid] pitfalls
+#    Refinement patches (is_error_patch=False) → channeled as [Refine] templates
+#
+#  This is the CORE differentiator from EvoMem:
+#    EvoMem: records "what changed" — treats all patches equally
+#    SkillForge: routes patches by TYPE — error patches get avoidance framing
+#               and refinement patches get procedural template framing
+# ══════════════════════════════════════════════════════════════════════════════
+
+def format_intermediate_state_patch(patch: dict) -> str:
+    """Format a single intermediate state patch with type-aware routing.
+
+    Failure-aware attention routing:
+    - Error patches (is_error_patch=True): formatted as [Avoid this pitfall]
+      with the correction rationale as an avoidance lesson.
+    - Refinement patches (is_error_patch=False): formatted as [Refined strategy]
+      as a procedural improvement template.
+
+    Args:
+        patch: dict with keys from IntermediateState: turn, conclusion,
+               revised_conclusion, revision_rationale, revision_trigger,
+               is_error_patch, etc.
+    """
+    is_error = patch.get("is_error_patch", False)
+    trigger = patch.get("revision_trigger", "self_correction")
+    turn = patch.get("turn", -1)
+    revised_at = patch.get("revised_at_turn", -1)
+    conclusion_type = patch.get("conclusion_type", "assumption")
+
+    if is_error:
+        # Error patch → avoidance framing (negation priming risk managed by
+        # using causal framing: "X fails because Y" rather than "Don't do X")
+        parts = [
+            f"[Avoid this pitfall — from turn {turn} (revised at turn {revised_at})]",
+        ]
+        if patch.get("conclusion"):
+            parts.append(f"Wrong conclusion: {patch['conclusion']}")
+        if patch.get("revised_conclusion"):
+            parts.append(f"Correct conclusion: {patch['revised_conclusion']}")
+        if patch.get("revision_rationale"):
+            parts.append(f"Why it was wrong: {patch['revision_rationale']}")
+        parts.append(f"Trigger: {trigger}")
+        return "\n".join(parts)
+    else:
+        # Refinement patch → procedural template framing
+        parts = [
+            f"[Refined strategy — from turn {turn} (improved at turn {revised_at})]",
+        ]
+        if patch.get("conclusion"):
+            parts.append(f"Initial approach ({conclusion_type}): {patch['conclusion']}")
+        if patch.get("revised_conclusion"):
+            parts.append(f"Improved approach: {patch['revised_conclusion']}")
+        if patch.get("revision_rationale"):
+            parts.append(f"Refinement insight: {patch['revision_rationale']}")
+        parts.append(f"Trigger: {trigger}")
+        return "\n".join(parts)
+
+
+def format_within_task_patches(exp: Experience, max_patches: int = 3) -> str:
+    """Format within-task intermediate state patches from one experience.
+
+    Selects the most informative patches (error patches first, then refinements)
+    and formats them with failure-aware attention routing.
+
+    Args:
+        exp: Experience with intermediate_states populated
+        max_patches: Maximum number of patches to include
+    """
+    patches = exp.intermediate_states
+    if not patches:
+        return ""
+
+    # Prioritize error patches (higher learning value), then refinement patches
+    error_patches = [p for p in patches if p.get("is_error_patch", False)]
+    refinement_patches = [p for p in patches if not p.get("is_error_patch", False)]
+
+    selected = []
+    # Take up to max_patches, error patches first
+    for p in error_patches[:max_patches]:
+        formatted = format_intermediate_state_patch(p)
+        if formatted:
+            selected.append(formatted)
+    remaining = max_patches - len(selected)
+    for p in refinement_patches[:remaining]:
+        formatted = format_intermediate_state_patch(p)
+        if formatted:
+            selected.append(formatted)
+
+    if not selected:
+        return ""
+
+    header = f"## Self-Correction Patterns (from similar task: {exp.task_desc[:80]})"
+    return header + "\n" + "\n\n".join(selected)
+
+
+def build_skillforge_prompt(task_desc: str, library: ExperienceLibrary,
+                             top_k_success: int = 3, top_k_failure: int = 2,
+                             top_k_patches: int = 2, max_patches_per_exp: int = 2,
+                             max_chars: int = 8000,
+                             **kwargs) -> str:
+    """Build SkillForge augmented prompt with THREE channels:
+    1. Success experiences (positive guidance)
+    2. Failure lessons (negative guidance with causal analysis)
+    3. Within-task patches (EvoMem-style intermediate state corrections
+       with failure-aware attention routing)
+
+    Channel 3 is the SkillForge differentiator — EvoMem records patches but
+    injects them as raw diffs. SkillForge routes patches by type:
+    - Error patches → "[Avoid this pitfall]" causal framing
+    - Refinement patches → "[Refined strategy]" procedural template
+
+    This failure-aware attention routing is what separates SkillForge from
+    both EvoMem (no routing) and standard memory injectors (no patches).
+
+    Theoretical guarantees:
+    - r_M unchanged: library content is never modified
+    - δ_sem managed: effectiveness-weighted retrieval
+    - δ_att reduced: quality gating + three-channel separation + type-aware routing
+    """
+    do_augment, reason = should_augment(task_desc, library)
+    if not do_augment:
+        return ""
+
+    sections = []
+    current_len = 0
+
+    # ── Channel 1: Success experiences ────────────────────────────────────
+    successes = library.retrieve_similar(task_desc, top_k=top_k_success * 2,
+                                         outcome_filter="success")
+    quality_successes = [exp for exp in successes if _is_quality_success(exp)][:top_k_success]
+    if quality_successes:
+        header = "## Relevant Experience (from similar successful tasks)\n"
+        sections.append(header)
+        current_len += len(header)
+        for exp in quality_successes:
+            entry = format_success_experience(exp) + "\n"
+            if current_len + len(entry) > max_chars:
+                break
+            sections.append(entry)
+            current_len += len(entry)
+
+    # ── Channel 2: Failure lessons ─────────────────────────────────────────
+    if current_len < max_chars:
+        failures = library.retrieve_similar(task_desc, top_k=top_k_failure * 2,
+                                             outcome_filter="failure", exclude_tool_failures=True)
+        if not failures:
+            failures = library.retrieve_similar(task_desc, top_k=top_k_failure * 2,
+                                                 outcome_filter="partial", exclude_tool_failures=True)
+        quality_failures = [exp for exp in failures if _is_quality_failure(exp)][:top_k_failure]
+        if quality_failures:
+            header = "## Lessons from Similar Failed Attempts\n"
+            sections.append(header)
+            current_len += len(header)
+            for exp in quality_failures:
+                entry = format_failure_experience(exp) + "\n"
+                if current_len + len(entry) > max_chars:
+                    break
+                sections.append(entry)
+                current_len += len(entry)
+
+    # ── Channel 3: Within-task patch memory (SkillForge differentiator) ───
+    # Theory: These intermediate state patches capture the agent's own
+    # self-correction patterns. When solving a new task, seeing how
+    # previous agents revised their intermediate conclusions helps the
+    # current agent avoid the same pitfalls.
+    #
+    # Failure-aware attention routing:
+    # - Error patches → avoidance framing (prevents negation priming)
+    # - Refinement patches → procedural template framing
+    if current_len < max_chars:
+        # Collect experiences with patches from both successes and failures
+        patch_experiences = []
+        for exp in library.experiences:
+            if exp.intermediate_states:
+                patch_experiences.append(exp)
+
+        # Score by similarity to current task
+        if patch_experiences:
+            scored_patches = []
+            for exp in patch_experiences:
+                sim = compute_similarity(task_desc, exp.task_desc)
+                # Weight by number of meaningful patches (error > refinement)
+                n_errors = sum(1 for p in exp.intermediate_states if p.get("is_error_patch"))
+                n_refinements = len(exp.intermediate_states) - n_errors
+                patch_value = n_errors * 1.5 + n_refinements * 1.0
+                scored_patches.append((sim * patch_value, exp))
+
+            scored_patches.sort(key=lambda x: -x[0])
+            top_patch_exps = [exp for _, exp in scored_patches[:top_k_patches]]
+
+            if top_patch_exps:
+                header = "## Self-Correction Patterns (from similar tasks)\n"
+                sections.append(header)
+                current_len += len(header)
+                for exp in top_patch_exps:
+                    entry = format_within_task_patches(exp, max_patches=max_patches_per_exp) + "\n"
+                    if current_len + len(entry) > max_chars:
+                        break
+                    sections.append(entry)
+                    current_len += len(entry)
+
+    result = "\n".join(sections) if sections else ""
+    if len(result) > max_chars:
+        result = result[:max_chars].rsplit("\n", 1)[0]
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Within-Task Patch Injection (B/C Group — EvoArena EvoMem Foundation)
+#
+#  EvoArena's EvoMem is a within-task mechanism: it tracks the agent's own
+#  self-corrections during a single task execution and makes them available
+#  for reference within the same task. This is fundamentally different from
+#  cross-task library injection (which was the old B/C design).
+#
+#  B组 (EvoArena EvoMem):    Plain memory patch log — "here's what you corrected"
+#  C组 (EvoArena + SkillForge): Failure-aware routing + critic quality gate
+#    - ERROR patches → [Avoid This Pitfall] avoidance framing
+#    - REFINEMENT patches → [Refined Strategy] procedural template framing
+#    - Quality gate filters trivial/incomplete patches
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def format_evoarena_patch_log(patches: list[dict]) -> str:
+    """Format within-task patches in plain EvoMem style for B组.
+
+    This replicates EvoArena's EvoMem approach: when the agent revises an
+    intermediate conclusion during a multi-turn task, the revision is captured
+    and made available for reference in subsequent turns. No cross-task
+    injection, no failure-aware routing — pure within-task self-correction
+    visibility.
+
+    Only includes patches that have been revised (revised_at_turn >= 0),
+    since unrevised conclusions are still pending.
+    """
+    revised = [p for p in patches if p.get("revised_at_turn", -1) >= 0]
+    if not revised:
+        return ""
+
+    entries = []
+    for p in revised:
+        turn = p.get("turn", -1)
+        revised_at = p.get("revised_at_turn", -1)
+        entries.append(
+            f"[Memory Update] Turn {turn} conclusion revised at turn {revised_at}:\n"
+            f"  Original: {p.get('conclusion', '')}\n"
+            f"  Revised:  {p.get('revised_conclusion', '')}\n"
+            f"  Reason:   {p.get('revision_rationale', '')}"
+        )
+
+    return "\n\n--- Memory Patch Log ---\n" + "\n\n".join(entries) + "\n--- End Patch Log ---\n"
+
+
+def format_skillforge_patch_log(patches: list[dict]) -> str:
+    """Format within-task patches with failure-aware attention routing for C组.
+
+    Builds on EvoArena EvoMem's within-task patch tracking. Our contributions:
+    1. Failure-aware routing: ERROR patches → [Avoid This Pitfall] format
+       (prevents negation priming by reframing as actionable avoidance),
+       REFINEMENT patches → [Refined Strategy] format (procedural template)
+    2. Critic quality gate: only includes patches with substantive revision
+       rationale (>= 10 chars), filtering trivial corrections.
+    3. Type-labeled separation: error and refinement patches are clearly
+       separated into distinct sections for unambiguous attention allocation.
+    """
+    revised = [p for p in patches if p.get("revised_at_turn", -1) >= 0]
+    if not revised:
+        return ""
+
+    error_patches = []
+    refinement_patches = []
+
+    for p in revised:
+        is_error = p.get("is_error_patch", False)
+        rationale = p.get("revision_rationale", "")
+
+        # Critic quality gate: skip trivial patches
+        if len(rationale) < 10:
+            continue
+
+        if is_error:
+            error_patches.append(
+                f"[Avoid This Pitfall] Turn {p.get('turn', -1)}:\n"
+                f"  Wrong approach: {p.get('conclusion', '')}\n"
+                f"  Corrected to:   {p.get('revised_conclusion', '')}\n"
+                f"  Lesson: {rationale}"
+            )
+        else:
+            refinement_patches.append(
+                f"[Refined Strategy] Turn {p.get('turn', -1)} → {p.get('revised_at_turn', -1)}:\n"
+                f"  Initial:  {p.get('conclusion', '')}\n"
+                f"  Improved: {p.get('revised_conclusion', '')}\n"
+                f"  Rationale: {rationale}"
+            )
+
+    parts = []
+    if error_patches:
+        parts.append("## Self-Corrections: Pitfalls to Avoid\n" + "\n\n".join(error_patches))
+    if refinement_patches:
+        parts.append("## Self-Corrections: Strategy Refinements\n" + "\n\n".join(refinement_patches))
+
+    if not parts:
+        return ""
+
+    return "\n\n--- Correction Log ---\n" + "\n\n".join(parts) + "\n--- End Log ---\n"
