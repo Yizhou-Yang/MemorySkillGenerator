@@ -1571,7 +1571,7 @@ async def main():
     print("  ✓ API is responding.", flush=True)
 
     # --- Check for existing checkpoint (resume support) ---
-    checkpoint = load_checkpoint()
+    checkpoint = load_checkpoint(CHECKPOINT_FILE)
     completed_benchmarks = checkpoint.get("completed_benchmarks", {})
     if completed_benchmarks:
         print(f"\n  📂 Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
@@ -1609,7 +1609,7 @@ async def main():
         if not api_ok:
             print(f"\n  ⚠️  API unavailable before starting {name}. Pausing experiment.", flush=True)
             save_checkpoint({"completed_benchmarks": all_reports, "paused_at": name,
-                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")})
+                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}, CHECKPOINT_FILE)
             paused = True
             break
 
@@ -1621,7 +1621,7 @@ async def main():
             print(f"  💾 Saving checkpoint and pausing...", flush=True)
             save_checkpoint({"completed_benchmarks": all_reports, "paused_at": name,
                              "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                             "error": str(e)})
+                             "error": str(e)}, CHECKPOINT_FILE)
             paused = True
             break
         except Exception as e:
@@ -1643,7 +1643,7 @@ async def main():
         print(f"{'═'*70}")
     else:
         # All done — clear checkpoint
-        clear_checkpoint()
+        clear_checkpoint(CHECKPOINT_FILE)
 
     # Print summary of whatever we have
     print(f"\n\n{'═'*70}")
