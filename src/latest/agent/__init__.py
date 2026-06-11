@@ -31,7 +31,7 @@ Agent delegation map (EvoMem-style):
   gaia2                 -> Terminus2Agent   (Harbor Docker / shell / prompt)
   locomo                -> AmemAgent        (A-Mem conversation memory QA)
   terminal_bench_2      -> Terminus2Agent   (Harbor Docker / shell / prompt)
-  persona_mem_evo       -> AmemAgent        (A-Mem persona memory)
+  personamem_v2       -> AmemAgent        (A-Mem persona memory)
   swe_chain_evo         -> OpenHandsAgent   (LEGACY: code engineering, not published)
 """
 from .base import BaseAgent, AgentFactory

@@ -134,6 +134,93 @@ async def run_gaia_task(task: dict, experience_section: str = "",
     return result
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  SelfCorrectionDetector — EvoMem-style within-task patch tracking
+#
+#  Detects when the agent revises its own intermediate conclusions during
+#  multi-step reasoning. Captures the "patch" as an IntermediateState record.
+#
+#  Key patterns detected:
+#  - "Wait, I need to reconsider..." (explicit self-correction)
+#  - "Actually, that's wrong..." (explicit error recognition)
+#  - "Let me correct..." (explicit correction intent)
+#  - "I made a mistake..." (error acknowledgment)
+#  - "That doesn't work because..." (implicit revision via new information)
+#
+#  SkillForge distinguishes two types of patches:
+#  - ERROR patches (is_error_patch=True): the original conclusion was WRONG
+#  - REFINEMENT patches (is_error_patch=False): the original was just incomplete
+#
+#  This distinction feeds into failure-aware attention routing during injection:
+#  error patches → [Avoid this] avoidance_note format
+#  refinement patches → [Refined strategy] procedural template format
+# ══════════════════════════════════════════════════════════════════════════════
+
+import re as _re_sc
+
+SELF_CORRECTION_PATTERNS = [
+    r"(?i)(?:wait|hold on|hang on|hmm|oh)\\s*,?\\s*(?:I need to|let me|I should|I'll)\\s*(?:reconsider|rethink|re-evaluate|correct|revise|go back|backtrack)",
+    r"(?i)(?:actually|in fact|on second thought|come to think of it|I was wrong|I made a mistake|that's (?:wrong|incorrect|not right))",
+    r"(?i)(?:let me|I'll|I should|I need to|I have to)\\s*(?:correct|fix|amend|revise|change|update)\\s*(?:that|this|my|the)",
+    r"(?i)(?:that doesn't work|that won't work|this approach fails|this isn't working|that's not going to work)\\s*(?:because|since|as|due to)",
+    r"(?i)(?:based on (?:the |this )?new|after re-?checking|upon re-?examination|looking (?:back )?at (?:the |this )?again)",
+]
+
+PRIOR_CONCLUSION_PATTERNS = [
+    r"(?i)(?:I (?:thought|assumed|believed|expected|figured|was thinking))\\s+(?:that\\s+)?(.+?)(?:\\.|but|however|actually)",
+    r"(?i)(?:my (?:initial|previous|earlier|original))\\s+(?:conclusion|assumption|thought|answer|result|finding)\\s+(?:was|is|would be|should be)\\s+(.+?)(?:\\.|but|however)",
+    r"(?i)(?:previously|initially|at first|earlier)\\s*(?:,?\\s*I\\s+)?(?:concluded|determined|found|decided|thought|assumed)\\s+(?:that\\s+)?(.+?)(?:\\.|but|however)",
+]
+
+
+class SelfCorrectionDetector:
+    """Detects self-correction moments in agent multi-turn reasoning."""
+
+    def __init__(self):
+        self._correction_patterns = [_re_sc.compile(p) for p in SELF_CORRECTION_PATTERNS]
+        self._prior_patterns = [_re_sc.compile(p) for p in PRIOR_CONCLUSION_PATTERNS]
+        self._patch_id = 0
+
+    def detect_correction(self, response_text: str, turn: int) -> dict | None:
+        """Detect if this turn contains a self-correction."""
+        is_correction = False
+        correction_match = None
+        for pat in self._correction_patterns:
+            m = pat.search(response_text)
+            if m:
+                is_correction = True
+                correction_match = m
+                break
+        if not is_correction:
+            return None
+
+        prior_conclusion = ""
+        for pat in self._prior_patterns:
+            m = pat.search(response_text)
+            if m:
+                prior_conclusion = m.group(1).strip()[:300]
+                break
+
+        is_error = any(kw in response_text.lower() for kw in [
+            "wrong", "incorrect", "mistake", "error", "not right"
+        ])
+
+        self._patch_id += 1
+        correction_start = max(0, correction_match.start() - 100) if correction_match else 0
+        correction_end = min(len(response_text), correction_match.end() + 400) if correction_match else len(response_text)
+        correction_snippet = response_text[correction_start:correction_end].strip()
+
+        return {
+            "patch_id": f"sc_{self._patch_id:04d}",
+            "turn": turn,
+            "prior_conclusion": prior_conclusion,
+            "correction_snippet": correction_snippet[:500],
+            "is_error_patch": is_error,
+            "correction_type": "error" if is_error else "refinement",
+            "timestamp": time.time(),
+        }
+
+
 # ─── GAIA Controlled Multi-Turn Runner (EvoMem-enabled) ───────────────────
 
 async def run_gaia_task_controlled(task: dict, experience_section: str = "",
@@ -1052,52 +1139,3 @@ class SyncResponseProcessor:
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
-
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Self-Correction Detector — EvoMem-style Within-Task Patch Memory
-#
-#  Detects when the agent revises its own intermediate conclusions during
-#  multi-step reasoning. Captures the "patch" as an IntermediateState record.
-#
-#  Key patterns detected:
-#  - "Wait, I need to reconsider..." (explicit self-correction)
-#  - "Actually, that's wrong..." (explicit error recognition)
-#  - "Let me correct..." (explicit correction intent)
-#  - "I made a mistake..." (error acknowledgment)
-#  - "That doesn't work because..." (implicit revision via new information)
-#
-#  SkillForge distinguishes two types of patches:
-#  - ERROR patches (is_error_patch=True): the original conclusion was WRONG
-#  - REFINEMENT patches (is_error_patch=False): the original was just incomplete
-#
-#  This distinction feeds into failure-aware attention routing during injection:
-#  error patches → [Avoid this] avoidance_note format
-#  refinement patches → [Refined strategy] procedural template format
-# ══════════════════════════════════════════════════════════════════════════════
-
-SELF_CORRECTION_PATTERNS = [
-    # Explicit self-correction
-    r"(?i)(?:wait|hold on|hang on|hmm|oh)\s*,?\s*(?:I need to|let me|I should|I'll)\s*(?:reconsider|rethink|re-evaluate|correct|revise|go back|backtrack)",
-    # Error acknowledgment
-    r"(?i)(?:actually|in fact|on second thought|come to think of it|I was wrong|I made a mistake|that's (?:wrong|incorrect|not right))",
-    # Correction intent
-    r"(?i)(?:let me|I'll|I should|I need to|I have to)\s*(?:correct|fix|amend|revise|change|update)\s*(?:that|this|my|the)",
-    # Implicit revision via new information
-    r"(?i)(?:that doesn't work|that won't work|this approach fails|this isn't working|that's not going to work)\s*(?:because|since|as|due to)",
-    # Step dependency revision: "step N's result changes step M"
-    r"(?i)(?:based on (?:the |this )?new|after re-?checking|upon re-?examination|looking (?:back )?at (?:the |this )?again)",
-]
-
-# Patterns to extract what the agent THOUGHT before the correction
-# These appear in the text just before the correction signal
-PRIOR_CONCLUSION_PATTERNS = [
-    r"(?i)(?:I (?:thought|assumed|believed|expected|figured|was thinking))\s+(?:that\s+)?(.+?)(?:\.|but|however|actually)",
-    r"(?i)(?:my (?:initial|previous|earlier|original))\s+(?:conclusion|assumption|thought|answer|result|finding)\s+(?:was|is|would be|should be)\s+(.+?)(?:\.|but|however)",
-    r"(?i)(?:previously|initially|at first|earlier)\s*(?:,?\s*I\s+)?(?:concluded|determined|found|decided|thought|assumed)\s+(?:that\s+)?(.+?)(?:\.|but|however)",
-]
-
-import re as _re
-
-

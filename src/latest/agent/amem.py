@@ -32,7 +32,7 @@ class AmemAgent(BaseAgent):
     long document/conversation and questions target specific facts.
     """
 
-    BENCHMARKS = {"locomo", "persona_mem_evo"}
+    BENCHMARKS = {"locomo", "personamem_v2"}
 
     def __init__(self, model: str = "deepseek-v4-pro",
                  backend: str = "openai",

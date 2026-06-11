@@ -14,13 +14,13 @@ from loguru import logger
 # Primary benchmarks — EvoMem-style agent delegation
 # Each benchmark maps to a specific agent backend.
 # terminal_bench_evo and swe_chain_evo REQUIRE Docker containers (Harbor / OpenHands sandbox).
-# persona_mem_evo is pure text QA, no Docker needed.
+# personamem_v2 is pure text QA, no Docker needed.
 PRIMARY_BENCHMARKS = [
     "gaia",                  # Memento-Skills agent (web search + multi-step QA)
     "gaia2",                 # Terminus 2 agent (Docker-based terminal tasks)
     "locomo",                # A-Mem agent (conversation memory QA)
     "terminal_bench_2",      # Terminus 2 agent (Docker-based, Harbor orchestration)
-    "persona_mem_evo",       # A-Mem agent (persona-based conversation memory)
+    "personamem_v2",       # A-Mem agent (persona-based conversation memory)
 ]
 
 # Legacy benchmarks — static datasets, loadable but not in active rotation
@@ -58,7 +58,7 @@ class BenchmarkLoader:
             # Primary benchmarks (online/dynamic)
             "gaia2": self._load_gaia2,
             "terminal_bench_2": self._load_terminal_bench_evo,
-            "persona_mem_evo": self._load_persona_mem_evo,
+            "personamem_v2": self._load_persona_mem_evo,
             "alfworld_interactive": self._load_alfworld_interactive,
             "swebench_dynamic": self._load_swebench_dynamic,
             "hotpotqa": self._load_hotpotqa,

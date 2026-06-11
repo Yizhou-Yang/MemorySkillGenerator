@@ -52,7 +52,7 @@ TASK_LIMITS = {
     "gaia2": 30,
     "terminal_bench_2": 30,
     "locomo": 30,
-    "persona_mem_evo": 30,
+    "personamem_v2": 30,
 }
 
 CHECKPOINT_FILE = str(PROJECT_ROOT / "experiments_results" / "latest" / "_checkpoint.json")
@@ -65,7 +65,7 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
     """Primary metric per benchmark:
        - gaia2: GAIA2 official judge (action sequence + gate matching)
        - terminal_bench_2: exact match on command output
-       - gaia / locomo / persona_mem_evo: exact match with LLM-Judge tie-breaker
+       - gaia / locomo / personamem_v2: exact match with LLM-Judge tie-breaker
     """
     if benchmark == "gaia2":
         oracle_events = result.get("expected", [])
@@ -107,7 +107,7 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         em = exact_match(response, expected)
         return {"score": em, "em": em, "method": "exact_match"}
 
-    # gaia, persona_mem_evo: exact match with LLM-Judge tie-breaker
+    # gaia, locomo, personamem_v2: exact match with LLM-Judge tie-breaker
     expected = (result.get("expected") or "").strip()
     response = (result.get("response") or "").strip()
     if not expected or not response:
@@ -162,14 +162,14 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         "gaia2": run_gaia2_task_with_are,
         "terminal_bench_2": run_terminal_bench_2_task,
         "locomo": run_locomo_task,
-        "persona_mem_evo": run_persona_mem_task,
+        "personamem_v2": run_persona_mem_task,
     }
     CONTROLLED_RUNNER = {
         "gaia": run_gaia_task_controlled,
         "gaia2": run_gaia2_task_with_are,  # gaia2 ARE runner supports within_task_patch_mode directly
         "terminal_bench_2": run_terminal_bench_2_task_controlled,
         "locomo": run_locomo_task_controlled,
-        "persona_mem_evo": run_persona_mem_task_controlled,
+        "personamem_v2": run_persona_mem_task_controlled,
     }
 
     run_fn_a = BASELINE_RUNNER.get(benchmark)
@@ -340,7 +340,7 @@ async def main():
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
     BENCHMARKS_TO_RUN = [
-        "gaia", "gaia2", "terminal_bench_2", "locomo", "persona_mem_evo"
+        "gaia", "gaia2", "terminal_bench_2", "locomo", "personamem_v2"
     ]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}
@@ -387,7 +387,7 @@ async def main():
             import traceback
             print(f"\n  ERROR on {name}: {e}")
             traceback.print_exc()
-            partial = compute_partial_results_from_trace(name)
+            partial = compute_partial_results_from_trace(name, RESULTS_DIR)
             if partial:
                 all_reports[name] = partial
             else:
