@@ -28,7 +28,7 @@ async def probe_api_available() -> bool:
     r = await _llm_call("Reply with exactly: OK", max_turns=1, timeout=30)
     if r.get("error"):
         err = str(r["error"])
-        if "429" in err or "rate_limit" in err or "timeout" in err or "额度" in err:
+        if "429" in err or "rate_limit" in err or "timeout" in err or "quota_exceeded" in err:
             return False
     if not r.get("text"):
         return False
@@ -40,7 +40,7 @@ def _check_api_error(r: dict) -> bool:
     global _api_consecutive_failures
     if r.get("error"):
         err = str(r["error"])
-        if "429" in err or "rate_limit" in err or "timeout" in err or "额度" in err:
+        if "429" in err or "rate_limit" in err or "timeout" in err or "quota_exceeded" in err:
             _api_consecutive_failures += 1
             if _api_consecutive_failures >= _API_FAILURE_THRESHOLD:
                 return True
@@ -160,7 +160,7 @@ def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
                             if isinstance(block, ToolUseBlock):
                                 actions.append({"tool": block.name, "input": str(block.input)})
                             elif hasattr(block, 'text') and block.text:
-                                if '429' in block.text and '额度' in block.text:
+                                if '429' in block.text and 'quota_exceeded' in block.text:
                                     return {"text": "", "actions": actions, "error": "429_rate_limit"}
                                 text += block.text
                         if text and max_turns <= 2:
@@ -213,7 +213,7 @@ def _query_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) 
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if hasattr(block, 'text') and block.text:
-                                if '429' in block.text and '额度' in block.text:
+                                if '429' in block.text and 'quota_exceeded' in block.text:
                                     return {"text": "", "error": "429_rate_limit"}
                                 text += block.text
         except Exception as e:

@@ -1,46 +1,11 @@
-"""Prompt Injection — Dual-Channel Experience Injection with Signal Separation.
-
-Theoretical Foundation (SRDP Framework — Corollary 15):
-    gap ≤ (2R_max)/(1-γ)² · [ε_LLM(r_M) + δ_sem + E[δ_att]]
-
-This module targets δ_att (attention degradation) through three mechanisms:
-
-1. QUALITY GATING: Filters noise skills that would dilute attention budget.
-   → Reduces δ_att by preventing format-parsing ambiguity and retrieval dilution.
-
-2. DUAL-CHANNEL SEPARATION: Success experiences and failure lessons are injected
-   as distinct, clearly-demarcated sections with different formatting.
-   → Reduces δ_att by preventing consistency collapse (LLM silently picking one
-   when given contradictory positive/negative signals in the same block).
-
-3. STRUCTURED FORMATTING: Each experience uses a consistent, parseable format
-   (labeled fields, markdown structure) rather than prose.
-   → Reduces δ_att by improving format clarity for LLM attention allocation.
-
-Design choice — NO position reordering:
-    Lost-in-the-Middle effects are documented at 4K-32K context windows.
-    With 1M context (DeepSeek V4), empirical evidence suggests position effects
-    are negligible. We therefore prioritize signal quality over position tricks.
-
-Coverage guarantee (r_M preservation):
-    This module NEVER filters based on content relevance alone — only on
-    structural quality (is it refined? does it have a causal lesson?).
-    All information remains in the library; only injection is gated.
-    → ε_LLM(r_M) is never increased by this module.
-"""
+"""Prompt Injection — Dual-channel success/failure experience injection."""
 from __future__ import annotations
 from .experience import Experience, ExperienceLibrary
 from .gate import should_augment, classify_task_type
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Quality Gates — δ_att reduction via noise filtering
-#
-#  Theory: Injecting low-quality skills increases δ_att through two mechanisms:
-#    (a) Retrieval dilution: noisy skills split attention mass with useful ones
-#    (b) Format ambiguity: unstructured raw commands are harder for LLM to parse
-#  These gates ensure only well-structured, AI-refined skills enter the context.
-# ══════════════════════════════════════════════════════════════════════════════
+# Quality gates — structural signal filtering only
+
 
 def _is_quality_success(exp: Experience) -> bool:
     """Quality gate for success experiences — reduces δ_att by filtering noise.

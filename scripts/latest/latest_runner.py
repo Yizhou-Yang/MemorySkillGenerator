@@ -25,13 +25,11 @@ from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, 
 from latest import (SkillForgeLatest, ExperienceLibrary, Experience,
                 build_augmented_prompt, ai_review_experience,
                 cross_agent_evaluate_skill)
-from latest.completion_gate import CompletionGate
-from latest.budget_tracker import BudgetTracker
-from latest.no_repeat_guard import NoRepeatGuard
+from latest.safety import CompletionGate, BudgetTracker, NoRepeatGuard
 from latest.response_filter import AIResponseProcessor
-from latest.agent_prompt import build_agent_system_prompt, detect_twist, get_twist_reminder
+from latest.llm.prompts import build_agent_system_prompt, detect_twist, get_twist_reminder
 from benchmarks.loader import BenchmarkLoader
-from latest.gaia2_judge import evaluate_gaia2 as _gaia2_official_judge
+from latest.eval.gaia2_judge import evaluate_gaia2 as _gaia2_official_judge
 
 # ─── Extracted module imports ─────────────────────────────────────────────
 from scripts.latest.trace import TraceLogger, APIUnavailableError

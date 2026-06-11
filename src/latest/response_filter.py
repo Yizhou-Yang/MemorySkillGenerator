@@ -729,6 +729,6 @@ class SyncResponseProcessor:
 # These classes have been extracted into their own modules per the single-
 # responsibility principle. They are re-exported here so existing imports
 # from `latest.response_filter` continue to work.
-from .completion_gate import CompletionGate    # noqa: F401
-from .budget_tracker import BudgetTracker      # noqa: F401
-from .no_repeat_guard import NoRepeatGuard     # noqa: F401
+from .safety.completion import CompletionGate    # noqa: F401
+from .safety.budget import BudgetTracker      # noqa: F401
+from .safety.dedup import NoRepeatGuard     # noqa: F401

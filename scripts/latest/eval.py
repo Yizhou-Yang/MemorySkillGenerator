@@ -69,7 +69,7 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
     if benchmark == "gaia2":
         # Official GAIA2 CLI judge logic: count gate + LLM action matching +
         # config-aware dual mode + alias normalization.
-        from latest.gaia2_judge import evaluate_gaia2 as _gaia2_official_judge
+        from latest.eval.gaia2_judge import evaluate_gaia2 as _gaia2_official_judge
 
         oracle_events = result.get("expected", [])
         event_log = result.get("event_log", [])
