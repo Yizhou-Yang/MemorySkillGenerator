@@ -4,11 +4,12 @@ import json
 
 from .experience import Experience, ExperienceLibrary, FailureTaxonomy
 from .gate import assess_task_complexity, should_augment, classify_task_type
-from .injection import (build_augmented_prompt, format_success_experience,
-                        format_failure_experience)
+from .injection import (build_augmented_prompt, build_skillforge_prompt,
+                        format_evoarena_patch_log, format_skillforge_patch_log,
+                        format_success_experience, format_failure_experience,
+                        format_intermediate_state_patch, format_within_task_patches)
 from .analysis import analyze_execution, classify_failure
 from .refine import ai_review_experience, cross_agent_evaluate_skill, critic_refine_experience, _format_patch_history
-from .response_filter import AIResponseProcessor, ProcessedResponse
 
 class SkillForgeLatest:
     """Orchestrates: record_experience → version tracking → AI refine → injection."""
@@ -37,6 +38,7 @@ class SkillForgeLatest:
                           token_cost: int = 0, time_cost: float = 0.0,
                           augmentation_used: str = "",
                           reasoning_trace: list[str] | None = None,
+                          intermediate_states: list[dict] | None = None,
                           baseline_score: float | None = None,
                           llm_reviewer=None,
                           critic_fn=None, critic_threshold: int = 5):
@@ -46,6 +48,9 @@ class SkillForgeLatest:
         # Attach reasoning trace from response_filter (AI-evaluated valuable reasoning)
         if reasoning_trace:
             exp.reasoning_trace = reasoning_trace
+        # Attach EvoMem-style within-task intermediate state patches
+        if intermediate_states:
+            exp.intermediate_states = intermediate_states
         if baseline_score is not None and augmentation_used:
             exp.augmentation_helped = exp.score > baseline_score
 

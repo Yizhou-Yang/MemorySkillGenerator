@@ -252,9 +252,80 @@ async def _llm_short_call(prompt: str, max_turns: int = 1, timeout: int = 30) ->
     return (r.get("text") or "").strip()
 
 
+def _regex_extract_answer(response: str) -> str | None:
+    """Fast regex-based answer extraction (pre-filter before LLM call).
+
+    Uses deterministic regex patterns: if we can extract the answer
+    via explicit markers or clean last-line heuristics, we skip the
+    LLM call entirely — saving time and API cost.
+
+    Returns extracted answer string, or None if regex extraction fails.
+    """
+    text = response.strip()
+    if not text:
+        return None
+
+    # Short single-line responses are already answers
+    if len(text) < 200 and '\n' not in text:
+        return text
+
+    # Try explicit ANSWER markers (highest confidence)
+    answer_markers = [
+        re.compile(r'(?:^|\n)(?:\d+\.?\s*)?(?:ANSWER|Final Answer|Answer)[:：]\s*(.+?)(?:\n|$)',
+                   re.IGNORECASE | re.MULTILINE),
+        re.compile(r'^\*\*Answer\*\*[:：]\s*(.+?)(?:\n|$)',
+                   re.IGNORECASE | re.MULTILINE),
+    ]
+    for marker in answer_markers:
+        m = marker.search(text)
+        if m:
+            answer = m.group(1).strip()
+            if answer and len(answer) >= 1:
+                return answer
+
+    # Walk lines backwards: skip reasoning lines, return first clean answer line
+    reasoning_start = re.compile(
+        r'^(?:Let me|I need|I\'ll|I will|Now|Based on|From the|'
+        r'The answer|The result|I (?:now )?have|I don\'t|'
+        r'However|Therefore|Thus|So|We (?:can|need)|'
+        r'According to|Looking at|After |First[,. ]|Second[,. ]|'
+        r'To (?:find|answer|get|determine)|What (?:is|are))',
+        re.IGNORECASE
+    )
+    reasoning_content = re.compile(
+        r'(?:let me|I need to|I\'ll|break (?:this|it) down|step \d+|'
+        r'search for|look up|find the|check the)',
+        re.IGNORECASE
+    )
+
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    for line in reversed(lines):
+        if reasoning_start.match(line):
+            continue
+        if reasoning_content.search(line):
+            continue
+        if re.match(r'^\*\*Step', line):
+            continue
+        if len(line) < 2:
+            continue
+        # Clean bold markers
+        clean = re.sub(r'\*\*(?:Answer|Result|Final)\*\*[:：]?\s*', '', line).strip()
+        if clean:
+            return clean
+
+    return None  # Could not extract deterministically
+
+
 async def llm_extract_answer(response: str, question: str) -> str:
     if len(response.split()) < 30:
         return response
+
+    # Fast path: try regex extraction first (no LLM call needed)
+    regex_answer = _regex_extract_answer(response)
+    if regex_answer and len(regex_answer) < 500:
+        return regex_answer
+
+    # Slow path: use LLM to extract answer from verbose response
     prompt = (
         "Extract ONLY the final answer from this response. Output just the answer, nothing else.\n\n"
         f"Question: {question}\n\nResponse: {response}\n\n"

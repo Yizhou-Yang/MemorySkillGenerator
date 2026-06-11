@@ -1,62 +1,345 @@
-"""SkillForge Latest — AI-Driven Response Processor & Conversation History Manager.
+#!/usr/bin/env python3
+"""SkillForge Latest — Latest Experiment Runner"""
+import asyncio
+import copy
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
 
-Framework-level module for cleaning LLM responses in agentic loops.
-Combines fast regex extraction for actions with AI-based evaluation
-of non-action content (reasoning, plans, analysis) to determine what
-should be preserved in conversation history.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT))
 
-Theoretical Grounding (SRDP — Attention Signal Density):
-    In the SRDP framework, the conversation history fed back to the LLM at each
-    turn is itself a "context window" subject to δ_att degradation. Noise tokens
-    in the history dilute attention allocated to genuinely useful information
-    (retrieved skills, tool results, task instructions). This module directly
-    optimizes the **attention signal density** of the conversation context:
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / ".env")
 
-        signal_density = valuable_tokens / total_tokens_in_history
+os.environ['LLM_PROVIDER'] = 'codebuddy'
+os.environ['CODEBUDDY_MODEL'] = 'deepseek-v4-pro'
+os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
-    By AI-filtering each turn's output before appending to history, we:
-    1. Reduce δ_att(format_parsing): structured action lines are always preserved
-       verbatim, preventing format ambiguity in subsequent turns.
-    2. Reduce δ_att(retrieval_dilution): noise removal prevents irrelevant text
-       from competing for attention with injected skills.
-    3. Preserve δ_att(consistency): valuable reasoning (plans, state tracking)
-       is retained to maintain coherent multi-turn decision-making.
+from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
 
-    The net effect: higher signal density → LLM allocates more attention to
-    injected skills and tool results → lower effective δ_att → tighter gap bound.
+from latest import (SkillForgeLatest, ExperienceLibrary, Experience,
+                build_augmented_prompt, ai_review_experience,
+                cross_agent_evaluate_skill)
+from latest.safety import CompletionGate, BudgetTracker, NoRepeatGuard
+from latest.llm.prompts import build_agent_system_prompt, detect_twist, get_twist_reminder
+from latest.injection import format_evoarena_patch_log, format_skillforge_patch_log
 
-Key design principles:
-1. Actions (NEXT_OP/PARAMS) are always extracted via regex (fast, deterministic)
-2. Non-action content is evaluated by AI to distinguish:
-   - Valuable reasoning (plans, analysis, error diagnosis) → KEEP in history
-   - Noise (filler, repetition, self-talk) → DISCARD from history
-3. Never discard information that could help the agent in future turns
-4. The AI evaluator uses the same model (deepseek-v4-pro) for consistency
+# ─── Extracted module imports ─────────────────────────────────────────────
+from scripts.latest.trace import TraceLogger, APIUnavailableError
+from scripts.latest.llm_client import (
+    probe_api_available, _check_api_error,
+    save_checkpoint, load_checkpoint, clear_checkpoint,
+    llm_review_fn,
+    _query_sync, _llm_call, _query_notool_sync, _llm_call_notool,
+    _llm_short_call, llm_extract_answer, llm_judge_answer,
+    llm_critic_skill_quality,
+)
+from scripts.latest.eval import (
+    normalize_answer, exact_match, evaluate_task,
+    compute_partial_results_from_trace,
+)
 
-Usage:
-    from latest.response_filter import AIResponseProcessor
+MODEL = "deepseek-v4-pro"
+CONCURRENCY = 15
+TASK_TIMEOUT_QA = 180
+TASK_TIMEOUT_AGENT = 300
+QUALITY_THRESHOLD = 5
 
-    processor = AIResponseProcessor(
-        action_pattern=r'NEXT_OP:\\s*(?P<action>op-\\d{3})',
-        params_pattern=r'PARAMS:\\s*(?P<params>.*?)(?:\\n|$)',
-        llm_fn=my_llm_call,  # async fn(prompt) -> str
+RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
+
+# ─── Trace Logger (for human review of prompts & responses) ───────────────
+TASK_LIMITS = {"gaia": 165, "gaia2": 50, "swebench_dynamic": 30}
+
+CHECKPOINT_FILE = str(PROJECT_ROOT / "experiments_results" / "latest" / "_checkpoint.json")
+
+# ─── Trace logger instance ────────────────────────────────────────────────
+_trace = TraceLogger(RESULTS_DIR)
+
+# ─── GAIA2 ARE runner (real tool calling) ─────────────────────────────────
+
+# ─── GAIA runner ──────────────────────────────────────────────────────────
+
+async def run_gaia_task(task: dict, experience_section: str = "",
+                        group: str = "A") -> dict:
+    task_id = task["task_id"]
+    description = task["description"]
+    expected = task.get("expected", "")
+    metadata = task.get("metadata", {})
+    benchmark_type = metadata.get("benchmark", "")
+
+    # Determine system prompt based on benchmark type
+    if benchmark_type == "swebench_dynamic" or "swebench" in task_id:
+        # SWE-bench: code debugging and patch generation
+        system = (
+            "You are an expert software engineer debugging a failing test case.\n\n"
+            "Strategy:\n"
+            "1. UNDERSTAND: Read the issue description carefully. What behavior is expected vs actual?\n"
+            "2. LOCATE: Identify which file(s) and function(s) are likely responsible.\n"
+            "3. DIAGNOSE: Determine the root cause of the bug.\n"
+            "4. FIX: Write a minimal, correct patch that fixes the issue.\n"
+            "5. VERIFY: Explain why your fix resolves the failing test.\n\n"
+            "Important:\n"
+            "- Focus on the MINIMAL change needed — don't refactor unrelated code.\n"
+            "- Your response MUST include the actual code fix (as a diff or code block).\n"
+            "- Show the file path, the original code, and your corrected code.\n"
+            "- If you need to read files or run tests, use the available tools."
+        )
+    else:
+        # GAIA: multi-step QA with tool use
+        system = (
+            "You are an expert research assistant capable of multi-step reasoning and tool use. "
+            "You have access to web search, file reading, code execution, and computation tools.\n\n"
+            "Strategy for answering questions:\n"
+            "1. ANALYZE: Break down the question — what information do you need?\n"
+            "2. SEARCH: Use web search to find relevant facts, data, or context.\n"
+            "3. VERIFY: Cross-check information from multiple sources when possible.\n"
+            "4. COMPUTE: If math/logic is needed, use code execution for accuracy.\n"
+            "5. ANSWER: Provide a concise, precise final answer.\n\n"
+            "Important rules:\n"
+            "- Always search the web for factual questions — do NOT guess from memory.\n"
+            "- For numerical answers, show your computation steps.\n"
+            "- If a question asks for a specific format (name, number, date), match that format exactly.\n"
+            "- Give ONLY the final answer in your last message — no explanation needed."
+        )
+
+    if experience_section:
+        system += f"\n\n{experience_section}"
+
+    prompt = (
+        f"{system}\n\n"
+        f"Question: {description}\n\n"
+        f"Think step by step. Use tools as needed. "
+        f"End with your final answer on the last line."
     )
 
-    # In your agent loop:
-    result = await processor.process_response(raw_llm_response, task_context)
-    if result.valid:
-        # Execute tool...
-        processor.append_result(tool_id, result_str)
-"""
-from __future__ import annotations
+    result = {"task_id": task_id, "expected": expected, "response": "",
+              "error": None, "time_cost": 0, "augmented": bool(experience_section),
+              "group": group, "actions": []}
+    t0 = time.time()
+    r = await _llm_call(prompt, max_turns=30, timeout=TASK_TIMEOUT_AGENT)
+    if _check_api_error(r):
+        raise APIUnavailableError(f"API unavailable after {_API_FAILURE_THRESHOLD} consecutive failures")
+    result["response"] = r.get("text", "")
+    result["actions"] = r.get("actions", [])
+    result["error"] = r.get("error")
+    result["time_cost"] = time.time() - t0
+    return result
 
-import re
-import json
-from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable, Optional
 
+# ─── GAIA Controlled Multi-Turn Runner (EvoMem-enabled) ───────────────────
 
-# ─── AI Evaluation Prompt ─────────────────────────────────────────────────
+async def run_gaia_task_controlled(task: dict, experience_section: str = "",
+                                     group: str = "A",
+                                     within_task_patch_mode: str | None = None) -> dict:
+    """Run GAIA/SWE-bench task with controlled multi-turn loop.
+
+    Unlike run_gaia_task (which delegates to CodeBuddy SDK's black-box tool loop),
+    this function manages the agent loop explicitly, enabling:
+
+    1. Between-turn SelfCorrectionDetector -> captures EvoMem-style patches
+    2. Within-task EvoMem patch injection (B group: plain, C group: failure-aware)
+    3. Manual tool execution (same tools as CodeBuddy SDK)
+
+    Args:
+        task: Task dict from benchmark loader
+        experience_section: Cross-task experience text (from SkillForge library)
+        group: A/B/C group label
+        within_task_patch_mode:
+            None / "evoarena" -> B group: plain EvoMem patch injection
+            "skillforge" -> C group: failure-aware EvoMem patch routing
+
+    Returns:
+        Result dict with response, actions, event_log, etc.
+    """
+    from scripts.latest.tools import (
+        ManualToolExecutor,
+        GAIA_SYSTEM_PROMPT_TEMPLATE,
+        SWE_SYSTEM_PROMPT_TEMPLATE,
+    )
+
+    task_id = task["task_id"]
+    description = task["description"]
+    expected = task.get("expected", "")
+    metadata = task.get("metadata", {})
+    benchmark_type = metadata.get("benchmark", "")
+    is_swe = benchmark_type == "swebench_dynamic" or "swebench" in task_id
+
+    result = {
+        "task_id": task_id,
+        "expected": expected,
+        "response": "",
+        "error": None,
+        "time_cost": 0,
+        "augmented": bool(experience_section),
+        "group": group,
+        "actions": [],
+        "event_log": [],
+    }
+    t0 = time.time()
+
+    # ── Initialize tool executor ──────────────────────────────────────
+    executor = ManualToolExecutor(working_dir=f"/tmp/skillforge_gaia/{task_id}")
+    tool_text = executor.get_tool_list_text()
+
+    # ── Build system prompt ───────────────────────────────────────────
+    if is_swe:
+        system_prompt = SWE_SYSTEM_PROMPT_TEMPLATE + f"\nOPERATIONS:\n{tool_text}\n\nSTART NOW. Output ONLY: NEXT_OP + PARAMS."
+    else:
+        system_prompt = GAIA_SYSTEM_PROMPT_TEMPLATE + f"\nOPERATIONS:\n{tool_text}\n\nSTART NOW. Output ONLY: NEXT_OP + PARAMS."
+
+    if experience_section:
+        system_prompt += f"\n\nRELEVANT EXPERIENCE:\n{experience_section}"
+
+    # ── Build initial user message ────────────────────────────────────
+    conversation_history = (
+        f"TASK: {description}\n\n"
+        "Output your first operation now (NEXT_OP + PARAMS only):"
+    )
+
+    # ── Initialize EvoMem components ──────────────────────────────────
+    detector = SelfCorrectionDetector()
+    processor = AIResponseProcessor(
+        action_pattern=r'NEXT_OP:\s*(?P<action>op-\d{3})',
+        params_pattern=r'PARAMS:\s*(?P<params>.*?)(?:\n|$)',
+        completion_signals=["op-000"],
+        valid_action_ids={"op-000", "op-001", "op-002", "op-003", "op-004", "op-005"},
+        enable_ai_filter=False,  # Skip AI eval for speed; we want raw extraction
+        max_retries=3,
+    )
+    nr_guard = NoRepeatGuard()
+    budget = BudgetTracker(max_turns=40)
+
+    max_turns = 40
+    all_responses = []
+    within_task_patches: list[dict] = []
+
+    try:
+        for turn in range(max_turns):
+            # ── Inject EvoMem patches into conversation (B/C groups only) ──
+            patch_injection = ""
+            if within_task_patch_mode and within_task_patches:
+                if within_task_patch_mode == "skillforge":
+                    patch_injection = format_skillforge_patch_log(within_task_patches)
+                else:
+                    patch_injection = format_evoarena_patch_log(within_task_patches)
+
+            # Build the full prompt with patch injection appended
+            full_history = conversation_history
+            if patch_injection:
+                full_history = conversation_history + "\n\n" + patch_injection
+
+            # ── Call LLM ──────────────────────────────────────────────
+            r = await _llm_call_notool(system_prompt, full_history, timeout=240)
+
+            if _check_api_error(r):
+                raise APIUnavailableError(
+                    f"API unavailable after {_API_FAILURE_THRESHOLD} consecutive failures"
+                )
+
+            response_text = r.get("text", "")
+            all_responses.append(response_text)
+
+            # ── Run SelfCorrectionDetector ────────────────────────────
+            patch = detector.detect_correction(response_text, turn)
+            if patch:
+                within_task_patches.append(patch)
+
+            # ── Parse response ────────────────────────────────────────
+            processed = await processor.process_response(response_text)
+
+            # Check for completion (op-000)
+            if processed.is_completion or processed.action_id == "op-000":
+                # Extract answer from params
+                params = processed.params_parsed or {}
+                answer = params.get("answer", response_text)
+                result["response"] = answer
+                break
+
+            # Handle invalid responses
+            if not processed.valid:
+                if turn < max_turns - 1:
+                    retry_prompt = (
+                        "\n\nERROR: Invalid response format. "
+                        "You MUST output exactly:\n"
+                        "NEXT_OP: op-XXX\n"
+                        "PARAMS: key:value\n\n"
+                        "Available ops: op-001 (search), op-002 (fetch), "
+                        "op-003 (read), op-004 (write), op-005 (exec), op-000 (finish)"
+                    )
+                    conversation_history += retry_prompt
+                    continue
+                break
+
+            tool_id = processed.action_id
+            tool_args = processed.params_parsed or {}
+
+            # ── Dedup guard ───────────────────────────────────────────
+            if nr_guard.would_repeat(tool_id, tool_args):
+                conversation_history += nr_guard.get_warning(tool_id)
+                continue
+            nr_guard.record(tool_id, tool_args)
+
+            # ── Execute tool ──────────────────────────────────────────
+            if tool_id == "op-000":
+                result["response"] = tool_args.get("answer", response_text)
+                break
+
+            tool_result = executor.execute(tool_id, tool_args)
+            result["actions"].append({
+                "tool": tool_id,
+                "args": tool_args,
+                "result_preview": str(tool_result)[:500],
+            })
+
+            # ── Build history entry ───────────────────────────────────
+            history_entry = (
+                f"\n\n--- Turn {turn + 1} Result ---\n"
+                f"Operation: {tool_id}\n"
+                f"Result: {tool_result}\n"
+                f"--- End Turn {turn + 1} ---\n\n"
+                "Output your next operation (NEXT_OP + PARAMS only):"
+            )
+
+            # Budget warning
+            budget_hint = budget.get_budget_hint(turn)
+            if budget_hint:
+                history_entry += budget_hint
+
+            conversation_history += f"\n[{tool_id} executed]\n"
+            conversation_history += history_entry
+
+            # Truncate if too long
+            if len(conversation_history) > 40000:
+                task_header = f"TASK: {description}\n\n"
+                remaining = conversation_history[len(task_header):]
+                conversation_history = (
+                    task_header
+                    + "[Earlier steps truncated]\n...\n"
+                    + remaining[-30000:]
+                )
+
+        # Collect full response
+        if not result["response"]:
+            result["response"] = "\n---\n".join(all_responses)
+
+        # Attach EvoMem patches to result for downstream experience recording
+        result["event_log"] = within_task_patches
+
+    except APIUnavailableError:
+        raise
+    except Exception as e:
+        result["error"] = str(e)[:300]
+    finally:
+        result["time_cost"] = time.time() - t0
+
+    return result
+
+# ??? AI Response Processor (moved from response_filter.py) ????????????????
 
 RESPONSE_EVAL_PROMPT = """You are a response quality evaluator for an AI agent's output.
 The agent is solving a multi-step task by calling tools. Each turn, it outputs text that may contain:
@@ -97,6 +380,49 @@ Agent's non-action text:
 
 
 @dataclass
+class ProcessedResponse:
+    """Result of processing a raw LLM response."""
+
+    valid: bool = False
+    action_id: str = ""
+    params_raw: str = ""
+    params_parsed: dict[str, Any] = field(default_factory=dict)
+    is_completion: bool = False
+    raw_response: str = ""
+    clean_action: str = ""  # Only the action lines (NEXT_OP + PARAMS)
+    valuable_reasoning: str = ""  # AI-evaluated valuable non-action content
+    error_type: str = ""  # "no_action" | "invalid_id" | ""
+    ai_filtered: bool = False  # Whether AI evaluation was applied
+
+
+class AIResponseProcessor:
+    """AI-driven response processor for agentic loops.
+
+    Responsibilities:
+    1. Extract valid actions from LLM output (regex — fast, deterministic)
+    2. AI-evaluate non-action content to identify valuable reasoning
+    3. Maintain clean conversation history (actions + valuable reasoning + results)
+    4. Generate format-retry prompts when LLM output is malformed
+    5. Track retry state and enforce retry limits
+    6. Detect and break action loops (reduces wasted turns → lower δ_sem)
+
+    SRDP Theory Connection:
+        This processor is the runtime mechanism for controlling δ_att in the
+        agent's multi-turn execution. Each turn's conversation history is the
+        "context" in p_LLM(a|s, c) — if it's polluted with noise, the LLM's
+        attention to injected skills (c) degrades. By maintaining a high
+        signal-to-noise ratio in history, we ensure:
+
+        - Injected skills remain in attention-peak positions (head of context)
+        - Tool results (ground truth) get full attention weight
+        - Agent's own valuable reasoning is preserved for coherent planning
+        - Noise is removed before it accumulates and triggers Lost-in-the-Middle
+
+        The loop detection mechanism additionally prevents δ_sem degradation:
+        when the agent repeatedly calls the same tool without progress, it's
+        burning turns that could be used for productive exploration.
+    """
+
 class ProcessedResponse:
     """Result of processing a raw LLM response."""
 
@@ -725,10 +1051,50 @@ class SyncResponseProcessor:
         return getattr(self._inner, name)
 
 
-# ─── Re-exports for backward compatibility ────────────────────────────────
-# These classes have been extracted into their own modules per the single-
-# responsibility principle. They are re-exported here so existing imports
-# from `latest.response_filter` continue to work.
-from .safety.completion import CompletionGate    # noqa: F401
-from .safety.budget import BudgetTracker      # noqa: F401
-from .safety.dedup import NoRepeatGuard     # noqa: F401
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Self-Correction Detector — EvoMem-style Within-Task Patch Memory
+#
+#  Detects when the agent revises its own intermediate conclusions during
+#  multi-step reasoning. Captures the "patch" as an IntermediateState record.
+#
+#  Key patterns detected:
+#  - "Wait, I need to reconsider..." (explicit self-correction)
+#  - "Actually, that's wrong..." (explicit error recognition)
+#  - "Let me correct..." (explicit correction intent)
+#  - "I made a mistake..." (error acknowledgment)
+#  - "That doesn't work because..." (implicit revision via new information)
+#
+#  SkillForge distinguishes two types of patches:
+#  - ERROR patches (is_error_patch=True): the original conclusion was WRONG
+#  - REFINEMENT patches (is_error_patch=False): the original was just incomplete
+#
+#  This distinction feeds into failure-aware attention routing during injection:
+#  error patches → [Avoid this] avoidance_note format
+#  refinement patches → [Refined strategy] procedural template format
+# ══════════════════════════════════════════════════════════════════════════════
+
+SELF_CORRECTION_PATTERNS = [
+    # Explicit self-correction
+    r"(?i)(?:wait|hold on|hang on|hmm|oh)\s*,?\s*(?:I need to|let me|I should|I'll)\s*(?:reconsider|rethink|re-evaluate|correct|revise|go back|backtrack)",
+    # Error acknowledgment
+    r"(?i)(?:actually|in fact|on second thought|come to think of it|I was wrong|I made a mistake|that's (?:wrong|incorrect|not right))",
+    # Correction intent
+    r"(?i)(?:let me|I'll|I should|I need to|I have to)\s*(?:correct|fix|amend|revise|change|update)\s*(?:that|this|my|the)",
+    # Implicit revision via new information
+    r"(?i)(?:that doesn't work|that won't work|this approach fails|this isn't working|that's not going to work)\s*(?:because|since|as|due to)",
+    # Step dependency revision: "step N's result changes step M"
+    r"(?i)(?:based on (?:the |this )?new|after re-?checking|upon re-?examination|looking (?:back )?at (?:the |this )?again)",
+]
+
+# Patterns to extract what the agent THOUGHT before the correction
+# These appear in the text just before the correction signal
+PRIOR_CONCLUSION_PATTERNS = [
+    r"(?i)(?:I (?:thought|assumed|believed|expected|figured|was thinking))\s+(?:that\s+)?(.+?)(?:\.|but|however|actually)",
+    r"(?i)(?:my (?:initial|previous|earlier|original))\s+(?:conclusion|assumption|thought|answer|result|finding)\s+(?:was|is|would be|should be)\s+(.+?)(?:\.|but|however)",
+    r"(?i)(?:previously|initially|at first|earlier)\s*(?:,?\s*I\s+)?(?:concluded|determined|found|decided|thought|assumed)\s+(?:that\s+)?(.+?)(?:\.|but|however)",
+]
+
+import re as _re
+
+
