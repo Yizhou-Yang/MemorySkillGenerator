@@ -64,6 +64,16 @@ class TraceLogger:
             f.close()
         self._files.clear()
 
+    def clear_benchmark(self, benchmark: str):
+        """Thread-safe: close and remove a single benchmark's trace file handle."""
+        with self._lock:
+            if benchmark in self._files:
+                try:
+                    self._files[benchmark].close()
+                except Exception:
+                    pass
+                del self._files[benchmark]
+
 
 class APIUnavailableError(Exception):
     """Raised when DeepSeek V4 Pro API is confirmed unavailable."""

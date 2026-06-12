@@ -42,7 +42,9 @@ from scripts.latest.locomo_runner import run_locomo_task, run_locomo_task_contro
 from scripts.latest.persona_mem_runner import run_persona_mem_task, run_persona_mem_task_controlled
 
 MODEL = "deepseek-v4-pro"
-CONCURRENCY = 5
+CONCURRENCY = 2  # Tasks per benchmark (reduced to avoid rate-limit with 5 concurrent benchmarks)
+BENCHMARK_CONCURRENCY = 5  # Run up to N benchmarks concurrently
+# Total peak API calls ≈ CONCURRENCY * BENCHMARK_CONCURRENCY = 10
 
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
 
@@ -145,12 +147,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     if trace_path.exists():
         trace_path.unlink()
         print(f"  Cleared stale trace: {trace_path}")
-    if benchmark in _trace._files:
-        try:
-            _trace._files[benchmark].close()
-        except Exception:
-            pass
-        del _trace._files[benchmark]
+    _trace.clear_benchmark(benchmark)
 
     test_tasks = tasks
 
@@ -188,89 +185,83 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         return {"error": f"no_runner_{benchmark}"}
 
     print(f"\n  Testing {len(test_tasks)} tasks x 3 groups (A/B/C)...")
-    concurrency = 3 if benchmark in ("gaia2", "terminal_bench_2") else CONCURRENCY
-    sem = asyncio.Semaphore(concurrency)
+    sem = asyncio.Semaphore(CONCURRENCY)
 
-    async def _run_group(label: str, tasks: list[dict], build_coro):
-        """Run tasks concurrently, printing per-task progress as each completes."""
+    async def _run_group(label: str, group_key: str, tasks: list[dict], build_coro):
+        """Run tasks concurrently. Evaluate + trace-log each task as it completes so
+        partial results survive crashes."""
         total = len(tasks)
         results = [None] * total
+        evals = [None] * total
 
         async def _wrap(i: int, task: dict):
             async with sem:
                 r = await build_coro(task)
+            # ── Evaluate immediately ──────────────────────────────
+            ev = await evaluate_task(r, benchmark)
+            # ── Trace-log immediately ─────────────────────────────
+            expected = task.get("expected", r.get("expected", ""))
+            aug = r.get("_aug_prompt", "")
+            _trace.log(benchmark=benchmark, group=group_key, phase="test",
+                       task_id=r.get("task_id", task.get("task_id", "")),
+                       task_desc=task.get("description", ""),
+                       augmented_prompt=aug,
+                       response=r.get("response", ""), expected=expected,
+                       score=ev.get("score", 0.0))
             tag = r.get("task_id", str(i))
             err = r.get("error")
             status = "\u2717" if err else "\u2713"
-            msg = f"    [{label}] {i+1}/{total} {status} {tag} ({r.get('time_cost',0):.0f}s)"
+            msg = f"    [{label}] {i+1}/{total} {status} {tag} ({r.get('time_cost',0):.0f}s) EM={ev.get('em',0):.0%}"
             if err:
                 msg += f" ERR: {str(err)[:80]}"
             print(msg, flush=True)
-            return i, r
+            return i, r, ev
 
         for coro in asyncio.as_completed([_wrap(i, t) for i, t in enumerate(tasks)]):
-            i, r = await coro
+            i, r, ev = await coro
             results[i] = r
-        return results
+            evals[i] = ev
+        return results, evals
 
     print(f"    [A] Baseline (no augmentation)...", flush=True)
-    results_a = await _run_group("A", test_tasks, lambda t: run_fn_a(t, "", "A"))
+    results_a, evals_a = await _run_group("A", "A_baseline", test_tasks,
+                                          lambda t: run_fn_a(t, "", "A"))
 
     if is_qa:
-        # QA benchmarks: B = self-consistency majority vote, C = evidence-weighted vote
         print(f"    [B] Self-Consistency (majority vote, 3 samples)...", flush=True)
-        results_b = await _run_group("B", test_tasks,
+        results_b, evals_b = await _run_group("B", "B_evoarena", test_tasks,
             lambda t: run_fn_controlled(t, "", "B", within_task_patch_mode="evoarena"))
         print(f"    [C] Evidence-Weighted Self-Consistency...", flush=True)
-        results_c = await _run_group("C", test_tasks,
+        results_c, evals_c = await _run_group("C", "C_skillforge", test_tasks,
             lambda t: run_fn_controlled(t, "", "C", within_task_patch_mode="skillforge"))
     else:
-        # Multiround agentic benchmarks: progressive EvoArena/SkillForge injection
         if benchmark == "gaia":
             print(f"    [B] EvoArena EvoMem (within-task patch memory)...", flush=True)
-            results_b = await _run_group("B", test_tasks,
+            results_b, evals_b = await _run_group("B", "B_evoarena", test_tasks,
                 lambda t: run_fn_controlled(t, "", "B", within_task_patch_mode="evoarena"))
             print(f"    [C] SkillForge (B + failure-aware patch routing)...", flush=True)
-            results_c = await _run_group("C", test_tasks,
+            results_c, evals_c = await _run_group("C", "C_skillforge", test_tasks,
                 lambda t: run_fn_controlled(t, "", "C", within_task_patch_mode="skillforge"))
         else:
             print(f"    [B] Baseline (repeat)...", flush=True)
-            results_b = await _run_group("B", test_tasks, lambda t: run_fn_a(t, "", "B"))
+            results_b, evals_b = await _run_group("B", "B_evoarena", test_tasks,
+                                                  lambda t: run_fn_a(t, "", "B"))
             print(f"    [C] Baseline (repeat)...", flush=True)
-            results_c = await _run_group("C", test_tasks, lambda t: run_fn_a(t, "", "C"))
+            results_c, evals_c = await _run_group("C", "C_skillforge", test_tasks,
+                                                  lambda t: run_fn_a(t, "", "C"))
 
-    print(f"\n  Evaluating with EM (LLM-Judge as tie-breaker)...", flush=True)
-    eval_tasks = []
+    # Build flat all_evals for per_level / per_config breakdowns
+    all_evals = []
     for i in range(len(test_tasks)):
-        eval_tasks.append(evaluate_task(results_a[i], benchmark))
-        eval_tasks.append(evaluate_task(results_b[i], benchmark))
-        eval_tasks.append(evaluate_task(results_c[i], benchmark))
-    all_evals = await asyncio.gather(*eval_tasks)
+        all_evals.append(evals_a[i])
+        all_evals.append(evals_b[i])
+        all_evals.append(evals_c[i])
 
     scores = {"A_baseline": [], "B_evoarena": [], "C_skillforge": []}
     for i in range(len(test_tasks)):
         scores["A_baseline"].append(all_evals[i * 3])
         scores["B_evoarena"].append(all_evals[i * 3 + 1])
         scores["C_skillforge"].append(all_evals[i * 3 + 2])
-
-    for i, task in enumerate(test_tasks):
-        task_id = task["task_id"]
-        task_desc = task.get("description", "")
-        expected = task.get("expected", results_a[i].get("expected", ""))
-        _trace.log(benchmark=benchmark, group="A_baseline", phase="test",
-                   task_id=task_id, task_desc=task_desc, augmented_prompt="",
-                   response=results_a[i].get("response", ""), expected=expected,
-                   score=all_evals[i * 3].get("score", 0.0))
-        aug_b = results_b[i].get("_aug_prompt", "")
-        _trace.log(benchmark=benchmark, group="B_evoarena", phase="test",
-                   task_id=task_id, task_desc=task_desc, augmented_prompt=aug_b,
-                   response=results_b[i].get("response", ""), expected=expected,
-                   score=all_evals[i * 3 + 1].get("score", 0.0))
-        aug_c = results_c[i].get("_aug_prompt", "")
-        _trace.log(benchmark=benchmark, group="C_skillforge", phase="test",
-                   task_id=task_id, task_desc=task_desc, augmented_prompt=aug_c,
-                   response=results_c[i].get("response", ""), expected=expected,
-                   score=all_evals[i * 3 + 2].get("score", 0.0))
 
     report = {}
     for group, evals in scores.items():
@@ -381,7 +372,7 @@ async def main():
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
     BENCHMARKS_TO_RUN = [
-        "gaia", "locomo"
+        "gaia", "gaia2", "terminal_bench_2", "locomo", "personamem_v2"
     ]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}
@@ -394,60 +385,62 @@ async def main():
         benchmarks[name] = tasks
         print(f"    {name}: {len(tasks)} tasks")
 
-    print(f"\n  Total: {sum(len(t) for t in benchmarks.values())} tasks")
+    print(f"\n  Total: {sum(len(t) for t in benchmarks.values())} tasks across {len(benchmarks)} benchmarks\n")
 
     all_reports = dict(completed_benchmarks)
-    paused = False
+    bench_sem = asyncio.Semaphore(BENCHMARK_CONCURRENCY)
 
-    for name, tasks in benchmarks.items():
+    async def _run_one(name: str, tasks: list):
+        async with bench_sem:
+            print(f"\n  >>> Concurrent start: {name} ({len(tasks)} tasks)", flush=True)
+            try:
+                return name, await run_benchmark(name, tasks)
+            except APIUnavailableError as e:
+                print(f"\n  API unavailable during {name}: {e}", flush=True)
+                return name, {"error": f"api_unavailable: {e}"}
+            except Exception as e:
+                import traceback
+                print(f"\n  ERROR on {name}: {e}")
+                traceback.print_exc()
+                partial = compute_partial_results_from_trace(name, RESULTS_DIR)
+                return name, partial if partial else {"error": str(e)}
+
+    # Filter out already-completed and empty benchmarks
+    pending = [(n, t) for n, t in benchmarks.items()
+               if n not in completed_benchmarks and t]
+    skipped = [(n, t) for n, t in benchmarks.items()
+               if n in completed_benchmarks or not t]
+    for name, _ in skipped:
         if name in completed_benchmarks:
-            print(f"\n  SKIP {name}: already completed (from checkpoint)")
-            continue
-        if not tasks:
-            print(f"\n  SKIP {name}: no tasks")
-            continue
+            print(f"  SKIP {name}: already completed (from checkpoint)")
+        else:
+            print(f"  SKIP {name}: no tasks")
 
-        api_ok = await probe_api_available()
-        if not api_ok:
-            print(f"\n  API unavailable before starting {name}. Pausing experiment.", flush=True)
-            save_checkpoint({"completed_benchmarks": all_reports, "paused_at": name,
-                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}, CHECKPOINT_FILE)
-            paused = True
-            break
-
-        try:
-            all_reports[name] = await run_benchmark(name, tasks)
-        except APIUnavailableError as e:
-            print(f"\n  API became unavailable during {name}: {e}", flush=True)
-            save_checkpoint({"completed_benchmarks": all_reports, "paused_at": name,
-                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                             "error": str(e)}, CHECKPOINT_FILE)
-            paused = True
-            break
-        except Exception as e:
-            import traceback
-            print(f"\n  ERROR on {name}: {e}")
-            traceback.print_exc()
-            partial = compute_partial_results_from_trace(name, RESULTS_DIR)
-            if partial:
-                all_reports[name] = partial
-            else:
-                all_reports[name] = {"error": str(e)}
-
-    if paused:
-        print(f"\n\n{'='*70}")
-        print(f"  EXPERIMENT PAUSED ? API unavailable")
-        print(f"  Completed: {[k for k in all_reports if 'error' not in all_reports.get(k, {})]}")
-        print(f"{'='*70}")
+    if not pending:
+        print("  All benchmarks already completed. Nothing to run.")
     else:
-        clear_checkpoint(CHECKPOINT_FILE)
-        print(f"\n\n{'='*70}")
-        print(f"  ALL BENCHMARKS COMPLETE")
-        print(f"{'='*70}")
-        for name, report in all_reports.items():
-            if isinstance(report, dict) and "results" in report:
-                r = report["results"]
-                print(f"  {name:>20}: A={r['A_baseline']['em']:.1%}, B={r['B_evoarena']['em']:.1%}, C={r['C_skillforge']['em']:.1%}")
+        coros = [_run_one(name, tasks) for name, tasks in pending]
+        results_list = await asyncio.gather(*coros, return_exceptions=True)
+
+        for result in results_list:
+            if isinstance(result, Exception):
+                print(f"\n  CRITICAL: benchmark gather failed: {result}")
+            else:
+                name, report = result
+                all_reports[name] = report
+
+    clear_checkpoint(CHECKPOINT_FILE)
+    print(f"\n\n{'='*70}")
+    print(f"  ALL BENCHMARKS COMPLETE")
+    print(f"{'='*70}")
+    for name, report in all_reports.items():
+        if isinstance(report, dict) and "results" in report:
+            r = report["results"]
+            print(f"  {name:>20}: A={r['A_baseline']['em']:.1%}, B={r['B_evoarena']['em']:.1%}, C={r['C_skillforge']['em']:.1%}")
+        elif isinstance(report, dict) and "error" in report:
+            print(f"  {name:>20}: ERROR — {report['error'][:80]}")
+        else:
+            print(f"  {name:>20}: {report}")
     await asyncio.sleep(2)
 
 
