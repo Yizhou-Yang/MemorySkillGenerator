@@ -153,8 +153,6 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         del _trace._files[benchmark]
 
     test_tasks = tasks
-    concurrency = 3 if benchmark in ("gaia2", "terminal_bench_2", "locomo") else CONCURRENCY
-    sem = asyncio.Semaphore(concurrency)
 
     # --- Dispatch table (benchmark -> runner functions) ---
     BASELINE_RUNNER = {
@@ -183,29 +181,49 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         return {"error": f"no_runner_{benchmark}"}
 
     print(f"\n  Testing {len(test_tasks)} tasks x 3 groups (A/B/C)...")
+    concurrency = 3 if benchmark in ("gaia2", "terminal_bench_2", "locomo") else CONCURRENCY
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _run_group(label: str, tasks: list[dict], build_coro):
+        """Run tasks concurrently, printing per-task progress as each completes."""
+        total = len(tasks)
+        results = [None] * total
+
+        async def _wrap(i: int, task: dict):
+            async with sem:
+                r = await build_coro(task)
+            tag = r.get("task_id", str(i))
+            err = r.get("error")
+            status = "\u2717" if err else "\u2713"
+            msg = f"    [{label}] {i+1}/{total} {status} {tag} ({r.get('time_cost',0):.0f}s)"
+            if err:
+                msg += f" ERR: {str(err)[:80]}"
+            print(msg, flush=True)
+            return i, r
+
+        for coro in asyncio.as_completed([_wrap(i, t) for i, t in enumerate(tasks)]):
+            i, r = await coro
+            results[i] = r
+        return results
+
     print(f"    [A] Baseline (no augmentation)...", flush=True)
-    async def run_test_a(i, task):
-        async with sem:
-            return await run_fn_a(task, "", "A")
-    results_a = await asyncio.gather(*[run_test_a(i, t) for i, t in enumerate(test_tasks)])
+    results_a = await _run_group("A", test_tasks, lambda t: run_fn_a(t, "", "A"))
 
     print(f"    [B] EvoArena EvoMem (reasoning scaffold)...", flush=True)
-    async def run_test_b(i, task):
-        async with sem:
-            if is_gaia:
-                aug = _build_gaia_scaffold(task, "evoarena")
-                return await run_fn_a(task, aug, "B")
-            return await run_fn_controlled(task, "", "B", within_task_patch_mode="evoarena")
-    results_b = await asyncio.gather(*[run_test_b(i, t) for i, t in enumerate(test_tasks)])
+    if is_gaia:
+        results_b = await _run_group("B", test_tasks,
+            lambda t: run_fn_a(t, _build_gaia_scaffold(t, "evoarena"), "B"))
+    else:
+        results_b = await _run_group("B", test_tasks,
+            lambda t: run_fn_controlled(t, "", "B", within_task_patch_mode="evoarena"))
 
     print(f"    [C] EvoArena + SkillForge (pitfall-aware scaffold)...", flush=True)
-    async def run_test_c(i, task):
-        async with sem:
-            if is_gaia:
-                aug = _build_gaia_scaffold(task, "skillforge")
-                return await run_fn_a(task, aug, "C")
-            return await run_fn_controlled(task, "", "C", within_task_patch_mode="skillforge")
-    results_c = await asyncio.gather(*[run_test_c(i, t) for i, t in enumerate(test_tasks)])
+    if is_gaia:
+        results_c = await _run_group("C", test_tasks,
+            lambda t: run_fn_a(t, _build_gaia_scaffold(t, "skillforge"), "C"))
+    else:
+        results_c = await _run_group("C", test_tasks,
+            lambda t: run_fn_controlled(t, "", "C", within_task_patch_mode="skillforge"))
 
     print(f"\n  Evaluating with EM (LLM-Judge as tie-breaker)...", flush=True)
     eval_tasks = []
