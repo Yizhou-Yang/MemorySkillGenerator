@@ -42,7 +42,7 @@ from scripts.latest.locomo_runner import run_locomo_task, run_locomo_task_contro
 from scripts.latest.persona_mem_runner import run_persona_mem_task, run_persona_mem_task_controlled
 
 MODEL = "deepseek-v4-pro"
-CONCURRENCY = 15
+CONCURRENCY = 5
 
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
 
@@ -163,7 +163,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         "personamem_v2": run_persona_mem_task,
     }
     CONTROLLED_RUNNER = {
-        "gaia": run_gaia_task,         # B/C use baseline runner with prompt scaffold
+        "gaia": run_gaia_task_controlled,  # B/C use controlled runner with within-task EvoMem patches
         "gaia2": run_gaia2_task_with_are,
         "terminal_bench_2": run_terminal_bench_2_task_controlled,
         "locomo": run_locomo_task_controlled,
@@ -225,11 +225,19 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         results_c = await _run_group("C", test_tasks,
             lambda t: run_fn_controlled(t, "", "C", within_task_patch_mode="skillforge"))
     else:
-        # Multiround agentic benchmarks: B/C run same baseline (no scaffold injection)
-        print(f"    [B] Baseline (repeat)...", flush=True)
-        results_b = await _run_group("B", test_tasks, lambda t: run_fn_a(t, "", "B"))
-        print(f"    [C] Baseline (repeat)...", flush=True)
-        results_c = await _run_group("C", test_tasks, lambda t: run_fn_a(t, "", "C"))
+        # Multiround agentic benchmarks: progressive EvoArena/SkillForge injection
+        if benchmark == "gaia":
+            print(f"    [B] EvoArena EvoMem (within-task patch memory)...", flush=True)
+            results_b = await _run_group("B", test_tasks,
+                lambda t: run_fn_controlled(t, "", "B", within_task_patch_mode="evoarena"))
+            print(f"    [C] SkillForge (B + failure-aware patch routing)...", flush=True)
+            results_c = await _run_group("C", test_tasks,
+                lambda t: run_fn_controlled(t, "", "C", within_task_patch_mode="skillforge"))
+        else:
+            print(f"    [B] Baseline (repeat)...", flush=True)
+            results_b = await _run_group("B", test_tasks, lambda t: run_fn_a(t, "", "B"))
+            print(f"    [C] Baseline (repeat)...", flush=True)
+            results_c = await _run_group("C", test_tasks, lambda t: run_fn_a(t, "", "C"))
 
     print(f"\n  Evaluating with EM (LLM-Judge as tie-breaker)...", flush=True)
     eval_tasks = []
@@ -373,7 +381,7 @@ async def main():
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
     BENCHMARKS_TO_RUN = [
-        "gaia2", "terminal_bench_2"
+        "gaia", "locomo"
     ]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}

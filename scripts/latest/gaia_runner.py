@@ -48,12 +48,72 @@ from scripts.latest.eval import (
 )
 
 MODEL = "deepseek-v4-pro"
-CONCURRENCY = 15
+CONCURRENCY = 5
 TASK_TIMEOUT_QA = 180
 TASK_TIMEOUT_AGENT = 300
 QUALITY_THRESHOLD = 5
 
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest")
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Group B/C Augmentations for Multi-Turn Agentic Benchmarks (GAIA, GAIA2)
+#
+#  Since CodeBuddy SDK is a black box (no between-turn injection), we encode
+#  EvoArena EvoMem principles into the system prompt augmentation. This gives
+#  the agent metacognitive guidance to self-correct and verify during reasoning.
+#
+#  Progressive improvement design:
+#    A (Baseline):       No augmentation (standard system prompt only)
+#    B (EvoArena EvoMem): Self-correction + verification protocol
+#    C (SkillForge):      B's protocol + failure-aware strategy diversification
+#                         + cross-task experience retrieval
+# ══════════════════════════════════════════════════════════════════════════════
+
+EVOARENA_AUGMENTATION = """
+## Self-Correction & Verification Protocol
+
+Apply these metacognitive principles during your multi-step reasoning:
+
+1. **Continuous Self-Monitoring**: Every 3-4 turns, pause and verify whether your
+   current direction is correct. If you detect a contradiction or error in your
+   previous reasoning, explicitly say "I need to correct my previous conclusion"
+   and explain the correction before proceeding.
+
+2. **Cross-Verification**: Never trust a single source. When you find a factual
+   claim, verify it with at least one independent source before accepting it.
+   If sources disagree, prefer official/primary sources over secondary ones.
+
+3. **Adaptive Search Strategy**: If a search returns no useful results, immediately
+   try a DIFFERENT keyword strategy (broader term, synonym, related concept)
+   rather than paginating through empty results or rephrasing the same query.
+
+4. **Budget Awareness**: You have limited turns. If you spend 5+ turns on one
+   sub-problem without progress, explicitly note it and move to a different
+   approach or sub-problem. You can revisit later if time permits.
+
+5. **Error Recovery**: When you realize you have been pursuing a wrong lead:
+   (a) State what was wrong and why,
+   (b) Identify the correct direction,
+   (c) Pursue the new direction immediately without dwelling on the error.
+
+6. **Final Verification**: Before submitting your answer, verify each component
+   of your reasoning chain is correct. If the answer is numerical, double-check
+   with Python computation.
+"""
+
+SKILLFORGE_AUGMENTATION = EVOARENA_AUGMENTATION + """
+## Precision Refinement
+
+Beyond self-correction, apply these refinements:
+
+1. **Failure Diagnosis**: When a search or computation fails, briefly state WHY
+   (wrong assumption? wrong tool? wrong query scope?) before attempting again.
+   This converts reactive correction into proactive prevention.
+
+2. **Answer Format Calibration**: Before final submission, strip ALL explanatory
+   text and output ONLY the exact answer in the requested format. If the question
+   asks for "a name", output just the name — no sentences, no commentary.
+"""
 
 # ─── Trace Logger (for human review of prompts & responses) ───────────────
 TASK_LIMITS = {"gaia": 165, "gaia2": 50, "swebench_dynamic": 30}
@@ -210,11 +270,30 @@ class SelfCorrectionDetector:
         correction_end = min(len(response_text), correction_match.end() + 400) if correction_match else len(response_text)
         correction_snippet = response_text[correction_start:correction_end].strip()
 
+        # Extract the revised conclusion: text after the correction marker
+        # (the agent states what the correct conclusion should be)
+        post_correction_text = response_text[correction_match.end():].strip() if correction_match else ""
+        # Take up to 300 chars after correction as the revised conclusion
+        revised_conclusion = post_correction_text[:300].split("\n\n")[0].strip()
+
+        # Extract revision rationale: the explanation between correction and
+        # the next action or paragraph break
+        rationale_start = 0
+        if correction_match:
+            # The rationale is typically the sentence containing the correction trigger
+            rationale = correction_snippet[100:400].strip()
+        else:
+            rationale = "self-detected error" if is_error else "self-detected refinement"
+
         return {
             "patch_id": f"sc_{self._patch_id:04d}",
             "turn": turn,
+            "revised_at_turn": turn,  # EvoMem compatibility: correction occurs this turn
             "prior_conclusion": prior_conclusion,
+            "conclusion": prior_conclusion,  # EvoMem compat: old/wrong conclusion
             "correction_snippet": correction_snippet[:500],
+            "revised_conclusion": revised_conclusion,  # EvoMem compat: corrected conclusion
+            "revision_rationale": rationale[:300],  # EvoMem compat: why correction was needed
             "is_error_patch": is_error,
             "correction_type": "error" if is_error else "refinement",
             "timestamp": time.time(),

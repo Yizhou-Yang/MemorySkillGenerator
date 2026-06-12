@@ -207,7 +207,7 @@ async def _evidence_weighted_vote(task: dict, responses: list[str],
     for ans in unique_answers:
         evidence_prompt = (
             f"Question: {question}\n\n"
-            f"Conversation Context:\n{context[:3000]}\n\n"
+            f"Conversation Context:\n{context[:2000]}\n\n"
             f"Proposed Answer: {ans}\n\n"
             f"Does the conversation context contain DIRECT evidence "
             f"supporting this answer? Reply ONLY with a number 0-3:\n"
@@ -224,11 +224,12 @@ async def _evidence_weighted_vote(task: dict, responses: list[str],
         except Exception:
             evidence_scores[ans] = 1  # Default weight if call fails
 
-    # Step 4: Apply evidence weighting: count * (1 + evidence_score * 0.5)
+    # Step 4: Apply conservative evidence weighting: count * (1 + evidence_score * 0.3)
+    # 0.3 multiplier ensures evidence can tip ties but cannot override a 2-vote majority
     weighted: dict[str, float] = {}
     for ans in unique_answers:
         ev_score = evidence_scores.get(ans, 1)
-        weight = counter[ans] * (1.0 + ev_score * 0.5)
+        weight = counter[ans] * (1.0 + ev_score * 0.3)
         weighted[ans] = weight
 
     consensus = max(weighted, key=weighted.get)

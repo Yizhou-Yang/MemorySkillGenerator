@@ -230,11 +230,12 @@ async def _persona_consistent_vote(task: dict, responses: list[str],
         except Exception:
             consistency_scores[ans] = 1
 
-    # Step 4: Apply persona-consistency weighting: count * (1 + score * 0.5)
+    # Step 4: Apply conservative persona-consistency weighting: count * (1 + score * 0.3)
+    # 0.3 multiplier ensures consistency can tip ties but cannot override a 2-vote majority
     weighted: dict[str, float] = {}
     for ans in unique_answers:
         cs = consistency_scores.get(ans, 1)
-        weight = counter[ans] * (1.0 + cs * 0.5)
+        weight = counter[ans] * (1.0 + cs * 0.3)
         weighted[ans] = weight
 
     consensus = max(weighted, key=weighted.get)
