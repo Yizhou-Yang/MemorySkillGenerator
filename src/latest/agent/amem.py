@@ -35,7 +35,7 @@ class AmemAgent(BaseAgent):
     BENCHMARKS = {"locomo", "personamem_v2"}
 
     def __init__(self, model: str = "deepseek-v4-pro",
-                 backend: str = "openai",
+                 backend: str = "codebuddy",
                  retrieve_k: int = 10,
                  embedding_model: str = "all-MiniLM-L6-v2"):
         self.model = model

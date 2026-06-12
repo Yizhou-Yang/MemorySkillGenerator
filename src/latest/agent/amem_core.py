@@ -1,5 +1,5 @@
-from ast import Str
 from typing import List, Dict, Optional, Literal, Any, Union
+import asyncio
 import json
 from datetime import datetime
 import uuid
@@ -172,6 +172,113 @@ class SGLangController(BaseLLMController):
             empty_response = self._generate_empty_response(response_format)
             return json.dumps(empty_response)
 
+class CodeBuddyController(BaseLLMController):
+    """CodeBuddy SDK controller for memory metadata generation.
+
+    Uses the project's primary LLM backend (CodeBuddy Agent SDK) which
+    routes to DeepSeek-V4-Pro. Does NOT require OPENAI_API_KEY.
+    """
+    def __init__(self, model: str = "deepseek-v4-pro"):
+        self.model = model
+
+    def _generate_empty_value(self, schema_type: str, schema_items: dict = None) -> Any:
+        if schema_type == "array":
+            return []
+        elif schema_type == "string":
+            return ""
+        elif schema_type == "object":
+            return {}
+        elif schema_type == "number" or schema_type == "integer":
+            return 0
+        elif schema_type == "boolean":
+            return False
+        return None
+
+    def _generate_empty_response(self, response_format: dict) -> dict:
+        if "json_schema" not in response_format:
+            return {}
+        schema = response_format["json_schema"]["schema"]
+        result = {}
+        if "properties" in schema:
+            for prop_name, prop_schema in schema["properties"].items():
+                result[prop_name] = self._generate_empty_value(
+                    prop_schema["type"], prop_schema.get("items"))
+        return result
+
+    def _build_json_instruction(self, response_format: dict) -> str:
+        """Build a JSON schema instruction string from response_format."""
+        if "json_schema" not in response_format:
+            return "\n\nYou MUST respond with ONLY a valid JSON object. No other text."
+        schema = response_format["json_schema"]["schema"]
+        schema_str = json.dumps(schema, indent=2)
+        return (
+            "\n\nYou MUST respond with ONLY a valid JSON object matching this schema:\n"
+            f"```json\n{schema_str}\n```\n"
+            "No explanations, no markdown outside the JSON block."
+        )
+
+    def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
+        """Get JSON completion via CodeBuddy SDK (sync wrapper)."""
+        json_instruction = self._build_json_instruction(response_format)
+        full_prompt = prompt + json_instruction
+
+        async def _inner():
+            from codebuddy_agent_sdk import (
+                query, CodeBuddyAgentOptions, AssistantMessage
+            )
+            opt = CodeBuddyAgentOptions(
+                permission_mode="bypassPermissions",
+                model=self.model,
+                max_turns=1,
+                cwd="/tmp",
+            )
+            text = ""
+            gen = None
+            try:
+                async with asyncio.timeout(60):
+                    gen = query(prompt=full_prompt, options=opt)
+                    async for msg in gen:
+                        if isinstance(msg, AssistantMessage):
+                            for block in msg.content:
+                                if hasattr(block, "text") and block.text:
+                                    text += block.text
+                            if text:
+                                break
+            except Exception:
+                pass
+            finally:
+                if gen is not None:
+                    try:
+                        await gen.aclose()
+                    except Exception:
+                        pass
+            return text
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_inner())
+        finally:
+            _shutdown_event_loop(loop)
+
+
+def _shutdown_event_loop(loop: asyncio.AbstractEventLoop):
+    """Gracefully shutdown an event loop."""
+    try:
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    except Exception:
+        pass
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        loop.close()
+
+
 class LiteLLMController(BaseLLMController):
     """LiteLLM controller for universal LLM access including Ollama and SGLang"""
     def __init__(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None):
@@ -236,7 +343,7 @@ class LiteLLMController(BaseLLMController):
 class LLMController:
     """LLM-based controller for memory metadata generation"""
     def __init__(self, 
-                 backend: Literal["openai", "ollama", "sglang"] = "sglang",
+                 backend: Literal["openai", "ollama", "sglang", "codebuddy"] = "codebuddy",
                  model: str = "gpt-4", 
                  api_key: Optional[str] = None,
                  api_base: Optional[str] = None,
@@ -255,8 +362,11 @@ class LLMController:
         elif backend == "sglang":
             # Direct SGLang API calls (better performance, no proxy)
             self.llm = SGLangController(model, sglang_host, sglang_port)
+        elif backend == "codebuddy":
+            # CodeBuddy SDK — same backend as the rest of SkillForge
+            self.llm = CodeBuddyController(model)
         else:
-            raise ValueError("Backend must be 'openai', 'ollama', or 'sglang'")
+            raise ValueError("Backend must be 'openai', 'ollama', 'sglang', or 'codebuddy'")
 
 class MemoryNote:
     """Basic memory unit with metadata"""
@@ -279,11 +389,14 @@ class MemoryNote:
         
         # Generate metadata using LLM if not provided and controller is available
         if llm_controller and any(param is None for param in [keywords, context, category, tags]):
-            analysis = self.analyze_content(content, llm_controller)
-            print("analysis", analysis)
-            keywords = keywords or analysis["keywords"]
-            context = context or analysis["context"]
-            tags = tags or analysis["tags"]
+            try:
+                analysis = self.analyze_content(content, llm_controller)
+                print("analysis", analysis)
+                keywords = keywords or analysis.get("keywords", [])
+                context = context or analysis.get("context", "General")
+                tags = tags or analysis.get("tags", [])
+            except Exception as e:
+                print(f"[MemoryNote] LLM metadata gen failed (non-fatal): {e}")
         
         # Set default values for optional parameters
         self.id = id or str(uuid.uuid4())
@@ -668,8 +781,8 @@ class AgenticMemorySystem:
     """Memory management system with embedding-based retrieval"""
     def __init__(self, 
                  model_name: str = 'all-MiniLM-L6-v2',
-                 llm_backend: str = "sglang",
-                 llm_model: str = "gpt-4o-mini",
+                 llm_backend: str = "codebuddy",
+                 llm_model: str = "deepseek-v4-pro",
                  evo_threshold: int = 100,
                  api_key: Optional[str] = None,
                  api_base: Optional[str] = None,

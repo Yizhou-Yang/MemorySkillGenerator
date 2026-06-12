@@ -66,7 +66,7 @@ _trace = TraceLogger(RESULTS_DIR)
 
 
 async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
-                                   group: str = "A") -> dict:
+                                   group: str = "A", **kwargs) -> dict:
     """Run a GAIA2 task using the real ARE simulation environment.
 
     The LLM interacts with the environment through function calling:

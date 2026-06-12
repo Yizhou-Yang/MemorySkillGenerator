@@ -43,22 +43,16 @@ async def _run_with_agent(task: dict, experience_section: str, group: str,
                           within_task_patch_mode: str | None) -> dict:
     """Core execution via Terminus2Agent with EvoMem injection."""
     from src.latest.agent.terminus2 import Terminus2Agent
-    from src.latest.injection import format_within_task_patches
 
     task_id = task["task_id"]
 
-    # Build within-task patches for B/C groups
+    # Within-task EvoMem injection is handled inside Terminus2Agent's multi-turn loop
+    # (analogous to gaia_runner's run_gaia_task_controlled).
+    # The group label and mode are passed through for the agent to use.
     aug = experience_section or ""
-    if within_task_patch_mode and group in ("B", "C"):
-        patches = format_within_task_patches(
-            task.get("description", ""),
-            mode=within_task_patch_mode,
-            task_id=task_id,
-        )
-        if patches:
-            aug = f"{aug}\n\n{patches}" if aug else patches
 
     agent = Terminus2Agent()
     result = await agent.run_task(task, experience_section=aug, group=group)
     result["_aug_prompt"] = aug
+    result["_within_task_patch_mode"] = within_task_patch_mode
     return result
