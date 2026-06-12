@@ -83,7 +83,12 @@ class Terminus2Agent(BaseAgent):
         # Try Harbor Docker mode first
         if self._harbor_available and self._docker_available:
             try:
-                return self._run_via_harbor(task, experience_section, group)
+                result = self._run_via_harbor(task, experience_section, group)
+                # Check if harbor produced usable output
+                if (result.get("response") and not result.get("error") and
+                        result.get("return_code") == 0):
+                    return result
+                # Harbor ran but produced no output — fall through
             except Exception as e:
                 # Fall through to next mode
                 pass
@@ -163,8 +168,11 @@ class Terminus2Agent(BaseAgent):
             # Run via harbor
             env = os.environ.copy()
             env["DEEPSEEK_API_KEY"] = env.get("DEEPSEEK_API_KEY", "")
+            harbor_bin = os.path.join(os.path.dirname(_HARBOR_PYTHON), "harbor")
+            if not os.path.exists(harbor_bin):
+                harbor_bin = shutil.which("harbor") or "harbor"
             cmd = [
-                _HARBOR_PYTHON, "-m", "harbor", "run",
+                harbor_bin, "run",
                 "--path", task_dir,
                 "--agent", "terminus-2",
                 "--model", f"deepseek/{self.model}",
@@ -201,11 +209,9 @@ class Terminus2Agent(BaseAgent):
                        group: str) -> dict:
         """Run task by executing commands directly on local shell.
 
-        This is a simplified version that:
-        1. Sets up sandbox directory with task files
-        2. Has the LLM generate a shell command
-        3. Executes the command locally
-        4. Returns stdout for evaluation
+        First generates a single bash command via LLM. If the LLM response
+        is reasoning text (not a command) or exceeds turn limits, falls
+        through to prompt-only mode by raising an exception.
 
         No Docker isolation — use with trusted tasks only.
         """
@@ -256,6 +262,11 @@ class Terminus2Agent(BaseAgent):
             raise APIUnavailableError("API unavailable")
 
         command = r.get("text", "").strip()
+
+        # Detect unusable responses — fall through to prompt-only mode
+        if not command or "Max turns" in command or len(command) < 3:
+            raise RuntimeError(f"shell_mode_unusable: {command[:100]}")
+
         result["response"] = command
 
         # Execute locally
@@ -281,12 +292,19 @@ class Terminus2Agent(BaseAgent):
 
     async def _run_prompt_only(self, task: dict, experience_section: str,
                                group: str) -> dict:
-        """Generate command text only — no execution.
+        """Solve task via multi-turn LLM reasoning — no code execution.
 
         Used when neither Docker nor shell execution is available.
-        The LLM response is compared against the expected output string.
+        The LLM reasons through the problem with multiple turns (up to 5),
+        then outputs the final answer. The response is compared against
+        the expected output string by the benchmark evaluator.
+
+        For Terminal-Bench-2.0 coding tasks, the LLM is expected to:
+        1. Analyze the problem requirements
+        2. Reason about the solution approach
+        3. Produce the correct output/code/answer
         """
-        from scripts.latest.llm_client import _llm_call, _check_api_error
+        from scripts.latest.llm_client import _llm_call_notool, _check_api_error
         from scripts.latest.trace import APIUnavailableError
 
         task_id = task["task_id"]
@@ -300,20 +318,24 @@ class Terminus2Agent(BaseAgent):
         t0 = time.time()
 
         system = (
-            "You are a terminal expert. Given a task, output the exact "
-            "output that would result from running the correct command. "
-            "Output ONLY the result, nothing else."
+            "You are an expert software engineer and systems administrator. "
+            "Given a technical task, solve it by reasoning step by step "
+            "and producing the exact correct output.\n\n"
+            "For coding tasks: write the complete solution with all necessary code.\n"
+            "For terminal tasks: produce the exact output the correct command would generate.\n"
+            "For data analysis: show your work and give the precise answer.\n\n"
+            "Important: Output ONLY the final result on the last line. "
+            "The last line of your response will be compared exactly against the expected answer."
         )
         if experience_section:
             system += f"\n\n## SkillForge Experience\n{experience_section}"
 
-        prompt = (
-            f"[System]\n{system}\n\n"
+        user_prompt = (
             f"Task: {instruction}\n\n"
-            f"Expected output:"
+            f"Solve this task. Show your reasoning, then output the final answer on the last line."
         )
 
-        r = await _llm_call(prompt, max_turns=1, timeout=self.timeout)
+        r = await _llm_call_notool(system, user_prompt, timeout=self.timeout)
         if _check_api_error(r):
             raise APIUnavailableError("API unavailable")
 

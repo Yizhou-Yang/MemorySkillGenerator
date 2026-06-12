@@ -254,11 +254,18 @@ class CodeBuddyController(BaseLLMController):
                         pass
             return text
 
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(_inner())
-        finally:
-            _shutdown_event_loop(loop)
+        def _run_in_new_loop():
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(_inner())
+            finally:
+                _shutdown_event_loop(loop)
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run_in_new_loop)
+            return future.result(timeout=70)
 
 
 def _shutdown_event_loop(loop: asyncio.AbstractEventLoop):

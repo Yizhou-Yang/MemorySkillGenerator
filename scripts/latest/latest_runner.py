@@ -173,15 +173,22 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     run_fn_a = BASELINE_RUNNER.get(benchmark)
     run_fn_controlled = CONTROLLED_RUNNER.get(benchmark)
 
-    # For GAIA (multiround agent), build prompt scaffold instead of broken controlled runner
-    is_gaia = benchmark == "gaia"
+    # Multiround agentic benchmarks (GAIA, GAIA2, Terminal-Bench):
+    #   All A/B/C groups run the same baseline runner — no scaffold injection.
+    #   Self-consistency and within-task patches are designed for single-round
+    #   QA and would interfere with the agent's multi-turn reasoning workflow.
+    #
+    # Single-round QA benchmarks (LoCoMo, PersonaMem-v2):
+    #   Group B uses self-consistency sampling (3 samples, majority vote).
+    #   Group C uses evidence-weighted / persona-consistent voting.
+    is_qa = benchmark in ("locomo", "personamem_v2")
 
     if not run_fn_a:
         print(f"  ERROR: No runner for benchmark '{benchmark}'")
         return {"error": f"no_runner_{benchmark}"}
 
     print(f"\n  Testing {len(test_tasks)} tasks x 3 groups (A/B/C)...")
-    concurrency = 3 if benchmark in ("gaia2", "terminal_bench_2", "locomo") else CONCURRENCY
+    concurrency = 3 if benchmark in ("gaia2", "terminal_bench_2") else CONCURRENCY
     sem = asyncio.Semaphore(concurrency)
 
     async def _run_group(label: str, tasks: list[dict], build_coro):
@@ -209,21 +216,20 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     print(f"    [A] Baseline (no augmentation)...", flush=True)
     results_a = await _run_group("A", test_tasks, lambda t: run_fn_a(t, "", "A"))
 
-    print(f"    [B] EvoArena EvoMem (reasoning scaffold)...", flush=True)
-    if is_gaia:
-        results_b = await _run_group("B", test_tasks,
-            lambda t: run_fn_a(t, _build_gaia_scaffold(t, "evoarena"), "B"))
-    else:
+    if is_qa:
+        # QA benchmarks: B = self-consistency majority vote, C = evidence-weighted vote
+        print(f"    [B] Self-Consistency (majority vote, 3 samples)...", flush=True)
         results_b = await _run_group("B", test_tasks,
             lambda t: run_fn_controlled(t, "", "B", within_task_patch_mode="evoarena"))
-
-    print(f"    [C] EvoArena + SkillForge (pitfall-aware scaffold)...", flush=True)
-    if is_gaia:
-        results_c = await _run_group("C", test_tasks,
-            lambda t: run_fn_a(t, _build_gaia_scaffold(t, "skillforge"), "C"))
-    else:
+        print(f"    [C] Evidence-Weighted Self-Consistency...", flush=True)
         results_c = await _run_group("C", test_tasks,
             lambda t: run_fn_controlled(t, "", "C", within_task_patch_mode="skillforge"))
+    else:
+        # Multiround agentic benchmarks: B/C run same baseline (no scaffold injection)
+        print(f"    [B] Baseline (repeat)...", flush=True)
+        results_b = await _run_group("B", test_tasks, lambda t: run_fn_a(t, "", "B"))
+        print(f"    [C] Baseline (repeat)...", flush=True)
+        results_c = await _run_group("C", test_tasks, lambda t: run_fn_a(t, "", "C"))
 
     print(f"\n  Evaluating with EM (LLM-Judge as tie-breaker)...", flush=True)
     eval_tasks = []
@@ -367,7 +373,7 @@ async def main():
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
     BENCHMARKS_TO_RUN = [
-        "gaia", "gaia2", "terminal_bench_2", "locomo", "personamem_v2"
+        "gaia2", "terminal_bench_2"
     ]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}
@@ -435,63 +441,6 @@ async def main():
                 r = report["results"]
                 print(f"  {name:>20}: A={r['A_baseline']['em']:.1%}, B={r['B_evoarena']['em']:.1%}, C={r['C_skillforge']['em']:.1%}")
     await asyncio.sleep(2)
-
-
-def _build_gaia_scaffold(task: dict, mode: str) -> str:
-    """Build reasoning scaffold for GAIA multiround agent tasks.
-
-    GAIA tasks require multi-step web search + reasoning. The controlled
-    runner (run_gaia_task_controlled) is broken, so we inject structured
-    reasoning guidance via the experience_section instead.
-
-    Group B (evoarena): Standard multi-step reasoning checklist.
-    Group C (skillforge): Enhanced with common pitfall avoidance patterns.
-
-    Expected impact: 3-4pp improvement from structured reasoning guidance.
-    """
-    description = task.get("description", "")
-
-    # Detect question type
-    has_math = any(kw in description.lower() for kw in [
-        "calculate", "compute", "how many", "what is the", "sum", "average",
-        "percentage", "ratio", "equation", "formula",
-    ])
-    has_search = any(kw in description.lower() for kw in [
-        "find", "search", "look up", "who is", "when did", "where is",
-        "what year", "which", "name of",
-    ])
-
-    parts = ["## Multi-Step Reasoning Guide\n"]
-    parts.append("Follow these steps to answer accurately:")
-
-    step = 1
-    parts.append(f"  {step}. DECOMPOSE — break the question into sub-questions")
-    step += 1
-
-    if has_search:
-        parts.append(f"  {step}. SEARCH — use web search for each sub-question. Verify from multiple sources.")
-        step += 1
-
-    if has_math:
-        parts.append(f"  {step}. COMPUTE — use code execution for calculations. Double-check your work.")
-        step += 1
-
-    parts.append(f"  {step}. CROSS-VERIFY — check that all sub-answers are consistent with each other")
-    step += 1
-    parts.append(f"  {step}. SYNTHESIZE — combine sub-answers into one final answer")
-    step += 1
-    parts.append(f"  {step}. FORMAT — output ONLY the final answer, matching the requested format exactly")
-
-    if mode == "skillforge":
-        parts.append("\n### Common Pitfalls — AVOID THESE:")
-        parts.append("  • SHALLOW SEARCH: One search result is not enough — verify from multiple sources")
-        parts.append("  • PARTIAL ANSWER: Answering only part of a multi-part question is WRONG")
-        parts.append("  • UNIT ERRORS: Check units — mixing km/miles, MB/GB, etc. will give wrong answers")
-        parts.append("  • HALLUCINATION: If you can't find information, say so — don't guess")
-        parts.append("  • STALE DATA: Check publication dates — use the most recent information available")
-        parts.append("  • FORMAT MISMATCH: If the question asks for a name, give a name; if a number, give a number")
-
-    return "\n".join(parts)
 
 
 if __name__ == "__main__":

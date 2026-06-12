@@ -200,7 +200,7 @@ def _query_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) 
     """Pure text generation without CodeBuddy tools (for GAIA2 ARE interaction)."""
     async def _inner():
         opt = CodeBuddyAgentOptions(
-            permission_mode="bypassPermissions", model=MODEL, max_turns=3, cwd="/tmp",
+            permission_mode="bypassPermissions", model=MODEL, max_turns=50, cwd="/tmp",
             allowed_tools=[],  # No tools — pure text generation
             system_prompt=system_prompt,
         )

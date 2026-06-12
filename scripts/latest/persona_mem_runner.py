@@ -126,7 +126,7 @@ async def _run_self_consistency(task: dict, experience_section: str,
     # ── Group C: Persona-consistent voting ──
     if use_persona_verification:
         persona_traits = _extract_persona_traits(task)
-        consensus_answer, weights, persona_notes = _persona_consistent_vote(
+        consensus_answer, weights, persona_notes = await _persona_consistent_vote(
             task, all_responses, persona_traits, task.get("description", "")
         )
         method = "persona_consistent_self_consistency"
@@ -171,7 +171,7 @@ def _majority_vote(responses: list[str]) -> tuple[str, dict[str, int]]:
     return most_common, dict(counter)
 
 
-def _persona_consistent_vote(task: dict, responses: list[str],
+async def _persona_consistent_vote(task: dict, responses: list[str],
                               persona_traits: list[str],
                               description: str) -> tuple[str, dict[str, int], str]:
     """Persona-consistent voting for Group C.
@@ -223,7 +223,7 @@ def _persona_consistent_vote(task: dict, responses: list[str],
             f"3 = strongly consistent with persona traits"
         )
         try:
-            out = _llm_short_call(consistency_prompt, max_turns=1, timeout=30)
+            out = await _llm_short_call(consistency_prompt, max_turns=1, timeout=30)
             m = re.search(r'(\d+)', out)
             score = int(m.group(1)) if m else 1
             consistency_scores[ans] = min(3, max(0, score))

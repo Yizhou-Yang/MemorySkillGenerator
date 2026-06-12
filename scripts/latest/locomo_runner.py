@@ -136,7 +136,7 @@ async def _run_self_consistency(task: dict, experience_section: str,
 
     # ── Group C: Evidence-weighted aggregation ──
     if use_evidence_weighting:
-        consensus_answer, weights, evidence_notes = _evidence_weighted_vote(
+        consensus_answer, weights, evidence_notes = await _evidence_weighted_vote(
             task, all_responses, task.get("context", ""), task.get("description", "")
         )
         method = "evidence_weighted_self_consistency"
@@ -169,7 +169,7 @@ def _majority_vote(responses: list[str]) -> tuple[str, dict[str, int]]:
     return most_common, dict(counter)
 
 
-def _evidence_weighted_vote(task: dict, responses: list[str],
+async def _evidence_weighted_vote(task: dict, responses: list[str],
                              context: str, description: str) -> tuple[str, dict[str, int], str]:
     """Evidence-weighted voting for Group C.
 
@@ -217,7 +217,7 @@ def _evidence_weighted_vote(task: dict, responses: list[str],
             f"3 = strong explicit evidence (directly stated)"
         )
         try:
-            out = _llm_short_call(evidence_prompt, max_turns=1, timeout=30)
+            out = await _llm_short_call(evidence_prompt, max_turns=1, timeout=30)
             m = re.search(r'(\d+)', out)
             score = int(m.group(1)) if m else 1
             evidence_scores[ans] = min(3, max(0, score))

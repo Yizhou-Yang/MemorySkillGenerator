@@ -513,49 +513,6 @@ class AIResponseProcessor:
         burning turns that could be used for productive exploration.
     """
 
-class ProcessedResponse:
-    """Result of processing a raw LLM response."""
-
-    valid: bool = False
-    action_id: str = ""
-    params_raw: str = ""
-    params_parsed: dict[str, Any] = field(default_factory=dict)
-    is_completion: bool = False
-    raw_response: str = ""
-    clean_action: str = ""  # Only the action lines (NEXT_OP + PARAMS)
-    valuable_reasoning: str = ""  # AI-evaluated valuable non-action content
-    error_type: str = ""  # "no_action" | "invalid_id" | ""
-    ai_filtered: bool = False  # Whether AI evaluation was applied
-
-
-class AIResponseProcessor:
-    """AI-driven response processor for agentic loops.
-
-    Responsibilities:
-    1. Extract valid actions from LLM output (regex — fast, deterministic)
-    2. AI-evaluate non-action content to identify valuable reasoning
-    3. Maintain clean conversation history (actions + valuable reasoning + results)
-    4. Generate format-retry prompts when LLM output is malformed
-    5. Track retry state and enforce retry limits
-    6. Detect and break action loops (reduces wasted turns → lower δ_sem)
-
-    SRDP Theory Connection:
-        This processor is the runtime mechanism for controlling δ_att in the
-        agent's multi-turn execution. Each turn's conversation history is the
-        "context" in p_LLM(a|s, c) — if it's polluted with noise, the LLM's
-        attention to injected skills (c) degrades. By maintaining a high
-        signal-to-noise ratio in history, we ensure:
-
-        - Injected skills remain in attention-peak positions (head of context)
-        - Tool results (ground truth) get full attention weight
-        - Agent's own valuable reasoning is preserved for coherent planning
-        - Noise is removed before it accumulates and triggers Lost-in-the-Middle
-
-        The loop detection mechanism additionally prevents δ_sem degradation:
-        when the agent repeatedly calls the same tool without progress, it's
-        burning turns that could be used for productive exploration.
-    """
-
     def __init__(
         self,
         action_pattern: str = r'NEXT_OP:\s*(?P<action>op-\d{3})',
