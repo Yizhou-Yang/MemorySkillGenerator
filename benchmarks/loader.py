@@ -1,6 +1,6 @@
+from __future__ import annotations
 """Benchmark dataset loader."""
 
-from __future__ import annotations
 
 import glob
 import json
@@ -666,35 +666,119 @@ class BenchmarkLoader:
     # Production usage: harbor run --dataset terminal-bench@2.0 --agent terminus-2
 
     def _load_terminal_bench_evo(self) -> list[dict[str, Any]]:
-        """Load Terminal-Bench-Evo tasks from local JSON dataset.
+        """Load Terminal-Bench 2.0 tasks from HuggingFace dataset.
 
-        Task format:
+        Source: https://huggingface.co/datasets/harborframework/terminal-bench-2.0
+
+        Each task is a directory with:
+          - task.toml: metadata (difficulty, category, tags, timeouts)
+          - instruction.md: natural language task description
+          - tests/test.sh, tests/test_outputs.py: pytest-based verification
+
+        Task format produced:
           {
-            "task_id": str,
-            "instruction": str,
-            "expected_command": str,
-            "expected_output": str,
-            "files": {filename: content, ...} (optional)
+            "task_id": str (directory name),
+            "description": str (instruction.md content),
+            "expected": str (placeholder — eval via Harbor docker),
+            "context": str (JSON with metadata),
+            "metadata": dict (difficulty, category, tags),
+            "task_type": "terminal",
           }
-
-        Dataset path: config["data_path"] or
-          /tmp/harbor-datasets/datasets/terminal-bench/tasks.json
         """
-        logger.info("Loading Terminal-Bench-Evo from local dataset...")
-        data_path = self.config.get(
-            "data_path",
-            "/tmp/harbor-datasets/datasets/terminal-bench/tasks.json",
-        )
-        if not os.path.exists(data_path):
-            logger.warning(
-                f"Terminal-Bench dataset not found at {data_path}. "
-                "Creating empty task list. Download tasks from laude-institute/t-bench."
-            )
+        logger.info("Loading Terminal-Bench-2.0 from HuggingFace (harborframework/terminal-bench-2.0)...")
+        try:
+            from huggingface_hub import hf_hub_download, list_repo_files
+        except ImportError:
+            logger.error("huggingface_hub not installed. Install with: pip install huggingface_hub")
             return []
 
-        with open(data_path) as f:
-            raw = json.load(f)
+        try:
+            all_files = list_repo_files(
+                "harborframework/terminal-bench-2.0", repo_type="dataset"
+            )
+        except Exception as e:
+            logger.error(f"Failed to list terminal-bench-2.0 repo files: {e}")
+            # Fallback: try local data_path
+            data_path = self.config.get(
+                "data_path",
+                "/tmp/harbor-datasets/datasets/terminal-bench/tasks.json",
+            )
+            if os.path.exists(data_path):
+                logger.warning(f"Falling back to local file: {data_path}")
+                with open(data_path) as f:
+                    raw = json.load(f)
+                return self._parse_terminal_bench_tasks(raw)
+            return []
 
+        # Collect task directories (those with a task.toml)
+        task_dirs: set[str] = set()
+        for fpath in all_files:
+            parts = fpath.split("/")
+            if len(parts) >= 2 and parts[-1] == "task.toml":
+                task_dirs.add(parts[0])
+
+        task_dirs_sorted = sorted(task_dirs)
+        logger.info(
+            f"Found {len(task_dirs_sorted)} Terminal-Bench 2.0 tasks, "
+            f"loading up to {self.num_samples}"
+        )
+
+        tasks: list[dict[str, Any]] = []
+        for task_name in task_dirs_sorted:
+            if len(tasks) >= self.num_samples:
+                break
+            try:
+                # Download instruction.md
+                instruction_path = hf_hub_download(
+                    "harborframework/terminal-bench-2.0",
+                    f"{task_name}/instruction.md",
+                    repo_type="dataset",
+                )
+                with open(instruction_path) as f:
+                    instruction = f.read().strip()
+
+                # Download task.toml for metadata
+                toml_path = hf_hub_download(
+                    "harborframework/terminal-bench-2.0",
+                    f"{task_name}/task.toml",
+                    repo_type="dataset",
+                )
+                metadata = {}
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib
+                with open(toml_path, "rb") as f:
+                    meta = tomllib.load(f)
+                meta_sec = meta.get("metadata", {}) if isinstance(meta, dict) else {}
+                metadata = {
+                    "difficulty": meta_sec.get("difficulty", ""),
+                    "category": meta_sec.get("category", ""),
+                    "tags": meta_sec.get("tags", []),
+                    "author": meta_sec.get("author_name", ""),
+                }
+
+                tasks.append({
+                    "task_id": task_name,
+                    "description": instruction,
+                    "expected": f"[Terminal-Bench 2.0 task: {task_name} — evaluated via pytest in Docker container]",
+                    "context": json.dumps({
+                        "task_dir": task_name,
+                        "category": metadata.get("category", ""),
+                        "difficulty": metadata.get("difficulty", ""),
+                    }),
+                    "metadata": metadata,
+                    "task_type": "terminal",
+                })
+            except Exception as e:
+                logger.warning(f"Failed to load task '{task_name}': {e}")
+                continue
+
+        logger.info(f"Loaded {len(tasks)} Terminal-Bench 2.0 tasks from HuggingFace")
+        return tasks
+
+    def _parse_terminal_bench_tasks(self, raw: list) -> list[dict[str, Any]]:
+        """Parse old-style JSON task list (fallback)."""
         tasks: list[dict[str, Any]] = []
         for idx, item in enumerate(raw):
             if len(tasks) >= self.num_samples:
