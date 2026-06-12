@@ -349,7 +349,7 @@ async def main():
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
     BENCHMARKS_TO_RUN = [
-        "gaia", "locomo"
+        "gaia", "gaia2", "terminal_bench_2", "locomo", "personamem_v2"
     ]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}
