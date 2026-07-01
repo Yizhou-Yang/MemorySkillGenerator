@@ -23,7 +23,10 @@ os.environ['LLM_PROVIDER'] = 'codebuddy'
 os.environ['CODEBUDDY_MODEL'] = 'hy3-preview-ioa'
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
-from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
+try:
+    from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
+except Exception:  # reviewer path (no CodeBuddy CLI) → OpenAI-compatible backend
+    query = CodeBuddyAgentOptions = AssistantMessage = ToolUseBlock = None
 
 from latest import (SkillForgeLatest, ExperienceLibrary, Experience,
                 build_augmented_prompt, ai_review_experience,

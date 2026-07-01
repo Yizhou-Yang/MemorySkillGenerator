@@ -32,6 +32,7 @@ PatchMemory = _engine.PatchMemory
 ground = _engine.ground
 render_patches_plain = _engine.render_patches_plain
 render_patches_grounded = _engine.render_patches_grounded
+_lexical_sim = _engine._lexical_sim
 repair_hint = _engine.repair_hint
 ActionOutcome = _engine.ActionOutcome
 ResolveConfig = _engine.ResolveConfig

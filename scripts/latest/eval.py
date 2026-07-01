@@ -153,7 +153,9 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         return {"score": 0.0, "em": 0.0, "method": "empty"}
 
     extracted = await llm_extract_answer(response, result.get("task_id", ""))
-    em = exact_match(extracted or response, expected)
+    # Match against BOTH the extracted span and the full response (max): a
+    # wrong-but-nonempty extraction must not shadow a correct full response.
+    em = max(exact_match(extracted, expected), exact_match(response, expected))
 
     llm_score = 0.0
     if use_llm_judge and em < 1.0:

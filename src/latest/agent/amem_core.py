@@ -71,26 +71,44 @@ class OpenAIController(BaseLLMController):
     def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
         try:
             from openai import OpenAI
-            self.model = model
-            if api_key is None:
-                api_key = os.getenv('OPENAI_API_KEY')
-            if api_key is None:
-                raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
-            self.client = OpenAI(api_key=api_key)
         except ImportError:
             raise ImportError("OpenAI package not found. Install it with: pip install openai")
-    
+        # Support any OpenAI-compatible endpoint (vLLM, TGI, a gateway) via env, so
+        # external reviewers can point LoCoMo at their own model.
+        self.model = os.getenv("OPENAI_MODEL") or os.getenv("DEEPSEEK_MODEL") or model
+        base_url = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+                    or os.getenv("DEEPSEEK_BASE_URL"))
+        if api_key is None:
+            api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+        client_kwargs = {"api_key": api_key or "EMPTY"}  # local servers accept any key
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        self.client = OpenAI(**client_kwargs)
+
     def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You must respond with a JSON object."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format=response_format,
-            temperature=temperature,
-            max_tokens=1000
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You must respond with a JSON object."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format=response_format,
+                temperature=temperature,
+                max_tokens=1000
+            )
+        except Exception:
+            # Some OpenAI-compatible servers reject a structured response_format;
+            # retry as a plain JSON-instructed completion.
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Respond with ONLY a valid JSON object."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=temperature,
+                max_tokens=1000
+            )
         return response.choices[0].message.content
 
 class OllamaController(BaseLLMController):
@@ -410,8 +428,14 @@ class LLMController:
             # Direct SGLang API calls (better performance, no proxy)
             self.llm = SGLangController(model, sglang_host, sglang_port)
         elif backend == "codebuddy":
-            # CodeBuddy SDK — same backend as the rest of SkillForge
-            self.llm = CodeBuddyController(model)
+            # CodeBuddy SDK — same backend as the rest of SkillForge. On machines
+            # without the CodeBuddy CLI (external reviewers) fall back transparently
+            # to an OpenAI-compatible endpoint so LoCoMo still runs end-to-end.
+            try:
+                import codebuddy_agent_sdk  # noqa: F401
+                self.llm = CodeBuddyController(model)
+            except Exception:
+                self.llm = OpenAIController(model)
         else:
             raise ValueError("Backend must be 'openai', 'ollama', 'sglang', or 'codebuddy'")
 

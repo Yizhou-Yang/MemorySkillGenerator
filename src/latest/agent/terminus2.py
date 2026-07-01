@@ -33,8 +33,13 @@ _HARBOR_PYTHON = "/root/.conda/envs/harbor312/bin/python"
 # Cache dir for downloaded terminal-bench-2.0 tasks
 _TERMINAL_BENCH_CACHE = Path("/tmp/skillforge_terminal_bench_cache")
 
-# Max agent turns for terminal-bench tasks
-_MAX_AGENT_TURNS = 10
+# Max agent turns for terminal-bench tasks. 10 was far too few for multi-step build
+# tasks (install deps, configure, compile, test); leaderboard agents run many more.
+# Env-tunable.
+_MAX_AGENT_TURNS = int(os.environ.get("TB2_MAX_TURNS", "40"))
+# Per-command timeout inside the container. 60s killed apt-get installs and compiles
+# mid-run (rc=-1 [TIMEOUT]); raise so build steps can finish.
+_CMD_TIMEOUT = int(os.environ.get("TB2_CMD_TIMEOUT", "180"))
 
 
 def _has_harbor() -> bool:
@@ -459,9 +464,17 @@ class Terminus2Agent(BaseAgent):
         task_dir = self._find_task_dir(container_id)
         has_solution = self._check_solution_exists(container_id)
 
+        # EvoMem: the retrieved cross-task patch block is NOT pasted into the prompt
+        # prefix (Terminus-2 degrades on long prefixes). It is materialized inside the
+        # container at /tmp/EVOMEM.md (written below) -- deliberately outside /workspace
+        # so it cannot perturb a task verifier that inspects the working tree (e.g. a
+        # `git status` check). The prompt carries only a short reference to it.
         if experience_section:
             system_prompt += (
-                f"\n\n## SkillForge Experience\n{experience_section}"
+                "\n\n## Memory\nRelevant prior solutions for this task are materialized "
+                "in the container at /tmp/EVOMEM.md. Read it when useful "
+                "(`cat /tmp/EVOMEM.md`); it is supporting context, and the task "
+                "instruction remains authoritative."
             )
 
         # EvoMem mode: instruct the agent to use patch history for
@@ -491,7 +504,18 @@ class Terminus2Agent(BaseAgent):
             "cp /workspace/tests/* /tests/ 2>/dev/null; "
             "true"
         )
-        
+
+        # Materialize the EvoMem patch block as a file the agent reads on demand,
+        # rather than inflating the prompt prefix. base64 so arbitrary content
+        # survives the shell unscathed; /tmp so it never touches the evaluated tree.
+        if experience_section:
+            import base64
+            _mem_b64 = base64.b64encode(experience_section.encode("utf-8")).decode("ascii")
+            self._docker_exec(
+                container_id,
+                f"echo {_mem_b64} | base64 -d > /tmp/EVOMEM.md"
+            )
+
         # Detect available tools
         detect_out, _ = self._docker_exec(
             container_id,
@@ -535,6 +559,7 @@ class Terminus2Agent(BaseAgent):
         # agent can recover overwritten knowledge and avoid repeating
         # failed approaches.
         patches: list[dict] = []
+        empty_streak = 0   # tolerate transient empty replies from the model
 
         for turn in range(max_turns):
             # Build the prompt with recent command outputs
@@ -550,7 +575,7 @@ class Terminus2Agent(BaseAgent):
             # EvoMem: inject recent patches so the agent can see what
             # has been tried, what succeeded, and what failed — following
             # the EvoArena paper's principle of traceable memory evolution.
-            if patches:
+            if patches and within_task_patch_mode in ("evoarena", "skillforge"):
                 recent_patches = patches[-5:]  # last 5 patches
                 context += "\n## EvoMem Patch History (recent)\n"
                 for p in recent_patches:
@@ -566,8 +591,15 @@ class Terminus2Agent(BaseAgent):
 
             response_text = r.get("text", "").strip()
             if not response_text:
+                # An empty reply from the model is usually transient (rate-limit /
+                # truncation). Do NOT end the task on the first one -- retry, and give up
+                # only after several in a row. Breaking here floored many tasks at turn 1.
                 agent_log_parts.append(f"[Turn {turn+1}] Empty response")
-                break
+                empty_streak += 1
+                if empty_streak >= 4:
+                    break
+                continue
+            empty_streak = 0
 
             # Parse THINK / CMD / DONE from response
             # Model outputs "THINK:" and "CMD:" (preferred), but also
@@ -621,7 +653,7 @@ class Terminus2Agent(BaseAgent):
                 cmd_output, cmd_rc = self._docker_exec(
                     container_id,
                     f"cd /workspace && {command}",
-                    timeout=60
+                    timeout=_CMD_TIMEOUT
                 )
                 output_summary = cmd_output[:2000] if cmd_output else "(empty)"
                 agent_log_parts.append(

@@ -38,6 +38,13 @@ MODELS=(
 # Resume by default so a crash mid-sweep doesn't lose finished models.
 export RESUME="${RESUME:-1}"
 
+# Iteration chains. Patch memory is feedback across iterations of the SAME task, so on
+# the independent-task benchmarks (gaia, gaia2, terminal_bench_2) a single pass leaves
+# every chain a singleton: B and C inject nothing and collapse onto A. Default to 3 so
+# memory actually threads across a task's own iterations; override with ITER_CHAIN=1
+# only when you explicitly want the A-only / no-memory baseline.
+export ITER_CHAIN="${ITER_CHAIN:-3}"
+
 for M in "${MODELS[@]}"; do
   echo ""
   echo "########################################################################"

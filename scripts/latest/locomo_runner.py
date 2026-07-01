@@ -39,11 +39,14 @@ _SC_TEMPERATURES = [0.3, 0.7, 1.0]
 
 async def run_locomo_task(task: dict, experience_section: str = "",
                            group: str = "A") -> dict:
-    """Run LoCoMo task — Group A baseline (single LLM call, no augmentation)."""
+    """Run LoCoMo task with a single LLM call. The injected memory block is passed
+    through to the agent prompt: empty for A (no memory), the retrieved patch block
+    for B/C. A-Mem's own conversation retrieval (retrieve_k=15) is unchanged across
+    arms, so the patch channel is strictly additive."""
     from src.latest.agent.amem import AmemAgent
     agent = AmemAgent(retrieve_k=15)
-    result = await agent.run_task(task, experience_section="", group=group)
-    result["_aug_prompt"] = ""
+    result = await agent.run_task(task, experience_section=experience_section, group=group)
+    result["_aug_prompt"] = experience_section
     return result
 
 

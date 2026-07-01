@@ -12,10 +12,179 @@ import os
 import re
 import time
 
-from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
+# The CodeBuddy Agent SDK is Tencent-internal and only present on the gateway.
+# Guard the import so the whole pipeline still imports (and runs, via the
+# OpenAI-compatible backend below) for external reviewers who don't have it.
+try:
+    from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
+    _HAS_CODEBUDDY = True
+except Exception:  # no CodeBuddy CLI → reviewer/OpenAI-compatible path
+    query = CodeBuddyAgentOptions = AssistantMessage = ToolUseBlock = None
+    _HAS_CODEBUDDY = False
+
+try:
+    from profiling import add_tokens as _prof_add_tokens
+except Exception:  # pragma: no cover - profiling is optional plumbing
+    def _prof_add_tokens(*_a, **_k):  # type: ignore
+        return None
 
 
 MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro")
+
+# ─── OpenAI-compatible backend (reproducibility path) ─────────────────────
+# When the CodeBuddy SDK is absent, or LLM_PROVIDER asks for it, every LLM call
+# routes to a standard OpenAI-compatible chat endpoint instead. ARE's tool
+# schemas are already OpenAI-shaped, so GAIA2 native tool-calling works here too.
+# Reviewers set: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL (or CODEBUDDY_MODEL).
+try:
+    from openai import OpenAI as _OpenAI
+    _HAS_OPENAI = True
+except Exception:
+    _OpenAI = None
+    _HAS_OPENAI = False
+
+# Prefer OPENAI_*; fall back to the DEEPSEEK_* names already in .env.example
+# (DeepSeek's endpoint is OpenAI-compatible), so the shipped example just works.
+_OPENAI_BASE_URL = (os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
+                    or os.environ.get("DEEPSEEK_BASE_URL"))
+_OPENAI_API_KEY = (os.environ.get("OPENAI_API_KEY")
+                   or os.environ.get("DEEPSEEK_API_KEY") or "")
+_OPENAI_MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("DEEPSEEK_MODEL")
+                 or os.environ.get("CODEBUDDY_MODEL") or MODEL)
+
+
+def use_openai_backend() -> bool:
+    """True when LLM calls should use the OpenAI-compatible endpoint.
+
+    Triggered when the CodeBuddy SDK is unavailable (reviewer machine) or when
+    LLM_PROVIDER explicitly selects an OpenAI-compatible provider.
+    """
+    provider = os.environ.get("LLM_PROVIDER", "").lower()
+    if provider in ("openai", "openai_compatible", "vllm", "oai"):
+        return True
+    return not _HAS_CODEBUDDY
+
+
+def openai_backend_ready() -> bool:
+    """True when the OpenAI-compatible path can actually make a call."""
+    return _HAS_OPENAI and bool(_OPENAI_BASE_URL or _OPENAI_API_KEY)
+
+
+def _openai_client(timeout: int = 60):
+    kwargs = {"timeout": timeout, "max_retries": 2}
+    if _OPENAI_BASE_URL:
+        kwargs["base_url"] = _OPENAI_BASE_URL
+    kwargs["api_key"] = _OPENAI_API_KEY or "EMPTY"  # many local servers accept any key
+    return _OpenAI(**kwargs)
+
+
+def _record_openai_usage(resp) -> None:
+    try:
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            _prof_add_tokens(getattr(u, "prompt_tokens", 0) or 0,
+                             getattr(u, "completion_tokens", 0) or 0, calls=1)
+    except Exception:
+        pass
+
+
+def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) -> dict:
+    """Single-turn OpenAI-compatible chat (no tools)."""
+    if not _HAS_OPENAI:
+        return {"text": "", "error": "openai_package_not_installed"}
+    if not (_OPENAI_BASE_URL or _OPENAI_API_KEY):
+        return {"text": "", "error": "openai_endpoint_not_configured"}
+    try:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        resp = _openai_client(timeout).chat.completions.create(
+            model=_OPENAI_MODEL, messages=messages, timeout=timeout)
+        _record_openai_usage(resp)
+        return {"text": resp.choices[0].message.content or "", "error": None}
+    except Exception as e:
+        return {"text": "", "error": str(e)[:200]}
+
+
+def _openai_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
+    """OpenAI-compatible replacement for the CodeBuddy tool-agent path.
+
+    The gateway's built-in tools (web search, bash, ...) don't exist here, so the
+    model answers directly. Enough for the pipeline to run end-to-end; search-heavy
+    benchmarks are correspondingly weaker without a tool provider.
+    """
+    r = _openai_notool_sync("", prompt, timeout)
+    return {"text": r.get("text", ""), "actions": [], "error": r.get("error")}
+
+
+def openai_tool_chat(messages: list, tools: list | None,
+                     timeout: int = 120, model: str | None = None) -> dict:
+    """One OpenAI-compatible chat turn with function-calling tools.
+
+    Returns {"assistant_message": <dict to append>, "tool_calls": [{id,name,arguments}],
+             "error": str|None}. Used by the GAIA2 native tool-calling loop.
+    """
+    if not _HAS_OPENAI:
+        return {"assistant_message": None, "tool_calls": [], "error": "openai_package_not_installed"}
+    try:
+        req = {"model": model or _OPENAI_MODEL, "messages": messages, "timeout": timeout}
+        if tools:
+            req["tools"] = tools
+            req["tool_choice"] = "auto"
+        resp = _openai_client(timeout).chat.completions.create(**req)
+        _record_openai_usage(resp)
+        msg = resp.choices[0].message
+        assistant = {"role": "assistant", "content": msg.content or ""}
+        parsed = []
+        if getattr(msg, "tool_calls", None):
+            assistant["tool_calls"] = [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in msg.tool_calls
+            ]
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except Exception:
+                    args = {}
+                parsed.append({"id": tc.id, "name": tc.function.name, "arguments": args})
+        return {"assistant_message": assistant, "tool_calls": parsed, "error": None}
+    except Exception as e:
+        return {"assistant_message": None, "tool_calls": [], "error": str(e)[:200]}
+
+
+def _record_usage(msg) -> None:
+    """Best-effort per-task token accounting for the cost table.
+
+    Duck-types any SDK message for a `usage` payload. We look in three places,
+    because Claude-Agent-SDK-style frameworks vary: directly on the message
+    (AssistantMessage / terminal ResultMessage), on a nested ``.message`` (some
+    SDKs wrap the provider message), and on a top-level dict. The payload may use
+    Anthropic names (input_tokens / output_tokens, plus cache_* on input),
+    OpenAI names (prompt_tokens / completion_tokens), or only a total; we accept
+    all three. Importing no message type keeps an SDK that omits one from ever
+    breaking the call path. Fully defensive: any failure is swallowed.
+    """
+    try:
+        usage = getattr(msg, "usage", None)
+        if usage is None:
+            inner = getattr(msg, "message", None)
+            usage = getattr(inner, "usage", None) if inner is not None else None
+        if usage is None and isinstance(msg, dict):
+            usage = msg.get("usage")
+        if usage is None:
+            return
+        get = usage.get if isinstance(usage, dict) else (lambda k, d=0: getattr(usage, k, d))
+        in_tok = get("input_tokens", 0) or get("prompt_tokens", 0)
+        in_tok += (get("cache_read_input_tokens", 0) or 0) + (get("cache_creation_input_tokens", 0) or 0)
+        out_tok = get("output_tokens", 0) or get("completion_tokens", 0)
+        if not in_tok and not out_tok:
+            out_tok = get("total_tokens", 0)  # coarse fallback when only a total is exposed
+        if in_tok or out_tok:
+            _prof_add_tokens(in_tok, out_tok, calls=1)
+    except Exception:
+        pass
 
 # Pin the SDK's background / "small-fast" model to the SAME model as the main
 # agent. Claude-Agent-SDK-style frameworks (codebuddy included) route auxiliary
@@ -119,6 +288,9 @@ def clear_checkpoint(checkpoint_file: str):
 
 def llm_review_fn(prompt: str) -> str:
     """Synchronous single-turn LLM call used by ai_review_experience."""
+    if use_openai_backend():
+        return _openai_notool_sync("", prompt, timeout=90).get("text", "")
+
     async def _call():
         opt = CodeBuddyAgentOptions(
             permission_mode="bypassPermissions", model=MODEL, max_turns=2, cwd="/tmp"
@@ -129,6 +301,7 @@ def llm_review_fn(prompt: str) -> str:
             async with asyncio.timeout(90):
                 gen = query(prompt=prompt, options=opt)
                 async for msg in gen:
+                    _record_usage(msg)
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if hasattr(block, 'text') and block.text:
@@ -177,6 +350,9 @@ def _shutdown_loop(loop: asyncio.AbstractEventLoop):
 
 def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
     """Run CodeBuddy query in a fresh event loop (thread-safe, avoids cancel scope issues)."""
+    if use_openai_backend():
+        return _openai_sync(prompt, max_turns, timeout)
+
     async def _inner():
         opt = CodeBuddyAgentOptions(
             permission_mode="bypassPermissions", model=MODEL, max_turns=max_turns, cwd="/tmp"
@@ -188,6 +364,7 @@ def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
             async with asyncio.timeout(timeout):
                 gen = query(prompt=prompt, options=opt)
                 async for msg in gen:
+                    _record_usage(msg)
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, ToolUseBlock):
@@ -237,6 +414,9 @@ def _query_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) 
     Instead, the ARE system prompt instructs the model to use only NEXT_OP/PARAMS
     format, which prevents tool usage at the instruction level.
     """
+    if use_openai_backend():
+        return _openai_notool_sync(system_prompt, user_prompt, timeout)
+
     async def _inner():
         opt = CodeBuddyAgentOptions(
             permission_mode="bypassPermissions", model=MODEL, max_turns=50, cwd="/tmp",
@@ -248,6 +428,7 @@ def _query_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) 
             async with asyncio.timeout(timeout):
                 gen = query(prompt=user_prompt, options=opt)
                 async for msg in gen:
+                    _record_usage(msg)
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if hasattr(block, 'text') and block.text:

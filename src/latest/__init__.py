@@ -40,11 +40,22 @@ class SkillForgeLatest:
                           reasoning_trace: list[str] | None = None,
                           intermediate_states: list[dict] | None = None,
                           baseline_score: float | None = None,
+                          score: float | None = None,
                           llm_reviewer=None,
-                          critic_fn=None, critic_threshold: int = 5):
+                          critic_fn=None, critic_threshold: int = 5,
+                          enrich: bool = True):
         exp = analyze_execution(task_id, task_desc, agent_actions, oracle_actions,
                                 token_cost=token_cost, time_cost=time_cost,
                                 augmentation_used=augmentation_used)
+        # Override the action-overlap score with the real task score when known
+        # (benchmarks like GAIA/LoCoMo are graded on the final answer, not an
+        # oracle action trace — without this every experience looks like a
+        # "failure" and refinement frames the wrong lesson). Must run BEFORE
+        # ai_review so the refined lesson and the critic see the true outcome.
+        if score is not None:
+            exp.score = float(score)
+            exp.outcome = ("success" if exp.score >= 0.8
+                           else "partial" if exp.score >= 0.4 else "failure")
         # Attach reasoning trace from response_filter (AI-evaluated valuable reasoning)
         if reasoning_trace:
             exp.reasoning_trace = reasoning_trace
@@ -94,8 +105,9 @@ class SkillForgeLatest:
             exp.failure_taxonomy["critic_quality"] = verdict.get("total", 5)
             exp.failure_taxonomy["critic_verdict"] = verdict.get("verdict", "inject")
 
-            # Low quality OR noise/info-loss detected → forced refine/expand (never discard)
-            if verdict.get("total", 5) < critic_threshold or verdict.get("verdict") == "low_confidence":
+            # Low quality OR noise/info-loss detected → forced refine/expand (never discard).
+            # `enrich` gates this stage so the ablation can run "+critic, no enrich".
+            if enrich and (verdict.get("total", 5) < critic_threshold or verdict.get("verdict") == "low_confidence"):
                 refinement = critic_refine_experience(exp, verdict, llm_fn=critic_fn)
                 if refinement.get("enhanced"):
                     # Expand existing fields — never overwrite with shorter content

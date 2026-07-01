@@ -20,7 +20,10 @@ os.environ['LLM_PROVIDER'] = 'codebuddy'
 os.environ['CODEBUDDY_MODEL'] = 'hy3-preview-ioa'
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
-from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
+try:
+    from codebuddy_agent_sdk import query, CodeBuddyAgentOptions, AssistantMessage, ToolUseBlock
+except Exception:  # reviewer path (no CodeBuddy CLI) → OpenAI-compatible backend
+    query = CodeBuddyAgentOptions = AssistantMessage = ToolUseBlock = None
 
 from latest import (SkillForgeLatest, ExperienceLibrary, Experience,
                 build_augmented_prompt, ai_review_experience,
@@ -38,12 +41,41 @@ from scripts.latest.llm_client import (
     llm_review_fn,
     _query_sync, _llm_call, _query_notool_sync, _llm_call_notool,
     _llm_short_call, llm_extract_answer, llm_judge_answer,
-    llm_critic_skill_quality,
+    llm_critic_skill_quality, _shutdown_loop,
+    use_openai_backend, openai_backend_ready, openai_tool_chat,
 )
 from scripts.latest.eval import (
     normalize_answer, exact_match, evaluate_task,
     compute_partial_results_from_trace,
 )
+
+import logging
+logger = logging.getLogger("gaia2-runner")
+
+# ─── GAIA2 native tool-calling toggle + SDK MCP detection ─────────────────
+# The op-NNN text protocol (below) was a stopgap from when we thought the SDK
+# couldn't expose custom tools. It can: the CodeBuddy SDK hosts an in-process
+# MCP server (same mechanism as the Claude Agent SDK it mirrors), so the model
+# calls ARE's tools natively instead of parsing NEXT_OP/PARAMS lines. That is
+# how the official GAIA2/ARE harnesses drive the agent, so raw scores line up
+# with the leaderboard far better. Native is the default; set GAIA2_NATIVE_TOOLS=0
+# to force the text protocol. If the installed SDK lacks MCP support we detect it
+# here and keep the text protocol automatically.
+_GAIA2_NATIVE_TOOLS = os.environ.get("GAIA2_NATIVE_TOOLS", "1") == "1"
+try:
+    from codebuddy_agent_sdk.mcp.types import (
+        SdkMcpServer,
+        SdkMcpServerOptions,
+        SdkMcpToolDefinition as _SdkMcpTool,
+        ToolInputSchema,
+    )
+    _MCP_AVAILABLE = True
+except Exception:
+    SdkMcpServer = None
+    SdkMcpServerOptions = None
+    _SdkMcpTool = None
+    ToolInputSchema = None
+    _MCP_AVAILABLE = False
 
 MODEL = "hy3-preview-ioa"
 CONCURRENCY = 15
@@ -61,9 +93,316 @@ CHECKPOINT_FILE = str(PROJECT_ROOT / "experiments_results" / "latest" / "_checkp
 # ─── Trace logger instance ────────────────────────────────────────────────
 _trace = TraceLogger(RESULTS_DIR)
 
-# ─── GAIA2 ARE runner (real tool calling) ─────────────────────────────────
+# ─── GAIA2 native tool-calling (SDK in-process MCP server) ────────────────
 
-# ─── GAIA2 ARE runner (real tool calling) ─────────────────────────────────
+def _sanitize_tool_name(name: str) -> str:
+    """ARE tools are named App__method; collapse to an MCP-safe single token."""
+    s = re.sub(r"[^A-Za-z0-9_-]", "_", name)
+    while "__" in s:
+        s = s.replace("__", "_")
+    return (s[:60] or "tool").strip("_") or "tool"
+
+
+def _make_native_handler(session, are_name: str, result: dict):
+    """Async MCP handler that forwards one call to the ARE session.
+
+    The environment side-effect and its event-log entry happen inside
+    ``session.call_tool`` regardless of how the SDK reads our return envelope,
+    so scoring stays correct even if the result shape is interpreted loosely.
+    """
+    async def handler(args):
+        a = args if isinstance(args, dict) else {}
+        try:
+            if are_name == "__wait__":
+                tr = session.wait_for_notification(int(a.get("timeout_seconds", 60)))
+            elif are_name == "__time__":
+                tr = session.get_time()
+            else:
+                tr = session.call_tool(are_name, a)
+        except Exception as e:  # a tool error must not kill the agent loop
+            tr = {"error": str(e), "type": type(e).__name__}
+        result["actions"].append({
+            "tool": are_name, "args": a, "result_preview": str(tr)[:500],
+        })
+        return {"content": [{"type": "text", "text": json.dumps(tr, default=str)[:4000]}]}
+    return handler
+
+
+def _make_tool_def(name, description, input_schema, handler):
+    """Construct an SdkMcpToolDefinition from a raw handler."""
+    props = input_schema.get("properties", {})
+    req = input_schema.get("required", [])
+    schema = ToolInputSchema(type="object", properties=props, required=req)
+    return _SdkMcpTool(
+        name=name, description=description,
+        input_schema=schema, handler=handler,
+    )
+
+
+def _build_are_mcp_server(session, result: dict):
+    """Expose every ARE tool as a native MCP tool. Returns (server, allowed_tools)."""
+    defs = []
+    used: set = set()
+    for sch in session.get_tool_schemas():
+        fn = sch.get("function", {})
+        are_name = fn.get("name")
+        if not are_name:
+            continue
+        safe = _sanitize_tool_name(are_name)
+        while safe in used:
+            safe += "_x"
+        used.add(safe)
+        params = fn.get("parameters") or {"type": "object", "properties": {}, "required": []}
+        defs.append(_make_tool_def(
+            safe, (fn.get("description") or are_name)[:1000], params,
+            _make_native_handler(session, are_name, result),
+        ))
+
+    # Synthetic control tools: wait for follow-ups, read the clock.
+    for safe, are_name, desc, params in [
+        ("wait_for_notification", "__wait__",
+         "Advance simulated time and wait for environment notifications such as a "
+         "user's follow-up reply or a scheduled event.",
+         {"type": "object",
+          "properties": {"timeout_seconds": {
+              "type": "integer", "description": "Maximum seconds to wait."}},
+          "required": []}),
+        ("get_time", "__time__", "Return the current simulation time.",
+         {"type": "object", "properties": {}, "required": []}),
+    ]:
+        if safe in used:
+            continue
+        used.add(safe)
+        defs.append(_make_tool_def(safe, desc, params,
+                                   _make_native_handler(session, are_name, result)))
+
+    server = SdkMcpServer(SdkMcpServerOptions(name="are", version="1.0.0", tools=defs))
+    server_cfg = {"type": "sdk", "name": "are", "server": server}
+    allowed = [f"mcp__are__{d}" for d in used]
+    return server_cfg, allowed
+
+
+def _build_native_system_prompt(experience_section: str, has_twist: bool) -> str:
+    lines = [
+        "You are an autonomous agent that operates a user's applications (email, "
+        "calendar, contacts, messaging, files, and others) through function calls.",
+        "Complete the user's request by calling the available tools. Read each tool "
+        "result before choosing the next call.",
+        "Guidelines:",
+        "- Actually perform the requested actions with tools; do not just describe them.",
+        "- Inspect state (list, search, read) before you create, modify, or send, so "
+        "you act on real ids and values instead of guesses.",
+        "- Do only what the task asks. Do not add extra messages or events.",
+        "- Deliver your final answer with the appropriate send-message-to-user tool.",
+    ]
+    if has_twist:
+        lines.append(
+            "- The user may send a follow-up. After you reply, call "
+            "wait_for_notification to receive it, then handle it before you finish.")
+    lines.append("- Once the task is fully handled, stop calling tools.")
+    prompt = "\n".join(lines)
+    if experience_section:
+        prompt += "\n\n" + experience_section.strip()
+    return prompt
+
+
+async def _drive_native_query(user_prompt, system_prompt, server, allowed, max_turns, result):
+    """Run the SDK agent loop; collect assistant text (tool calls run in handlers)."""
+    opt = CodeBuddyAgentOptions(
+        permission_mode="bypassPermissions",
+        model=MODEL,
+        max_turns=max_turns,
+        cwd="/tmp",
+        mcp_servers={"are": server},
+        allowed_tools=allowed,
+        system_prompt=system_prompt,
+    )
+    texts = []
+    gen = None
+    try:
+        async with asyncio.timeout(int(os.environ.get("GAIA2_NATIVE_TIMEOUT", "1200"))):
+            gen = query(prompt=user_prompt, options=opt)
+            async for msg in gen:
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, ToolUseBlock):
+                            continue  # side-effect + logging happen in the handler
+                        txt = getattr(block, "text", "")
+                        if txt:
+                            texts.append(txt)
+    except Exception as e:
+        result.setdefault("error", str(e)[:300])
+    finally:
+        if gen is not None:
+            try:
+                await gen.aclose()
+            except Exception:
+                pass
+    result["response"] = "\n".join(t for t in texts if t)[:8000]
+    result["reasoning_trace"] = texts[-20:]
+
+
+def _gaia2_native_sync(scenario_path, task_desc, experience_section, base_result, max_turns):
+    """Synchronous worker: own ARE session + own event loop, native tool-calling.
+
+    Returns the result dict. Sets ``_native_failed=True`` only when the MCP server
+    cannot be built, so the caller can fall back to the text protocol without
+    having spent a full agent run.
+    """
+    from scripts.latest.are_integration import ARESession
+
+    result = dict(base_result)
+    result["actions"] = []
+    result["event_log"] = []
+    result["reasoning_trace"] = []
+    t0 = time.time()
+    session = None
+    try:
+        session = ARESession(scenario_path)
+
+        tmsg = session.call_tool("AgentUserInterface__get_last_message_from_user", {})
+        task_content = ""
+        if isinstance(tmsg, dict):
+            r = tmsg.get("result")
+            task_content = r.get("content", "") if isinstance(r, dict) else str(r or "")
+        task_content = task_content or task_desc
+        result["actions"].append({
+            "tool": "AgentUserInterface__get_last_message_from_user",
+            "args": {}, "result_preview": task_content[:200],
+        })
+
+        has_twist = detect_twist(task_content, task_desc)
+
+        try:
+            server, allowed = _build_are_mcp_server(session, result)
+        except Exception as e:
+            logger.warning("GAIA2 native MCP build failed (%s); using text protocol", e)
+            result["_native_failed"] = True
+            return result
+
+        system_prompt = _build_native_system_prompt(experience_section, has_twist)
+        user_prompt = (
+            f"TASK: {task_content}\n\n"
+            "Complete this task using the available tools. When it is fully done, stop."
+        )
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_drive_native_query(
+                user_prompt, system_prompt, server, allowed, max_turns, result))
+        finally:
+            _shutdown_loop(loop)
+
+        result["event_log"] = session.event_log
+    except Exception as e:
+        result["error"] = str(e)[:300]
+    finally:
+        if session:
+            session.close()
+        result["time_cost"] = time.time() - t0
+    return result
+
+
+def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base_result, max_turns):
+    """OpenAI-compatible native tool-calling worker (external-reviewer path).
+
+    ARE's get_tool_schemas() is already OpenAI function-calling shaped, so this runs
+    a standard chat loop with no CodeBuddy dependency: the model emits tool_calls, we
+    execute them against the ARE session, feed the results back, and repeat. Same
+    result-dict shape (event_log drives scoring) as the SDK MCP worker.
+    """
+    from scripts.latest.are_integration import ARESession
+
+    result = dict(base_result)
+    result["actions"] = []
+    result["event_log"] = []
+    result["reasoning_trace"] = []
+    t0 = time.time()
+    session = None
+    try:
+        session = ARESession(scenario_path)
+
+        tmsg = session.call_tool("AgentUserInterface__get_last_message_from_user", {})
+        task_content = ""
+        if isinstance(tmsg, dict):
+            r = tmsg.get("result")
+            task_content = r.get("content", "") if isinstance(r, dict) else str(r or "")
+        task_content = task_content or task_desc
+        result["actions"].append({
+            "tool": "AgentUserInterface__get_last_message_from_user",
+            "args": {}, "result_preview": task_content[:200],
+        })
+
+        has_twist = detect_twist(task_content, task_desc)
+
+        # ARE schemas are OpenAI-compatible; add the two synthetic control tools.
+        tools = list(session.get_tool_schemas())
+        tools.append({"type": "function", "function": {
+            "name": "wait_for_notification",
+            "description": ("Advance simulated time and wait for environment "
+                            "notifications such as a user's follow-up reply."),
+            "parameters": {"type": "object", "properties": {
+                "timeout_seconds": {"type": "integer",
+                                    "description": "Maximum seconds to wait."}},
+                "required": []}}})
+        tools.append({"type": "function", "function": {
+            "name": "get_time",
+            "description": "Return the current simulation time.",
+            "parameters": {"type": "object", "properties": {}, "required": []}}})
+
+        system_prompt = _build_native_system_prompt(experience_section, has_twist)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content":
+                f"TASK: {task_content}\n\nComplete this task using the available "
+                "tools. When it is fully done, stop."},
+        ]
+        texts = []
+        timeout = int(os.environ.get("GAIA2_OPENAI_TIMEOUT", "120"))
+
+        for _turn in range(max_turns):
+            r = openai_tool_chat(messages, tools, timeout=timeout)
+            if r.get("error"):
+                result.setdefault("error", r["error"])
+                break
+            assistant = r.get("assistant_message") or {"role": "assistant", "content": ""}
+            if assistant.get("content"):
+                texts.append(assistant["content"])
+            messages.append(assistant)
+            calls = r.get("tool_calls") or []
+            if not calls:
+                break  # model produced a final answer with no tool calls
+            for tc in calls:
+                name = tc["name"]
+                args = tc["arguments"] if isinstance(tc.get("arguments"), dict) else {}
+                try:
+                    if name == "wait_for_notification":
+                        tr = session.wait_for_notification(int(args.get("timeout_seconds", 60)))
+                    elif name == "get_time":
+                        tr = session.get_time()
+                    else:
+                        tr = session.call_tool(name, args)
+                except Exception as e:
+                    tr = {"error": str(e), "type": type(e).__name__}
+                result["actions"].append({
+                    "tool": name, "args": args, "result_preview": str(tr)[:500]})
+                messages.append({
+                    "role": "tool", "tool_call_id": tc["id"],
+                    "content": json.dumps(tr, default=str)[:4000]})
+
+        result["response"] = "\n".join(t for t in texts if t)[:8000]
+        result["reasoning_trace"] = texts[-20:]
+        result["event_log"] = session.event_log
+    except Exception as e:
+        result["error"] = str(e)[:300]
+    finally:
+        if session:
+            session.close()
+        result["time_cost"] = time.time() - t0
+    return result
+
+
+# ─── GAIA2 ARE runner (text protocol fallback + native dispatch) ──────────
 
 
 async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
@@ -101,6 +440,30 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
     if not scenario_path:
         result["error"] = "no_scenario_path"
         return result
+
+    # ── Native tool-calling path (preferred, aligns with the official harness) ──
+    # Give the model ARE's tools as real function-calling tools. Internally this
+    # uses an in-process CodeBuddy SDK MCP server; for external reviewers with no
+    # CodeBuddy CLI it uses a standard OpenAI-compatible tools= loop (ARE schemas
+    # are already OpenAI-shaped). Both run in a worker thread with their own session
+    # and event loop. Falls through to the text protocol only if neither native
+    # backend is usable or the SDK server cannot be built.
+    if _GAIA2_NATIVE_TOOLS:
+        worker = None
+        if use_openai_backend():
+            if openai_backend_ready():
+                worker = _gaia2_openai_native_sync
+        elif _MCP_AVAILABLE:
+            worker = _gaia2_native_sync
+        if worker is not None:
+            loop = asyncio.get_event_loop()
+            native = await loop.run_in_executor(
+                None, worker,
+                scenario_path, task_desc, experience_section, dict(result),
+                int(os.environ.get("GAIA2_MAX_TURNS", "50")),
+            )
+            if native is not None and not native.pop("_native_failed", False):
+                return native
 
     t0 = time.time()
     session = None
@@ -166,7 +529,11 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             "Start with your first operation (THINK + NEXT_OP + PARAMS):"
         )
 
-        max_turns = 25
+        # 25 was too small: multi-app GAIA2 tasks need 6-10 oracle actions plus
+        # exploration and a twist follow-up, and the BudgetTracker's own thresholds
+        # (75,50,30,15,5) assume a larger budget -- at 25 the "URGENT/FINAL" hints fire
+        # in the first half and the agent quits mid-task. Env-tunable.
+        max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "50"))
         all_responses = []
         reasoning_trace = []  # Collect AI-filtered valuable reasoning across turns
 

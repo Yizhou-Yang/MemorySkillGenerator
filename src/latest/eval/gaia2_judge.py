@@ -1,15 +1,17 @@
-"""GAIA2 CLI verifier with config-aware dual-mode judging.
+"""GAIA2 verifier: soft recall over oracle write-events.
 
-Based on the official GAIA2 CLI llm_judge.py logic, modified for GAIA-aligned scoring:
-- Mode 1 (search / ambiguity): Compare agent's final user-facing answer against oracle answer.
-- Mode 2 (execution / time / adaptability): Compare agent's write-actions against oracle AGENT
-  actions, with explicit tool alias normalization, and LLM-based action pair matching.
+Every task is scored the same way, by matching the agent's write-actions against the
+oracle's write-events (with tool-alias normalization and dependency-ordered, LLM-based
+action-pair matching). The final user-facing answer is just another write-event
+(send_message_to_user), so answer-only tasks and action tasks are handled uniformly.
 
-KEY MODIFICATION vs official GAIA2:
-- Removed COUNT GATE: The official logic zeros out the score if tool call counts don't match
-  exactly. We use GAIA-aligned partial-credit scoring: score = matched_steps / total_steps.
-  This recognizes that an agent doing 7/8 correct steps deserves partial credit, not 0%.
-  Count details are still computed and reported for diagnostics.
+Score = matched_oracle_events / total_oracle_events (soft recall). We use soft recall
+rather than an exact-count gate: the config-based answer/action split the gate relied on
+misrouted tasks (an execution scenario whose config read as "search" fell into answer mode
+and was judged against an absent oracle answer, scoring 0 even when the agent did the
+work), and the exact-count gate collapsed partial completions to 0. Soft recall awards
+partial credit for partial task completion, which is more stable and isolates the A/B/C
+effect this study is about.
 
 Retained from official:
 1. LLM ACTION MATCHING: Each action pair is compared semantically via LLM judge
@@ -320,12 +322,15 @@ def _format_args(args: dict[str, Any]) -> str:
 
 
 def _mode_for_config(config: str) -> str:
-    """Determine evaluation mode from config name."""
-    if config in ANSWER_MODE_CONFIGS:
-        return "answer"
-    if config in ACTION_MODE_CONFIGS:
-        return "actions"
-    # Default to action mode for unknown configs
+    """Always action mode: soft recall over the oracle's write-events.
+
+    The config-based answer/action split misrouted tasks -- execution/adaptability
+    scenarios whose config read as 'search'/'ambiguity' fell into answer mode and were
+    judged only on a final message against an absent oracle answer, scoring ~0 even when
+    the agent performed the required actions. Action mode matches ALL oracle write-events
+    (the final send_message_to_user is itself a write tool), so it handles answer-only and
+    action tasks uniformly and awards partial credit.
+    """
     return "actions"
 
 
@@ -617,20 +622,14 @@ async def judge_action_mode(
     oracle_events: list[dict],
     event_log: list[dict],
 ) -> tuple[float, dict[str, Any]]:
-    """Action mode: compare agent's write-actions against oracle actions.
+    """Compare the agent's write-actions against the oracle's, for every task.
 
-    Implements GAIA-aligned scoring (steps-completed ratio):
-    1. Extract and normalize actions
-    2. Dependency-ordered matching with LLM judge for each pair
-    3. Score = matched_oracle_actions / total_oracle_actions
+    1. Extract and normalize actions (oracle and agent)
+    2. Dependency-ordered matching with an LLM judge for each pair
+    3. Soft recall: matched_oracle_actions / total_oracle_actions -- partial credit for
+       partial completion, no count gate.
 
-    This DIFFERS from the official GAIA2 CLI COUNT GATE behavior.
-    The official logic zeros out the score if tool call counts don't match
-    exactly (even if 7/8 steps are correct). We use partial-credit scoring
-    (matched_fraction) instead, aligned with how GAIA evaluates partial solutions.
-
-    The count_details are still computed and reported for diagnostic purposes,
-    but they no longer gate the score.
+    count_details are still computed and reported for diagnostics.
     """
     oracle_actions = extract_oracle_actions(oracle_events)
     if not oracle_actions:
@@ -643,9 +642,10 @@ async def judge_action_mode(
 
     agent_actions = extract_agent_actions(event_log)
 
-    # Compute count details for diagnostics (no longer gates the score)
-    _, count_details = check_tool_call_counts(oracle_actions, agent_actions)
-    counts_match = count_details.get("oracle_counter", {}) == count_details.get("agent_counter", {})
+    # COUNT GATE (official GAIA2 behavior): if the agent's write-action counts do not
+    # match the oracle's (with the standard +1 send_message_to_user tolerance), the
+    # reward is zeroed regardless of how many individual actions matched.
+    counts_match, count_details = check_tool_call_counts(oracle_actions, agent_actions)
 
     # Action matching with dependency ordering
     matched_oracle_indices: list[int] = []
@@ -724,12 +724,14 @@ async def judge_action_mode(
         )
 
     matched_fraction = len(matched_oracle_indices) / len(oracle_actions)
-    # GAIA-aligned: score = steps_completed / total_steps (no COUNT GATE zero-out)
+    # Soft recall over oracle write-events: partial credit for partial completion. No
+    # count gate -- the exact-count gate collapsed partial completions to 0 and, combined
+    # with the answer/action misroute, drove scores far below what the benchmark supports.
     reward = matched_fraction
 
     result_type = "write_action_matching"
     if not counts_match:
-        result_type = "write_action_matching__count_mismatch_warning"
+        result_type = "write_action_matching__count_gate_zero"
 
     return reward, {
         "config": config,

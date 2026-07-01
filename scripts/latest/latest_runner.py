@@ -58,7 +58,7 @@ from scripts.latest.gaia_runner import run_gaia_task, run_gaia_task_controlled
 from scripts.latest.gaia2_runner import run_gaia2_task_with_are
 from scripts.latest.terminal_bench_2_runner import run_terminal_bench_2_task, run_terminal_bench_2_task_controlled
 from scripts.latest.locomo_runner import run_locomo_task, run_locomo_task_controlled
-from scripts.latest.evomem_bridge import BenchmarkMemory, solve_with_memory
+from scripts.latest.evomem_bridge import BenchmarkMemory, CuratedMemory, solve_with_memory
 
 MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro")
 
@@ -67,9 +67,13 @@ def _auto_slots() -> int:
     """Pick a global heavy-task cap from the machine. Memory-aware when psutil
     is available, else a conservative cpu-based default. The point is that this
     bounds PEAK resource use, so expanding the test set only lengthens the queue
-    — it does not raise memory/CPU pressure."""
+    — it does not raise memory/CPU pressure.
+
+    Since LLM-agent workloads are I/O-bound (waiting on API), we scale with cores,
+    but cap at 24: higher concurrency put too much pressure on the HY3 internal API.
+    Override with TASK_CONCURRENCY when a backbone tolerates more."""
     cpu = os.cpu_count() or 4
-    slots = max(1, min(cpu - 1, 8))
+    slots = max(1, min(cpu * 4, 24))
     try:
         import psutil
         avail_gb = psutil.virtual_memory().available / 1e9
@@ -87,6 +91,12 @@ def _auto_slots() -> int:
 GLOBAL_TASK_SLOTS = int(os.environ.get("TASK_CONCURRENCY", "0")) or _auto_slots()
 DOCKER_TASK_SLOTS = int(os.environ.get("DOCKER_CONCURRENCY", "2"))
 BENCHMARK_CONCURRENCY = int(os.environ.get("BENCH_CONCURRENCY", "6"))  # benchmarks may interleave
+# Iteration chains: run each task ITER_CHAIN times in sequence, threading B/C
+# memory across iterations (chain-scoped retrieval). This is the substrate where
+# patch memory pays off — feedback across iterations of the SAME task. K=1 is the
+# ordinary one-shot run; the main table uses the final iteration (post-memory),
+# chain-level accuracy (all iterations correct) is aggregated from the trace.
+ITER_CHAIN = max(1, int(os.environ.get("ITER_CHAIN", "3")))
 DOCKER_BENCHMARKS = {"terminal_bench_2"}
 CONCURRENCY = GLOBAL_TASK_SLOTS  # kept for the startup banner
 
@@ -263,7 +273,50 @@ def _load_done_map(trace_path: Path) -> dict:
     return done
 
 
+def _trace_iter_total(trace_path: Path) -> int:
+    """The iter_total recorded in an existing trace (read from its first row), or 1 if
+    absent/unreadable. All rows of one run share it, so the first row suffices. Used to
+    detect a stale single-pass trace before a chain run."""
+    try:
+        for line in trace_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            return int(json.loads(line).get("iter_total", 1))
+    except Exception:
+        pass
+    return 1
+
+
 # --- Evaluation ---
+
+def _parse_pytest_counts(test_output: str) -> tuple[int, int]:
+    """Return (passed, failed) from pytest output, robust to summary format.
+
+    Handles "N passed", "N failed", "N error", "N passed, M failed" (either
+    order), skips/xfails, and falls back to the per-file progress letters
+    (".F.sE") when there is no summary banner. `error` and `xfailed` count as
+    failures; `skipped`/`warning` are ignored. Sums tokens from the LAST summary
+    banner so a "passed" mentioned in a traceback body can't inflate the count."""
+    import re as _re
+    text = test_output or ""
+    passed = failed = 0
+    banners = _re.findall(r'={3,}[^\n=]*?\d+\s+(?:passed|failed|error|skipped|xfailed|xpassed)[^\n=]*?={3,}',
+                          text)
+    target = banners[-1] if banners else text
+    for num, kind in _re.findall(r'(\d+)\s+(passed|failed|error|errors|xfailed|xpassed)', target):
+        n = int(num)
+        if kind in ("passed", "xpassed"):
+            passed += n
+        elif kind in ("failed", "error", "errors", "xfailed"):
+            failed += n
+    if passed == 0 and failed == 0:
+        # Fallback: per-file progress line, e.g. "../tests/test_x.py FFFF [100%]"
+        for letters in _re.findall(r'\.py\s+([.FEsxX]{1,})', text):
+            passed += letters.count(".")
+            failed += letters.count("F") + letters.count("E")
+    return passed, failed
+
 
 async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True) -> dict:
     """Primary metric per benchmark:
@@ -312,25 +365,13 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         if test_passed:
             return {"score": 1.0, "em": 1.0, "method": "docker_pytest_pass"}
 
-        # Parse pytest summary line: "X failed, Y passed" or "Y passed, X failed"
-        import re as _re
-        passed = 0
-        failed = 0
-        _tb2_match = _re.search(
-            r'(\d+)\s+passed.*?(\d+)\s+failed|'
-            r'(\d+)\s+failed.*?(\d+)\s+passed',
-            test_output
-        )
-        if _tb2_match:
-            if _tb2_match.group(1) and _tb2_match.group(2):
-                # "X passed, Y failed"
-                passed = int(_tb2_match.group(1))
-                failed = int(_tb2_match.group(2))
-            elif _tb2_match.group(3) and _tb2_match.group(4):
-                # "X failed, Y passed"
-                failed = int(_tb2_match.group(3))
-                passed = int(_tb2_match.group(4))
-
+        # Parse the pytest summary robustly. The old regex required BOTH a
+        # "passed" AND a "failed" count on one line, so it scored 0 for the
+        # common "=== 4 failed in 0.5s ===" (failed-only) and "=== 4 passed
+        # ===" (passed-only, harness missed) summaries. Sum each outcome token
+        # independently from the LAST summary line (prefer the "==== ... ===="
+        # banner; fall back to the per-file progress letters like ".F.F").
+        passed, failed = _parse_pytest_counts(test_output)
         total = passed + failed
         if total > 0:
             partial_score = passed / total
@@ -360,7 +401,13 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         return {"score": 0.0, "em": 0.0, "method": "empty"}
 
     extracted = await llm_extract_answer(response, result.get("task_id", ""))
-    em = exact_match(extracted or response, expected)
+    # Credit the answer if EITHER the extracted span OR the full response matches
+    # gold. A wrong-but-nonempty extraction must not shadow a correct full
+    # response (the old `extracted or response` did exactly that, e.g. gold
+    # "Claude Shannon" present in the response but scored 0). The single-token
+    # gold guard inside exact_match (word-boundary + <=20 words) keeps the
+    # full-response path from false-positiving on a stray number.
+    em = max(exact_match(extracted, expected), exact_match(response, expected))
 
     llm_score = 0.0
     if use_llm_judge and em < 1.0:
@@ -390,10 +437,19 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     trace_path = Path(RESULTS_DIR) / benchmark / "trace.jsonl"
     done_map: dict = {}
     if trace_path.exists():
-        if RESUME:
+        # A chain run (ITER_CHAIN>1) must not resume from a stale single-pass trace:
+        # done_map keys on (group, task_id) only, so an old iter_total=1 A-arm row would
+        # be reused and leave A single-pass while B/C run the full chain. If the existing
+        # trace was written with a different iter_total, it is from an incompatible run --
+        # clear it and start fresh rather than silently poison the A arm.
+        stale = RESUME and ITER_CHAIN > 1 and _trace_iter_total(trace_path) != ITER_CHAIN
+        if RESUME and not stale:
             done_map = _load_done_map(trace_path)
             print(f"  RESUME: {len(done_map)} completed (group,task) pairs will be skipped")
         else:
+            if stale:
+                print(f"  [resume] existing trace has iter_total != {ITER_CHAIN}; "
+                      "clearing stale trace and starting fresh")
             trace_path.unlink()
             print(f"  Cleared stale trace: {trace_path}")
     _trace.clear_benchmark(benchmark)
@@ -407,25 +463,14 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         "terminal_bench_2": run_terminal_bench_2_task,
         "locomo": run_locomo_task,
     }
-    CONTROLLED_RUNNER = {
-        "gaia": run_gaia_task_controlled,  # B/C use controlled runner with within-task EvoMem patches
-        "gaia2": run_gaia2_task_with_are,
-        "terminal_bench_2": run_terminal_bench_2_task_controlled,
-        "locomo": run_locomo_task_controlled,
-    }
-
     run_fn_a = BASELINE_RUNNER.get(benchmark)
-    run_fn_controlled = CONTROLLED_RUNNER.get(benchmark)
 
-    # Multiround agentic benchmarks (GAIA, GAIA2, Terminal-Bench):
-    #   All A/B/C groups run the same baseline runner — no scaffold injection.
-    #   Self-consistency and within-task patches are designed for single-round
-    #   QA and would interfere with the agent's multi-turn reasoning workflow.
-    #
-    # Single-round QA benchmarks (LoCoMo, PersonaMem-v2):
-    #   Group B uses self-consistency sampling (3 samples, majority vote).
-    #   Group C uses evidence-weighted / persona-consistent voting.
-    is_qa = benchmark in ("locomo",)
+    # A/B/C are unified across every benchmark by the evomem_bridge (see the
+    # "Unified A/B/C" block below): A runs the baseline runner with no memory;
+    # B/C wrap that SAME baseline with cross-task patch memory (B plain, C
+    # effectiveness-weighted + grounded). The old per-benchmark "controlled"
+    # runners / self-consistency paths are retired — they made the arms
+    # inconsistent across benchmarks and (on the agentic ones) injected nothing.
 
     if not run_fn_a:
         print(f"  ERROR: No runner for benchmark '{benchmark}'")
@@ -438,11 +483,17 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     docker_sem = _SEMS.get("docker")
     needs_docker = benchmark in DOCKER_BENCHMARKS
 
-    async def _run_group(label: str, group_key: str, tasks: list[dict], build_coro):
+    async def _run_group(label: str, group_key: str, tasks: list[dict], build_coro,
+                         mem=None):
         """Run tasks concurrently. Evaluate + trace-log each task as it completes so
         partial results survive crashes. With RESUME=1, already-traced tasks are
         reconstructed from the trace instead of re-run; every fresh task is retried
-        with backoff on transient API failures."""
+        with backoff on transient API failures.
+
+        `mem` (B/C cross-task memory, None for A): after a task is evaluated its
+        patch is recorded into `mem` WITH the task's real score — so C's
+        effectiveness-weighted retrieval sees scored patches, and resumed runs
+        rebuild memory from the trace instead of starting empty."""
         total = len(tasks)
         results = [None] * total
         evals = [None] * total
@@ -459,51 +510,78 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                      "_resumed": True}
                 ev = {"score": prev.get("score", 0.0), "em": prev.get("em", 0.0),
                       "method": prev.get("method", "resumed")}
+                # Rebuild B/C memory from the resumed result (else a resumed run
+                # would retrieve against an empty store).
+                if mem is not None:
+                    try:
+                        await mem.record(task, r, ev.get("score", 0.0))
+                    except Exception:
+                        pass
                 print(f"    [{label}] {i+1}/{total} ⟳ {tid} (resumed EM={ev['em']:.0%})",
                       flush=True)
                 return i, r, ev
-            # ── Run with retry, bounded by the global (and, for Docker
-            #    benchmarks, the tighter container) semaphore.
-            #    Profile per-task wall-clock (embed / docker / llm_io). ──
-            start_task_profile()
-            _t0 = _perf()
-            async with global_sem:
+            # ── Iteration chain: run the task ITER_CHAIN times in sequence.
+            #    For B/C, each iteration's mem.record() adds a patch to the
+            #    chain, and the next iteration's chain-scoped inject() retrieves
+            #    it — so memory threads across iterations of the SAME task. K=1
+            #    (default) reduces to the ordinary one-shot run. The main table
+            #    uses the final iteration (post-memory); the per-iteration trace
+            #    rows feed chain-level accuracy. ──
+            last_r, last_ev, prof = None, None, {}
+            for _it in range(ITER_CHAIN):
+                start_task_profile()
+                _t0 = _perf()
+                # Acquire the scarce docker slot BEFORE the global slot. The other
+                # order let a docker task hold a global slot while queued for docker,
+                # so TB2 could pin all global slots waiting on the 2 docker slots and
+                # starve the non-docker benchmarks (LoCoMo/GAIA/GAIA2 got 0 progress).
+                # docker-then-global is a consistent lock order, so no deadlock.
                 if needs_docker and docker_sem is not None:
                     async with docker_sem:
-                        r = await _build_with_retry(build_coro, task)
+                        async with global_sem:
+                            r = await _build_with_retry(build_coro, task)
                 else:
-                    r = await _build_with_retry(build_coro, task)
-            prof = summarize(_perf() - _t0, read_task_profile())
-            if isinstance(r, dict):
-                r["_prof"] = prof
-            # ── Evaluate immediately ──────────────────────────────
-            ev = await evaluate_task(r, benchmark)
-            # ── Trace-log immediately (with full metric provenance) ──
-            expected = task.get("expected", r.get("expected", ""))
-            aug = r.get("_aug_prompt", "")
-            exec_mode = (r.get("execution_mode")
-                         or r.get("_within_task_patch_mode")
-                         or "default")
-            _meta = task.get("metadata") or {}
-            _trace.log(benchmark=benchmark, group=group_key, phase="test",
-                       task_id=r.get("task_id", tid),
-                       task_desc=task.get("description", ""),
-                       augmented_prompt=aug,
-                       response=r.get("response", ""), expected=expected,
-                       score=ev.get("score", 0.0),
-                       extra={"em": ev.get("em", 0.0),
-                              "method": ev.get("method", ""),
-                              "execution_mode": exec_mode,
-                              "error": str(r.get("error") or "")[:200],
-                              # --- per-sample fields for the breakdown sub-tables ---
-                              # category/type and difficulty (when the benchmark provides them)
-                              "category": str(_meta.get("category") or _meta.get("task_type")
-                                              or _meta.get("type") or ""),
-                              "level": str(_meta.get("level") or _meta.get("difficulty") or ""),
-                              # whether a curated patch was injected (for retrieved-vs-not analysis)
-                              "patch_injected": bool(aug),
-                              "aug_len": len(aug or ""),
-                              **{f"prof_{k}": v for k, v in prof.items()}})
+                    async with global_sem:
+                        r = await _build_with_retry(build_coro, task)
+                prof = summarize(_perf() - _t0, read_task_profile())
+                if isinstance(r, dict):
+                    r["_prof"] = prof
+                ev = await evaluate_task(r, benchmark)
+                # Record WITH the real score so the NEXT iteration of this chain
+                # can retrieve it (and C weights retrieval by it).
+                if mem is not None and isinstance(r, dict):
+                    try:
+                        await mem.record(task, r, ev.get("score", 0.0))
+                    except Exception:
+                        pass
+                expected = task.get("expected", r.get("expected", ""))
+                aug = r.get("_aug_prompt", "")
+                exec_mode = (r.get("execution_mode")
+                             or r.get("_within_task_patch_mode") or "default")
+                _meta = task.get("metadata") or {}
+                _trace.log(benchmark=benchmark, group=group_key, phase="test",
+                           task_id=r.get("task_id", tid),
+                           task_desc=task.get("description", ""),
+                           augmented_prompt=aug,
+                           response=r.get("response", ""), expected=expected,
+                           score=ev.get("score", 0.0),
+                           extra={"em": ev.get("em", 0.0),
+                                  "method": ev.get("method", ""),
+                                  "execution_mode": exec_mode,
+                                  "error": str(r.get("error") or "")[:200],
+                                  # category/type and difficulty (when provided)
+                                  "category": str(_meta.get("category") or _meta.get("task_type")
+                                                  or _meta.get("type") or ""),
+                                  "level": str(_meta.get("level") or _meta.get("difficulty") or ""),
+                                  "patch_injected": bool(aug),
+                                  "aug_len": len(aug or ""),
+                                  # iteration index along the chain + chain length,
+                                  # for chain-level (all-iterations-correct) accuracy.
+                                  "iteration": _it,
+                                  "iter_total": ITER_CHAIN,
+                                  **{f"prof_{k}": v for k, v in prof.items()}})
+                last_r, last_ev = r, ev
+            r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
             err = r.get("error")
             status = "\u2717" if err else "\u2713"
@@ -523,24 +601,27 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         return results, evals
 
     # ── Unified A/B/C matching the paper (one mechanism for every benchmark) ──
-    #   A  Vanilla : no memory.
-    #   B  EvoMem  : cross-task patch memory — retrieve + inject prior patches.
-    #   C  GPR     : B's patches + per-patch environment-check (additive superset).
-    # B and C each keep their own cross-task patch memory; A keeps none.
+    #   A  Vanilla  : no memory.
+    #   B  PatchMem : naive cross-task patch memory — retrieve + inject prior
+    #                 task responses verbatim (the \patchmem baseline).
+    #   C  Curator  : real curation — refined experiences (LLM reviewer + cross-
+    #                 agent critic + forced enrichment), effectiveness-weighted
+    #                 retrieval. Injects reusable lessons, not B's raw answers.
+    # B and C each keep their own cross-task memory; A keeps none.
     mem_b = BenchmarkMemory(benchmark, "B")
-    mem_c = BenchmarkMemory(benchmark, "C")
+    mem_c = CuratedMemory(benchmark)
 
     print(f"    [A] Vanilla (no memory)...", flush=True)
     results_a, evals_a = await _run_group("A", "A_baseline", test_tasks,
                                           lambda t: run_fn_a(t, "", "A"))
 
-    print(f"    [B] EvoMem (cross-task patch memory)...", flush=True)
+    print(f"    [B] PatchMem (naive cross-task patch memory)...", flush=True)
     results_b, evals_b = await _run_group("B", "B_evomem", test_tasks,
-        lambda t: solve_with_memory(run_fn_a, t, mem_b, "B"))
+        lambda t: solve_with_memory(run_fn_a, t, mem_b, "B"), mem=mem_b)
 
-    print(f"    [C] GPR (EvoMem patches + environment grounding)...", flush=True)
+    print(f"    [C] Curator (refined experiences + effectiveness-weighted retrieval)...", flush=True)
     results_c, evals_c = await _run_group("C", "C_gpr", test_tasks,
-        lambda t: solve_with_memory(run_fn_a, t, mem_c, "C"))
+        lambda t: solve_with_memory(run_fn_a, t, mem_c, "C"), mem=mem_c)
 
     # Build flat all_evals for per_level / per_config breakdowns
     all_evals = []
