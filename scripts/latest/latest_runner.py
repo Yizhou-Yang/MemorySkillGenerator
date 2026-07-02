@@ -266,6 +266,29 @@ async def _build_with_retry(build_coro, task: dict) -> dict:
                     "error": "retry_exhausted"}
 
 
+# One hung task (a docker wait or an LLM call that never returns) must not pin a
+# docker/global slot forever and silently stall its whole benchmark — TB2 sat 30+
+# minutes without a trace write behind exactly this. Bound every task by
+# wall-clock; on expiry, record an error row and move on. Defaults are generous
+# because a legitimate TB2 task can run 40 turns x 180s commands (~2-3h) — the
+# bound is a backstop against hangs, not a budget.
+_WALL_TIMEOUT_S = int(os.environ.get("TASK_WALL_TIMEOUT_S", "2400"))
+_DOCKER_WALL_TIMEOUT_S = int(os.environ.get("DOCKER_WALL_TIMEOUT_S", "10800"))
+
+
+async def _run_bounded(build_coro, task: dict, needs_docker: bool) -> dict:
+    limit = _DOCKER_WALL_TIMEOUT_S if needs_docker else _WALL_TIMEOUT_S
+    try:
+        return await asyncio.wait_for(_build_with_retry(build_coro, task),
+                                      timeout=limit)
+    except asyncio.TimeoutError:
+        print(f"      ⏱ wall-clock timeout ({limit}s) {task.get('task_id','')}"
+              f" — recorded as error; its container may need manual cleanup",
+              flush=True)
+        return {"task_id": task.get("task_id", ""), "response": "",
+                "error": f"wall_clock_timeout_{limit}s"}
+
+
 def _load_done_map(trace_path: Path) -> dict:
     """Read an existing trace.jsonl into {(group, task_id): record} for resume.
     Later records win, so a re-run of a task overrides an earlier partial."""
@@ -556,10 +579,10 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 if needs_docker and docker_sem is not None:
                     async with docker_sem:
                         async with global_sem:
-                            r = await _build_with_retry(build_coro, task)
+                            r = await _run_bounded(build_coro, task, True)
                 else:
                     async with global_sem:
-                        r = await _build_with_retry(build_coro, task)
+                        r = await _run_bounded(build_coro, task, False)
                 prof = summarize(_perf() - _t0, read_task_profile())
                 if isinstance(r, dict):
                     r["_prof"] = prof
