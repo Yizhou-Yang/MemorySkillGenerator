@@ -7,14 +7,20 @@ harbor's per-task rewards, mem.record(task, result, score) (record-after-eval),
 persist the store (pickle) so the NEXT iteration's CuratedTerminus injects it.
 
 Usage (server, after Gate 1 smoke of HARBOR_TB2_PLAN §1):
-  python scripts/latest/tb2_harbor_bridge.py --arm B --iters 3 \
-      --model openai/hy3-preview-ioa --n-tasks 88
+  # Start the proxy first:
+  nohup /root/.conda/envs/skillforge/bin/python scripts/latest/codebuddy_oai_proxy.py &
+
+  # Then run the bridge:
+  OPENAI_API_BASE=http://localhost:8741/v1 OPENAI_API_KEY=dummy \
+  /root/.conda/envs/harbor312/bin/python scripts/latest/tb2_harbor_bridge.py \
+      --arm B --iters 3 --model openai/hy3-preview-ioa --n-tasks 80
+
 Trace lands in experiments_results/harbor_tb2/<model-slug>/terminal_bench_2/
 (kept separate from the simplified-loop results until Gate 4 signs off).
 
-VERIFY ON SERVER: the `harbor run` agent-path flag (`-a module:Class` vs
-`--agent-import-path`) and the results.json schema of the pinned version —
-_parse_results() tries the common layouts and fails loudly otherwise.
+NOTE: Uses `terminal-bench run` CLI (not `harbor run`). The dataset is at
+.datasets/terminal-bench-2 (downloaded via `terminal-bench datasets download`).
+For arms B/C, uses --agent-import-path with CuratedTerminus subclass.
 """
 from __future__ import annotations
 
@@ -58,43 +64,70 @@ def _mk_memory(arm: str, benchmark: str = "terminal_bench_2"):
 
 
 def _parse_results(run_dir: Path) -> list[dict]:
-    """Best-effort parse of harbor run output into
-    [{task_id, task_name, instruction, reward, response}]. Tries the common
-    layouts; extend after pinning the harbor version (plan §0)."""
+    """Parse terminal-bench v0.2.18 results.json into
+    [{task_id, task_name, instruction, reward, response}].
+
+    The results.json schema (v0.2.18):
+      {
+        "results": [{
+          "task_id": str,
+          "instruction": str,
+          "is_resolved": bool,
+          "failure_mode": str,
+          "parser_results": {"test_name": "passed"|"failed"},
+          ...
+        }],
+        "accuracy": float,
+        "n_resolved": int,
+      }
+    """
     out = []
-    candidates = (list(run_dir.rglob("results.json"))
-                  + list(run_dir.rglob("result.json")))
+    # Find the top-level results.json (not per-task ones)
+    candidates = sorted(run_dir.rglob("results.json"))
     for rj in candidates:
         try:
             data = json.loads(rj.read_text())
         except Exception:
             continue
-        rows = (data.get("results") if isinstance(data, dict) else data) or []
-        if isinstance(rows, dict):
-            rows = [dict(v, task_name=k) if isinstance(v, dict) else
-                    {"task_name": k, "reward": v} for k, v in rows.items()]
+        if not isinstance(data, dict):
+            continue
+        rows = data.get("results", [])
+        if not isinstance(rows, list):
+            continue
         for r in rows:
             if not isinstance(r, dict):
                 continue
-            name = str(r.get("task_name") or r.get("task_id") or r.get("name") or "")
-            reward = r.get("reward", r.get("score",
-                     r.get("resolved", r.get("is_resolved"))))
-            if reward is None and "parser_results" in r:
-                pr = r["parser_results"] or {}
-                vals = [v for v in pr.values() if isinstance(v, (int, float, bool))]
-                reward = (sum(map(float, vals)) / len(vals)) if vals else None
-            if not name or reward is None:
+            task_id = str(r.get("task_id") or r.get("task_name") or "")
+            if not task_id:
                 continue
+            # Primary: is_resolved boolean
+            resolved = r.get("is_resolved")
+            if resolved is not None:
+                reward = 1.0 if resolved else 0.0
+            else:
+                # Fallback: parser_results
+                pr = r.get("parser_results") or {}
+                if pr:
+                    passed = sum(1 for v in pr.values() if v == "passed")
+                    total = len(pr)
+                    reward = passed / total if total > 0 else 0.0
+                else:
+                    reward = r.get("reward", r.get("score", 0.0))
+                    if isinstance(reward, bool):
+                        reward = float(reward)
             out.append({
-                "task_id": name, "task_name": name,
-                "instruction": str(r.get("instruction") or r.get("task_description") or ""),
-                "reward": float(bool(reward)) if isinstance(reward, bool) else float(reward),
-                "response": str(r.get("final_response") or r.get("agent_output") or "")[:2000],
+                "task_id": task_id,
+                "task_name": task_id,
+                "instruction": str(r.get("instruction") or "")[:2000],
+                "reward": float(reward),
+                "response": str(r.get("failure_mode") or "")[:500],
             })
+        if out:
+            break  # Use the first valid results.json found
     if not out:
         raise RuntimeError(
             f"no parsable results under {run_dir} — inspect the run layout and "
-            "extend _parse_results() (VERIFY marker, plan §3)")
+            "extend _parse_results()")
     return out
 
 
@@ -111,10 +144,13 @@ def main() -> None:
     ap.add_argument("--arm", choices=["A", "B", "C"], required=True)
     ap.add_argument("--iters", type=int, default=int(os.environ.get("ITER_CHAIN", "3")))
     ap.add_argument("--model", default=os.environ.get("TB2_MODEL", "openai/hy3-preview-ioa"))
-    ap.add_argument("--dataset", default="terminal-bench/terminal-bench-2")
+    ap.add_argument("--dataset-path",
+                    default=str(PROJECT_ROOT / ".datasets" / "terminal-bench-2"),
+                    help="Path to downloaded terminal-bench-core dataset")
     ap.add_argument("--n-tasks", type=int, default=0, help="0 = all")
-    ap.add_argument("--agent-flag", default="-a",
-                    help="harbor's agent flag (VERIFY: -a vs --agent-import-path)")
+    ap.add_argument("--n-concurrent", type=int, default=4)
+    ap.add_argument("--task-ids", nargs="*", default=None,
+                    help="Specific task IDs to run (default: all)")
     args = ap.parse_args()
 
     slug = re.sub(r"[^A-Za-z0-9._-]", "_", args.model.split("/")[-1])
@@ -127,21 +163,34 @@ def main() -> None:
 
     mem = _mk_memory(args.arm)
     import asyncio
+    tb_bin = "/root/.conda/envs/harbor312/bin/terminal-bench"
     for it in range(args.iters):
         run_dir = out_root / f"runs_{args.arm}_iter{it}"
         env = os.environ.copy()
         env["TB2_ARM"] = args.arm
         env["TB2_MEM_STATE"] = str(state)
-        agent = ("terminus-2" if args.arm == "A"
-                 else "scripts.latest.tb2_harbor_agent:CuratedTerminus")
-        cmd = ["harbor", "run", "-d", args.dataset, args.agent_flag, agent,
-               "-m", args.model, "-k", "1", "--output-dir", str(run_dir)]
+        # Arm A uses vanilla terminus-2; B/C use our memory-prefix subclass
+        if args.arm == "A":
+            cmd = [tb_bin, "run", "-a", "terminus-2"]
+        else:
+            cmd = [tb_bin, "run",
+                   "--agent-import-path",
+                   "scripts.latest.tb2_harbor_agent:CuratedTerminus"]
+        cmd += ["-m", args.model,
+                "-p", args.dataset_path,
+                "--output-path", str(run_dir),
+                "--n-attempts", "1",
+                "--n-concurrent", str(args.n_concurrent),
+                "--no-rebuild"]
         if args.n_tasks:
             cmd += ["--n-tasks", str(args.n_tasks)]
+        if args.task_ids:
+            for tid in args.task_ids:
+                cmd += ["-t", tid]
         print(f"[bridge] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
         rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
         if rc != 0:
-            print(f"[bridge] harbor exited rc={rc} — stopping arm", flush=True)
+            print(f"[bridge] terminal-bench exited rc={rc} — stopping arm", flush=True)
             break
         rows = _parse_results(run_dir)
         with open(trace, "a") as f:

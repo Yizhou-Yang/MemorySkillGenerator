@@ -71,32 +71,28 @@ def _base():
     return _Terminus2
 
 
-def CuratedTerminus(*args, **kwargs):
-    """Factory returning a Terminus2 subclass instance (lazy so the module
-    imports cleanly even where terminal-bench is absent)."""
-    Base = _base()
+class CuratedTerminus(_base()):
+    """Terminus2 subclass with a memory-prefix (lazy base so the module imports
+    cleanly even where terminal-bench is absent). harbor requires a real class
+    (not a factory function) for --agent-import-path."""
 
-    class _CuratedTerminus(Base):
-        @staticmethod
-        def name() -> str:  # harbor registry display name
-            return "curated-terminus"
+    @staticmethod
+    def name() -> str:  # harbor registry display name
+        return "curated-terminus"
 
-        def perform_task(self, *a, **kw):
-            block = None
-            a = list(a)
-            for i, v in enumerate(a):           # first str arg = the instruction
-                if isinstance(v, str):
+    def perform_task(self, *a, **kw):
+        a = list(a)
+        for i, v in enumerate(a):           # first str arg = the instruction
+            if isinstance(v, str):
+                block = _inject_block(v)
+                if block:
+                    a[i] = f"{block}\n\n---\n\n{v}"
+                break
+        else:
+            for k, v in kw.items():
+                if isinstance(v, str) and len(v) > 40:
                     block = _inject_block(v)
                     if block:
-                        a[i] = f"{block}\n\n---\n\n{v}"
+                        kw[k] = f"{block}\n\n---\n\n{v}"
                     break
-            else:
-                for k, v in kw.items():
-                    if isinstance(v, str) and len(v) > 40:
-                        block = _inject_block(v)
-                        if block:
-                            kw[k] = f"{block}\n\n---\n\n{v}"
-                        break
-            return super().perform_task(*a, **kw)
-
-    return _CuratedTerminus(*args, **kwargs)
+        return super().perform_task(*a, **kw)
