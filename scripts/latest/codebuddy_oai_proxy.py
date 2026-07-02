@@ -160,6 +160,14 @@ async def chat_completions(request: Request):
     if "/" in model:
         model = model.split("/", 1)[1]
 
+    # Force non-streaming: this proxy returns a complete JSON response, not SSE.
+    # litellm (used by Terminus-2) may request stream=true by default; if the
+    # client expects SSE chunks and gets a single JSON object, it fails to parse.
+    # We detect and strip the flag, silently degrading to non-streamed.
+    if body.get("stream"):
+        body = dict(body)
+        body["stream"] = False
+
     system_prompt, user_prompt = _messages_to_prompt(messages)
 
     if not user_prompt:
