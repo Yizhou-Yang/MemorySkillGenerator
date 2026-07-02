@@ -11,6 +11,15 @@ import contextvars
 import json
 import os
 import re
+
+# SDK tool-call markup sometimes leaks into text blocks (</arg_value:..>,
+# </tool_call:..>, <think:..>) and poisons downstream consumers: bash syntax
+# errors on TB2 commands, failed exact-match on LoCoMo answers (44 polluted
+# rows observed). Scrub at the source so EVERY caller gets clean text;
+# terminus2 keeps its own scrub as a second line of defense.
+_SDK_MARKUP_RE = re.compile(
+    r"</?(?:think|tool_calls?|name|args?|arg_key|arg_value)(?::[A-Za-z0-9_-]+)?>"
+)
 import time
 
 # The CodeBuddy Agent SDK is Tencent-internal and only present on the gateway.
@@ -332,7 +341,7 @@ def llm_review_fn(prompt: str) -> str:
                     await gen.aclose()
                 except Exception:
                     pass
-        return result
+        return _SDK_MARKUP_RE.sub("", result)
 
     def _run_in_thread():
         loop = asyncio.new_event_loop()
@@ -396,14 +405,14 @@ def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
                         if text and max_turns <= 2:
                             break
         except Exception as e:
-            return {"text": text, "actions": actions, "error": str(e)[:200] if not text else None}
+            return {"text": _SDK_MARKUP_RE.sub("", text), "actions": actions, "error": str(e)[:200] if not text else None}
         finally:
             if gen is not None:
                 try:
                     await gen.aclose()
                 except Exception:
                     pass
-        return {"text": text, "actions": actions, "error": None}
+        return {"text": _SDK_MARKUP_RE.sub("", text), "actions": actions, "error": None}
 
     loop = asyncio.new_event_loop()
     try:
