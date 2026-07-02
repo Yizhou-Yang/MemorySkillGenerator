@@ -63,6 +63,31 @@ def _mk_memory(arm: str, benchmark: str = "terminal_bench_2"):
     return BenchmarkMemory(benchmark, "B") if arm == "B" else CuratedMemory(benchmark)
 
 
+def _agent_transcript(run_dir: Path, task_id: str) -> str:
+    """Best-effort read of the agent's own output for one task (commands +
+    final pane), used as the B/C patch content. Layouts vary by terminal-bench
+    version — we try the common files under the task's dir; VERIFY on the
+    pinned version that at least one matches (else patches fall back to a
+    one-line summary and memory arms carry little signal)."""
+    task_dirs = [d for d in run_dir.rglob(task_id) if d.is_dir()]
+    parts: list[str] = []
+    for td in task_dirs[:2]:
+        for pat in ("**/commands.txt", "**/post-agent*.txt", "**/post-agent*.pane",
+                    "**/agent-logs/**/*.log", "**/episode*.json"):
+            for fp in sorted(td.glob(pat))[:3]:
+                try:
+                    s = fp.read_text(errors="replace").strip()
+                except Exception:
+                    continue
+                if s:
+                    parts.append(s[-1500:])
+            if parts:
+                break
+        if parts:
+            break
+    return ("\n".join(parts))[:2000]
+
+
 def _parse_results(run_dir: Path) -> list[dict]:
     """Parse terminal-bench v0.2.18 results.json into
     [{task_id, task_name, instruction, reward, response}].
@@ -83,7 +108,9 @@ def _parse_results(run_dir: Path) -> list[dict]:
     """
     out = []
     # Find the top-level results.json (not per-task ones)
-    candidates = sorted(run_dir.rglob("results.json"))
+    # newest first: a rerun/retry may leave multiple results.json in the tree
+    candidates = sorted(run_dir.rglob("results.json"),
+                        key=lambda q: q.stat().st_mtime, reverse=True)
     for rj in candidates:
         try:
             data = json.loads(rj.read_text())
@@ -120,7 +147,13 @@ def _parse_results(run_dir: Path) -> list[dict]:
                 "task_name": task_id,
                 "instruction": str(r.get("instruction") or "")[:2000],
                 "reward": float(reward),
-                "response": str(r.get("failure_mode") or "")[:500],
+                # patch content for B/C = the agent's actual transcript (what it
+                # DID), not the failure_mode label — an injected "unset" teaches
+                # nothing. Falls back to a resolved-summary when no log is found.
+                "response": _agent_transcript(run_dir, task_id) or
+                            f"resolved={bool(reward >= 1.0)}; failure_mode="
+                            f"{r.get('failure_mode') or 'n/a'}",
+                "failure_mode": str(r.get("failure_mode") or "")[:200],
             })
         if out:
             break  # Use the first valid results.json found
@@ -162,6 +195,9 @@ def main() -> None:
     rev = _code_rev()
 
     mem = _mk_memory(args.arm)
+    if mem is not None:                       # fail fast, not at iter-0's end
+        pickle.loads(pickle.dumps(mem))
+        print(f"[bridge] arm {args.arm} store pickle round-trip ok", flush=True)
     import asyncio
     tb_bin = "/root/.conda/envs/harbor312/bin/terminal-bench"
     for it in range(args.iters):

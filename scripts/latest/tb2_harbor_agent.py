@@ -71,10 +71,18 @@ def _base():
     return _Terminus2
 
 
-class CuratedTerminus(_base()):
-    """Terminus2 subclass with a memory-prefix (lazy base so the module imports
-    cleanly even where terminal-bench is absent). harbor requires a real class
-    (not a factory function) for --agent-import-path."""
+try:
+    _BaseAgent = _load_terminus()
+except ImportError:
+    _BaseAgent = object  # keeps this module importable where terminal-bench is
+                         # absent (local tooling); using the class then fails
+                         # loudly in _inject-time super() call, by design.
+
+
+class CuratedTerminus(_BaseAgent):
+    """Terminus2 subclass with a memory-prefix. harbor requires a real class
+    (not a factory) for --agent-import-path; base resolves at import when
+    terminal-bench is installed, else degrades to `object` for importability."""
 
     @staticmethod
     def name() -> str:  # harbor registry display name

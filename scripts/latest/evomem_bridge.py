@@ -288,6 +288,19 @@ class CuratedMemory:
         self._last_score: dict[str, float] = {}
         self._record_failures = 0
 
+    # Pickled by the harbor bridge between iterations: drop the LLM function
+    # ref on dump (re-imported on load). If SkillForgeLatest's embedder turns
+    # out unpicklable too, the bridge's startup round-trip check will catch it.
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        d["_llm"] = None
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        from scripts.latest.llm_client import llm_review_fn
+        self._llm = llm_review_fn
+
     def inject(self, task: dict) -> str:
         # Retrieve on the CLEANED question (boilerplate stripped) so similarity
         # reflects real content, effectiveness-weighted via retrieve_similar.
