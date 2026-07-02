@@ -651,6 +651,15 @@ class BenchmarkLoader:
                         "evidence": evidence,
                         "num_sessions": len(sessions),
                         "num_turns": len(turns),
+                        # Conversation-scoped chains: all questions of one LoCoMo
+                        # conversation share a chain, so B/C patches written for
+                        # one question become retrievable by its siblings. OFF by
+                        # default — the shipped results scope memory to each
+                        # question's own iteration chain (task_id fallback in
+                        # evomem_bridge._chain_id); flipping this changes the
+                        # experiment semantics and needs a fresh (non-RESUME) run.
+                        **({"chain_id": f"locomo_s{sample_idx}"}
+                           if os.environ.get("LOCOMO_SESSION_CHAINS") == "1" else {}),
                     },
                 })
 

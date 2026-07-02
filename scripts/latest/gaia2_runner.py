@@ -45,7 +45,7 @@ from scripts.latest.llm_client import (
     use_openai_backend, openai_backend_ready, openai_tool_chat,
 )
 from scripts.latest.eval import (
-    normalize_answer, exact_match, evaluate_task,
+    normalize_answer, exact_match,
     compute_partial_results_from_trace,
 )
 

@@ -53,6 +53,17 @@ from scripts.latest.eval import (
     compute_partial_results_from_trace,
 )
 
+# Fingerprint every trace row with the code revision that produced it, so a
+# resumed sweep can be audited for rows that predate a bug fix (a stale-row
+# resume once kept 300 pre-fix arm-B rows and silently voided a comparison).
+try:
+    import subprocess as _sp
+    _CODE_REV = _sp.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                 cwd=str(PROJECT_ROOT), text=True,
+                                 stderr=_sp.DEVNULL).strip()
+except Exception:
+    _CODE_REV = "unknown"
+
 # --- Sub-runners (per-benchmark EvoArena-style within-agent injection) ---
 from scripts.latest.gaia_runner import run_gaia_task, run_gaia_task_controlled
 from scripts.latest.gaia2_runner import run_gaia2_task_with_are
@@ -502,6 +513,12 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             tid = task.get("task_id", "")
             # ── Resume: reconstruct already-completed tasks from trace ──
             prev = done_map.get((group_key, tid))
+            # A chain counts as done only if its FINAL iteration was traced. A
+            # crash mid-chain would otherwise freeze this task at an early,
+            # memory-less iteration forever (biasing B/C down); re-run it fully.
+            if (prev is not None and ITER_CHAIN > 1
+                    and int(prev.get("iteration", ITER_CHAIN - 1)) < ITER_CHAIN - 1):
+                prev = None
             if prev is not None:
                 r = {"task_id": tid, "response": prev.get("response", ""),
                      "expected": prev.get("expected", ""),
@@ -579,6 +596,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   # for chain-level (all-iterations-correct) accuracy.
                                   "iteration": _it,
                                   "iter_total": ITER_CHAIN,
+                                  "code_rev": _CODE_REV,
                                   **{f"prof_{k}": v for k, v in prof.items()}})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev

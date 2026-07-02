@@ -259,6 +259,14 @@ class CuratedMemory:
         # exp task_id -> its chain id, so retrieval can be scoped to the chain
         # (patch memory = same-task iterations, not cross-task transfer).
         self._chain_of: dict[str, str] = {}
+        # Effectiveness feedback loop (the paper's w_c): inject() remembers which
+        # experience ids it served for a task; record() then credits/blames them
+        # with the within-chain score delta (this iteration vs the previous one),
+        # via library.update_effectiveness -> get_experience_weight. Without this
+        # wiring w_c stays 1.0 forever and retrieval is pure similarity.
+        self._served: dict[str, list[str]] = {}
+        self._last_score: dict[str, float] = {}
+        self._record_failures = 0
 
     def inject(self, task: dict) -> str:
         # Retrieve on the CLEANED question (boilerplate stripped) so similarity
@@ -284,12 +292,34 @@ class CuratedMemory:
         succ = [e for e in cands if getattr(e, "outcome", "") == "success"][:self.top_k]
         fail = [e for e in cands if getattr(e, "outcome", "") in ("failure", "partial")]
         fail = fail[:max(1, self.top_k - 1)]
-        return _format_curated(succ, fail)
+        out = _format_curated(succ, fail)
+        if out:
+            # remember what was actually served, for the effectiveness update
+            self._served[task.get("task_id", "")] = [e.task_id for e in succ + fail]
+        return out
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
+        tid = task.get("task_id", "")
+        chain = _chain_id(task)
+        served = self._served.pop(tid, None)
         resp = (result.get("response") or "").strip()
         if not resp:
             return
+        # Effectiveness update (w_c feedback): the injected experiences get the
+        # within-chain paired delta -- this iteration's score minus the previous
+        # iteration's. Positive => they helped; negative => they hurt. Bounded
+        # into weights by get_experience_weight (clip [0.3, 1.5]).
+        if served and score is not None:
+            prev = self._last_score.get(chain)
+            if prev is not None:
+                delta = float(score) - prev
+                for eid in served:
+                    try:
+                        self._sf.library.update_effectiveness(eid, delta)
+                    except Exception:
+                        pass
+        if score is not None:
+            self._last_score[chain] = float(score)
         actions = _actions_from_result(result)
         oracle = _oracle_from_task(task)
         rtrace = result.get("reasoning_trace") or [resp[:1000]]
@@ -314,8 +344,12 @@ class CuratedMemory:
             # retrieval). Same-task iterations share a task_id; LoCoMo shares a
             # session chain_id.
             self._chain_of[task.get("task_id", "")] = _chain_id(task)
-        except Exception:
-            pass
+        except Exception as e:
+            # never crash the run over a memory write, but don't hide it either
+            self._record_failures += 1
+            if self._record_failures <= 3:
+                print(f"  [CuratedMemory] record failed ({self._record_failures}): "
+                      f"{type(e).__name__}: {e}", flush=True)
 
     def __len__(self) -> int:
         return len(self._sf.library.experiences)
