@@ -180,6 +180,18 @@ class BenchmarkMemory:
         self._n = 0
         self._lock = threading.Lock()
 
+    # The harbor bridge pickles the store between iterations; a threading.Lock
+    # is unpicklable and crashed arm B at iteration 0. Drop it on dump,
+    # recreate on load.
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        d["_lock"] = None
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        self._lock = threading.Lock()
+
     def inject(self, task: dict) -> str:
         query = task.get("description", task.get("task_id", ""))
         # CHAIN-SCOPED retrieval: patch memory is feedback across iterations of
