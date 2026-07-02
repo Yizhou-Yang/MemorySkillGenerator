@@ -13,7 +13,7 @@ python scripts/latest/analyze_results.py experiments_results/formal/<snapshot>
 ### `2026-06-16_hy3_n30`
 First complete A/B/C run on **hy3-preview-ioa** (hunyuan-3), 30 tasks/benchmark.
 Mechanism = legacy within-task A/B/C (gaia/gaia2 prompt-blob augmentation, locomo
-self-consistency) — i.e. EvoMem/GPR retrofit NOT yet applied.
+self-consistency) — i.e. the curated patch-memory pipeline (arm C) NOT yet applied.
 
 Primary-metric mean scores:
 

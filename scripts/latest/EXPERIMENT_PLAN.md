@@ -1,10 +1,10 @@
-# CuratorMem — Experiment Plan (executable)
+# Experiment Plan (executable)
 
 **Goal.** Produce the paper's tables: a main A/B/C table across backbone models,
 plus the mechanism / breakdown sub-tables.
 
-- **Arms:** A = no memory, B = raw `\patchmem` (inject raw patches), C = CuratorMem
-  (curated store). Set per benchmark by the existing `latest_runner.py`.
+- **Arms:** A = no memory, B = raw `\patchmem` (inject raw patches), C = curated
+  patch memory (curated store). Set per benchmark by the existing `latest_runner.py`.
 - **Benchmarks (4):** `gaia`, `gaia2`, `locomo`, `terminal_bench_2`.
 - **Models (7), cheapest → most expensive** (output price, RMB/MTok, USD×7):
 
