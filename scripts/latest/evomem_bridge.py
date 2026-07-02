@@ -21,6 +21,7 @@ true outcome.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import threading
 
@@ -242,7 +243,14 @@ class CuratedMemory:
         to keep the event loop free. Recorded with the task's real score."""
 
     def __init__(self, benchmark: str, top_k: int = 3,
-                 use_critic: bool = True, use_enrich: bool = True) -> None:
+                 use_critic: bool | None = None, use_enrich: bool | None = None) -> None:
+        # Stage toggles default from env so the ablation driver can build the
+        # C_refine / C_refine_critic arms without touching the runner:
+        #   C_USE_CRITIC=0 -> refinement only; C_USE_ENRICH=0 -> no forced enrich.
+        if use_critic is None:
+            use_critic = os.environ.get("C_USE_CRITIC", "1") == "1"
+        if use_enrich is None:
+            use_enrich = os.environ.get("C_USE_ENRICH", "1") == "1"
         self.benchmark = benchmark
         self.top_k = top_k
         # Curation-stage toggles (for the ablation): refinement is always on;

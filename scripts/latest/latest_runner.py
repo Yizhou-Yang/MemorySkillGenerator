@@ -121,6 +121,9 @@ TASK_RETRY_BASE_DELAY = float(os.environ.get("TASK_RETRY_BASE_DELAY", "8"))
 # RESUME=1 keeps existing trace.jsonl and skips already-completed (group, task_id)
 # pairs instead of wiping and restarting from scratch.
 RESUME = os.environ.get("RESUME", "0") == "1"
+# Arm selection (used by the ablation driver): run only these arms of A/B/C.
+# Default runs all three — the main sweep is unchanged.
+_ARMS = set(os.environ.get("ARMS", "A,B,C").replace(" ", "").split(","))
 
 _TRANSIENT_MARKERS = (
     "429", "rate_limit", "rate-limit", "timeout", "quota", "quota_exceeded",
@@ -131,7 +134,8 @@ _TRANSIENT_MARKERS = (
 #   experiments_results/latest/<model>/<benchmark>/{trace.jsonl,report.json}
 _MODEL_SLUG = re.sub(r"[^A-Za-z0-9._-]", "_",
                      os.environ.get("CODEBUDDY_MODEL", "hy3-preview-ioa"))
-RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / "latest" / _MODEL_SLUG)
+_RESULTS_BASE = os.environ.get("RESULTS_BASE", "latest")  # ablation arms write elsewhere
+RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / _RESULTS_BASE / _MODEL_SLUG)
 
 # --- Primary Benchmarks ---
 # Scaled to 100/benchmark (override with TASK_LIMIT=<n>) so A/B/C deltas can
@@ -649,33 +653,60 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     #                 agent critic + forced enrichment), effectiveness-weighted
     #                 retrieval. Injects reusable lessons, not B's raw answers.
     # B and C each keep their own cross-task memory; A keeps none.
-    mem_b = BenchmarkMemory(benchmark, "B")
-    mem_c = CuratedMemory(benchmark)
+    mem_b = BenchmarkMemory(benchmark, "B") if "B" in _ARMS else None
+    mem_c = CuratedMemory(benchmark) if "C" in _ARMS else None
 
-    print(f"    [A] Vanilla (no memory)...", flush=True)
-    results_a, evals_a = await _run_group("A", "A_baseline", test_tasks,
-                                          lambda t: run_fn_a(t, "", "A"))
+    # Equal-budget control (ablation `ctrl_reprompt` arm): wrap the no-memory
+    # baseline with m extra self-refinement calls so the A slot spends the same
+    # write-time budget as C's refine+critic — separating WHERE the extra compute
+    # goes from HOW MUCH there is. Off unless REPROMPT_CONTROL=1.
+    if os.environ.get("REPROMPT_CONTROL") == "1":
+        _m_reprompt = int(os.environ.get("REPROMPT_CALLS", "2"))
+        _run_fn_base = run_fn_a
 
-    print(f"    [B] PatchMem (naive cross-task patch memory)...", flush=True)
-    results_b, evals_b = await _run_group("B", "B_evomem", test_tasks,
-        lambda t: solve_with_memory(run_fn_a, t, mem_b, "B"), mem=mem_b)
+        async def run_fn_a(task, exp, group, _base=_run_fn_base, _m=_m_reprompt):
+            r = await _base(task, exp, group)
+            try:
+                resp = (r.get("response") or "").strip() if isinstance(r, dict) else ""
+                for _ in range(_m):
+                    if not resp:
+                        break
+                    out = await _llm_call_notool(
+                        "You critique and improve answers. Return ONLY the improved final answer.",
+                        f"Task:\n{task.get('description', '')[:2000]}\n\n"
+                        f"Current answer:\n{resp[:2000]}\n\n"
+                        "Critique the answer for errors or omissions, then return "
+                        "the improved final answer only.",
+                        timeout=90)
+                    improved = (out.get("text") or "").strip()
+                    if improved:
+                        resp = improved
+                if isinstance(r, dict) and resp:
+                    r["response"] = resp
+                    r["execution_mode"] = "reprompt_control"
+            except Exception:
+                pass
+            return r
 
-    print(f"    [C] Curator (refined experiences + effectiveness-weighted retrieval)...", flush=True)
-    results_c, evals_c = await _run_group("C", "C_gpr", test_tasks,
-        lambda t: solve_with_memory(run_fn_a, t, mem_c, "C"), mem=mem_c)
+    results_a = results_b = results_c = []
+    evals_a = evals_b = evals_c = []
+    if "A" in _ARMS:
+        print(f"    [A] Vanilla (no memory)...", flush=True)
+        results_a, evals_a = await _run_group("A", "A_baseline", test_tasks,
+                                              lambda t: run_fn_a(t, "", "A"))
+    if "B" in _ARMS:
+        print(f"    [B] PatchMem (naive cross-task patch memory)...", flush=True)
+        results_b, evals_b = await _run_group("B", "B_evomem", test_tasks,
+            lambda t: solve_with_memory(run_fn_a, t, mem_b, "B"), mem=mem_b)
+    if "C" in _ARMS:
+        print(f"    [C] Curator (refined experiences + effectiveness-weighted retrieval)...", flush=True)
+        results_c, evals_c = await _run_group("C", "C_gpr", test_tasks,
+            lambda t: solve_with_memory(run_fn_a, t, mem_c, "C"), mem=mem_c)
 
-    # Build flat all_evals for per_level / per_config breakdowns
-    all_evals = []
-    for i in range(len(test_tasks)):
-        all_evals.append(evals_a[i])
-        all_evals.append(evals_b[i])
-        all_evals.append(evals_c[i])
-
-    scores = {"A_baseline": [], "B_evomem": [], "C_gpr": []}
-    for i in range(len(test_tasks)):
-        scores["A_baseline"].append(all_evals[i * 3])
-        scores["B_evomem"].append(all_evals[i * 3 + 1])
-        scores["C_gpr"].append(all_evals[i * 3 + 2])
+    # Flat evals + per-group scores for the arms that actually ran.
+    scores = {g: e for g, e in (("A_baseline", evals_a), ("B_evomem", evals_b),
+                                ("C_gpr", evals_c)) if e}
+    all_evals = [e for evs in scores.values() for e in evs]
 
     report = {}
     for group, evals in scores.items():
@@ -689,12 +720,12 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
 
     metric_name = "EM"
     print(f"\n  Results ({benchmark}, model={MODEL}):")
-    print(f"    A (Vanilla):  {metric_name}={report['A_baseline']['em']:.1%}")
-    print(f"    B (EvoMem):   {metric_name}={report['B_evomem']['em']:.1%}")
-    print(f"    C (GPR):      {metric_name}={report['C_gpr']['em']:.1%}")
-    delta_ac = report['C_gpr']['em'] - report['A_baseline']['em']
-    delta_bc = report['C_gpr']['em'] - report['B_evomem']['em']
-    print(f"    Delta(C-A): {delta_ac:+.1%} | Delta(C-B): {delta_bc:+.1%}")
+    for _g, _r in report.items():
+        print(f"    {_g:12s}: {metric_name}={_r['em']:.1%}")
+    if {"A_baseline", "B_evomem", "C_gpr"} <= set(report):
+        delta_ac = report['C_gpr']['em'] - report['A_baseline']['em']
+        delta_bc = report['C_gpr']['em'] - report['B_evomem']['em']
+        print(f"    Delta(C-A): {delta_ac:+.1%} | Delta(C-B): {delta_bc:+.1%}")
 
     # ── Per-task wall-clock breakdown (where time goes → how to scale) ──
     _profs = [r["_prof"] for grp in (results_a, results_b, results_c)
@@ -809,6 +840,11 @@ async def main():
     BENCHMARKS_TO_RUN = [
         "gaia", "gaia2", "terminal_bench_2", "locomo"
     ]
+    # Benchmark selection (ablation driver / partial reruns): BENCHMARKS=locomo,gaia2
+    _bf = os.environ.get("BENCHMARKS", "").strip()
+    if _bf:
+        _keep = {b.strip() for b in _bf.split(",") if b.strip()}
+        BENCHMARKS_TO_RUN = [b for b in BENCHMARKS_TO_RUN if b in _keep]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}
     for name in BENCHMARKS_TO_RUN:
