@@ -230,6 +230,12 @@ async def run_single_benchmark(
                     "test_passed": r.get("test_passed", False),
                     "test_output": (r.get("test_output", "") or "")[:2000],
                     "execution_mode": r.get("execution_mode", "?"),
+                    "em": ev.get("em", 0.0),
+                    "method": ev.get("method", ""),
+                    # TB2 loop visibility (see latest_runner trace extra)
+                    **{k: r[k] for k in
+                       ("turns_used", "end_reason", "cmds_executed",
+                        "pre_test_passed") if k in r},
                 }
 
                 # Atomic trace append

@@ -457,10 +457,16 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             worker = _gaia2_native_sync
         if worker is not None:
             loop = asyncio.get_event_loop()
+            # Propagate contextvars into the worker thread so per-task LLM
+            # token/call profiling lands in this task's accumulator
+            # (run_in_executor does not copy the context by itself).
+            import contextvars as _cv
+            _ctx = _cv.copy_context()
+            _max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "50"))
             native = await loop.run_in_executor(
-                None, worker,
-                scenario_path, task_desc, experience_section, dict(result),
-                int(os.environ.get("GAIA2_MAX_TURNS", "50")),
+                None, lambda: _ctx.run(
+                    worker, scenario_path, task_desc, experience_section,
+                    dict(result), _max_turns),
             )
             if native is not None and not native.pop("_native_failed", False):
                 return native

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import json
 import os
 import re
@@ -23,10 +24,19 @@ except Exception:  # no CodeBuddy CLI → reviewer/OpenAI-compatible path
     _HAS_CODEBUDDY = False
 
 try:
-    from profiling import add_tokens as _prof_add_tokens
+    # Import via the SAME package path the runner uses. A bare `from profiling
+    # import ...` binds a second copy of the module (scripts/latest is
+    # sys.path[0] when latest_runner.py is the entry script) with its own
+    # ContextVar accumulator that the runner never reads — every token/call
+    # count landed there and the trace showed prof_llm_calls=0/prof_tok_*=0
+    # even for tasks with dozens of real LLM calls.
+    from scripts.latest.profiling import add_tokens as _prof_add_tokens
 except Exception:  # pragma: no cover - profiling is optional plumbing
-    def _prof_add_tokens(*_a, **_k):  # type: ignore
-        return None
+    try:
+        from profiling import add_tokens as _prof_add_tokens
+    except Exception:
+        def _prof_add_tokens(*_a, **_k):  # type: ignore
+            return None
 
 
 MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro")
@@ -81,9 +91,12 @@ def _openai_client(timeout: int = 60):
 def _record_openai_usage(resp) -> None:
     try:
         u = getattr(resp, "usage", None)
-        if u is not None:
-            _prof_add_tokens(getattr(u, "prompt_tokens", 0) or 0,
-                             getattr(u, "completion_tokens", 0) or 0, calls=1)
+        pt = (getattr(u, "prompt_tokens", 0) or 0) if u is not None else 0
+        ct = (getattr(u, "completion_tokens", 0) or 0) if u is not None else 0
+        # calls=1 unconditionally: an invocation whose usage payload is missing
+        # must still count as a call, else prof_llm_calls=0 is ambiguous
+        # between "no usage surfaced" and "the LLM was never called".
+        _prof_add_tokens(pt, ct, calls=1)
     except Exception:
         pass
 
@@ -182,7 +195,10 @@ def _record_usage(msg) -> None:
         if not in_tok and not out_tok:
             out_tok = get("total_tokens", 0)  # coarse fallback when only a total is exposed
         if in_tok or out_tok:
-            _prof_add_tokens(in_tok, out_tok, calls=1)
+            # calls=0: the invocation itself is counted once per query() in the
+            # _query_*_sync bodies; counting here too would double-count on
+            # SDKs that attach usage to several streamed messages per call.
+            _prof_add_tokens(in_tok, out_tok, calls=0)
     except Exception:
         pass
 
@@ -354,6 +370,10 @@ def _query_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
         return _openai_sync(prompt, max_turns, timeout)
 
     async def _inner():
+        # Count the invocation itself: the SDK does not always surface a usage
+        # payload, and prof_llm_calls must distinguish "called, no usage" from
+        # "never called" (the TB2 zero-score triage hinged on exactly this).
+        _prof_add_tokens(0, 0, calls=1)
         opt = CodeBuddyAgentOptions(
             permission_mode="bypassPermissions", model=MODEL, max_turns=max_turns, cwd="/tmp"
         )
@@ -397,9 +417,16 @@ async def _llm_call(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
     Has a hard outer timeout (timeout + 30s grace) to prevent indefinite hangs."""
     loop = asyncio.get_event_loop()
     hard_timeout = timeout + 30  # Grace period beyond the inner timeout
+    # run_in_executor does NOT propagate contextvars (asyncio.to_thread does),
+    # so the per-task profiling accumulator was invisible inside the worker
+    # thread and every token/call count no-opped. Run under a copy of the
+    # caller's context: the accumulator dict is shared by reference, so
+    # in-place adds land in the right task profile.
+    ctx = contextvars.copy_context()
     try:
         return await asyncio.wait_for(
-            loop.run_in_executor(None, _query_sync, prompt, max_turns, timeout),
+            loop.run_in_executor(
+                None, lambda: ctx.run(_query_sync, prompt, max_turns, timeout)),
             timeout=hard_timeout
         )
     except asyncio.TimeoutError:
@@ -418,6 +445,7 @@ def _query_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) 
         return _openai_notool_sync(system_prompt, user_prompt, timeout)
 
     async def _inner():
+        _prof_add_tokens(0, 0, calls=1)  # count the invocation (see _query_sync)
         opt = CodeBuddyAgentOptions(
             permission_mode="bypassPermissions", model=MODEL, max_turns=50, cwd="/tmp",
             system_prompt=system_prompt,
@@ -458,9 +486,11 @@ async def _llm_call_notool(system_prompt: str, user_prompt: str, timeout: int = 
     """Async wrapper for pure-text LLM call (no tools)."""
     loop = asyncio.get_event_loop()
     hard_timeout = timeout + 30
+    ctx = contextvars.copy_context()  # propagate the profiling accumulator (see _llm_call)
     try:
         return await asyncio.wait_for(
-            loop.run_in_executor(None, _query_notool_sync, system_prompt, user_prompt, timeout),
+            loop.run_in_executor(
+                None, lambda: ctx.run(_query_notool_sync, system_prompt, user_prompt, timeout)),
             timeout=hard_timeout
         )
     except asyncio.TimeoutError:

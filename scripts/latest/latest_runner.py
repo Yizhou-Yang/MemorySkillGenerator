@@ -400,8 +400,22 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         # score from pytest pass/fail ratios to reward partial progress.
         test_passed = result.get("test_passed", False)
         test_output = result.get("test_output", "")
+        # Pre-agent baseline (terminus2 runs the suite once BEFORE the agent):
+        # some tasks' tests partially pass on the untouched workspace, so a raw
+        # pass ratio credits the agent for work it never did — the n=48 A-arm
+        # had pytest_partial_1_5-style scores from runs that executed zero
+        # commands. Score only the agent's marginal contribution.
+        pre_passed, _pre_failed = _parse_pytest_counts(
+            result.get("pre_test_output", "") or "")
         if test_passed:
-            return {"score": 1.0, "em": 1.0, "method": "docker_pytest_pass"}
+            method = "docker_pytest_pass"
+            if result.get("pre_test_passed"):
+                # Tests were green before the agent ran: the pass carries no
+                # signal about the agent. Score kept at 1.0 (official binary
+                # semantics) but flagged so analysis can exclude the task.
+                method += "_pretest_saturated"
+            return {"score": 1.0, "em": 1.0, "method": method,
+                    "pre_passed": pre_passed}
 
         # Parse the pytest summary robustly. The old regex required BOTH a
         # "passed" AND a "failed" count on one line, so it scored 0 for the
@@ -412,15 +426,26 @@ async def evaluate_task(result: dict, benchmark: str, use_llm_judge: bool = True
         passed, failed = _parse_pytest_counts(test_output)
         total = passed + failed
         if total > 0:
-            partial_score = passed / total
+            gain = max(0, passed - pre_passed)
+            denom = total - pre_passed
+            if denom <= 0:
+                # Everything that passes already passed pre-agent.
+                return {"score": 0.0, "em": 0.0,
+                        "method": f"pytest_saturated_pre{pre_passed}",
+                        "pytest_passed": passed, "pytest_failed": failed,
+                        "pytest_total": total, "pre_passed": pre_passed}
+            partial_score = gain / denom
             em = 1.0 if partial_score >= 1.0 else 0.0
+            method = (f"pytest_partial_{passed}_{failed}"
+                      + (f"_pre{pre_passed}" if pre_passed else ""))
             return {
                 "score": partial_score,
                 "em": em,
-                "method": f"pytest_partial_{passed}_{failed}",
+                "method": method,
                 "pytest_passed": passed,
                 "pytest_failed": failed,
                 "pytest_total": total,
+                "pre_passed": pre_passed,
             }
 
         # No machine-checkable test evidence → score 0. We do NOT credit the
@@ -624,6 +649,13 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "iteration": _it,
                                   "iter_total": ITER_CHAIN,
                                   "code_rev": _CODE_REV,
+                                  # TB2 loop visibility: how far the agent loop
+                                  # got and why it ended — distinguishes "agent
+                                  # flailed" from "agent never engaged".
+                                  **{k: r[k] for k in
+                                     ("turns_used", "end_reason",
+                                      "cmds_executed", "pre_test_passed")
+                                     if isinstance(r, dict) and k in r},
                                   **{f"prof_{k}": v for k, v in prof.items()}})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev

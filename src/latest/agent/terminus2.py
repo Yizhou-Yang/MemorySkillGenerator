@@ -37,6 +37,14 @@ _TERMINAL_BENCH_CACHE = Path("/tmp/skillforge_terminal_bench_cache")
 # tasks (install deps, configure, compile, test); leaderboard agents run many more.
 # Env-tunable.
 _MAX_AGENT_TURNS = int(os.environ.get("TB2_MAX_TURNS", "40"))
+
+# The CodeBuddy SDK leaks fragments of its internal tool-call markup into text
+# blocks, shaped like </arg_value:6124c78e>, </tool_call:...>, <think:...>.
+# When one rides a CMD: line the executed command becomes a bash syntax error
+# (rc=2) — the n=48 A-arm trace shows this poisoned 26/38 zero-score tasks.
+_SDK_MARKUP_RE = re.compile(
+    r"</?(?:think|tool_calls?|name|args?|arg_key|arg_value)(?::[A-Za-z0-9_-]+)?>"
+)
 # Per-command timeout inside the container. 60s killed apt-get installs and compiles
 # mid-run (rc=-1 [TIMEOUT]); raise so build steps can finish.
 _CMD_TIMEOUT = int(os.environ.get("TB2_CMD_TIMEOUT", "180"))
@@ -163,7 +171,8 @@ class Terminus2Agent(BaseAgent):
                   "response": "", "error": None, "time_cost": 0,
                   "augmented": bool(experience_section), "group": group,
                   "execution_mode": "docker", "actions": [],
-                  "test_passed": False, "test_output": ""}
+                  "test_passed": False, "test_output": "",
+                  "turns_used": 0, "end_reason": "", "cmds_executed": 0}
         t0 = time.time()
 
         # Step 1: Download full task
@@ -208,14 +217,47 @@ class Terminus2Agent(BaseAgent):
                 "apt-get update -qq && apt-get install -y -qq curl ca-certificates 2>/dev/null || true"
             )
             print(f"  [terminal-bench] Environment ready")
-            
+
+            # Step 5.5: Pre-agent baseline test run. Some tasks' tests partially
+            # pass on the UNTOUCHED workspace (the n=48 A-arm trace has
+            # pytest_partial_1_5-style scores from runs that executed zero
+            # commands), so raw pytest ratios credit the agent for work it never
+            # did. Record the baseline here; evaluate_task subtracts it.
+            # Disable with TB2_PRETEST=0.
+            if os.environ.get("TB2_PRETEST", "1") != "0":
+                self._docker_exec(
+                    container_id,
+                    "mkdir -p /workspace /tests /logs/verifier && "
+                    "cp -r /task/* /workspace/ 2>/dev/null; "
+                    "cp -r /task/.[!.]* /workspace/ 2>/dev/null; "
+                    "cp /workspace/tests/* /tests/ 2>/dev/null; "
+                    "true"
+                )
+                pre_passed, pre_output = self._run_tests(container_id)
+                result["pre_test_passed"] = pre_passed
+                result["pre_test_output"] = pre_output[:5000]
+                print(f"  [terminal-bench] pre-agent baseline: passed={pre_passed}")
+                # Scrub verifier state and restore task files so the agent starts
+                # clean and the post-agent run cannot read a stale reward.txt.
+                self._docker_exec(
+                    container_id,
+                    "rm -rf /logs/verifier/* /workspace/.pytest_cache 2>/dev/null; "
+                    "mkdir -p /logs/verifier && "
+                    "cp -r /task/* /workspace/ 2>/dev/null; "
+                    "cp -r /task/.[!.]* /workspace/ 2>/dev/null; "
+                    "true"
+                )
+
             # Step 6: Agent loop
-            agent_log = await self._agent_loop(
+            agent_log, loop_meta = await self._agent_loop(
                 container_id, instruction, experience_section,
                 max_turns=_MAX_AGENT_TURNS,
                 within_task_patch_mode=within_task_patch_mode,
             )
             result["response"] = agent_log
+            result["turns_used"] = loop_meta.get("turns_used", 0)
+            result["end_reason"] = loop_meta.get("end_reason", "")
+            result["cmds_executed"] = loop_meta.get("cmds_executed", 0)
             result["actions"] = self._extract_actions_from_log(agent_log)
 
             # Step 6: Run pytest tests
@@ -428,10 +470,13 @@ class Terminus2Agent(BaseAgent):
         self, container_id: str, instruction: str,
         experience_section: str, max_turns: int = 30,
         within_task_patch_mode: str | None = None,
-    ) -> str:
+    ) -> tuple[str, dict]:
         """Run the agentic loop: LLM reasons, docker exec runs commands.
 
-        Returns the full agent execution log.
+        Returns (agent execution log, loop metadata). The metadata records
+        turns_used / end_reason / cmds_executed so a task that died at turn 1
+        is distinguishable in the trace from one that genuinely worked and
+        failed — the n=48 A-arm run was undiagnosable without this.
         """
         from scripts.latest.llm_client import _llm_call_notool, _check_api_error
         from scripts.latest.trace import APIUnavailableError
@@ -559,9 +604,13 @@ class Terminus2Agent(BaseAgent):
         # agent can recover overwritten knowledge and avoid repeating
         # failed approaches.
         patches: list[dict] = []
-        empty_streak = 0   # tolerate transient empty replies from the model
+        empty_streak = 0    # tolerate transient empty replies from the model
+        noncmd_streak = 0   # tolerate replies that lack a parseable CMD/DONE
+        turns_used = 0
+        end_reason = "max_turns"
 
         for turn in range(max_turns):
+            turns_used = turn + 1
             # Build the prompt with recent command outputs
             context = conversation
             if last_command_outputs:
@@ -589,7 +638,10 @@ class Terminus2Agent(BaseAgent):
             if _check_api_error(r):
                 raise APIUnavailableError("API unavailable")
 
-            response_text = r.get("text", "").strip()
+            # Strip leaked SDK tool-call markup BEFORE parsing: a reply that is
+            # only markup is effectively empty, and a CMD line carrying a
+            # trailing </arg_value:...> tag is a guaranteed bash syntax error.
+            response_text = _SDK_MARKUP_RE.sub("", r.get("text", "")).strip()
             if not response_text:
                 # An empty reply from the model is usually transient (rate-limit /
                 # truncation). Do NOT end the task on the first one -- retry, and give up
@@ -597,6 +649,7 @@ class Terminus2Agent(BaseAgent):
                 agent_log_parts.append(f"[Turn {turn+1}] Empty response")
                 empty_streak += 1
                 if empty_streak >= 4:
+                    end_reason = "empty_replies"
                     break
                 continue
             empty_streak = 0
@@ -625,6 +678,7 @@ class Terminus2Agent(BaseAgent):
                     f"[Turn {turn+1}] DONE: {done_msg}"
                 )
                 print(f"    [agent] turn {turn+1}: DONE - {done_msg[:100]}")
+                end_reason = "done"
                 break
 
             if not command:
@@ -643,6 +697,7 @@ class Terminus2Agent(BaseAgent):
             if command:
                 # Clean the command
                 command = command.strip().strip("`").strip()
+                noncmd_streak = 0
                 agent_log_parts.append(
                     f"[Turn {turn+1}] THINK: {thinking[:200]}\n"
                     f"  CMD: {command[:300]}"
@@ -690,12 +745,33 @@ class Terminus2Agent(BaseAgent):
                 ):
                     agent_log_parts.append("[Auto-detect] Tests appear to pass!")
             else:
+                # Same lesson as the empty-reply break (8a1b930): ONE malformed
+                # reply must not end the task. 31/38 zero-score tasks in the
+                # n=48 A-arm died right here — the model opened with THINK-only
+                # prose (its CMD swallowed by the SDK's tool-call parsing) and
+                # the loop broke at turn 1 with the workspace untouched.
+                # Nudge the model back into the format and retry; give up only
+                # after several non-command replies in a row.
                 agent_log_parts.append(
                     f"[Turn {turn+1}] No command parsed: {response_text[:200]}"
                 )
-                break
+                noncmd_streak += 1
+                if noncmd_streak >= 3:
+                    end_reason = "no_command_streak"
+                    break
+                conversation += (
+                    f"\n[Turn {turn+1}]\n"
+                    "Your previous reply contained no 'CMD:' or 'DONE:' line. "
+                    "Reply again using exactly the required format: "
+                    "'THINK: <reasoning>' then 'CMD: <bash one-liner>' "
+                    "(or 'DONE: <summary>' if the task is finished).\n"
+                )
 
-        return "\n".join(agent_log_parts)
+        return "\n".join(agent_log_parts), {
+            "turns_used": turns_used,
+            "end_reason": end_reason,
+            "cmds_executed": len(patches),
+        }
 
     def _find_task_dir(self, container_id: str) -> str:
         """Find the workspace directory in the container."""
