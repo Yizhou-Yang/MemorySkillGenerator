@@ -773,7 +773,10 @@ async def main():
     for name in BENCHMARKS_TO_RUN:
         config = {"name": name, "num_samples": TASK_LIMITS[name]}
         if name == "gaia2":
-            config["scenario_dir"] = "/tmp/harbor-datasets/datasets/gaia2-cli"
+            config["scenario_dir"] = os.environ.get(
+                "GAIA2_SCENARIO_DIR",
+                "/tmp/harbor-datasets/datasets/gaia2-cli",
+            )
         loader = BenchmarkLoader(config)
         tasks = loader.load()[:TASK_LIMITS[name]]
         benchmarks[name] = tasks

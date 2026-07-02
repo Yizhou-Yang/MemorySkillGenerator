@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """Single-benchmark robust runner with per-task timeouts and crash resilience.
 
 Usage:
@@ -366,7 +367,10 @@ async def main():
     # Load tasks
     config = {"name": benchmark, "num_samples": TASK_LIMITS[benchmark]}
     if benchmark == "gaia2":
-        config["scenario_dir"] = "/tmp/harbor-datasets/datasets/gaia2-cli"
+        config["scenario_dir"] = os.environ.get(
+            "GAIA2_SCENARIO_DIR",
+            "/tmp/harbor-datasets/datasets/gaia2-cli",
+        )
     loader = BenchmarkLoader(config)
     tasks = loader.load()[:TASK_LIMITS[benchmark]]
     print(f"Loaded {len(tasks)} tasks", flush=True)

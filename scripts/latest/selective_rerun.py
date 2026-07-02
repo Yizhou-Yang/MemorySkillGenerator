@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """Selective re-run: re-run specific benchmark+group combinations,
 preserving existing traces for groups not being re-run.
 
@@ -308,7 +309,10 @@ async def main():
     for bn in bench_names:
         config = {"name": bn, "num_samples": TASK_LIMITS[bn]}
         if bn == "gaia2":
-            config["scenario_dir"] = "/tmp/harbor-datasets/datasets/gaia2-cli"
+            config["scenario_dir"] = os.environ.get(
+                "GAIA2_SCENARIO_DIR",
+                "/tmp/harbor-datasets/datasets/gaia2-cli",
+            )
         loader = BenchmarkLoader(config)
         tasks = loader.load()[:TASK_LIMITS[bn]]
         all_tasks[bn] = tasks
