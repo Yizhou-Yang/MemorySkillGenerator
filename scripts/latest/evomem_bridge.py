@@ -188,9 +188,18 @@ class BenchmarkMemory:
         # single-pass run of independent tasks nothing is in-chain yet, so B
         # honestly injects nothing there — the value appears under iteration
         # chains (ITER_CHAIN>1).
+        # Relevance gate compares the current task against each patch's PRODUCING
+        # task (stored untruncated in `evidence`), symmetrically and boilerplate-
+        # stripped — NOT against the patch's short answer text (`p._doc()`). On a
+        # benchmark whose task text is long (LoCoMo = a whole conversation),
+        # desc-vs-answer Jaccard is size-diluted below the floor, so every in-chain
+        # candidate was wrongly dropped and B injected nothing. desc-core vs
+        # desc-core keeps both sides at the same scale (this is what arm C does).
+        qcore = _core_task(query)
         cand = self._mem.retrieve(query, top_k=self.top_k * 4,
                                   chain_id=_chain_id(task))
-        cand = [p for p in cand if _content_overlap(query, p._doc()) >= _SIM_FLOOR]
+        cand = [p for p in cand
+                if _content_overlap(qcore, _core_task(p.evidence)) >= _SIM_FLOOR]
         if not cand:
             return ""
         return render_patches_plain(cand[:self.top_k])
@@ -211,7 +220,9 @@ class BenchmarkMemory:
             summary=resp.splitlines()[0][:120],
             content_before="", content_after=resp[:400],
             rationale="prior task in this benchmark",
-            evidence=(task.get("description", "") or "")[:200],
+            # Full producing-task text (not truncated): used ONLY by inject()'s
+            # relevance gate, never rendered into the prompt, so no bloat.
+            evidence=(task.get("description", "") or ""),
             is_negative=(score is not None and float(score) < 0.5),
         ))
 
