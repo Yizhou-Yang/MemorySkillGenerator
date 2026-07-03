@@ -426,7 +426,19 @@ async def solve_with_memory(run_fn, task: dict, mem, group: str) -> dict:
     recorded by the runner AFTER evaluation (mem.record(task, r, score)), once
     the real score is known. `run_fn(task, experience, group)` is the
     benchmark's baseline runner."""
-    injected = mem.inject(task)
+    # A memory-layer failure must DEGRADE the task to no-injection, never kill
+    # it: a broken embedder dependency once turned an entire C rerun into 100%
+    # error rows while A/B (older data) looked fine — masquerading as a method
+    # regression. Degradations are counted and printed, not hidden.
+    try:
+        injected = mem.inject(task)
+    except Exception as e:
+        n = getattr(mem, "_inject_failures", 0) + 1
+        mem._inject_failures = n
+        if n <= 3 or n % 50 == 0:
+            print(f"  [memory] inject failed ({n}x, degrading to no-injection): "
+                  f"{type(e).__name__}: {e}", flush=True)
+        injected = ""
     r = await run_fn(task, injected, group)
     if isinstance(r, dict):
         r["_aug_prompt"] = injected

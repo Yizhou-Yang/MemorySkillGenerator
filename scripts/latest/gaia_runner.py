@@ -38,7 +38,7 @@ from latest.injection import format_evoarena_patch_log, format_skillforge_patch_
 # ─── Extracted module imports ─────────────────────────────────────────────
 from scripts.latest.trace import TraceLogger, APIUnavailableError
 from scripts.latest.llm_client import (
-    probe_api_available, _check_api_error,
+    probe_api_available, _check_api_error, _API_FAILURE_THRESHOLD,
     save_checkpoint, load_checkpoint, clear_checkpoint,
     llm_review_fn,
     _query_sync, _llm_call, _query_notool_sync, _llm_call_notool,
