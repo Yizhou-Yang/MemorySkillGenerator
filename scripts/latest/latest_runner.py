@@ -81,10 +81,10 @@ def _auto_slots() -> int:
     — it does not raise memory/CPU pressure.
 
     Since LLM-agent workloads are I/O-bound (waiting on API), we scale with cores,
-    but cap at 24: higher concurrency put too much pressure on the HY3 internal API.
-    Override with TASK_CONCURRENCY when a backbone tolerates more."""
+    but cap at 30: higher concurrency may put pressure on internal APIs.
+    Override with TASK_CONCURRENCY to set a different cap."""
     cpu = os.cpu_count() or 4
-    slots = max(1, min(cpu * 4, 24))
+    slots = max(1, min(cpu * 4, 30))
     try:
         import psutil
         avail_gb = psutil.virtual_memory().available / 1e9
