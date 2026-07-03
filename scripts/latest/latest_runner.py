@@ -307,12 +307,51 @@ async def _run_bounded(build_coro, task: dict, needs_docker: bool) -> dict:
                 "error": f"wall_clock_timeout_{limit}s"}
 
 
+# Variants MUST be identical across arms (else C-B compares different task
+# texts), across RESUME, and across backbone rows of Table 1 — so they are
+# cached in ONE file shared by every model dir of this protocol base.
+_MUTATIONS_PATH = PROJECT_ROOT / "experiments_results" / _RESULTS_BASE / "mutations.json"
+try:
+    _MUTATIONS: dict = json.loads(_MUTATIONS_PATH.read_text())
+except Exception:
+    _MUTATIONS = {}
+
+
+def _save_mutations() -> None:
+    try:
+        _MUTATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _MUTATIONS_PATH.write_text(json.dumps(_MUTATIONS, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+async def _get_variant(task: dict, iteration: int) -> str:
+    key = f"{task.get('task_id','')}|{iteration}"
+    if key in _MUTATIONS:
+        return _MUTATIONS[key]
+    desc = await _mutate_task_desc(task, iteration)
+    _MUTATIONS[key] = desc
+    _save_mutations()
+    return desc
+
+
 async def _mutate_task_desc(task: dict, iteration: int) -> str:
     """Reword the task for iteration k>=1 of an evolving chain. MUST preserve
     every fact, constraint, entity, and the correct answer — only the surface
     form changes. Falls back to the original on any failure."""
     desc = task.get("description", "")
     if not desc.strip():
+        return desc
+    # Long contexts (LoCoMo: the whole conversation + a question): reword ONLY
+    # the question and keep the corpus verbatim — paraphrasing a 6000-char
+    # truncation would drop the conversation tail and make the gold answer
+    # unreachable. If no question marker is found, skip mutation entirely.
+    if len(desc) > 4000:
+        head, sep, tail = desc.rpartition("Question:")
+        if sep and 0 < len(tail.strip()) <= 2000:
+            sub = dict(task, description=tail.strip())
+            new_q = await _mutate_task_desc(sub, iteration)
+            return head + sep + " " + new_q if new_q != tail.strip() else desc
         return desc
     try:
         out = await _llm_call_notool(
@@ -674,7 +713,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             for _it in range(ITER_CHAIN):
                 cur_task = task
                 if ITER_MUTATE and _it >= 1:
-                    _mdesc = await _mutate_task_desc(task, _it)
+                    _mdesc = await _get_variant(task, _it)
                     if _mdesc != task.get("description", ""):
                         cur_task = dict(task, description=_mdesc)
                 start_task_profile()
