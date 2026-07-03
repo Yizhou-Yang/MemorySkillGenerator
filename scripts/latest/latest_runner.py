@@ -150,9 +150,15 @@ RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / _RESULTS_BASE / _MODEL_
 # reach significance; the loader caps at each benchmark's available pool.
 # terminal_bench_2 runs via Docker directly using the SDK as the LLM backend.
 _TASK_N = int(os.environ.get("TASK_LIMIT", "100"))
+# GAIA2 runs at 200 by default: its 5 config splits (execution/search/
+# adaptability/ambiguity/time) mean n=100 leaves only ~20 tasks per split —
+# too thin for the per-split (dynamic vs static) analysis the thesis needs;
+# 200 gives ~40/split. The loader's stratified sampling is deterministic and
+# superset-stable (sorted dirs, first-k per config), so RESUME on an existing
+# run extends the task set instead of resampling it.
 TASK_LIMITS = {
     "gaia": _TASK_N,
-    "gaia2": _TASK_N,
+    "gaia2": int(os.environ.get("GAIA2_TASK_LIMIT", str(max(200, _TASK_N)))),
     "terminal_bench_2": _TASK_N,
     "locomo": _TASK_N,
 }

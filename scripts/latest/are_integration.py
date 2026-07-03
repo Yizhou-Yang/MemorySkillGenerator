@@ -569,6 +569,10 @@ def load_gaia2_tasks_from_cli_dir(
     if not tasks_by_config:
         return []
 
+    # DETERMINISM CONTRACT: selection must stay sorted + first-k per config —
+    # n=200's task set is then a superset of n=100's, so raising the limit on
+    # an existing run extends it under RESUME instead of resampling. Do NOT
+    # add shuffling here without seeding and versioning the protocol.
     n_configs = len(tasks_by_config)
     per_config = max(1, num_samples // n_configs)
     remainder = num_samples - per_config * n_configs
