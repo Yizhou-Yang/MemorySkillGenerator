@@ -12,19 +12,19 @@ plus the mechanism / breakdown sub-tables.
   |---|---|---|---|
   | 1 | `hy3-preview-ioa` | in-house | **primary**, in-house |
   | 2 | `deepseek-v4-pro` | ¥6 | confirmed |
-  | 3 | `minimax-m2.7` | ¥8.4 | **VERIFY id** (not in console list) |
-  | 4 | `glm-5.1` | ¥24 | VERIFY id |
-  | 5 | `kimi-k2.6` | ¥27 | VERIFY id |
-  | 6 | `gemini-3.1-pro` | ¥84 ($12×7) | VERIFY id |
-  | 7 | `gpt-5.5` | ¥210 ($30×7) | VERIFY id |
+  | 3 | `minimax-m2.7` | ¥8.4 | confirmed (SDK probe ✓) |
+  | 4 | `glm-5.1` | ¥24 | confirmed (SDK probe ✓) |
+  | 5 | `kimi-k2.6` | ¥27 | confirmed (SDK probe ✓) |
+  | 6 | `gemini-3.1-pro` | ¥84 ($12×7) | confirmed (SDK probe ✓) |
+  | 7 | `gpt-5.5` | ¥210 ($30×7) | confirmed (SDK probe ✓) |
   | – | `claude-4.6-opus` | ¥175 | **left blank** (paper placeholder column) |
 
+  All model IDs verified via CodeBuddy SDK live probe (2026-07-03).
   Cheapest first so pipeline bugs surface before the expensive models burn budget.
 
 ## Pre-flight (do once before the sweep)
 
-1. **Verify the 5 non-HY3 CodeBuddy model ids** in the console (esp. `minimax-m2.7`,
-   guessed). Fix them in `run_all_models.sh` if wrong.
+1. ~~**Verify the 5 non-HY3 CodeBuddy model ids**~~ ✅ All 7 ids confirmed via SDK probe.
 2. **Internet environment:** HY3 uses `CODEBUDDY_INTERNET_ENVIRONMENT=ioa` (internal).
    External models may need a different value — override per model in the wrapper.
 3. **Docker up** for `gaia2` and `terminal_bench_2` (Harbor / sandbox); the other two
