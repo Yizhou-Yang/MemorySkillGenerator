@@ -108,6 +108,14 @@ BENCHMARK_CONCURRENCY = int(os.environ.get("BENCH_CONCURRENCY", "6"))  # benchma
 # ordinary one-shot run; the main table uses the final iteration (post-memory),
 # chain-level accuracy (all iterations correct) is aggregated from the trace.
 ITER_CHAIN = max(1, int(os.environ.get("ITER_CHAIN", "3")))
+# Evolving chains (ITER_MUTATE=1): iterations k>=1 run a REWORDED variant of the
+# task (facts/constraints/gold preserved). Two birds: (a) a frozen repeat only
+# rewards memorizing one's own last answer — a variant forces the memory to
+# generalize (the thesis: adaptation, not recall); (b) gold-derived feedback
+# recorded on v_k and used on variant v_{k+1} is graded-practice, not label
+# leakage on the scored instance. Surface rewording only — true environment
+# mutation (tool versions, GAIA2 twists) is phase 2, per-benchmark.
+ITER_MUTATE = os.environ.get("ITER_MUTATE", "0") == "1"
 DOCKER_BENCHMARKS = {"terminal_bench_2"}
 CONCURRENCY = GLOBAL_TASK_SLOTS  # kept for the startup banner
 
@@ -291,6 +299,29 @@ async def _run_bounded(build_coro, task: dict, needs_docker: bool) -> dict:
               flush=True)
         return {"task_id": task.get("task_id", ""), "response": "",
                 "error": f"wall_clock_timeout_{limit}s"}
+
+
+async def _mutate_task_desc(task: dict, iteration: int) -> str:
+    """Reword the task for iteration k>=1 of an evolving chain. MUST preserve
+    every fact, constraint, entity, and the correct answer — only the surface
+    form changes. Falls back to the original on any failure."""
+    desc = task.get("description", "")
+    if not desc.strip():
+        return desc
+    try:
+        out = await _llm_call_notool(
+            "You reword task descriptions. Preserve EVERY fact, number, entity, "
+            "constraint, and the expected answer exactly; change only wording and "
+            "sentence structure. Return ONLY the reworded task, no commentary.",
+            f"Reword (variant {iteration}) the following task:\n\n{desc[:6000]}",
+            timeout=60)
+        new = (out.get("text") or "").strip()
+        # sanity: refuse suspicious rewrites (too short / lost most content)
+        if new and len(new) >= 0.5 * min(len(desc), 6000):
+            return new
+    except Exception:
+        pass
+    return desc
 
 
 def _load_done_map(trace_path: Path) -> dict:
@@ -598,6 +629,11 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             #    rows feed chain-level accuracy. ──
             last_r, last_ev, prof = None, None, {}
             for _it in range(ITER_CHAIN):
+                cur_task = task
+                if ITER_MUTATE and _it >= 1:
+                    _mdesc = await _mutate_task_desc(task, _it)
+                    if _mdesc != task.get("description", ""):
+                        cur_task = dict(task, description=_mdesc)
                 start_task_profile()
                 _t0 = _perf()
                 # Acquire the scarce docker slot BEFORE the global slot. The other
@@ -608,10 +644,10 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 if needs_docker and docker_sem is not None:
                     async with docker_sem:
                         async with global_sem:
-                            r = await _run_bounded(build_coro, task, True)
+                            r = await _run_bounded(build_coro, cur_task, True)
                 else:
                     async with global_sem:
-                        r = await _run_bounded(build_coro, task, False)
+                        r = await _run_bounded(build_coro, cur_task, False)
                 prof = summarize(_perf() - _t0, read_task_profile())
                 if isinstance(r, dict):
                     r["_prof"] = prof
@@ -620,7 +656,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 # can retrieve it (and C weights retrieval by it).
                 if mem is not None and isinstance(r, dict):
                     try:
-                        await mem.record(task, r, ev.get("score", 0.0))
+                        await mem.record(cur_task, r, ev.get("score", 0.0))
                     except Exception:
                         pass
                 expected = task.get("expected", r.get("expected", ""))
@@ -630,7 +666,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 _meta = task.get("metadata") or {}
                 _trace.log(benchmark=benchmark, group=group_key, phase="test",
                            task_id=r.get("task_id", tid),
-                           task_desc=task.get("description", ""),
+                           task_desc=cur_task.get("description", ""),
                            augmented_prompt=aug,
                            response=r.get("response", ""), expected=expected,
                            score=ev.get("score", 0.0),
@@ -639,7 +675,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "execution_mode": exec_mode,
                                   "error": str(r.get("error") or "")[:200],
                                   # category/type and difficulty (when provided)
-                                  "category": str(_meta.get("category") or _meta.get("task_type")
+                                  "category": str(_meta.get("category") or _meta.get("config")
+                                                  or _meta.get("task_type")
                                                   or _meta.get("type") or ""),
                                   "level": str(_meta.get("level") or _meta.get("difficulty") or ""),
                                   "patch_injected": bool(aug),
@@ -648,6 +685,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   # for chain-level (all-iterations-correct) accuracy.
                                   "iteration": _it,
                                   "iter_total": ITER_CHAIN,
+                                  "mutated": bool(ITER_MUTATE and _it >= 1 and cur_task is not task),
                                   "code_rev": _CODE_REV,
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
