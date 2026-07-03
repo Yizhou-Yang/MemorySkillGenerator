@@ -89,6 +89,23 @@ def _oracle_from_task(task: dict) -> list[dict]:
 # first real run had C lose to B because retrieval was boilerplate-polluted and
 # the refined steps were [PLACEHOLDER] templates).
 _C_SIM_FLOOR = 0.08
+# C's retrieval channels are driven by DEPLOYABLE signals only (no gold, no
+# absolute self-score threshold — self-eval is optimistic and 0.5-gating stopped
+# filtering anything under ITER_FEEDBACK=self):
+#   primary channel  = critic-approved entries (critic_quality >= gate) that are
+#                      the chain's best self-assessed attempt so far (relative
+#                      rank, which LLM judges do far more reliably than absolute
+#                      scores);
+#   avoidance channel= everything else with a usable note (worse-than-best
+#                      attempts and critic-rejected entries).
+_CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
+
+
+def _critic_q(e) -> int:
+    try:
+        return int((e.failure_taxonomy or {}).get("critic_quality", 5))
+    except Exception:
+        return 5
 
 
 def _core_task(desc: str) -> str:
@@ -140,7 +157,8 @@ def _format_curated(successes: list, failures: list = ()) -> str:
         if not concrete or key in seen:
             continue
         seen.add(key)
-        parts = [f"[✓ Similar task solved (reliability {getattr(e, 'score', 0.0):.0%})]",
+        parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
+                 f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
                  f"Task: {_core_task(e.task_desc)[:200]}",
                  f"What worked: {concrete}"]
         lesson = ((e.failure_taxonomy or {}).get("causal_lesson") or "").strip()
@@ -322,8 +340,11 @@ class CuratedMemory:
         cands = [e for e in cands if self._chain_of.get(e.task_id) == chain]
         cands = [e for e in cands
                  if _content_overlap(core, _core_task(e.task_desc)) >= _C_SIM_FLOOR]
-        succ = [e for e in cands if getattr(e, "outcome", "") == "success"][:self.top_k]
-        fail = [e for e in cands if getattr(e, "outcome", "") in ("failure", "partial")]
+        best = max((getattr(e, "score", 0.0) or 0.0 for e in cands), default=0.0)
+        succ = [e for e in cands
+                if _critic_q(e) >= _CRITIC_GATE
+                and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
+        fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
         out = _format_curated(succ, fail)
         if out:
@@ -377,6 +398,18 @@ class CuratedMemory:
             # retrieval). Same-task iterations share a task_id; LoCoMo shares a
             # session chain_id.
             self._chain_of[task.get("task_id", "")] = _chain_id(task)
+            # w_c cold-start prior from the critic (deployable, no extra calls):
+            # seed one pseudo-observation so a high-quality patch starts above
+            # unit weight and a critic-rejected one below, instead of every
+            # patch idling at w_c=1.0 until two real reuse deltas accumulate.
+            try:
+                _exps = self._sf.library.experiences
+                if _exps:
+                    _q = _critic_q(_exps[-1])
+                    self._sf.library.update_effectiveness(
+                        tid, (_q - _CRITIC_GATE) / 10.0)
+            except Exception:
+                pass
         except Exception as e:
             # never crash the run over a memory write, but don't hide it either
             self._record_failures += 1
