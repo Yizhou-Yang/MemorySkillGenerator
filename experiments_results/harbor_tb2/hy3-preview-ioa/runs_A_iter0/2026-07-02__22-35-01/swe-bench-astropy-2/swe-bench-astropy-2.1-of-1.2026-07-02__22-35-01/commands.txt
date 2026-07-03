@@ -1,0 +1,43 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"find /app/astropy -name '*.py' | xargs grep -l 'qdp' -i 2>/dev/null | head -20\n"
+''
+'ls /app/astropy/astropy/io/ascii/ | grep -i qdp\n'
+'cat /app/astropy/astropy/io/ascii/qdp.py\n'
+"sed -n '150,330p' /app/astropy/astropy/io/ascii/qdp.py\n"
+"grep -n '_command_re' /app/astropy/astropy/io/ascii/qdp.py\n"
+'python3 - <<\'EOF\'\nimport re\np=\'/app/astropy/astropy/io/ascii/qdp.py\'\ns=open(p).read()\nold=\'    _command_re = r"READ [TS]ERR(\\\\s+[0-9]+)+"\'\nnew=\'    _command_re = r"(?i:READ [TS]ERR(\\\\s+[0-9]+)+)"\'\nassert old in s, \'pattern not found\'\ns=s.replace(old,new)\nopen(p,\'w\').write(s)\nprint(\'done\')\nEOF\n'
+"sed -n '63p' /app/astropy/astropy/io/ascii/qdp.py\n"
+'cd /tmp && printf \'read serr 1 2\\n1 0.5 1 0.5\\n\' > test.qdp && python3 -c "from astropy.table import Table; t=Table.read(\'test.qdp\',format=\'ascii.qdp\'); print(t); print(t.colnames)"\n'
+'cd /app/astropy && python3 -c "import astropy; print(astropy.__file__)"\n'
+'pip install packaging 2>&1 | tail -3\n'
+'python3 - <<\'EOF\'\nimport re\nsep = r"\\s+"_decimal_re = r"[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?"\n_command_re = r"(?i:READ [TS]ERR(\\s+[0-9]+)+"\n_new_re = rf"NO({sep}NO)+"\n_data_re = rf"({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)\\s*"\n_type_re = rf"^\\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\\s*(\\!(?P<comment>.*))?\\s*$"\nrx = re.compile(_type_re)\nfor line in ["read serr 1 2", "READ SERR 1 2", "read TERR 1", "1 0.5 1 0.5", "NO NO NO"]:\n    m = rx.match(line.strip())\n    if m is None:\n        print(repr(line), \'-> no match\')\n    else:\n        for k,v in m.groupdict().items():\n            if v is not None:\n                print(repr(line), \'->\', k)\nEOF\n'
+'C-c'
+'clear\n'
+'python3 - <<\'PYEOF\'\nimport re\nsep = r"\\s+"\n_dec = r"[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?"\n_cmd = r"(?i:READ [TS]ERR(\\s+[0-9]+)+"\n_new = rf"NO({sep}NO)+"\n_data = rf"({_dec}|NO|[-+]?nan)({sep}({_dec}|NO|[-+]?nan))*)\\s*"\n_t = rf"^\\s*((?P<command>{_cmd})|(?P<new>{_new})|(?P<data>{_data})?\\s*(\\!(?P<comment>.*))?\\s*$"\nrx = re.compile(_t)\nfor line in ["read serr 1 2", "READ SERR 1 2", "Read Terr 1", "1 0.5 1 0.5", "NO NO NO"]:\n    m = rx.match(line.strip())\n    kind = [k for k,v in (m.groupdict().items() if m else []) if v is not None]\n    print(repr(line), \'->\', kind)\nPYEOF\n'
+'python3 - <<\'PYEOF\'\nimport re\nsep = r"\\s+"\n_dec = r"[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?"\n_cmd = r"(?i:READ [TS]ERR(\\s+[0-9]+)+)"\n_new = rf"NO({sep}NO)+"\n_data = rf"({_dec}|NO|[-+]?nan)({sep}({_dec}|NO|[-+]?nan))*)\\s*"\n_t = rf"^\\s*((?P<command>{_cmd})|(?P<new>{_new})|(?P<data>{_data})?\\s*(\\!(?P<comment>.*))?\\s*$"\nrx = re.compile(_t)\nfor line in ["read serr 1 2", "READ SERR 1 2", "Read Terr 1", "1 0.5 1 0.5", "NO NO NO"]:\n    m = rx.match(line.strip())\n    kind = [k for k,v in (m.groupdict().items() if m else []) if v is not None]\n    print(repr(line), \'->\', kind)\nPYEOF\n'
+"python3 - <<'PYEOF'\nimport re, ast\nsrc = open('/app/astropy/astropy/io/ascii/qdp.py').read()\n# Extract the _command_re assignment line and compile a regex from it via exec of a minimal snippet\nns = {}\nexec('import re\\n' + '\\n'.join(l for l in src.splitlines() if l.startswith('    _') or l.startswith('_') and 're' in l), ns)\nprint('compiled ok, _command_re =', ns.get('_command_re'))\nPYEOF\n"
+'python3 -c \'import numpy; print("numpy", numpy.__version__)\'\n'
+'pip install --break-system-packages packaging 2>&1 | tail -3\n'
+"which python python3; ls /opt 2>/dev/null; ls /usr/local/bin | grep -i py; python3 -c 'import sys; print(sys.executable)'\n"
+'python3 -c \'import packaging; print("packaging ok")\' 2>&1 | tail -2\n'
+''
+'python3 -c \'import numpy; print("numpy", numpy.__version__)\' 2>&1 | tail -2\n'
+'pip install --break-system-packages numpy 2>&1 | tail -3\n'
+'python3 -c \'import numpy; print("numpy", numpy.__version__)\' 2>&1 | tail -2\n'
+''
+"python3 -c 'import astropy; print(astropy.__version__)' 2>&1 | tail -5\n"
+'pip install --break-system-packages pyerfa 2>&1 | tail -3\n'
+"python3 -c 'import astropy; print(astropy.__version__)' 2>&1 | tail -5\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+'cd /app/astropy && python setup.py build_ext --inplace 2>&1 | tail -8\n'
+'pip install --break-system-packages extension_helpers 2>&1 | tail -2\n'
+''
+''
+'python setup.py build_ext --inplace 2>&1 | tail -8\n'
+"python3 - <<'PYEOF'\nimport sys, types, re\n\nsrc = open('/app/astropy/astropy/io/ascii/qdp.py').read()\n\n# Stub astropy submodules needed by qdp.py top-level imports\nastropy = types.ModuleType('astropy')\nsys.modules['astropy'] = astropy\nutils = types.ModuleType('astropy.utils'); sys.modules['astropy.utils']=utils\nexc = types.ModuleType('astropy.utils.exceptions'); sys.modules['astropy.utils.exceptions']=exc\nclass AstropyUserWarning(UserWarning): pass\nexc.AstropyUserWarning = AstropyUserWarning\n\nclass Table:\n    def __init__(self, names=None, rows=None):\n        self.names = list(names) if names else []\n        self.rows = rows if rows is not None else []\n        self.meta = {}\n        # store as dict of columns\n        self._cols = {n: [r[i] for r in self.rows] for i,n in enumerate(self.names)}\n    def __getitem__(self, k):\n        return self._cols[k]\nsys.modules['astropy.table'] = types.ModuleType('astropy.table')\nsys.modules['astropy.table'].Table = Table\n\nio = types.ModuleType('astropy.io'); sys.modules['astropy.io']=io\nasc = types.ModuleType('astropy.io.ascii'); sys.modules['astropy.io.ascii']=asc\nbasic = types.ModuleType('astropy.io.ascii.basic'); sys.modules['astropy.io.ascii.basic']=basic\nclass Basic: pass\nbasic.Basic = Basic\ntable_mod = types.ModuleType('astropy.table'); table_mod.Table=Table; sys.modules['astropy.table']=table_mod\ncore = types.ModuleType('astropy.io.ascii.core'); sys.modules['astropy.io.ascii.core']=core\ncore.masked = 'NO'\n\n# Execute qdp.py as a module\nmod = types.ModuleType('astropy.io.ascii.qdp')\nmod.__package__ = 'astropy.io.ascii'\nmod.__file__ = '/app/astropy/astropy/io/ascii/qdp.py'\nsys.modules['astropy.io.ascii.qdp'] = mod\nexec(compile(src, 'qdp.py', 'exec'), mod.__dict__)\n\n# Now run the real read logic on a lowercase-command file\nlines = ['read serr 1 2', '1 0.5 1 0.5']\ntables = mod._get_tables_from_qdp_file(lines, delimiter=None)\nassert len(tables) == 1, tables\nt = tables[0]\nprint('colnames:', t.names)\nprint('col1:', t['col1'])\nprint('col1_err:', t['col1_err'])\nassert t.names == ['col1','col1_err','col2','col2_err'], t.names\nassert list(t['col1']) == [1] and list(t['col1_err']) == [0.5]\nprint('END-TO-END OK')\nPYEOF\n"
+['C-d']
+['C-d']
+'cat /tmp/e2e_out.txt\n'

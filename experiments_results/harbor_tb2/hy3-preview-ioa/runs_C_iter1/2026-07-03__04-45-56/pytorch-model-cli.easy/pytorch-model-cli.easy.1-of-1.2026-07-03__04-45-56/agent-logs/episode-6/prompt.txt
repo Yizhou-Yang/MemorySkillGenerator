@@ -1,0 +1,82 @@
+New Terminal Output:
+
+root@18ca25fadf71:/app# cat > /app/proto.py <<'EOF'
+> import struct, zlib, zipfile
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+> names = ['input_layer.weight','input_layer.bias','hidden_layer.weight','hidden_layer.bias','output_layer.weight','output_layer.bias']
+> keys = ['simple_mnist/data/%d'%i for i in range(6)]
+> W = {}
+> for n,k in zip(names,keys):
+>     raw = zf.read(k)
+>     W[n] = list(struct.unpack('<%df'%(len(raw)//4), raw))
+> print('shapes', [len(W[n]) for n in names])
+>
+> def decode_png(path):
+>     data = open(path,'rb').read()
+>     assert data[:8]==b'\x89PNG\r\n\x1a\n'
+>     pos=8; width=height=ct=None; idat=b''
+>     while pos < len(data):
+>         ln=int.from_bytes(data[pos:pos+4],'big'); typ=data[pos+4:pos+8]; cpos=pos+8
+>         if typ==b'IHDR':
+>             width=int.from_bytes(data[cpos:cpos+4],'big'); height=int.from_bytes(data[cpos+4:cpos+8],'big')
+>             ct=data[cpos+9]
+>         elif typ==b'IDAT': idat+=data[cpos:cpos+ln]
+>         elif typ==b'IEND': break
+>         pos=cpos+ln+4
+>     raw=zlib.decompress(idat)
+>     ch={0:1,2:3,6:4}[ct]; stride=width*ch
+>     prev=bytearray(stride); out=[]; rp=0
+>     for y in range(height):
+>         f=raw[rp]; rp+=1
+>         line=bytearray(raw[rp:rp+stride]); rp+=stride
+>         for i in range(stride):
+>             a=line[i-ch] if i>=ch else 0; b=prev[i]; c=prev[i-ch] if i>=ch else 0; v=line[i]
+>             if f==0: pass
+>             elif f==1: v=(v+a)&255
+>             elif f==2: v=(v+b)&255
+>             elif f==3: v=(v+((a+b)>>1))&255
+>             elif f==4:
+>                 p=a+b-c; pa=abs(p-a); pb=abs(p-b); pc=abs(p-c)
+>                 pr=a if (pa<=pb and pa<=pc) else (b if pb<=pc else c)
+>                 v=(v+pr)&255
+>             line[i]=v
+>         prev=line; out.extend(line)
+>     return width,height,ch,out
+>
+> w,h,ch,pix=decode_png('/app/image.png')
+> print('png',w,h,ch)
+> gray=[pix[i*ch] for i in range(w*h)]
+>
+> def infer(x):
+>     def mm(Wt,xin):
+>         o=len(Wt); inn=len(xin); out=[0.0]*o
+>         for r in range(o):
+>             s=0.0
+>             for c in range(inn): s+=Wt[r*inn+c]*xin[c]
+>             out[r]=s
+>         return out
+>     z=mm(W['input_layer.weight'],x); z=[v+W['input_layer.bias'][i] for i,v in enumerate(z)]; z=[max(0.0,v) for v in z]
+>     z=mm(W['hidden_layer.weight'],z); z=[v+W['hidden_layer.bias'][i] for i,v in enumerate(z)]; z=[max(0.0,v) for v in z]
+>     z=mm(W['output_layer.weight'],z); z=[v+W['output_layer.bias'][i] for i,v in enumerate(z)]
+>     return z.index(max(z))
+>
+> x1=[v/255.0 for v in gray]
+> print('pred /255      :', infer(x1))
+> x2=[(v/255.0-0.1307)/0.3081 for v in gray]
+> print('pred normalize :', infer(x2))
+> EOF
+root@18ca25fadf71:/app# python3 /app/proto.py
+shapes [12544, 16, 256, 16, 160, 10]
+png 28 28 1
+Traceback (most recent call last):
+  File "/app/proto.py", line 62, in <module>
+    print('pred /255      :', infer(x1))
+                              ~~~~~^^^^
+  File "/app/proto.py", line 56, in infer
+    z=mm(W['input_layer.weight'],x); z=[v+W['input_layer.bias'][i] for i,v in enumerate(z)]; z=[max(0.0,v) for v in z]
+  File "/app/proto.py", line 53, in mm
+    for c in range(inn): s+=Wt[r*inn+c]*xin[c]
+                            ~~^^^^^^^^^
+IndexError: list index out of range
+root@18ca25fadf71:/app#

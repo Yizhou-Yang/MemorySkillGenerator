@@ -1,0 +1,18 @@
+{
+  "analysis": "The HTTPS login page returns 200, confirming the server is up on port 8888 with SSL and password auth. To eliminate the deprecation warning and ensure robustness, I'll add the recommended PasswordIdentityProvider.hashed_password setting, then restart the server and re-verify.",
+  "plan": "Update config to add c.PasswordIdentityProvider.hashed_password. Kill the existing server, restart it, then verify HTTPS login returns 200 and that the notebook file exists.",
+  "commands": [
+    {
+      "keystrokes": "cat >> /app/jupyter_server_config.py << 'EOF'\nc.PasswordIdentityProvider.hashed_password = 'argon2:$argon2id$v=19$m=10240,t=10,p=8$PGAnuNDS/IJA0IE3CgzcvQ$QVSG3aSAUZEjujtQYOzXIsepQb0hGqCcTy0Rzvao08Y'\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "kill 718 2>/dev/null; sleep 2; nohup jupyter notebook --config /app/jupyter_server_config.py > /app/jupyter.log 2>&1 &\n",
+      "duration": 1
+    },
+    {
+      "keystrokes": "sleep 4; tail -3 /app/jupyter.log; curl -sk -o /dev/null -w \"login:%{http_code}\\n\" https://127.0.0.1:8888/login\n",
+      "duration": 5
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+- Extra text detected after JSON object
+
+New Terminal Output:
+
+root@0ee6ec3050e7:/app# cat > final.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+> d = np.loadtxt('graphene.dat', delimiter=None,
+>    converters={0: lambda s: float(str(s).replace(',','.')), 1: lambda s: float(str(s).replace(',','.'))})
+> x=d[:,0]; y=d[:,1]; o=np.argsort(x); x=x[o]; y=y[o]
+> def lor(x,off,x0,g,a): return off + a*g**2/((x-x0)**2+g**2)
+> def fit(w,p0):
+>     m=(x>=w[0])&(x<=w[1])
+>     p,_=curve_fit(lor,x[m],y[m],p0=p0,maxfev=300000)
+>     return p
+> for w in [(9000,11900),(9500,11300)]:
+>     p=fit(w,[9000,10431,347,10578]); print('G win',w,'off=%.1f x0=%.1f gamma=%.1f amp=%.1f'%(p[0],p[1],p[2],p[3]))
+> for w in [(17600,20900),(18000,19800)]:
+>     p=fit(w,[14000,19222,426,70088]); print('2D win',w,'off=%.1f x0=%.1f gamma=%.1f amp=%.1f'%(p[0],p[1],p[2],p[3]))
+> # final write using (9000,11900) and (17600,20900)
+> G=fit((9000,11900),[9000,10431,347,10578])
+> D=fit((17600,20900),[14000,19222,426,70088])
+> res={"G":{"x0":float(G[1]),"gamma":float(abs(G[2])),"amplitude":float(G[3]),"offset":float(G[0])},
+>      "2D":{"x0":float(D[1]),"gamma":float(abs(D[2])),"amplitude":float(D[3]),"offset":float(D[0])}}
+> with open('results.json','w') as f: json.dump(res,f,indent=2)
+> print('\nFINAL'); print(json.dumps(res,indent=2))
+> EOF
+root@0ee6ec3050e7:/app# python3 final.py
+G win (9000, 11900) off=9194.0 x0=10438.3 gamma=340.3 amp=10555.4
+G win (9500, 11300) off=7694.4 x0=10431.9 gamma=406.5 amp=11881.0
+2D win (17600, 20900) off=9675.2 x0=19195.5 gamma=428.1 amp=75376.9
+2D win (18000, 19800) off=14402.0 x0=19221.8 gamma=426.0 amp=70088.2
+
+FINAL
+{
+  "G": {
+    "x0": 10438.316717205355,
+    "gamma": 340.3431884815016,
+    "amplitude": 10555.356742700867,
+    "offset": 9194.021117176237
+  },
+  "2D": {
+    "x0": 19195.494344391394,
+    "gamma": 428.1362110662383,
+    "amplitude": 75376.85310442146,
+    "offset": 9675.174806720117
+  }
+}
+root@0ee6ec3050e7:/app#

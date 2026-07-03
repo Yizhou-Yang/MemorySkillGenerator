@@ -1,0 +1,20 @@
+The process is running (PID 332) and the login prompt was reached. The port check returned nothing — but `ss`/`netstat` may simply not be installed, so I'll verify port 6665 differently and confirm the user can actually connect.
+
+{
+  "analysis": "qemu is running (job [1] PID 332) and the serial log shows the 'localhost login:' prompt. However, the port check returned nothing — likely because ss/netstat aren't installed, not because the port isn't listening. I need to confirm 6665 is actually bound and reachable so the user's telnet will work.",
+  "plan": "Check /proc/net/tcp for the listening socket on port 6665 (hex 1A0D) and verify the qemu process is alive via /proc. Then do a quick non-blocking connect test to confirm a telnet client can reach it. Port 6665 = 0x1A0D.",
+  "commands": [
+    {
+      "keystrokes": "grep -i ':1A0D' /proc/net/tcp /proc/net/tcp6 2>/dev/null; echo GREP=$?\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ls -d /proc/332 2>&1\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "timeout 4 python3 -c 'import socket;s=socket.create_connection((\"127.0.0.1\",6665),timeout=3);print(\"CONNECTED\",s.recv(60));s.close()' 2>&1\n",
+      "duration": 5.0
+    }
+  ]
+}

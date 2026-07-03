@@ -1,0 +1,74 @@
+New Terminal Output:
+
+pip     24.3.1
+root@d7188015bae8:/app# ls /usr/bin | grep -E 'gcc|clang|tcc|zig|g\+\+|make|ld' ; echo '---search---'; find / -name 'gcc' -o -name 'g++' -o -name 'cc' -o -name
+'clang' 2>/dev/null | head
+fold
+ld.so
+ldd
+pldd
+---search---
+/usr/share/gcc
+root@d7188015bae8:/app# python3 -c "import sys; print(sys.version)"
+3.13.1 (main, Jan 14 2025, 02:51:49) [GCC 12.2.0]
+root@d7188015bae8:/app# cat > /tmp/explore2.py << 'PYEOF'
+> import zipfile, pickle, io
+>
+> path='/app/model.pth'
+> z=zipfile.ZipFile(path)
+> print('NAMES:', z.namelist())
+> data=z.read('archive/data.pkl')
+>
+> rec={'cls':[], 'pid':[], 'reb':[]}
+>
+> def rebuild(*args):
+>     rec['reb'].append(args)
+>     return ('TENSOR', args)
+>
+> class U(pickle.Unpickler):
+>     def find_class(self, mod, name):
+>         rec['cls'].append((mod,name))
+>         if (mod,name)==('torch._utils','_rebuild_tensor_v2'):
+>             return rebuild
+>         if (mod,name)==('torch','_rebuild_tensor'):
+>             return rebuild
+>         if (mod,name)==('collections','OrderedDict'):
+>             return dict
+>         if mod=='torch.storage' and name=='_load_from_bytes':
+>             return lambda b: ('SB', b)
+>         if name.endswith('Storage'):
+>             return lambda *a, **k: ('STG', name, a, k)
+>         return lambda *a, **k: ('STUB', mod, name, a, k)
+>     def persistent_load(self, pid):
+>         rec['pid'].append(pid)
+>         return ('PID', pid)
+>
+> u=U(io.BytesIO(data))
+> try:
+>     obj=u.load()
+>     print('LOADED TYPE', type(obj), repr(obj)[:300])
+> except Exception as e:
+>     import traceback; traceback.print_exc()
+> print('--- CLASSES ---')
+> for c in rec['cls']: print('  ',c)
+> print('--- PERSISTENT IDS ---')
+> for p in rec['pid']: print('  ',repr(p)[:200])
+> print('--- REBUILD ARGS ---')
+> for r in rec['reb']: print('  ', [repr(x)[:60] for x in r])
+> PYEOF
+root@d7188015bae8:/app# python3 /tmp/explore2.py 2>&1 | head -90
+NAMES: ['simple_mnist/data.pkl', 'simple_mnist/byteorder', 'simple_mnist/data/0', 'simple_mnist/data/1', 'simple_mnist/data/2', 'simple_mnist/data/3', 'simple_m
+nist/data/4', 'simple_mnist/data/5', 'simple_mnist/version', 'simple_mnist/.data/serialization_id']
+Traceback (most recent call last):
+  File "/tmp/explore2.py", line 6, in <module>
+    data=z.read('archive/data.pkl')
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1598, in read
+    with self.open(name, "r", pwd) as fp:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1635, in open
+    zinfo = self.getinfo(name)
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1563, in getinfo
+    raise KeyError(
+        'There is no item named %r in the archive' % name)
+KeyError: "There is no item named 'archive/data.pkl' in the archive"
+root@d7188015bae8:/app#

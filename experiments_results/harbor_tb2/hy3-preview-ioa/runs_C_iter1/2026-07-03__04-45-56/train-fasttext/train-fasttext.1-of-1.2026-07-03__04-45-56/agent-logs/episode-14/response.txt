@@ -1,0 +1,14 @@
+{
+  "analysis": "The script failed because curl is not installed (only the URLs were parsed). I have 76 .deb URLs. Python3 is available, so I'll use Python's urllib to download them, then extract with dpkg -x into /, set up symlinks, and verify. Let me also check for wget as a fallback.",
+  "plan": "Replace the curl step with a Python urllib downloader (parallel via threads). Then dpkg -x each deb into /, run ldconfig, symlink g++/gcc, and verify. After that, build fasttext-wheel.",
+  "commands": [
+    {
+      "keystrokes": "which wget; python3 --version\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "cat > /tmp/dl.py <<'EOF'\nimport urllib.request, concurrent.futures, sys, os\nurls=[u.strip() for u in open('/tmp/urls.txt') if u.strip()]\nos.makedirs('/tmp/debs', exist_ok=True)\ndef get(u):\n    fn='/tmp/debs/'+os.path.basename(u.split('?')[0])\n    for _ in range(3):\n        try:\n            urllib.request.urlretrieve(u, fn); return (u,'ok')\n        except Exception as e:\n            pass\n    return (u,'FAIL')\nwith concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:\n    for u,r in ex.map(get, urls):\n        if r!='ok': print('FAIL',u)\nprint('done', len(urls))\nEOF\npython3 /tmp/dl.py\n",
+      "duration": 60.0
+    }
+  ]
+}

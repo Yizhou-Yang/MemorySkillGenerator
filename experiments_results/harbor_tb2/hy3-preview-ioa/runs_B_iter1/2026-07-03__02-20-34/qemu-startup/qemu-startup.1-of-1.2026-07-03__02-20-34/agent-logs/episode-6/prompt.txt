@@ -1,0 +1,55 @@
+New Terminal Output:
+
+root@6ee8095a34cf:/app# cat > /tmp/extract.py << 'EOF'
+> import struct
+> ISO='/app/alpine.iso'
+> f=open(ISO,'rb')
+> f.seek(16*2048)
+> pvd=f.read(2048)
+> assert pvd[1:6]==b'CD001', 'not iso9660'
+> def parse(data,i):
+>     rl=data[i]
+>     if rl==0: return None
+>     extent=struct.unpack('<I',data[i+2:i+6])[0]
+>     dlen=struct.unpack('<I',data[i+10:i+14])[0]
+>     flags=data[i+25]
+>     nlen=data[i+32]
+>     name=data[i+33:i+33+nlen]
+>     return name,extent,dlen,(flags&2),rl
+> def readdir(extent,dlen):
+>     f.seek(extent*2048); data=f.read(dlen); out=[]; i=0
+>     while i < len(data):
+>         rec=parse(data,i)
+>         if rec is None:
+>             i=((i//2048)+1)*2048; continue
+>         name,extent,dlen,isdir,rl=rec; i+=rl
+>         nm=name.split(b';')[0]
+>         if nm in (b'.',b'\x00'): continue
+>         out.append((nm,extent,dlen,isdir))
+>     return out
+> def find_prefix(entries,pref):
+>     pref=pref.upper()
+>     for nm,e,dl,d in entries:
+>         if nm.upper().startswith(pref): return e,dl,d
+>     return None
+> root_ext=struct.unpack('<I',pvd[158:162])[0]
+> root_len=struct.unpack('<I',pvd[166:170])[0]
+> root=readdir(root_ext,root_len)
+> boot=None
+> for nm,e,dl,d in root:
+>     if nm.upper()==b'BOOT' and d: boot=(e,dl)
+> assert boot, 'no boot dir'
+> bootdir=readdir(boot[0],boot[1])
+> k=find_prefix(bootdir,b'VMLINUZ')
+> i=find_prefix(bootdir,b'INITRAMFS')
+> assert k, 'no vmlinuz'; assert i,'no initramfs'
+> for fn,e,dl in [('/tmp/vmlinuz',k[0],k[1]),('/tmp/initramfs',i[0],i[1])]:
+>     f.seek(e*2048); d=f.read(dl); open(fn,'wb').write(d); print('wrote',fn,dl)
+> EOF
+root@6ee8095a34cf:/app# python3 /tmp/extract.py
+wrote /tmp/vmlinuz 11879168
+wrote /tmp/initramfs 20486092
+root@6ee8095a34cf:/app# ls -la /tmp/vmlinuz /tmp/initramfs
+-rw-r--r-- 1 root root 20486092 Jul  2 19:03 /tmp/initramfs
+-rw-r--r-- 1 root root 11879168 Jul  2 19:03 /tmp/vmlinuz
+root@6ee8095a34cf:/app#

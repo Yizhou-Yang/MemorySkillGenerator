@@ -1,0 +1,30 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'python3 --version; which pip3 pip; cat /etc/os-release | head -n 2\n'
+'pip install notebook matplotlib 2>&1 | tail -n 5\n'
+''
+''
+'which openssl; mkdir -p ~/.jupyter; cd /app\n'
+'python3 -c "from jupyter_server.auth import passwd; print(passwd(\'benchmarkpass\'))"\n'
+''
+'mkdir -p /app/certs && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /app/certs/mykey.key -out /app/certs/mycert.pem -subj "/C=US/ST=NA/L=NA/O=NA/CN=localhost" 2>&1 | tail -n 3\n'
+"cat > /app/jupyter_server_config.py << 'EOF'\nc = get_config()\n\nc.ServerApp.ip = '0.0.0.0'\nc.ServerApp.port = 8888\nc.ServerApp.open_browser = False\nc.ServerApp.password = 'argon2:$argon2id$v=19$m=10240,t=10,p=8$FvlFCUfOkwxrcxYlzIFhBg$JIp8NT73BCWcvmTXVVROzcM+e02PCwQrTfK79VER8Gc'\nc.ServerApp.certfile = '/app/certs/mycert.pem'\nc.ServerApp.keyfile = '/app/certs/mykey.key'\nc.ServerApp.allow_root = True\nc.ServerApp.allow_origin = '*'\nc.ServerApp.base_url = '/'\nEOF\n"
+'cat /app/jupyter_server_config.py\n'
+'cat > /app/test_notebook.ipynb << \'EOF\'\n{\n "cells": [\n  {\n   "cell_type": "markdown",\n   "metadata": {},\n   "source": [\n    "# What is Jupyter Notebook?\\n",\n    "\\n",\n    "Jupyter Notebook is an open-source web application that allows you to create and share documents containing live code, equations, visualizations, and narrative text. It supports many programming languages, with Python being the most common. Notebooks are useful for data cleaning and transformation, numerical simulation, statistical modeling, data visualization, and machine learning."\n   ]\n  },\n  {\n   "cell_type": "code",\n   "execution_count": null,\n   "metadata": {},\n   "outputs": [],\n   "source": [\n    "import numpy as np\\n",\n    "import matplotlib.pyplot as plt\\n",\n    "\\n",\n    "x = np.linspace(0, 2 * np.pi, 400)\\n",\n    "y = np.sin(x)\\n",\n    "\\n",\n    "plt.figure(figsize=(8, 4))\\n",\n    "plt.plot(x, y)\\n",\n    "plt.title(\'Sine Wave\')\\n",\n    "plt.xlabel(\'x\')\\n",\n    "plt.ylabel(\'sin(x)\')\\n",\n    "plt.grid(True)\\n",\n    "plt.show()"\n   ]\n  }\n ],\n "metadata": {\n  "kernelspec": {\n   "display_name": "Python 3",\n   "language": "python",\n   "name": "python3"\n  },\n  "language_info": {\n   "name": "python",\n   "version": "3.13.14"\n  }\n },\n "nbformat": 4,\n "nbformat_minor": 5\n}\nEOF\n'
+'python3 -c "import json; json.load(open(\'/app/test_notebook.ipynb\')); print(\'valid notebook\')"\n'
+'cp /app/jupyter_server_config.py ~/.jupyter/jupyter_server_config.py\n'
+'cd /app && nohup jupyter notebook --config /app/jupyter_server_config.py > /app/jupyter.log 2>&1 &\n'
+'sleep 5; tail -n 20 /app/jupyter.log\n'
+'sleep 5; tail -n 25 /app/jupyter.log\n'
+'curl -k -s -o /dev/null -w "%{http_code}\\n" https://127.0.0.1:8888/tree\n'
+''
+"kill %1 2>/dev/null; sleep 2; pkill -f 'jupyter notebook' 2>/dev/null; sleep 1\n"
+"cat > /app/jupyter_server_config.py << 'EOF'\nc = get_config()\n\nc.ServerApp.ip = '0.0.0.0'\nc.ServerApp.port = 8888\nc.ServerApp.open_browser = False\nc.ServerApp.password = 'argon2:$argon2id$v=19$m=10240,t=10,p=8$FvlFCUfOkwxrcxYlzIFhBg$JIp8NT73BCWcvmTXVVROzcM+e02PCwQrTfK79VER8Gc'\nc.PasswordIdentityProvider.hashed_password = 'argon2:$argon2id$v=19$m=10240,t=10,p=8$FvlFCUfOkwxrcxYlzIFhBg$JIp8NT73BCWcvmTXVVROzcM+e02PCwQrTfK79VER8Gc'\nc.ServerApp.certfile = '/app/certs/mycert.pem'\nc.ServerApp.keyfile = '/app/certs/mykey.key'\nc.ServerApp.allow_root = True\nc.ServerApp.allow_origin = '*'\nc.ServerApp.base_url = '/'\nEOF\n"
+'cp /app/jupyter_server_config.py ~/.jupyter/jupyter_server_config.py\n'
+'cd /app && nohup jupyter notebook --config /app/jupyter_server_config.py > /app/jupyter.log 2>&1 &\n'
+'sleep 6; tail -n 8 /app/jupyter.log\n'
+'sleep 4; curl -k -s -o /dev/null -w "HTTP %{http_code}\\n" https://127.0.0.1:8888/tree; ls -la /app/test_notebook.ipynb\n'
+'jobs; ss -tlnp 2>/dev/null | grep 8888 || netstat -tlnp 2>/dev/null | grep 8888\n'
+'python3 -c "import json; nb=json.load(open(\'/app/test_notebook.ipynb\')); types=[c[\'cell_type\'] for c in nb[\'cells\']]; print(\'cell types:\', types); print(\'has markdown:\', \'markdown\' in types); print(\'has code:\', \'code\' in types); print(\'has sine plot:\', any(\'np.sin\' in \'\'.join(c[\'source\']) or \'plt.plot\' in \'\'.join(c[\'source\']) for c in nb[\'cells\'] if c[\'cell_type\']==\'code\'))"\n'
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']

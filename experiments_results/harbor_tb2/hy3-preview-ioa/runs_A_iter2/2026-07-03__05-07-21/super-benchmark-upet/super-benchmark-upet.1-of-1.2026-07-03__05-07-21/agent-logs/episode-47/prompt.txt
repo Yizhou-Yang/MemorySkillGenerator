@@ -1,0 +1,41 @@
+Current Terminal Screen:
+  File "/app/UPET/run.py", line 7, in <module>
+    import datasets
+  File "/usr/local/lib/python3.10/site-packages/datasets/__init__.py", line 19, in <module>
+    from .builder import ArrowBasedBuilder, BeamBasedBuilder, BuilderConfig, DatasetBuilder, GeneratorBasedBuilder
+  File "/usr/local/lib/python3.10/site-packages/datasets/builder.py", line 968
+    ):
+    ^
+SyntaxError: unmatched ')'
+root@7bcf8a0cf7c8:/app/UPET# sed -i 's/                if False:  # patched: skip disk space check/                if not has_sufficient_disk_space(/' /usr/loca
+l/lib/python3.10/site-packages/datasets/builder.py
+root@7bcf8a0cf7c8:/app/UPET# grep -rn 'def has_sufficient_disk_space' /usr/local/lib/python3.10/site-packages/datasets/
+/usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py:559:def has_sufficient_disk_space(needed_bytes, directory="."):
+root@7bcf8a0cf7c8:/app/UPET# sed -n '555,580p' /usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py
+        else:
+            return [data]
+
+
+def has_sufficient_disk_space(needed_bytes, directory="."):
+    try:
+        free_bytes = disk_usage(os.path.abspath(directory)).free
+    except OSError:
+        return True
+    return needed_bytes < free_bytes
+
+
+def _convert_github_url(url_path: str) -> Tuple[str, Optional[str]]:
+    """Convert a link to a file on a github repo in a link to the raw github object."""
+    parsed = urlparse(url_path)
+    sub_directory = None
+    if parsed.scheme in ("http", "https", "s3") and parsed.netloc == "github.com":
+        if "blob" in url_path:
+            if not url_path.endswith(".py"):
+                raise ValueError(f"External import from github at {url_path} should point to a file ending with '.py'")
+            url_path = url_path.replace("blob", "raw")  # Point to the raw file
+        else:
+            # Parse github url to point to zip
+            github_path = parsed.path[1:]
+            repo_info, branch = github_path.split("/tree/") if "/tree/" in github_path else (github_path, "master")
+            repo_owner, repo_name = repo_info.split("/")
+root@7bcf8a0cf7c8:/app/UPET#

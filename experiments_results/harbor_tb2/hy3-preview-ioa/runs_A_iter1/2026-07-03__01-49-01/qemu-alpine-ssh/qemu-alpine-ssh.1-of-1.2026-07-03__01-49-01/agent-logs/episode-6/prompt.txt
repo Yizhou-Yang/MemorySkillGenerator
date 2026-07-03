@@ -1,0 +1,41 @@
+Current Terminal Screen:
+> bootfiles=walk(rec_lba(boot),rec_len(boot))
+> os.makedirs('/app/boot',exist_ok=True)
+> for nm,r in bootfiles:
+>     u=nm.upper()
+>     if u.startswith('VMLINUZ_LTS'): dst='/app/boot/vmlinuz'
+>     elif u.startswith('INITRAMFS_LTS'): dst='/app/boot/initramfs'
+>     else: continue
+>     print('extract', nm, dst, rec_len(r))
+>     data=read(rec_lba(r), (rec_len(r)+2047)//2048)
+>     open(dst,'wb').write(data[:rec_len(r)])
+> print('done')
+> PYEOF
+root@88975f2109d1:/app# python3 /app/extract.py
+extract INITRAMFS_LTS. /app/boot/initramfs 20486092
+extract VMLINUZ_LTS. /app/boot/vmlinuz 11879168
+ls -la /app/boot
+done
+root@88975f2109d1:/app# ls -la /app/boot
+total 31620
+drwxr-xr-x 2 root root     4096 Jul  2 18:40 .
+drwxr-xr-x 3 root root     4096 Jul  2 18:40 ..
+-rw-r--r-- 1 root root 20486092 Jul  2 18:40 initramfs
+-rw-r--r-- 1 root root 11879168 Jul  2 18:40 vmlinuz
+root@88975f2109d1:/app# cat > /app/run_vm.sh << 'EOF'
+> #!/bin/sh
+> exec qemu-system-x86_64 \
+>   -m 1024 -smp 2 -no-kvm \
+>   -display none -monitor none -serial stdio \
+>   -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+>   -device e1000,netdev=net0 \
+>   -cdrom /app/alpine.iso \
+>   -kernel /app/boot/vmlinuz \
+>   -initrd /app/boot/initramfs \
+>   -append 'console=ttyS0 init=/bin/sh'
+> EOF
+root@88975f2109d1:/app# chmod +x /app/run_vm.sh
+root@88975f2109d1:/app# tmux kill-session -t vm 2>/dev/null; tmux new-session -d -s vm '/app/run_vm.sh'
+root@88975f2109d1:/app# sleep 3; tmux capture-pane -pt vm | tail -n 20
+can't find pane: vm
+root@88975f2109d1:/app#

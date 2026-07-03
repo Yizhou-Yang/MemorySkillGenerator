@@ -1,0 +1,14 @@
+{
+  "analysis": "I understand the test file structure. There's a `test_cstack` test. I'll add a regression test that covers the nested CompoundModel case — both at the `_cstack` level (right operand as a precomputed array) and at the `separability_matrix` level, which is the exact scenario from the bug report.",
+  "plan": "Append a regression test to test_separable.py verifying: (1) separability_matrix of a nested compound model produces the correct block-diagonal structure, and (2) _cstack preserves the right array when it's precomputed. Then run the test file to confirm all pass.",
+  "commands": [
+    {
+      "keystrokes": "cat >> astropy/modeling/tests/test_separable.py << 'EOF'\n\n\ndef test_cstack_preserves_nested_separability():\n    # Regression test for the bug where nesting a CompoundModel under '&'\n    # caused the nested model's separability information to be dropped\n    # (the right-operand branch of _cstack previously wrote 1 instead of\n    # copying the sub-matrix).\n    from astropy.modeling import models as m\n\n    cm = m.Linear1D(10) & m.Linear1D(5)\n\n    # The nested model on the right must keep its separable block.\n    result = separability_matrix(m.Pix2Sky_TAN() & cm)\n    expected = np.array([[True, True, False, False],\n                         [True, True, False, False],\n                         [False, False, True, False],\n                         [False, False, False, True]])\n    assert_allclose(result, expected)\n\n    # A direct check that _cstack copies a precomputed right-hand matrix\n    # rather than filling with ones.\n    left = _coord_matrix(m.Shift(1), 'left', 4)\n    right_matrix = np.array([[1, 0, 0, 0],\n                             [0, 1, 0, 0],\n                             [0, 0, 1, 0],\n                             [0, 0, 0, 1]])\n    stacked = _cstack(models.Shift(1), right_matrix)\n    assert_allclose(stacked, np.hstack([left, right_matrix]))\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python -m pytest astropy/modeling/tests/test_separable.py -q 2>/dev/null\n",
+      "duration": 30.0
+    }
+  ]
+}

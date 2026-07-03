@@ -1,0 +1,18 @@
+{
+  "analysis": "Remount failed (permission denied), and /root/.cache is a tiny 64MB tmpfs with ~23MB free — it can't hold the 256MB cache. The only large writable location is /sys/fs/cgroup (32GB free), where the working cache already lives. To make offline use work with NO special setup (i.e., the default cache location), I'll point the default location at the good cache via a symlink, and also persist HF_HOME in ~/.bashrc as a fallback. A symlink takes negligible space, so the 64MB /root/.cache constraint is no problem.",
+  "plan": "1) Remove the partial broken cache left in the default location from the first failed attempt. 2) Symlink /root/.cache/huggingface -> /sys/fs/cgroup/hfhome so the default cache path resolves to the good cache. 3) Add `export HF_HOME=/sys/fs/cgroup/hfhome` to ~/.bashrc as a belt-and-suspenders. 4) Verify offline loading works in a CLEAN shell with HF_HOME unset (relying purely on the symlink/default path). If that prints token IDs, the task is robustly complete.",
+  "commands": [
+    {
+      "keystrokes": "rm -rf /root/.cache/huggingface; ln -s /sys/fs/cgroup/hfhome /root/.cache/huggingface; ls -ld /root/.cache/huggingface\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "grep -q 'HF_HOME=/sys/fs/cgroup/hfhome' ~/.bashrc || echo 'export HF_HOME=/sys/fs/cgroup/hfhome' >> ~/.bashrc; tail -1 ~/.bashrc\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "env -u HF_HOME HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 -c \"from transformers import AutoTokenizer, AutoModel; tok=AutoTokenizer.from_pretrained('albert/albert-base-v2'); m=AutoModel.from_pretrained('albert/albert-base-v2'); print('DEFAULT-PATH OFFLINE OK ->', tok('Hello world')['input_ids'][:5])\"\n",
+      "duration": 15.0
+    }
+  ]
+}

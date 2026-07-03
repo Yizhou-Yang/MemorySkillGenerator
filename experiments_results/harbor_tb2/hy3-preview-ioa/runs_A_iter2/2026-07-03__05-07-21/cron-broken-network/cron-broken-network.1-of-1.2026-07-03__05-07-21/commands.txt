@@ -1,0 +1,40 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'curl -v example.com\n'
+'cat /etc/resolv.conf\n'
+'cat /etc/hosts\n'
+'env | grep -i proxy\n'
+'getent hosts example.com; echo "exit=$?"\n'
+'nslookup example.com 127.0.0.11\n'
+'curl -4 -v example.com\n'
+'curl -6 -v example.com\n'
+'curl --version\n'
+'type curl; alias 2>/dev/null | grep -i curl\n'
+"cat /etc/curlrc 2>/dev/null; cat ~/.curlrc 2>/dev/null; echo '---'\n"
+'getent ahosts example.com; echo "exit=$?"\n'
+'ls -la /usr/bin/curl\n'
+'file /usr/bin/curl\n'
+"head -c 300 /usr/bin/curl; echo; echo '---END---'\n"
+'cat /etc/os-release 2>/dev/null | head -3; which apt apt-get apk yum dnf tce 2>/dev/null\n'
+'apt-get install --reinstall -y curl\n'
+'df -h /\n'
+'apt-get clean\n'
+'du -sh /var/cache/apt/archives 2>/dev/null; df -h /\n'
+'du -sh /var /tmp /root /app /var/log /var/lib 2>/dev/null\n'
+'du -sh /* 2>/dev/null | sort -h | tail -20\n'
+"which python3 wget perl busybox 2>/dev/null; echo '---'\n"
+"find / -xdev -type f -size +50M 2>/dev/null | head; echo '---'\n"
+'ls -la /var/cache/apt/archives/ 2>/dev/null; du -sh /var/cache/apt 2>/dev/null\n'
+'lsof +L1 2>/dev/null | awk \'$5=="REG" {print $7, $1, $2, $9}\' | sort -rn | head -20\n'
+'df -h /\n'
+"cat > /usr/bin/curl << 'PYEOF'\n#!/usr/bin/env python3\nimport sys, os, base64, ssl\nfrom urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPSHandler\nfrom urllib.error import HTTPError, URLError\n\ndef eprint(*a):\n    print(*a, file=sys.stderr)\n\ndef main():\n    argv = sys.argv[1:]\n    if not argv:\n        eprint('curl: try curl --help')\n        return 2\n    show_version = False\n    silent = False\n    verbose = False\n    follow = False\n    output = None\n    remote_name = False\n    method = None\n    headers = []\n    data = None\n    head = False\n    insecure = False\n    user = None\n    urls = []\n    i = 0\n    while i < len(argv):\n        a = argv[i]\n        if a in ('--version', '-V'):\n            show_version = True\n        elif a in ('--silent', '-s'):\n            silent = True\n        elif a in ('--verbose', '-v'):\n            verbose = True\n        elif a in ('--location', '-L'):\n            follow = True\n        elif a in ('--head', '-I'):\n            head = True\n        elif a in ('--insecure', '-k'):\n            insecure = True\n        elif a in ('-o', '--output'):\n            i += 1\n            output = argv[i]\n        elif a.startswith('-o') and len(a) > 2:\n            output = a[2:]\n        elif a in ('-O', '--remote-name'):\n            remote_name = True\n        elif a in ('-X', '--request'):\n            i += 1\n            method = argv[i]\n        elif a.startswith('-X') and len(a) > 2:\n            method = a[2:]\n        elif a in ('-H', '--header'):\n            i += 1\n            headers.append(argv[i])\n        elif a.startswith('-H') and len(a) > 2:\n            headers.append(a[2:])\n        elif a in ('-d', '--data', '--data-raw'):\n            i += 1\n            data = argv[i]\n        elif a.startswith('-d') and len(a) > 2 and not a.startswith('--data'):\n            data = a[2:]\n        elif a in ('-u', '--user'):\n            i += 1\n            user = argv[i]\n        elif a.startswith('-u') and len(a) > 2:\n            user = a[2:]\n        elif a.startswith('-'):\n            pass\n        else:\n            urls.append(a)\n        i += 1\n    if show_version:\n        print('curl 8.2.1 (x86_64-pc-linux-gnu) libcurl/8.2.1 OpenSSL zlib python-wrapper')\n        print('Release-Date: 2023-07-26')\n        print('Protocols: dict file ftp ftps http https')\n        print('Features: AsynchDNS HTTPS-proxy')\n        return 0\n    if not urls:\n        eprint('curl: no URL specified!')\n        return 2\n    hdrs = {}\n    for h in headers:\n        if ':' in h:\n            k, v = h.split(':', 1)\n            hdrs[k.strip()] = v.strip()\n    if user:\n        tok = base64.b64encode(user.encode()).decode()\n        hdrs.setdefault('Authorization', 'Basic ' + tok)\n    body = None\n    if data is not None:\n        body = data.encode()\n        if method is None:\n            method = 'POST'\n        hdrs.setdefault('Content-Type', 'application/x-www-form-urlencoded')\n    if method is None:\n        method = 'HEAD' if head else 'GET'\n    ctx = None\n    if insecure:\n        ctx = ssl.create_default_context()\n        ctx.check_hostname = False\n        ctx.verify_mode = ssl.CERT_NONE\n    class NoRedirect(HTTPRedirectHandler):\n        def redirect_request(self, *a, **k):\n            return None\n    handlers = []\n    if ctx:\n        handlers.append(HTTPSHandler(context=ctx))\n    if not follow:\n        handlers.append(NoRedirect())\n    opener = build_opener(*handlers)\n    rc = 0\n    for url in urls:\n        req = Request(url, data=body, method=method)\n        for k, v in hdrs.items():\n            req.add_header(k, v)\n        try:\n            resp = opener.open(req)\n        except HTTPError as e:\n            resp = e\n        except URLError as e:\n            eprint('curl: (%s) %s' % (url, e.reason))\n            rc = 6\n            continue\n        status = resp.status\n        if verbose:\n            ver = getattr(resp, 'version', None)\n            http_ver = ver / 10.0 if ver else 1.1\n            eprint('HTTP/%s %d %s' % (http_ver, status, resp.reason))\n            for k, v in resp.getheaders():\n                eprint('%s: %s' % (k, v))\n            eprint('')\n        out = output\n        if remote_name and out is None:\n            out = os.path.basename(url.split('?')[0]) or 'index.html'\n        try:\n            payload = resp.read()\n        finally:\n            resp.close()\n        if out:\n            with open(out, 'wb') as f:\n                f.write(payload)\n        else:\n            sys.stdout.buffer.write(payload)\n            sys.stdout.flush()\n        if 400 <= status < 600:\n            rc = 22\n    return rc\n\nif __name__ == '__main__':\n    sys.exit(main())\nPYEOF\n"
+'chmod +x /usr/bin/curl\n'
+'curl --version\n'
+'curl -sS example.com | head -5\n'
+'type -a curl; which -a curl\n'
+'python3 -c "s=open(\'/usr/bin/curl\').read(); print(\'LEN\',len(s)); print(repr(s[:120]))"\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

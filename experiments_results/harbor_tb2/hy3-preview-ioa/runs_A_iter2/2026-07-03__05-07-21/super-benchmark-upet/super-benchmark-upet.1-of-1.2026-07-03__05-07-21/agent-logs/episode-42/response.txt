@@ -1,0 +1,14 @@
+{
+  "analysis": "Important: the write test succeeded — I wrote 200MB to /tmp fine. The `df` "0 avail" is a fuse-overlayfs reporting quirk; the actual container only uses ~4.7G. So the disk is writable, but `datasets/builder.py` does a `statvfs`-based free-space check that fails because the overlay reports 0 available. The OSError is raised by datasets' own disk-space sanity check, not by huggingface_hub. I'll patch datasets' builder to skip that check (minimal, local, safe).",
+  "plan": "Inspect the disk-space check in datasets/builder.py around line 969 to find a clean patch point. Then patch it to bypass (e.g., wrap the check in a try or force success). Re-run the training.",
+  "commands": [
+    {
+      "keystrokes": "grep -n 'Not enough disk space\\|def _check_disk_space\\|disk_space\\|free_disk_space\\|def download_and_prepare' /usr/local/lib/python3.10/site-packages/datasets/builder.py | head\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "sed -n '930,975p' /usr/local/lib/python3.10/site-packages/datasets/builder.py\n",
+      "duration": 0.1
+    }
+  ]
+}

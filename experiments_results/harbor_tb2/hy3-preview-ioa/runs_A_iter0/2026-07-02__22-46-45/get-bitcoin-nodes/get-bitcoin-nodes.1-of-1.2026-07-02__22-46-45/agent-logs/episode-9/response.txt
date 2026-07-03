@@ -1,0 +1,12 @@
+Service is running and the P2P connection to a real Bitcoin peer on port 8333 succeeded. Now let me verify all endpoints.
+
+{
+  "analysis": "The service is live on 127.0.0.1:5000 and a real P2P connection to the Bitcoin network (136.115.195.146:8333) was established. Now I need to validate the endpoints: /status, /block/<hash>, /transaction/<txid>, and the 404 error paths.",
+  "plan": "Run a Python test script using requests to verify: /status returns {'status':'online'}; /block/<valid> matches the block schema; /transaction/<valid> matches the tx schema; invalid block/tx return 404 with {'error':...}. Print status codes and key fields.",
+  "commands": [
+    {
+      "keystrokes": "python3 << 'PYEOF'\nimport requests as r\nB='http://127.0.0.1:5000'\nh='00000000000000000001ff479f59fad262511577ca386061c3c4c7d2aa3a7506'\ns=r.get(B+'/status',timeout=20)\nprint('STATUS', s.status_code, s.json())\nb=r.get(B+'/block/'+h,timeout=30)\nprint('BLOCK', b.status_code, b.json())\ntid=b.json()['tx'][0]\nt=r.get(B+'/transaction/'+tid,timeout=30)\nprint('TX', t.status_code, t.json())\nfor path in ['/block/deadbeef','/transaction/deadbeef']:\n    e=r.get(B+path,timeout=20)\n    print('ERR', path, e.status_code, e.json())\nPYEOF\n",
+      "duration": 40
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+- Extra text detected after JSON object
+
+New Terminal Output:
+
+--- dev ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+root@5800c03d8045:/tmp/work# cat > /tmp/test.sh <<'EOF'
+> #!/bin/bash
+> rm -rf /tmp/work; mkdir -p /tmp/work; cd /tmp/work
+> git init -q -b main
+> git config user.email t@t.com; git config user.name t
+> echo '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main
+> git checkout -q -b dev
+> echo '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev
+> git remote add origin git@localhost:/git/project
+> export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null'
+> export SSH_ASKPASS=/tmp/askpass.sh; export SSH_ASKPASS_REQUIRE=force; export DISPLAY=:0
+> setsid git push -q origin main dev; echo "PUSH_EXIT=$?"
+> sleep 1
+> echo '--- main ---'; curl -sk https://localhost:8443/index.html
+> echo '--- dev ---'; curl -sk https://localhost:8443/dev/index.html
+> EOF
+root@5800c03d8045:/tmp/work# bash /tmp/test.sh
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+fatal: protocol error: bad line length character: Welc
+PUSH_EXIT=128
+--- main ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+--- dev ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+root@5800c03d8045:/tmp/work#

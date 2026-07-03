@@ -1,0 +1,79 @@
+New Terminal Output:
+
+root@613463f80ab1:/app# cat > /app/revert.py << 'PYEOF'
+> #!/usr/bin/env python3
+> """Revert c4_reshard/ back to the original flat layout that matches c4_sample/.
+>
+> The build step placed the original files (and, for any oversized file, its
+> split parts) into shard_* sub-folders inside c4_reshard/ and recorded the
+> mapping in c4_reshard_manifest.json. Running this script reads that manifest
+> and reconstructs the original flat file set directly inside c4_reshard/,
+> removing the shard sub-folders. After running, the contents of c4_reshard/
+> match what was originally in c4_sample/.
+> """
+> import json
+> import os
+> import shutil
+> import sys
+>
+> SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+> RESHARD_DIR = os.path.join(SCRIPT_DIR, "c4_reshard")
+> MANIFEST_PATH = os.path.join(SCRIPT_DIR, "c4_reshard_manifest.json")
+>
+>
+> def main():
+>     if not os.path.isdir(RESHARD_DIR):
+>         print("error: %s does not exist" % RESHARD_DIR, file=sys.stderr)
+>         return 1
+>     if not os.path.isfile(MANIFEST_PATH):
+>         print("error: manifest %s not found" % MANIFEST_PATH, file=sys.stderr)
+>         return 1
+>
+>     with open(MANIFEST_PATH) as f:
+>         manifest = json.load(f)
+>
+>     for entry in manifest["entries"]:
+>         orig = entry["orig"]
+>         parts = entry["parts"]  # list of paths relative to RESHARD_DIR
+>         dest = os.path.join(RESHARD_DIR, orig)
+>         if len(parts) == 1:
+>             src = os.path.join(RESHARD_DIR, parts[0])
+>             if os.path.abspath(src) != os.path.abspath(dest):
+>                 shutil.move(src, dest)
+>         else:
+>             tmp = dest + ".tmp"
+>             with open(tmp, "wb") as out:
+>                 for p in parts:
+>                     with open(os.path.join(RESHARD_DIR, p), "rb") as inp:
+>                         shutil.copyfileobj(inp, out)
+>             os.replace(tmp, dest)
+>             for p in parts:
+>                 os.remove(os.path.join(RESHARD_DIR, p))
+>
+>     # remove now-empty shard folders
+>     for name in os.listdir(RESHARD_DIR):
+>         full = os.path.join(RESHARD_DIR, name)
+>         if os.path.isdir(full):
+>             try:
+>                 os.rmdir(full)
+>             except OSError:
+>                 pass
+>
+>     print("reverted c4_reshard/ to original layout")
+>     return 0
+>
+>
+> if __name__ == "__main__":
+>     sys.exit(main())
+> PYEOF
+root@613463f80ab1:/app# python3 -c "import ast; ast.parse(open('/app/revert.py').read()); print('revert.py syntax OK')"
+revert.py syntax OK
+root@613463f80ab1:/app# rm -f /app/build_reshard.py && ls -la /app
+total 1480
+drwxr-xr-x   4 root root   4096 Jul  2 19:15 .
+drwxr-xr-x  19 root root   4096 Jul  2 19:09 ..
+drwxr-xr-x 332 root root  12288 Jul  2 19:15 c4_reshard
+-rw-r--r--   1 root root 960173 Jul  2 19:15 c4_reshard_manifest.json
+drwxr-xr-x   2 root root 524288 Jul  2 15:33 c4_sample
+-rw-r--r--   1 root root   2204 Jul  2 19:15 revert.py
+root@613463f80ab1:/app#

@@ -1,0 +1,82 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected after JSON object
+
+New Terminal Output:
+
+root@5800c03d8045:/app# cat > /tmp/setup.sh <<'SETUP_EOF'
+> #!/bin/bash
+> set -e
+>
+> # 1. git user with password
+> id git >/dev/null 2>&1 || useradd -m -s /bin/bash git
+> echo 'git:password' | chpasswd
+>
+> # 2. bare repo + post-receive hook
+> mkdir -p /git
+> rm -rf /git/project
+> git init --bare /git/project >/dev/null
+> cat > /git/project/hooks/post-receive <<'HOOK_EOF'
+> #!/bin/bash
+> unset GIT_DIR
+> REPO=/git/project
+> WEB=/var/www/html
+> deploy() {
+>   local branch=$1; local target=$2
+>   if git --git-dir="$REPO" rev-parse --verify "$branch" >/dev/null 2>&1; then
+>     mkdir -p "$target"
+>     git --git-dir="$REPO" --work-tree="$target" checkout -f "$branch"
+>     chmod -R a+rX "$target"
+>   fi
+> }
+> deploy main "$WEB"
+> deploy dev "$WEB/dev"
+> HOOK_EOF
+> chmod +x /git/project/hooks/post-receive
+> chown -R git:git /git
+>
+> # 3. web root
+> mkdir -p /var/www/html
+> chown -R git:git /var/www/html
+>
+> # 4. self-signed cert
+> mkdir -p /etc/nginx/ssl
+> openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.crt -days 365 -subj "/CN=localhost" >/dev/null 2>&1
+>
+> # 5. nginx server block
+> cat > /etc/nginx/conf.d/git.conf <<'NGINX_EOF'
+> server {
+>     listen 8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/nginx.crt;
+>     ssl_certificate_key /etc/nginx/ssl/nginx.key;
+>     root /var/www/html;
+>     index index.html;
+> }
+> NGINX_EOF
+>
+> # 6. sshd password auth
+> mkdir -p /etc/ssh/sshd_config.d
+> echo 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/99-local.conf
+> sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+> grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+> mkdir -p /run/sshd
+> ssh-keygen -A >/dev/null 2>&1
+>
+> echo SETUP_DONE
+> SETUP_EOF
+root@5800c03d8045:/app# bash /tmp/setup.sh
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+SETUP_DONE
+root@5800c03d8045:/app#

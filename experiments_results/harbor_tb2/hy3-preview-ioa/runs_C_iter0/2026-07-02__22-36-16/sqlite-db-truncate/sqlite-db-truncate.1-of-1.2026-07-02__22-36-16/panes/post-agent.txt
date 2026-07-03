@@ -1,0 +1,401 @@
+root@b5538c1cf93e:/app# ls -la /app/trunc.db
+-rw-r--r-- 1 root root 4096 Jul  2 13:59 /app/trunc.db
+root@b5538c1cf93e:/app# file /app/trunc.db
+bash: file: command not found
+root@b5538c1cf93e:/app# xxd /app/trunc.db | head -50
+bash: xxd: command not found
+root@b5538c1cf93e:/app# which python3 sqlite3 od hexdump strings grep
+/usr/bin/python3
+/usr/bin/od
+/usr/bin/grep
+root@b5538c1cf93e:/app# od -A x -t x1z /app/trunc.db | head -40
+000000 0d 00 00 00 0a 0f 49 00 0f f0 0f df 0f ce 0f bd  >......I.........<
+000010 0f ac 0f 9b 0f 8a 0f 79 0f 61 0f 49 00 00 00 00  >.......y.a.I....<
+000020 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  >................<
+*
+000f40 00 00 00 00 00 00 00 00 00 16 0a 04 00 21 07 74  >.............!.t<
+000f50 65 73 74 77 6f 72 64 30 39 3f e0 00 00 00 00 00  >estword09?......<
+000f60 00 16 09 04 00 21 07 74 65 73 74 77 6f 72 64 30  >.....!.testword0<
+000f70 38 40 58 ff 5c 28 f5 c2 8f 0f 08 04 00 21 01 74  >8@X.\(.......!.t<
+000f80 65 73 74 77 6f 72 64 30 37 63 0f 07 04 00 21 01  >estword07c....!.<
+000f90 74 65 73 74 77 6f 72 64 30 36 4b 0f 06 04 00 21  >testword06K....!<
+000fa0 01 74 65 73 74 77 6f 72 64 30 35 32 0f 05 04 00  >.testword052....<
+000fb0 21 01 74 65 73 74 77 6f 72 64 30 34 2a 0f 04 04  >!.testword04*...<
+000fc0 00 21 01 74 65 73 74 77 6f 72 64 30 33 19 0f 03  >.!.testword03...<
+000fd0 04 00 21 01 74 65 73 74 77 6f 72 64 30 32 0a 0f  >..!.testword02..<
+000fe0 02 04 00 21 01 74 65 73 74 77 6f 72 64 30 31 02  >...!.testword01.<
+000ff0 0e 01 04 00 21 09 74 65 73 74 77 6f 72 64 30 30  >....!.testword00<
+001000
+root@b5538c1cf93e:/app# cat > /app/recover.py << 'PYEOF'
+> import struct, json
+>
+> data = open('/app/trunc.db','rb').read()
+>
+> def read_varint(buf, pos):
+>     result = 0
+>     for i in range(9):
+>         b = buf[pos+i]
+>         if i == 8:
+>             result = (result << 8) | b
+>             return result, pos+9
+>         result = (result << 7) | (b & 0x7f)
+>         if not (b & 0x80):
+>             return result, pos+i+1
+>     return result, pos+9
+>
+> off = 0
+> page_type = data[off]
+> ncells = int.from_bytes(data[off+3:off+5],'big')
+> cell_ptr_array = off + 8
+> pointers = [int.from_bytes(data[cell_ptr_array+2*i:cell_ptr_array+2*i+2],'big') for i in range(ncells)]
+>
+> def parse_record(payload):
+>     hdr_len, hpos = read_varint(payload, 0)
+>     serial_types = []
+>     idx = hpos
+>     while idx < hdr_len:
+>         st, idx = read_varint(payload, idx)
+>         serial_types.append(st)
+>     cols = []
+>     dpos = hdr_len
+>     for st in serial_types:
+>         if st == 0:
+>             cols.append(None); continue
+>         elif st == 1:
+>             v = int.from_bytes(payload[dpos:dpos+1],'big',signed=True); dpos+=1
+>         elif st == 2:
+>             v = int.from_bytes(payload[dpos:dpos+2],'big',signed=True); dpos+=2
+>         elif st == 3:
+>             v = int.from_bytes(payload[dpos:dpos+3],'big',signed=True); dpos+=3
+>         elif st == 4:
+>             v = int.from_bytes(payload[dpos:dpos+4],'big',signed=True); dpos+=4
+>         elif st == 5:
+>             v = int.from_bytes(payload[dpos:dpos+6],'big',signed=True); dpos+=6
+>         elif st == 6:
+>             v = int.from_bytes(payload[dpos:dpos+8],'big',signed=True); dpos+=8
+>         elif st == 7:
+>             v = struct.unpack('>d', payload[dpos:dpos+8])[0]; dpos+=8
+>         elif st == 8:
+>             v = 0
+>         elif st == 9:
+>             v = 1
+>         elif st >= 12 and st % 2 == 0:
+>             n = (st-12)//2
+>             v = payload[dpos:dpos+n].decode('utf-8','replace'); dpos+=n
+>         elif st >= 13 and st % 2 == 1:
+>             n = (st-13)//2
+>             v = payload[dpos:dpos+n]; dpos+=n
+>         else:
+>             v = None
+>         cols.append(v)
+>     return cols
+>
+> results = []
+> for p in pointers:
+>     pos = p
+>     payload_len, pos = read_varint(data, pos)
+>     rowid, pos = read_varint(data, pos)
+>     end = pos + payload_len
+>     if end > len(data):
+>         continue
+>     payload = data[pos:end]
+>     try:
+>         cols = parse_record(payload)
+>     except Exception:
+>         continue
+>     word = None; value = None
+>     for c in cols:
+>         if isinstance(c, str) and word is None:
+>             word = c
+>         elif isinstance(c, (int,float)) and not isinstance(c,bool) and value is None:
+>             value = c
+>     if word is not None and value is not None:
+>         results.append((rowid, word, value))
+>
+> results.sort()
+> out = [{"word": w, "value": v} for _, w, v in results]
+> with open('/app/recover.json','w') as f:
+>     json.dump(out, f, indent=2)
+> print("recovered", len(out))
+> for r in out:
+>     print(r)
+> PYEOF
+root@b5538c1cf93e:/app# python3 /app/recover.py
+recovered 0
+root@b5538c1cf93e:/app# cat > /app/dbg.py << 'PYEOF'
+> import struct
+> data = open('/app/trunc.db','rb').read()
+> print('len', len(data))
+> print('hdr', data[:8].hex())
+> ncells = int.from_bytes(data[3:5],'big')
+> print('ncells', ncells)
+> ptrs = [int.from_bytes(data[8+2*i:10+2*i],'big') for i in range(ncells)]
+> print('ptrs', [hex(p) for p in ptrs])
+>
+> def rv(buf, pos):
+>     r=0
+>     for i in range(9):
+>         b=buf[pos+i]
+>         if i==8:
+>             return (r<<8)|b, pos+9
+>         r=(r<<7)|(b&0x7f)
+>         if not (b&0x80):
+>             return r, pos+i+1
+>     return r, pos+9
+>
+> for p in ptrs:
+>     try:
+>         pl, pos = rv(data, p)
+>         rid, pos = rv(data, pos)
+>         end = pos+pl
+>         payload = data[pos:end]
+>         print(hex(p), 'plen', pl, 'rowid', rid, 'end', hex(end), 'payload', payload.hex())
+>     except Exception as e:
+>         print(hex(p), 'ERR', e)
+> PYEOF
+root@b5538c1cf93e:/app# python3 /app/dbg.py
+len 4096
+hdr 0d0000000a0f4900
+ncells 10
+ptrs ['0xff0', '0xfdf', '0xfce', '0xfbd', '0xfac', '0xf9b', '0xf8a', '0xf79', '0xf61', '0xf49']
+0xff0 plen 14 rowid 1 end 0x1000 payload 0400210974657374776f72643030
+0xfdf plen 15 rowid 2 end 0xff0 payload 0400210174657374776f7264303102
+0xfce plen 15 rowid 3 end 0xfdf payload 0400210174657374776f726430320a
+0xfbd plen 15 rowid 4 end 0xfce payload 0400210174657374776f7264303319
+0xfac plen 15 rowid 5 end 0xfbd payload 0400210174657374776f726430342a
+0xf9b plen 15 rowid 6 end 0xfac payload 0400210174657374776f7264303532
+0xf8a plen 15 rowid 7 end 0xf9b payload 0400210174657374776f726430364b
+0xf79 plen 15 rowid 8 end 0xf8a payload 0400210174657374776f7264303763
+0xf61 plen 22 rowid 9 end 0xf79 payload 0400210774657374776f726430384058ff5c28f5c28f
+0xf49 plen 22 rowid 10 end 0xf61 payload 0400210774657374776f726430393fe0000000000000
+root@b5538c1cf93e:/app# cat > /app/final_recover.py << 'PYEOF'
+> import struct, json
+>
+> data = open('/app/trunc.db','rb').read()
+>
+> def rv(buf, pos):
+>     r = 0
+>     for i in range(9):
+>         b = buf[pos+i]
+>         if i == 8:
+>             return (r << 8) | b, pos+9
+>         r = (r << 7) | (b & 0x7f)
+>         if not (b & 0x80):
+>             return r, pos+i+1
+>     return r, pos+9
+>
+> ncells = int.from_bytes(data[3:5],'big')
+> ptrs = [int.from_bytes(data[8+2*i:10+2*i],'big') for i in range(ncells)]
+>
+> def parse_record(payload):
+>     hdr_len, hpos = rv(payload, 0)
+>     serial_types = []
+>     idx = hpos
+>     while idx < hdr_len:
+>         st, idx = rv(payload, idx)
+>         serial_types.append(st)
+>     cols = []
+>     dpos = hdr_len
+>     for st in serial_types:
+>         if st == 0:
+>             cols.append(None)
+>         elif st == 1:
+>             v = int.from_bytes(payload[dpos:dpos+1],'big',signed=True); dpos+=1
+>         elif st == 2:
+>             v = int.from_bytes(payload[dpos:dpos+2],'big',signed=True); dpos+=2
+>         elif st == 3:
+>             v = int.from_bytes(payload[dpos:dpos+3],'big',signed=True); dpos+=3
+>         elif st == 4:
+>             v = int.from_bytes(payload[dpos:dpos+4],'big',signed=True); dpos+=4
+>         elif st == 5:
+>             v = int.from_bytes(payload[dpos:dpos+6],'big',signed=True); dpos+=6
+>         elif st == 6:
+>             v = int.from_bytes(payload[dpos:dpos+8],'big',signed=True); dpos+=8
+>         elif st == 7:
+>             v = struct.unpack('>d', payload[dpos:dpos+8])[0]; dpos+=8
+>         elif st == 8:
+>             v = 0
+>         elif st == 9:
+>             v = 1
+>         elif st >= 12 and st % 2 == 0:
+>             n = (st-12)//2; v = payload[dpos:dpos+n].decode('utf-8','replace'); dpos+=n
+>         elif st >= 13 and st % 2 == 1:
+>             n = (st-13)//2; v = payload[dpos:dpos+n].decode('utf-8','replace'); dpos+=n
+>         else:
+>             v = None
+>         cols.append(v)
+>     return cols
+>
+> results = []
+> for p in ptrs:
+>     try:
+>         pl, pos = rv(data, p)
+>         rid, pos = rv(data, pos)
+>         end = pos + pl
+>         payload = data[pos:end]
+>         cols = parse_record(payload)
+>         word = next((c for c in cols if isinstance(c, str)), None)
+>         value = next((c for c in cols if isinstance(c, (int,float)) and not isinstance(c, bool)), None)
+>         if word is not None and value is not None:
+>             results.append((rid, word, value))
+>     except Exception as e:
+>         print('skip', hex(p), e)
+>
+> results.sort()
+> out = [{"word": w, "value": v} for _, w, v in results]
+> with open('/app/recover.json','w') as f:
+>     json.dump(out, f, indent=2)
+> print('recovered', len(out))
+> for r in out:
+>     print(r)
+> PYEOF
+root@b5538c1cf93e:/app# python3 /app/final_recover.py
+skip 0xff0 cannot access local variable 'v' where it is not associated with a value
+skip 0xfdf cannot access local variable 'v' where it is not associated with a value
+skip 0xfce cannot access local variable 'v' where it is not associated with a value
+skip 0xfbd cannot access local variable 'v' where it is not associated with a value
+skip 0xfac cannot access local variable 'v' where it is not associated with a value
+skip 0xf9b cannot access local variable 'v' where it is not associated with a value
+skip 0xf8a cannot access local variable 'v' where it is not associated with a value
+skip 0xf79 cannot access local variable 'v' where it is not associated with a value
+skip 0xf61 cannot access local variable 'v' where it is not associated with a value
+skip 0xf49 cannot access local variable 'v' where it is not associated with a value
+recovered 0
+root@b5538c1cf93e:/app# cat > /app/final_recover.py << 'PYEOF'
+> import struct, json
+>
+> data = open('/app/trunc.db','rb').read()
+>
+> def rv(buf, pos):
+>     r = 0
+>     for i in range(9):
+>         b = buf[pos+i]
+>         if i == 8:
+>             return (r << 8) | b, pos+9
+>         r = (r << 7) | (b & 0x7f)
+>         if not (b & 0x80):
+>             return r, pos+i+1
+>     return r, pos+9
+>
+> ncells = int.from_bytes(data[3:5],'big')
+> ptrs = [int.from_bytes(data[8+2*i:10+2*i],'big') for i in range(ncells)]
+>
+> def parse_record(payload):
+>     hdr_len, hpos = rv(payload, 0)
+>     serial_types = []
+>     idx = hpos
+>     while idx < hdr_len:
+>         st, idx = rv(payload, idx)
+>         serial_types.append(st)
+>     cols = []
+>     dpos = hdr_len
+>     for st in serial_types:
+>         if st == 0:
+>             cols.append(None)
+>             continue
+>         elif st == 1:
+>             v = int.from_bytes(payload[dpos:dpos+1],'big',signed=True); dpos+=1
+>         elif st == 2:
+>             v = int.from_bytes(payload[dpos:dpos+2],'big',signed=True); dpos+=2
+>         elif st == 3:
+>             v = int.from_bytes(payload[dpos:dpos+3],'big',signed=True); dpos+=3
+>         elif st == 4:
+>             v = int.from_bytes(payload[dpos:dpos+4],'big',signed=True); dpos+=4
+>         elif st == 5:
+>             v = int.from_bytes(payload[dpos:dpos+6],'big',signed=True); dpos+=6
+>         elif st == 6:
+>             v = int.from_bytes(payload[dpos:dpos+8],'big',signed=True); dpos+=8
+>         elif st == 7:
+>             v = struct.unpack('>d', payload[dpos:dpos+8])[0]; dpos+=8
+>         elif st == 8:
+>             v = 0
+>         elif st == 9:
+>             v = 1
+>         elif st >= 12 and st % 2 == 0:
+>             n = (st-12)//2; v = payload[dpos:dpos+n].decode('utf-8','replace'); dpos+=n
+>         elif st >= 13 and st % 2 == 1:
+>             n = (st-13)//2; v = payload[dpos:dpos+n].decode('utf-8','replace'); dpos+=n
+>         else:
+>             v = None
+>         cols.append(v)
+>     return cols
+>
+> results = []
+> for p in ptrs:
+>     pl, pos = rv(data, p)
+>     rid, pos = rv(data, pos)
+>     end = pos + pl
+>     payload = data[pos:end]
+>     cols = parse_record(payload)
+>     word = next((c for c in cols if isinstance(c, str)), None)
+>     value = next((c for c in cols if isinstance(c, (int,float)) and not isinstance(c, bool)), None)
+>     if word is not None and value is not None:
+>         results.append((rid, word, value))
+>
+> results.sort()
+> out = [{"word": w, "value": v} for _, w, v in results]
+> with open('/app/recover.json','w') as f:
+>     json.dump(out, f, indent=2)
+> print('recovered', len(out))
+> for r in out:
+>     print(r)
+> PYEOF
+root@b5538c1cf93e:/app# python3 /app/final_recover.py
+recovered 10
+{'word': 'testword00', 'value': 1}
+{'word': 'testword01', 'value': 2}
+{'word': 'testword02', 'value': 10}
+{'word': 'testword03', 'value': 25}
+{'word': 'testword04', 'value': 42}
+{'word': 'testword05', 'value': 50}
+{'word': 'testword06', 'value': 75}
+{'word': 'testword07', 'value': 99}
+{'word': 'testword08', 'value': 99.99}
+{'word': 'testword09', 'value': 0.5}
+root@b5538c1cf93e:/app# cat /app/recover.json
+[
+  {
+    "word": "testword00",
+    "value": 1
+  },
+  {
+    "word": "testword01",
+    "value": 2
+  },
+  {
+    "word": "testword02",
+    "value": 10
+  },
+  {
+    "word": "testword03",
+    "value": 25
+  },
+  {
+    "word": "testword04",
+    "value": 42
+  },
+  {
+    "word": "testword05",
+    "value": 50
+  },
+  {
+    "word": "testword06",
+    "value": 75
+  },
+  {
+    "word": "testword07",
+    "value": 99
+  },
+  {
+    "word": "testword08",
+    "value": 99.99
+  },
+  {
+    "word": "testword09",
+    "value": 0.5
+  }
+]root@b5538c1cf93e:/app# python3 -c "import json; d=json.load(open('/app/recover.json')); print('valid json,', len(d), 'records'); print(d[0]); print(d[-1])"
+valid json, 10 records
+{'word': 'testword00', 'value': 1}
+{'word': 'testword09', 'value': 0.5}
+root@b5538c1cf93e:/app#

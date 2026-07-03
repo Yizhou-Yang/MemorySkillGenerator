@@ -1,0 +1,22 @@
+{
+  "analysis": "Interesting twist: `getent hosts example.com` successfully resolved to IPv6 addresses (2606:4700:10::...), and /etc/hosts is fine. But curl reported a 'DNS resolution error'. The resolv.conf uses Docker's embedded DNS (127.0.0.11). The fact that getent resolves but curl fails suggests curl isn't using the system resolver as expected — possibly a proxy env var, a curlrc with bad dns-servers, an alias, or nsswitch config. I need to dig into curl's actual configuration and environment.",
+  "plan": "Investigate: (1) proxy environment variables, (2) ~/.curlrc or /etc/curlrc, (3) nsswitch.conf, (4) whether curl is aliased, and (5) re-run curl verbose capturing full output. This should reveal why curl's resolver path differs from getent.",
+  "commands": [
+    {
+      "keystrokes": "env | grep -i -E 'proxy|dns' \n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cat /etc/nsswitch.conf | grep hosts\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cat ~/.curlrc 2>/dev/null; echo '---'; cat /etc/curlrc 2>/dev/null; echo '---'\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "type curl; alias curl 2>/dev/null\n",
+      "duration": 0.1
+    }
+  ]
+}

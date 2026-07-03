@@ -1,0 +1,442 @@
+root@f969e203af66:/app# python3 --version; pip --version
+Python 3.13.1
+python3 -c "import datasets, transformers; print(datasets.__version__, transformers.__version__)"
+pip 24.3.1 from /usr/local/lib/python3.13/site-packages/pip (python 3.13)
+root@f969e203af66:/app# python3 -c "import datasets, transformers; print(datasets.__version__, transformers.__version__)"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import datasets, transformers; print(datasets.__version__, transformers.__version__)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'datasets'
+root@f969e203af66:/app# python3 -c "import transformers; print('transformers', transformers.__version__)" 2>&1 | head -3
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import transformers; print('transformers', transformers.__version__)
+root@f969e203af66:/app# python3 -c "import huggingface_hub; print('hf_hub', huggingface_hub.__version__)" 2>&1 | head -3
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import huggingface_hub; print('hf_hub', huggingface_hub.__version__)
+root@f969e203af66:/app# python3 -c "import torch; print('torch', torch.__version__)" 2>&1 | head -3
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import torch; print('torch', torch.__version__)
+root@f969e203af66:/app# curl -sL --max-time 20 https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/main/README.md | head -120
+bash: curl: command not found
+root@f969e203af66:/app# python3 -c "import urllib.request; print(urllib.request.urlopen('https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/mai
+n/README.md', timeout=20).read()[:200])" 2>&1 | head -5
+b'---\ndataset_info:\n- config_name: default\n  features:\n  - name: system\n    dtype: string\n  - name: conversations\n    list:\n    - name: from\n      dtyp
+e: string\n    - name: value\n      dtype: string\n  s'
+root@f969e203af66:/app# which wget; pip install --quiet --dry-run urllib3 2>&1 | head -5
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@f969e203af66:/app# python3 -c "import urllib.request; open('/tmp/readme.md','wb').write(urllib.request.urlopen('https://huggingface.co/datasets/open-though
+ts/OpenThoughts-114k/raw/main/README.md', timeout=30).read())"
+root@f969e203af66:/app# wc -l /tmp/readme.md; echo '-----'; cat /tmp/readme.md
+187 /tmp/readme.md
+-----
+---
+dataset_info:
+- config_name: default
+  features:
+  - name: system
+    dtype: string
+  - name: conversations
+    list:
+    - name: from
+      dtype: string
+    - name: value
+      dtype: string
+  splits:
+  - name: train
+    num_bytes: 2635015668
+    num_examples: 113957
+  download_size: 1078777193
+  dataset_size: 2635015668
+- config_name: metadata
+  features:
+  - name: problem
+    dtype: string
+  - name: deepseek_reasoning
+    dtype: string
+  - name: deepseek_solution
+    dtype: string
+  - name: ground_truth_solution
+    dtype: string
+  - name: domain
+    dtype: string
+  - name: source
+    dtype: string
+  - name: test_cases
+    dtype: string
+  - name: starter_code
+    dtype: string
+  splits:
+  - name: train
+    num_bytes: 5525214077.699433
+    num_examples: 113957
+  download_size: 2469729724
+  dataset_size: 5525214077.699433
+configs:
+- config_name: default
+  data_files:
+  - split: train
+    path: data/train-*
+- config_name: metadata
+  data_files:
+  - split: train
+    path: metadata/train-*
+tags:
+- curator
+- synthetic
+license: apache-2.0
+---
+
+<p align="center">
+    <img src="open_thoughts.png" width="50%">
+</p>
+
+> [!NOTE]
+> We have released a paper for OpenThoughts! See our paper [here](https://arxiv.org/abs/2506.04178).
+
+<a href="https://github.com/bespokelabsai/curator/">
+ <img src="https://huggingface.co/datasets/bespokelabs/Bespoke-Stratos-17k/resolve/main/made_with_curator.png" alt="Made with Curator" width=200px>
+</a>
+
+# Open-Thoughts-114k
+
+## Dataset Description
+
+- **Homepage:** https://www.open-thoughts.ai/
+- **Repository:** https://github.com/open-thoughts/open-thoughts
+- **Point of Contact:** [Open Thoughts Team](contact@open-thoughts.ai)
+
+Open synthetic reasoning dataset with 114k high-quality examples covering math, science, code, and puzzles!
+
+Inspect the content with rich formatting with [Curator Viewer](https://curator.bespokelabs.ai/datasets/1389c194254c4ead96daaf145505c3d1).
+
+### Available Subsets
+
+**default** subset containing ready-to-train data used to finetune the [OpenThinker-7B](https://huggingface.co/open-thoughts/OpenThinker-7B) and [OpenThinker-32
+B](https://huggingface.co/open-thoughts/OpenThinker-32B) models:
+```
+ds = load_dataset("open-thoughts/OpenThoughts-114k", split="train")
+```
+**metadata** subset containing extra columns used in dataset construction:
+- `problem`
+- `ground_truth_solution`
+- `deepseek_reasoning`
+- `deepseek_solution`
+- `domain`
+- `source`
+- `test_cases` (code only)
+- `starter_code`(code only)
+
+```
+ds = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train")
+```
+
+# OpenThinker Models
+
+The numbers reported in the tables below are evaluated with our open-source tool [Evalchemy](https://github.com/mlfoundations/Evalchemy).
+
+|                             | AIME24   | MATH500 | GPQA-Diamond | LCBv2 Easy  | LCBv2 Medium  | LCBv2 Hard  | LCBv2 All  |
+| --------------------------- | -------- | ------- | ------------ | ----------- | ------------- | ----------- | ---------- |
+| [OpenThinker-32B](https://huggingface.co/open-thoughts/OpenThinker-32B)             | 66       | 90.6    | 61.6         | 95.1        | 70.9          | 26.8
+      | 68.9       |
+| [OpenThinker-7B](https://huggingface.co/open-thoughts/OpenThinker-7B)              | 31.3     | 83.0    | 42.4         | 75.3        | 28.6          | 6.5
+     | 39.9       |
+| Bespoke-Stratos-7B          | 22.7     | 79.6    | 38.9         | 71.4        | 25.2          | 0.8         | 35.8       |
+| DeepSeek-R1-Distill-Qwen-7B | 60       | 88.2    | 46.9         | 79.7        | 45.1          | 14.6        | 50.1       |
+| gpt-4o-0513                 | 8.7      | 75.8    | 46.5         | 87.4        | 42.7          | 8.9         | 50.5       |
+| o1-mini                     | 64       | 85.6    | 60           | 92.8        | 74.7          | 39.8        | 72.8       |
+
+We are fully open-source. Our [model weights](https://huggingface.co/open-thoughts), [datasets](https://huggingface.co/open-thoughts), [data generation code](ht
+tps://github.com/open-thoughts/open-thoughts), [evaluation code](https://github.com/mlfoundations/Evalchemy), and [training code](https://github.com/hiyouga/LLa
+MA-Factory) are all publicly available.
+
+|  | Open Weights | Open Data | Open Code |
+|--|--------------|-----------| --------- |
+|OpenThinker-32B|✅|[✅](https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k)|[✅](https://github.com/open-thoughts/open-thoughts) |
+|OpenThinker-7B|✅|[✅](https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k)|[✅](https://github.com/open-thoughts/open-thoughts) |
+|Bespoke-Stratos-7B|✅|[✅](https://huggingface.co/datasets/bespokelabs/Bespoke-Stratos-17k)|[✅](https://github.com/bespokelabsai/curator/tree/main/examples/be
+spoke-stratos-data-generation)|
+|DeepSeek-R1-Distill models|✅|❌|❌|
+|OpenAI/Gemini|❌|❌|❌|❌|
+
+We are actively working towards improving the dataset, so please stay tuned!
+
+# Data Curation Recipe
+
+Code
+- [BAAI/TACO](https://huggingface.co/datasets/BAAI/TACO)
+- [codeparrot/apps](https://huggingface.co/datasets/codeparrot/apps)
+- [deepmind/code_contests](https://huggingface.co/datasets/deepmind/code_contests)
+- [MatrixStudio/Codeforces-Python-Submissions](https://huggingface.co/datasets/MatrixStudio/Codeforces-Python-Submissions)
+
+Math
+- [AI-MO/NuminaMath-CoT](https://huggingface.co/datasets/AI-MO/NuminaMath-CoT)
+
+Science
+- [camel-ai/chemistry](https://huggingface.co/datasets/camel-ai/chemistry)
+- [camel-ai/biology](https://huggingface.co/datasets/camel-ai/biology)
+- [camel-ai/physics](https://huggingface.co/datasets/camel-ai/physics)
+
+Puzzle
+- [INK-USC/riddle_sense](https://huggingface.co/datasets/INK-USC/riddle_sense)
+
+Using a curated mix of the datasets above, we generate reasoning traces from DeepSeek-R1 and verify correctness to construct the final dataset.
+
+![diagram](diagram.png)
+
+The full code for the data generation pipeline is publicly available [in our github repo](https://github.com/open-thoughts/open-thoughts).
+
+
+# Links
+- 📝 [OpenThoughts Paper](https://arxiv.org/abs/2506.04178)
+- 📊 [OpenThinker-32B Blog Post](https://www.open-thoughts.ai/blog/scale)
+- 📊 [Measuing Reasoning with Evalchemy Blog Post](https://www.open-thoughts.ai/blog/measure)
+- 📊 [Open Thoughts Launch Blog Post](https://www.open-thoughts.ai/blog/launch)
+- 💻 [Open Thoughts GitHub Repository](https://github.com/open-thoughts/open-thoughts)
+- 🧠 [OpenThoughts-114k dataset](https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k) - this dataset.
+- 🤖 [OpenThinker-32B model](https://huggingface.co/open-thoughts/OpenThinker-32B)
+- 🤖 [OpenThinker-7B model](https://huggingface.co/open-thoughts/OpenThinker-7B)
+- 📊 [Bespoke-Stratos Blog Post](https://www.bespokelabs.ai/blog/bespoke-stratos-the-unreasonable-effectiveness-of-reasoning-distillation)
+- 🧠 [Bespoke-Stratos-17k dataset](https://huggingface.co/datasets/bespokelabs/Bespoke-Stratos-17k)
+- 🤖 [Bespoke-Stratos-32B model](https://huggingface.co/bespokelabs/Bespoke-Stratos-32B)
+- 🤖 [Bespoke-Stratos-7B model](https://huggingface.co/bespokelabs/Bespoke-Stratos-7B)
+- 💻 [Curator Viewer](https://curator.bespokelabs.ai/datasets/1389c194254c4ead96daaf145505c3d1)
+
+## Visualization
+Inspect the content with rich formatting with [Curator Viewer](https://curator.bespokelabs.ai/datasets/1389c194254c4ead96daaf145505c3d1)
+
+All 114k examples, clustered by semantic similarity, can be explored in [Nomic Atlas](https://atlas.nomic.ai/data/nomic/openthoughts-114k/map).
+
+<a href="https://atlas.nomic.ai/data/nomic/openthoughts-114k/map">
+  <img src="https://cdn-uploads.huggingface.co/production/uploads/630bfb6b86b8b9904c35f4d1/d7TjezV6R3OnIDlEVL1Rl.png" alt="Nomic Atlas Open-Thoughts-114k Map" w
+idth="35%"/>
+</a>
+
+# Citation
+```
+@misc{guha2025openthoughtsdatarecipesreasoning,
+  title={OpenThoughts: Data Recipes for Reasoning Models},
+  author={Etash Guha and Ryan Marten and Sedrick Keh and Negin Raoof and Georgios Smyrnis and Hritik Bansal and Marianna Nezhurina and Jean Mercat and Trung Vu
+and Zayne Sprague and Ashima Suvarna and Benjamin Feuer and Liangyu Chen and Zaid Khan and Eric Frankel and Sachin Grover and Caroline Choi and Niklas Muennigho
+ff and Shiye Su and Wanjia Zhao and John Yang and Shreyas Pimpalgaonkar and Kartik Sharma and Charlie Cheng-Jie Ji and Yichuan Deng and Sarah Pratt and Vivek Ra
+manujan and Jon Saad-Falcon and Jeffrey Li and Achal Dave and Alon Albalak and Kushal Arora and Blake Wulfe and Chinmay Hegde and Greg Durrett and Sewoong Oh an
+d Mohit Bansal and Saadia Gabriel and Aditya Grover and Kai-Wei Chang and Vaishaal Shankar and Aaron Gokaslan and Mike A. Merrill and Tatsunori Hashimoto and Ye
+jin Choi and Jenia Jitsev and Reinhard Heckel and Maheswaran Sathiamoorthy and Alexandros G. Dimakis and Ludwig Schmidt},
+  year={2025},
+  eprint={2506.04178},
+  archivePrefix={arXiv},
+  primaryClass={cs.LG},
+  url={https://arxiv.org/abs/2506.04178},
+}
+```
+root@f969e203af66:/app# pip install pyarrow tokenizers 2>&1 | tail -8
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 25.2 MB/s eta 0:00:00
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Installing collected packages: typing-extensions, tqdm, shellingham, pyyaml, pygments, pyarrow, packaging, mdurl, idna, hf-xet, h11, fsspec, filelock, click, ce
+rtifi, annotated-doc, markdown-it-py, httpcore, anyio, rich, httpx, typer, huggingface-hub, tokenizers
+Successfully installed annotated-doc-0.0.4 anyio-4.14.1 certifi-2026.6.17 click-8.4.2 filelock-3.29.4 fsspec-2026.6.0 h11-0.16.0 hf-xet-1.5.1 httpcore-1.0.9 htt
+px-0.28.1 huggingface-hub-1.21.0 idna-3.18 markdown-it-py-4.2.0 mdurl-0.1.2 packaging-26.2 pyarrow-24.0.0 pygments-2.20.0 pyyaml-6.0.3 rich-15.0.0 shellingham-1
+.5.4 tokenizers-0.23.1 tqdm-4.68.3 typer-0.25.1 typing-extensions-4.16.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@f969e203af66:/app# python3 -c "import urllib.request,json; d=json.load(urllib.request.urlopen('https://datasets-server.huggingface.co/parquet?dataset=open-
+thoughts/OpenThoughts-114k', timeout=60)); [print(f['config'], f['split'], f['url'], f.get('size',0)) for f in d['parquet_files'] if f['config']=='metadata']"
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet 95768353
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0001.parquet 95136352
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0002.parquet 96960337
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0003.parquet 96200746
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0004.parquet 96517902
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0005.parquet 96927089
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0006.parquet 97282062
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0007.parquet 70725345
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0008.parquet 90934213
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0009.parquet 370488734
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0010.parquet 975735462
+metadata train https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0011.parquet 287053647
+root@f969e203af66:/app# df -h /tmp /app; mkdir -p /tmp/ot
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  956G     0 100% /
+fuse-overlayfs  984G  956G     0 100% /
+root@f969e203af66:/app# python3 -c "import urllib.request; open('/tmp/ot/tokenizer.json','wb').write(urllib.request.urlopen('https://huggingface.co/Qwen/Qwen2.5
+-1.5B-Instruct/resolve/main/tokenizer.json', timeout=60).read()); print('downloaded tokenizer')"
+downloaded tokenizer
+root@f969e203af66:/app# python3 -c "import urllib.request; open('/tmp/ot/0000.parquet','wb').write(urllib.request.urlopen('https://huggingface.co/datasets/open-
+thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet', timeout=120).read()); print('downloaded 0000')"
+downloaded 0000
+root@f969e203af66:/app# python3 -c "import pyarrow.parquet as pq; t=pq.read_table('/tmp/ot/0000.parquet'); print(t.schema); print('---'); d=t.to_pydict(); print
+('domains sample:', d['domain'][:10]); print('n=',len(d['domain']))"
+python3 -c "import pyarrow.parquet as pq; t=pq.read_table('/tmp/ot/0000.parquet'); d=t.to_pydict(); idx=[i for i,dom in enumerate(d['domain']) if dom=='science'
+]; print('science idx in file0:', idx[:10], 'count', len(idx)); i=idx[0]; print('REASONING len', len(d['deepseek_reasoning'][i]) if d['deepseek_reasoning'][i] e
+lse 0); print('SOLUTION len', len(d['deepseek_solution'][i]) if d['deepseek_solution'][i] else 0); print(repr(d['deepseek_reasoning'][i][:300]))"
+problem: string
+deepseek_reasoning: string
+deepseek_solution: string
+ground_truth_solution: string
+domain: string
+source: string
+test_cases: string
+starter_code: string
+-- schema metadata --
+huggingface: '{"info": {"features": {"problem": {"dtype": "string", "_typ' + 406
+---
+domains sample: ['math', 'math', 'math', 'math', 'math', 'math', 'math', 'math', 'math', 'math']
+n= 9497
+root@f969e203af66:/app# python3 -c "import pyarrow.parquet as pq; t=pq.read_table('/tmp/ot/0000.parquet'); d=t.to_pydict(); idx=[i for i,dom in enumerate(d['dom
+ain']) if dom=='science']; print('science idx in file0:', idx[:10], 'count', len(idx)); i=idx[0]; print('REASONING len', len(d['deepseek_reasoning'][i]) if d['d
+eepseek_reasoning'][i] else 0); print('SOLUTION len', len(d['deepseek_solution'][i]) if d['deepseek_solution'][i] else 0); print(repr(d['deepseek_reasoning'][i]
+[:300]))"
+science idx in file0: [] count 0
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import pyarrow.parquet as pq; t=pq.read_table('/tmp/ot/0000.parquet'); d=t.to_pydict(); idx=[i for i,dom in enumerate(d['domain']) if dom=='science']; print
+('science idx in file0:', idx[:10], 'count', len(idx)); i=idx[0]; print('REASONING len', len(d['deepseek_reasoning'][i]) if d['deepseek_reasoning'][i] else 0);
+print('SOLUTION len', len(d['deepseek_solution'][i]) if d['deepseek_solution'][i] else 0); print(repr(d['deepseek_reasoning'][i][:300]))
+
+                                                          ~~~^^^
+IndexError: list index out of range
+root@f969e203af66:/app# python3 -c "from tokenizers import Tokenizer; t=Tokenizer.from_file('/tmp/ot/tokenizer.json'); e=t.encode('Hello world, this is a test.'
+); print('ids',e.ids); print('n',len(e.ids))"
+ids [9707, 1879, 11, 419, 374, 264, 1273, 13]
+n 8
+cat > /tmp/ot/run.py << 'EOF'
+import urllib.request, os
+import pyarrow.parquet as pq
+from tokenizers import Tokenizer
+
+tok = Tokenizer.from_file('/tmp/ot/tokenizer.json')
+
+urls = [
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0001.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0002.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0003.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0004.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0005.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0006.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0007.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0008.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0009.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0010.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0011.parquet",
+]
+
+total = 0
+science_rows = 0
+for url in urls:
+    fn = '/tmp/ot/' + url.rsplit('/',1)[-1]
+    print('downloading', fn, flush=True)
+    req = urllib.request.Request(url, headers={'User-Agent':'curl/8'})
+    with urllib.request.urlopen(req, timeout=180) as r, open(fn,'wb') as f:
+        while True:
+            chunk = r.read(1<<20)
+            if not chunk: break
+            f.write(chunk)
+    t = pq.read_table(fn)
+    d = t.to_pydict()
+    domain = d['domain']
+    reason = d['deepseek_reasoning']
+    sol = d['deepseek_solution']
+    n = len(domain)
+    texts = []
+    for i in range(n):
+        if (domain[i] or '').strip() == 'science':
+            texts.append((reason[i] or '') + (sol[i] or ''))
+    science_rows += len(texts)
+    for j in range(0, len(texts), 500):
+        encs = tok.encode_batch(texts[j:j+500])
+        for e in encs:
+            total += len(e.ids)
+    del texts
+    os.remove(fn)
+    print('running total', total, 'science_rows', science_rows, flush=True)
+print('FINAL', total)
+with open('/app/answer.txt','w') as f:
+    f.write(str(total))
+EOF
+echo written
+root@f969e203af66:/app# cat > /tmp/ot/run.py << 'EOF'
+> import urllib.request, os
+> import pyarrow.parquet as pq
+> from tokenizers import Tokenizer
+>
+> tok = Tokenizer.from_file('/tmp/ot/tokenizer.json')
+>
+> urls = [
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0001.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0002.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0003.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0004.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0005.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0006.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0007.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0008.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0009.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0010.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0011.parquet",
+> ]
+>
+> total = 0
+> science_rows = 0
+> for url in urls:
+>     fn = '/tmp/ot/' + url.rsplit('/',1)[-1]
+>     print('downloading', fn, flush=True)
+>     req = urllib.request.Request(url, headers={'User-Agent':'curl/8'})
+>     with urllib.request.urlopen(req, timeout=180) as r, open(fn,'wb') as f:
+>         while True:
+>             chunk = r.read(1<<20)
+>             if not chunk: break
+>             f.write(chunk)
+>     t = pq.read_table(fn)
+>     d = t.to_pydict()
+>     domain = d['domain']
+>     reason = d['deepseek_reasoning']
+>     sol = d['deepseek_solution']
+>     n = len(domain)
+>     texts = []
+>     for i in range(n):
+>         if (domain[i] or '').strip() == 'science':
+>             texts.append((reason[i] or '') + (sol[i] or ''))
+>     science_rows += len(texts)
+>     for j in range(0, len(texts), 500):
+>         encs = tok.encode_batch(texts[j:j+500])
+>         for e in encs:
+>             total += len(e.ids)
+>     del texts
+>     os.remove(fn)
+>     print('running total', total, 'science_rows', science_rows, flush=True)
+> print('FINAL', total)
+> with open('/app/answer.txt','w') as f:
+>     f.write(str(total))
+> EOF
+root@f969e203af66:/app# echo written
+written
+root@f969e203af66:/app# cd /tmp/ot && nohup python3 run.py > log.txt 2>&1 &
+[1] 528
+root@f969e203af66:/app# sleep 20; cat log.txt
+cat: log.txt: No such file or directory
+root@f969e203af66:/app# jobs; ls -la /tmp/ot/log.txt; cat /tmp/ot/log.txt
+[1]+  Running                 cd /tmp/ot && nohup python3 run.py > log.txt 2>&1 &
+-rw-r--r-- 1 root root 119 Jul  2 16:38 /tmp/ot/log.txt
+nohup: ignoring input
+downloading /tmp/ot/0000.parquet
+running total 0 science_rows 0
+downloading /tmp/ot/0001.parquet
+root@f969e203af66:/app# sleep 45; cat /tmp/ot/log.txt
+nohup: ignoring input
+downloading /tmp/ot/0000.parquet
+running total 0 science_rows 0
+downloading /tmp/ot/0001.parquet
+running total 0 science_rows 0
+downloading /tmp/ot/0002.parquet
+root@f969e203af66:/app# sleep 50; cat /tmp/ot/log.txt
+

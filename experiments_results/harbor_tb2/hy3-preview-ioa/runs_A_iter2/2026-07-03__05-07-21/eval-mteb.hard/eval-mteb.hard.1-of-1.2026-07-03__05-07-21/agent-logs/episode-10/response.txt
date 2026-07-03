@@ -1,0 +1,10 @@
+{
+  "analysis": "Confirmed: setting `transformers.AutoModelForVision2Seq = object` BEFORE importing mteb makes `from transformers import AutoModelForVision2Seq` succeed. My earlier combined test likely had a subtle issue with the `hasattr` guard. I'll use this shim, then verify the full mteb import works and that STS12 is available, then pick a strong model.",
+  "plan": "1) Verify mteb imports successfully when I unconditionally set the attribute. 2) Confirm STS12 task exists in mteb and check available models. 3) Then choose a model that scores cosine_spearman > 0.7 on STS12. I'll start by confirming the mteb import and listing STS12.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'PY'\nimport transformers\ntransformers.AutoModelForVision2Seq = object\nimport mteb\nprint('mteb OK', mteb.__version__)\ntry:\n    tasks = mteb.get_tasks(task_name='STS12')\n    print('STS12 found:', [t.metadata.name for t in tasks])\nexcept Exception as e:\n    print('err', e)\nPY\n",
+      "duration": 10.0
+    }
+  ]
+}

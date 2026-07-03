@@ -1,0 +1,14 @@
+{
+  "analysis": "Tools available: qemu-system-x86_64, expect, nc, python3, qemu-img. No sshpass, no socat, no mkisofs/genisoimage, no 7z. Mounting the ISO failed (container lacks privileges), so I can't mount to inspect. I need to decide: (a) boot the ISO directly and hope it provides a serial console, or (b) extract vmlinuz+initramfs and boot with explicit console=ttyS0. I should check KVM availability and internet (for apk/pycdlib), then do a quick empirical boot test over a TCP serial server to see if a login prompt appears.",
+  "plan": "1) Check /dev/kvm and qemu version. 2) Test internet connectivity (needed for any apk install / pip). 3) Launch qemu with a TCP serial server (blocking on connect) and connect via a small python script to capture boot output for ~25s, sending a newline to elicit a login prompt. This tells me whether direct serial boot yields a root shell. Based on that I'll choose the extraction-or-direct path.",
+  "commands": [
+    {
+      "keystrokes": "ls -l /dev/kvm 2>&1; echo '---'; qemu-system-x86_64 --version 2>&1 | head -1\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 -c \"import socket; s=socket.socket(); s.settimeout(5); print('net_connect=',s.connect_ex(('dl-cdn.alpinelinux.org',80)))\" 2>&1\n",
+      "duration": 6.0
+    }
+  ]
+}

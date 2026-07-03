@@ -1,0 +1,69 @@
+New Terminal Output:
+
+root@6699f51e7751:/app# SUBJ=$(openssl x509 -in /app/ssl/server.crt -noout -subject | sed 's/^subject=//'); NB=$(openssl x509 -in /app/ssl/server.crt -noout -st
+artdate | cut -d= -f2); NA=$(openssl x509 -in /app/ssl/server.crt -noout -enddate | cut -d= -f2); FP=$(openssl x509 -in /app/ssl/server.crt -noout -fingerprint
+-sha256 | cut -d= -f2); NBD=$(date -u -d "$NB" +%Y-%m-%d); NAD=$(date -u -d "$NA" +%Y-%m-%d); printf 'Subject: %s\nNot Before: %s (%s)\nNot After: %s (%s)\nSHA-
+256 Fingerprint: %s\n' "$SUBJ" "$NB" "$NBD" "$NA" "$NAD" "$FP" > /app/ssl/verification.txt
+root@6699f51e7751:/app# cat > /app/check_cert.py << 'EOF'
+> #!/usr/bin/env python3
+> import ssl
+> import subprocess
+> import sys
+>
+> CERT_PATH = "/app/ssl/server.crt"
+>
+>
+> def main():
+>     # Verify the certificate file exists and can be loaded
+>     try:
+>         with open(CERT_PATH, "rb") as f:
+>             cert_data = f.read()
+>     except FileNotFoundError:
+>         print(f"Error: certificate file not found at {CERT_PATH}")
+>         sys.exit(1)
+>
+>     # Use openssl to parse the certificate (loads/validates it)
+>     result = subprocess.run(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout",
+>          "-subject", "-enddate"],
+>         capture_output=True, text=True,
+>     )
+>     if result.returncode != 0:
+>         print("Error: failed to load certificate")
+>         print(result.stderr)
+>         sys.exit(1)
+>
+>     subject = ""
+>     enddate = ""
+>     for line in result.stdout.splitlines():
+>         if line.startswith("subject="):
+>             subject = line[len("subject="):].strip()
+>         elif line.startswith("notAfter="):
+>             enddate = line[len("notAfter="):].strip()
+>
+>     # Extract Common Name from the subject
+>     common_name = ""
+>     for part in subject.split(","):
+>         part = part.strip()
+>         if part.startswith("CN ="):
+>             common_name = part.split("=", 1)[1].strip()
+>         elif part.startswith("CN="):
+>             common_name = part.split("=", 1)[1].strip()
+>
+>     # Convert expiration to YYYY-MM-DD
+>     exp_result = subprocess.run(
+>         ["date", "-u", "-d", enddate, "+%Y-%m-%d"],
+>         capture_output=True, text=True,
+>     )
+>     expiration = exp_result.stdout.strip() if exp_result.returncode == 0 else enddate
+>
+>     print(f"Common Name: {common_name}")
+>     print(f"Expiration Date: {expiration}")
+>     print("Certificate verification successful")
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@6699f51e7751:/app# python3 /app/check_cert.py
+

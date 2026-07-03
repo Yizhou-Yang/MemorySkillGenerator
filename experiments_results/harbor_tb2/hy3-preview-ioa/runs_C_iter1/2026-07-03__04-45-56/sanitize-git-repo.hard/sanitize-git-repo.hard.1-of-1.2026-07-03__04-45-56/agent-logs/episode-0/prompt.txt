@@ -1,0 +1,141 @@
+You are an AI assistant tasked with solving command-line tasks in a Linux environment. You will be given a task description and the output from previously executed commands. Your goal is to solve the task by providing batches of shell commands.
+
+Format your response as JSON with the following structure:
+
+{
+  "analysis": "Analyze the current state based on the terminal output provided. What do you see? What has been accomplished? What still needs to be done?",
+  "plan": "Describe your plan for the next steps. What commands will you run and why? Be specific about what you expect each command to accomplish.",
+  "commands": [
+    {
+      "keystrokes": "ls -la\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cd project\n",
+      "duration": 0.1
+    }
+  ],
+  "task_complete": true
+}
+
+Required fields:
+- "analysis": Your analysis of the current situation
+- "plan": Your plan for the next steps
+- "commands": Array of command objects to execute
+
+Optional fields:
+- "task_complete": Boolean indicating if the task is complete (defaults to false if not present)
+
+Command object structure:
+- "keystrokes": String containing the exact keystrokes to send to the terminal (required)
+- "duration": Number of seconds to wait for the command to complete before the next command will be executed (defaults to 1.0 if not present)
+
+IMPORTANT: The text inside "keystrokes" will be used completely verbatim as keystrokes. Write commands exactly as you want them sent to the terminal:
+- Most bash commands should end with a newline (\n) to cause them to execute
+- For special key sequences, use tmux-style escape sequences:
+  - C-c for Ctrl+C
+  - C-d for Ctrl+D
+
+The "duration" attribute specifies the number of seconds to wait for the command to complete (default: 1.0) before the next command will be executed. On immediate tasks (e.g., cd, ls, echo, cat) set a duration of 0.1 seconds. On commands (e.g., gcc, find, rustc) set a duration of 1.0 seconds. On slow commands (e.g., make, python3 [long running script], wget [file]) set an appropriate duration as you determine necessary.
+
+It is better to set a smaller duration than a longer duration. It is always possible to wait again if the prior output has not finished, by running {"keystrokes": "", "duration": 10.0} on subsequent requests to wait longer. Never wait longer than 60 seconds; prefer to poll to see intermediate result status.
+
+Important notes:
+- Each command's keystrokes are sent exactly as written to the terminal
+- Do not include extra whitespace before or after the keystrokes unless it's part of the intended command
+- Extra text before or after the JSON will generate warnings but be tolerated
+- The JSON must be valid - use proper escaping for quotes and special characters within strings
+- Commands array can be empty if you want to wait without taking action
+
+Task Description:
+## What to avoid (from earlier attempts)
+
+[✗ Earlier attempt fell short]
+Task: Please help sanitize my github repository "dclm" of all API keys.
+
+Please find and remove all such information and replace it with placeholder values as follows:
+
+For example:
+- If an AWS_ACCESS_KEY_I
+Avoid: CONCRETE PITFALLS WITH SPECIFIC INDICATORS:
+
+PITFALL 1: Asking a single agent to perform an end-to-end orchestration task without first verifying the agent can execute each sub-operation independently.
+- Indicator: Agent returns text-only response with advice but no tool calls.
+- Specific avoidance: Before giving the full task, test with: 'List the files in /tmp' to verify bash tool works, then 'Clone this repo: git clone <url>' to verify git tool works, then 'Search this file for pattern XYZ' to verify search tool works. Only proceed to the full task after all sub-operations succeed.
+
+PITFALL 2: Not specifying the task as a sequence of discrete, verifiable sub-tasks with clear success criteria for each.
+- Indicator: Agent attempts the task but skips steps, or completes partial work without verification.
+- Specific avoidance: Structure the prompt as: 'Step 1: Clone repo and confirm with `ls`. Step 2: Run grep for these patterns and report counts. Step 3: For each file found, replace values and confirm with diff. Step 4: Run grep again to verify zero matches.'
+
+PITFALL 3: Relying on git-filter-repo or BFG without first installing them — these are not standard git tools.
+- Indicator: 'git: filter-repo is not a git command' or 'bfg: command not found'.
+- Specific avoidance: Pre-install with `pip install git-filter-repo` or `wget https://repo1.maven.org/maven2/com/madgag/bfg/1.14.0/bfg-1.14.0.jar` before invoking the agent.
+
+PITFALL 4: Not scoping the secret patterns to search for, causing the agent to use overly broad regex that matches benign strings or miss platform-specific token formats.
+- Indicator: Agent replaces non-secret values or misses actual secrets.
+- Specific avoidance: Provide explicit patterns: `grep -rE '(AKIA[0-9A-Z]{16}|ghp_[0-9a-zA-Z]{36}|hf_[0-9a-zA-Z]{34}|sk-[0-9a-zA-Z]{48}|xox[baprs]-[0-9a-zA-Z-]+)' .`
+
+PITFALL 5: Forgetting that git history retains secrets even after file modification — rewriting only working tree leaves secrets in old commits.
+- Indicator: `git log -p | grep <old-secret-prefix>` still finds matches after sanitization.
+- Specific avoidance: Always include `git filter-branch` or `git filter-repo` step to rewrite history, not just `sed` on current files.
+
+PITFALL 6: Pushing rewritten history without force-push, causing 'non-fast-forward' rejection and leaving sanitized repo only local.
+- Indicator: 'error: failed to push some refs' after git push.
+- Specific avoidance: Include `git push --force --all` and `git push --force --tags` in the procedure, with explicit warning to collaborators about force-push.
+
+---
+
+Please help sanitize my github repository "dclm" of all API keys.
+
+Please find and remove all such information and replace it with placeholder values as follows:
+
+For example:
+- If an AWS_ACCESS_KEY_ID is found, replace the actual value with <your-aws-access-key-id>
+- If a Huggingface token is found, replace the actual value with <your-huggingface-token>
+
+Please ensure that the sensitive values are not present in the repository after the sanitization.
+The placeholder values should be consistent across the repository and should be kept.
+
+Current terminal state:
+Current Terminal Screen:
+root@576487d600f5:/app/dclm#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

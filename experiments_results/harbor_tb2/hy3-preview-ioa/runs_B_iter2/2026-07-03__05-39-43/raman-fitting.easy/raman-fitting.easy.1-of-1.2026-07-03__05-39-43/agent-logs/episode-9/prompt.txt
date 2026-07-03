@@ -1,0 +1,62 @@
+New Terminal Output:
+
+root@1bebe10bbd55:/app# cat > /app/fit3.py << 'EOF'
+rgmax(y2s)
+p02 = [x2[i2], 15, y2s[i2]-np.median(y2s), np.median(y2s)]
+print('p02', p02)
+p2,_ = curve_fit(lor, x2, y2s, p0=p02, maxfev=2000000,
+                 bounds=([2650,0.1,0,0],[2980,200,1e5,1e5]))
+
+print('G : x0=%.3f gamma=%.3f amp=%.3f off=%.3f  R2sm=%.4f R2raw=%.4f' % (pG[0],pG[1],pG[2],pG[3], r2(xG,yGs,pG), r2(xG,yGr,pG)))
+print('2D: x0=%.3f gamma=%.3f amp=%.3f off=%.3f  R2sm=%.4f R2raw=%.4f' % (p2[0],p2[1],p2[2],p2[3], r2(x2,y2s,p2), r2(x2,y2r,p2)))
+EOF
+python3 /app/fit3.py
+> import numpy as np
+> from scipy.optimize import curve_fit
+>
+> d = np.loadtxt('/app/graphene.dat', delimiter=None, dtype=str)
+> x = np.array([float(s.replace(',', '.')) for s in d[:,0]])
+> y = np.array([float(s.replace(',', '.')) for s in d[:,1]])
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+>
+> def lor(x, x0, gamma, amp, off):
+>     return off + amp * gamma**2 / ((x - x0)**2 + gamma**2)
+>
+> def r2(xd, yd, p):
+>     pred = lor(xd, *p)
+>     return 1 - np.sum((yd-pred)**2)/np.sum((yd-yd.mean())**2)
+>
+> def smooth(y, w):
+>     k = np.ones(w)/w
+>     return np.convolve(y, k, mode='same')
+>
+> ys = smooth(y, 21)
+>
+> # G: window around 1654
+> mG = (x>=1630)&(x<=1690)
+> xG, yGs, yGr = x[mG], ys[mG], y[mG]
+> iG = np.argmax(yGs)
+> p0G = [xG[iG], 7, yGs[iG]-np.median(yGs), np.median(yGs)]
+> print('p0G', p0G)
+> pG,_ = curve_fit(lor, xG, yGs, p0=p0G, maxfev=2000000,
+>                  bounds=([1600,0.1,0,0],[1700,100,1e5,1e5]))
+>
+> # 2D: window 2650-2980, peak ~2700-2900
+> m2 = (x>=2650)&(x<=2980)
+> x2, y2s, y2r = x[m2], ys[m2], y[m2]
+> i2 = np.argmax(y2s)
+> p02 = [x2[i2], 15, y2s[i2]-np.median(y2s), np.median(y2s)]
+> print('p02', p02)
+> p2,_ = curve_fit(lor, x2, y2s, p0=p02, maxfev=2000000,
+>                  bounds=([2650,0.1,0,0],[2980,200,1e5,1e5]))
+>
+> print('G : x0=%.3f gamma=%.3f amp=%.3f off=%.3f  R2sm=%.4f R2raw=%.4f' % (pG[0],pG[1],pG[2],pG[3], r2(xG,yGs,pG), r2(xG,yGr,pG)))
+> print('2D: x0=%.3f gamma=%.3f amp=%.3f off=%.3f  R2sm=%.4f R2raw=%.4f' % (p2[0],p2[1],p2[2],p2[3], r2(x2,y2s,p2), r2(x2,y2r,p2)))
+> EOF
+root@1bebe10bbd55:/app# python3 /app/fit3.py
+p0G [np.float64(1653.704408), 7, np.float64(372.1280783095244), np.float64(5788.418360642857)]
+p02 [np.float64(2954.867283), 15, np.float64(103.38012023809512), np.float64(378.151922)]
+G : x0=1659.779 gamma=5.789 amp=605.680 off=5539.403  R2sm=0.1834 R2raw=0.1457
+2D: x0=2969.754 gamma=51.782 amp=92.853 off=360.471  R2sm=0.4894 R2raw=0.0548
+root@1bebe10bbd55:/app#

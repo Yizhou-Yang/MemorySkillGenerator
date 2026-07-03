@@ -1,0 +1,97 @@
+New Terminal Output:
+
+root@3d181e99fdaf:/app# cat > /app/image.c << 'EOF'
+> #include <stdio.h>
+> #include <stdlib.h>
+>
+> static long g_pos = 0;
+> static int next_int(const unsigned char *buf, long sz){
+>     while(g_pos < sz && (buf[g_pos] < '0' || buf[g_pos] > '9')) g_pos++;
+>     int v = 0;
+>     while(g_pos < sz){
+>         unsigned char c = buf[g_pos];
+>         if(c >= '0' && c <= '9'){ v = v*10 + (c-'0'); g_pos++; }
+>         else break;
+>     }
+>     return v;
+> }
+>
+> int main(void){
+>     FILE *f = fopen("high_res.ppm", "rb");
+>     if(!f){ fprintf(stderr, "open fail: high_res.ppm\n"); return 1; }
+>     fseek(f, 0, SEEK_END);
+>     long sz = ftell(f);
+>     fseek(f, 0, SEEK_SET);
+>     unsigned char *buf = (unsigned char*)malloc((size_t)sz);
+>     if(!buf){ fclose(f); return 1; }
+>     if(fread(buf, 1, (size_t)sz, f) != (size_t)sz){ fprintf(stderr, "read fail\n"); return 1; }
+>     fclose(f);
+>
+>     int magic = next_int(buf, sz);
+>     int W = next_int(buf, sz);
+>     int H = next_int(buf, sz);
+>     int maxv = next_int(buf, sz);
+>     (void)magic; (void)maxv;
+>
+>     int OW = 800, OH = 600;
+>     long long *sum = (long long*)calloc((long)OW*OH*3, sizeof(long long));
+>     int *cnt = (int*)calloc((long)OW*OH, sizeof(int));
+>     if(!sum || !cnt){ free(buf); return 1; }
+>
+>     long total = (long)W * H;
+>     for(long i = 0; i < total; i++){
+>         int r = next_int(buf, sz);
+>         int g = next_int(buf, sz);
+>         int b = next_int(buf, sz);
+>         int sx = (int)(i % W);
+>         int sy = (int)(i / W);
+>         int ox = (sx * OW) / W;
+>         int oy = (sy * OH) / H;
+>         long o = (long)oy * OW + ox;
+>         sum[o*3]   += r;
+>         sum[o*3+1] += g;
+>         sum[o*3+2] += b;
+>         cnt[o]++;
+>     }
+>     free(buf);
+>
+>     FILE *out = fopen("reconstructed.ppm", "wb");
+>     if(!out){ fprintf(stderr, "out fail\n"); return 1; }
+>     fprintf(out, "P6\n%d %d\n255\n", OW, OH);
+>     unsigned char *row = (unsigned char*)malloc((size_t)OW*3);
+>     for(int y = 0; y < OH; y++){
+>         for(int x = 0; x < OW; x++){
+>             long o = (long)y*OW + x;
+>             int c = cnt[o] > 0 ? cnt[o] : 1;
+>             row[x*3+0] = (unsigned char)(sum[o*3]/c);
+>             row[x*3+1] = (unsigned char)(sum[o*3+1]/c);
+>             row[x*3+2] = (unsigned char)(sum[o*3+2]/c);
+>         }
+>         fwrite(row, 1, (size_t)OW*3, out);
+>     }
+>     free(row);
+>     free(sum);
+>     free(cnt);
+>     fclose(out);
+>     return 0;
+> }
+> EOF
+root@3d181e99fdaf:/app# echo written
+written
+root@3d181e99fdaf:/app# cat > /tmp/check.py << 'EOF'
+> import numpy as np
+> from PIL import Image
+> a = np.array(Image.open('/app/image.ppm')).astype(np.float64)
+> b = np.array(Image.open('/app/reconstructed.ppm')).astype(np.float64)
+> l2 = np.sqrt(((a-b)**2).sum())
+> norm = np.sqrt((a**2).sum())
+> print('sim_L2 (1-||a-b||/||a||) =', 1 - l2/norm)
+> an = a.reshape(-1); bn = b.reshape(-1)
+> print('cosine =', an.dot(bn)/(np.linalg.norm(an)*np.linalg.norm(bn)))
+> print('mse =', ((a-b)**2).mean())
+> print('max abs diff =', np.abs(a-b).max())
+> EOF
+root@3d181e99fdaf:/app# echo written
+written
+root@3d181e99fdaf:/app# cd /app && gcc -o image image.c -lm && echo compiled
+

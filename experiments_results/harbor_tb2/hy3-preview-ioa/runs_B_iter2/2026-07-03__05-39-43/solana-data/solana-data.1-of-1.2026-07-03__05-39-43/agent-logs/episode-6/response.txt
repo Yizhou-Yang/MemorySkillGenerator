@@ -1,0 +1,10 @@
+{
+  "analysis": "Found a reachable Solana RPC: https://mainnet.helius-rpc.com returns 200 with getHealth 'ok' (mainnet-beta). The official Solana endpoints are blocked/SSL-broken in this sandbox. I'll build the server against this reachable endpoint using mainnet-beta. Now I must verify the actual methods I need (getSlot, getVersion, getClusterNodes, getBlock, getTransaction, getAccountInfo, getProgramAccounts) work through it.",
+  "plan": "Test a batch of JSON-RPC methods against helius to confirm which work and what their response shapes look like. This validates my server's data extraction logic before writing it.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'EOF'\nimport urllib.request, json\nURL='https://mainnet.helius-rpc.com'\ndef call(method, params=None):\n    data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode()\n    req=urllib.request.Request(URL, data=data, headers={'Content-Type':'application/json'})\n    r=urllib.request.urlopen(req, timeout=15)\n    return json.loads(r.read())\nfor m,p in [('getSlot',[]),('getVersion',[]),('getClusterNodes',[]),('getBlock',[313635500]),('getAccountInfo',['11111111111111111111111111111111',{'encoding':'jsonParsed'}])]:\n    try:\n        res=call(m,p)\n        print('===',m)\n        print(json.dumps(res, indent=1)[:500])\n    except Exception as e:\n        print(m,'ERR',repr(e)[:120])\nEOF\n",
+      "duration": 60.0
+    }
+  ]
+}

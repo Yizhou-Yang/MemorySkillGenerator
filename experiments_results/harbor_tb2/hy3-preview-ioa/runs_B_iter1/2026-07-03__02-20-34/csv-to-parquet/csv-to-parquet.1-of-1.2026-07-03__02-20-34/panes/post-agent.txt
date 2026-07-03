@@ -1,0 +1,108 @@
+root@2dec2c347e38:/app# ls -la /app && head -5 /app/data.csv
+total 12
+drwxr-xr-x  2 root root 4096 Jul  2 15:23 .
+drwxr-xr-x 19 root root 4096 Jul  2 19:19 ..
+-rw-r--r--  1 root root  101 Jul  2 13:59 data.csv
+name,age,city
+John,25,New York
+Alice,30,San Francisco
+Bob,35,Chicago
+Emma,28,Boston
+root@2dec2c347e38:/app# python3 -c "import pandas, pyarrow; print('pandas', pandas.__version__, 'pyarrow', pyarrow.__version__)"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'pandas'
+root@2dec2c347e38:/app# python3 -c "import pyarrow; print('pyarrow', pyarrow.__version__)"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'pyarrow'
+root@2dec2c347e38:/app# pip install pandas pyarrow 2>&1 | tail -5
+bash: pip: command not found
+root@2dec2c347e38:/app# which pip3 python3; python3 -m pip --version
+/usr/bin/python3
+/usr/bin/python3: No module named pip
+root@2dec2c347e38:/app# python3 -m ensurepip --upgrade 2>&1 | tail -5
+/usr/bin/python3: No module named ensurepip
+root@2dec2c347e38:/app# apt-get --version 2>&1 | head -2
+apt 2.7.14 (amd64)
+Supported modules:
+root@2dec2c347e38:/app# apt-get update 2>&1 | tail -5
+Get:7 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1336 kB]
+Get:8 http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages [1020 kB]
+Get:9 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1490 kB]
+Fetched 7699 kB in 7s (1130 kB/s)
+Reading package lists...
+root@2dec2c347e38:/app# apt-get install -y python3-pip 2>&1 | tail -8
+  dpkg gcc-14-base gpgv libc-bin libc6 libexpat1 libgcc-s1 liblzma5
+  libpython3-stdlib libpython3.12-minimal libpython3.12-stdlib libstdc++6
+  perl-base python3 python3-minimal python3-pkg-resources python3.12
+  python3.12-minimal
+18 upgraded, 118 newly installed, 0 to remove and 33 not upgraded.
+Need to get 118 MB of archives.
+After this operation, 385 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@2dec2c347e38:/app# df -h / /tmp /var 2>&1 | head
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  957G     0 100% /
+fuse-overlayfs  984G  957G     0 100% /
+fuse-overlayfs  984G  957G     0 100% /
+root@2dec2c347e38:/app# apt-get clean 2>&1; df -h / 2>&1 | tail -2
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  957G     0 100% /
+root@2dec2c347e38:/app# df -i / 2>&1 | tail -2; fallocate -l 1M /app/_t 2>&1; ls -la /app/_t 2>&1; rm -f /app/_t
+Filesystem       Inodes    IUsed    IFree IUse% Mounted on
+fuse-overlayfs 65536000 13212088 52323912   21% /
+-rw-r--r-- 1 root root 1048576 Jul  2 19:22 /app/_t
+root@2dec2c347e38:/app# which curl wget python3
+/usr/bin/curl
+/usr/bin/python3
+root@2dec2c347e38:/app# curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && python3 /tmp/get-pip.py 2>&1 | tail -5
+
+    See /usr/share/doc/python3.12/README.venv for more information.
+
+note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your
+ Python installation or OS, by passing --break-system-packages.
+hint: See PEP 668 for the detailed specification.
+root@2dec2c347e38:/app# python3 /tmp/get-pip.py --break-system-packages 2>&1 | tail -5
+Downloading pip-26.1.2-py3-none-any.whl (1.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 259.2 kB/s  0:00:06
+Installing collected packages: pip
+Successfully installed pip-26.1.2
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you a
+re doing and want to suppress this warning.
+root@2dec2c347e38:/app# pip install pyarrow --break-system-packages 2>&1 | tail -6
+  Downloading pyarrow-24.0.0-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (3.0 kB)
+Downloading pyarrow-24.0.0-cp312-cp312-manylinux_2_28_x86_64.whl (48.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.9/48.9 MB 2.2 MB/s  0:01:07
+Installing collected packages: pyarrow
+Successfully installed pyarrow-24.0.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you a
+re doing and want to suppress this warning.
+root@2dec2c347e38:/app# python3 -c "import pyarrow.csv as csv, pyarrow.parquet as pq; t = csv.read_csv('/app/data.csv'); pq.write_table(t, '/app/data.parquet');
+ print('rows:', t.num_rows)"
+rows: 5
+root@2dec2c347e38:/app# ls -la /app/data.parquet && python3 -c "import pyarrow.parquet as pq; print(pq.read_table('/app/data.parquet').to_pandas())"
+-rw-r--r-- 1 root root 1084 Jul  2 19:26 /app/data.parquet
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "pyarrow/array.pxi", line 1071, in pyarrow.lib._PandasConvertible.to_pandas
+  File "pyarrow/table.pxi", line 5146, in pyarrow.lib.Table._to_pandas
+  File "/usr/local/lib/python3.12/dist-packages/pyarrow/pandas_compat.py", line 813, in table_to_dataframe
+    index = _pandas_api.pd.RangeIndex(table.num_rows)
+            ^^^^^^^^^^^^^^
+  File "pyarrow/pandas-shim.pxi", line 142, in pyarrow.lib._PandasAPIShim.pd.__get__
+  File "pyarrow/pandas-shim.pxi", line 107, in pyarrow.lib._PandasAPIShim._check_import
+  File "pyarrow/pandas-shim.pxi", line 110, in pyarrow.lib._PandasAPIShim._check_import
+  File "pyarrow/pandas-shim.pxi", line 55, in pyarrow.lib._PandasAPIShim._import_pandas
+  File "pyarrow/pandas-shim.pxi", line 50, in pyarrow.lib._PandasAPIShim._import_pandas
+ModuleNotFoundError: No module named 'pandas'
+root@2dec2c347e38:/app# python3 -c "import pyarrow.parquet as pq; t = pq.read_table('/app/data.parquet'); print('schema:', t.schema); print('rows:', t.num_rows)
+; print(t.to_pydict())"
+schema: name: string
+age: int64
+city: string
+rows: 5
+{'name': ['John', 'Alice', 'Bob', 'Emma', 'David'], 'age': [25, 30, 35, 28, 33], 'city': ['New York', 'San Francisco', 'Chicago', 'Boston', 'Seattle ']}
+root@2dec2c347e38:/app#

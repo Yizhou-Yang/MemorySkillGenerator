@@ -1,0 +1,145 @@
+New Terminal Output:
+
+root@f2cbf281bdd3:/app# cat > /app/relay.py << 'PYEOF'
+> #!/usr/bin/env python3
+> import socket, select, time
+>
+> QEMU_SOCK = '/tmp/alp.sock'
+> HOST, PORT = '127.0.0.1', 6665
+>
+> def strip_iac(data):
+>     out = bytearray()
+>     i = 0
+>     n = len(data)
+>     while i < n:
+>         b = data[i]
+>         if b == 255:
+>             if i+1 >= n:
+>                 break
+>             cmd = data[i+1]
+>             if cmd == 255:
+>                 out.append(255); i += 2; continue
+>             if cmd in (251,252,253,254):
+>                 i += 3 if i+2 < n else 2
+>                 continue
+>             if cmd == 250:
+>                 j = i+2
+>                 while j < n and data[j] != 240:
+>                     j += 1
+>                 i = j+1 if j < n else n
+>                 continue
+>             i += 2
+>             continue
+>         out.append(b)
+>         i += 1
+>     return bytes(out)
+>
+> def serve_client(csock):
+>     qsock = None
+>     while True:
+>         try:
+>             qsock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+>             qsock.connect(QEMU_SOCK)
+>             break
+>         except OSError:
+>             time.sleep(0.2)
+>     try:
+>         qsock.sendall(bytes([13,10]))
+>     except OSError:
+>         pass
+>     poller = select.poll()
+>     poller.register(csock, select.POLLIN)
+>     poller.register(qsock, select.POLLIN)
+>     fds = {csock.fileno(): csock, qsock.fileno(): qsock}
+>     try:
+>         while True:
+>             for fd, ev in poller.poll(1000):
+>                 if ev & (select.POLLERR | select.POLLHUP | select.POLLNVAL):
+>                     return
+>                 src = fds[fd]
+>                 try:
+>                     data = src.recv(4096)
+>                 except OSError:
+>                     return
+>                 if not data:
+>                     return
+>                 if src is csock:
+>                     fwd = strip_iac(data)
+>                     if fwd:
+>                         try: qsock.sendall(fwd)
+>                         except OSError: return
+>                 else:
+>                     try: csock.sendall(data)
+>                     except OSError: return
+>     finally:
+>         try: csock.close()
+>         except OSError: pass
+>         try: qsock.close()
+>         except OSError: pass
+>
+> def main():
+>     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+>     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+>     s.bind((HOST, PORT))
+>     s.listen(5)
+>     while True:
+>         try:
+>             csock, _ = s.accept()
+>         except OSError:
+>             continue
+>         try:
+>             serve_client(csock)
+>         except Exception:
+>             pass
+>
+> if __name__ == '__main__':
+>     main()
+> PYEOF
+root@f2cbf281bdd3:/app# cat > /app/probe.py << 'PYEOF'
+> #!/usr/bin/env python3
+> import socket, sys, time
+>
+> HOST, PORT = '127.0.0.1', 6665
+> deadline = time.time() + 300
+> while time.time() < deadline:
+>     try:
+>         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+>         s.settimeout(12)
+>         s.connect((HOST, PORT))
+>         s.sendall(bytes([13,10]))
+>         buf = b''
+>         end = time.time() + 20
+>         while time.time() < end:
+>             try:
+>                 d = s.recv(4096)
+>             except socket.timeout:
+>                 break
+>             if not d:
+>                 break
+>             buf += d
+>             if b'login:' in buf.lower():
+>                 print('READY')
+>                 s.close()
+>                 sys.exit(0)
+>         s.close()
+>     except OSError:
+>         pass
+>     time.sleep(2)
+> print('TIMEOUT')
+> sys.exit(1)
+> PYEOF
+root@f2cbf281bdd3:/app# nohup qemu-system-x86_64 -machine accel=kvm:tcg -m 1024 -smp 2 -boot d -cdrom /app/alpine.iso -drive if=virtio,format=qcow2,file=/app/al
+pine-disk.qcow2 -net none -display none -serial unix:/tmp/alp.sock,server,nowait > /tmp/qemu.log 2>&1 &
+[1] 268
+root@f2cbf281bdd3:/app# nohup python3 /app/relay.py > /tmp/relay.log 2>&1 &
+[2] 279
+root@f2cbf281bdd3:/app# sleep 1; ls -l /tmp/alp.sock; echo '--- qemu.log ---'; tail -n 20 /tmp/qemu.log; echo '--- relay.log ---'; tail -n 5 /tmp/relay.log
+srwxr-xr-x 1 root root 0 Jul  2 16:25 /tmp/alp.sock
+--- qemu.log ---
+nohup: ignoring input
+Could not access KVM kernel module: No such file or directory
+qemu-system-x86_64: failed to initialize kvm: No such file or directory
+qemu-system-x86_64: falling back to tcg
+--- relay.log ---
+nohup: ignoring input
+root@f2cbf281bdd3:/app#

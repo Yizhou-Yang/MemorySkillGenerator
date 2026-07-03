@@ -1,0 +1,46 @@
+New Terminal Output:
+
+root@064410431fd1:/app/filesystem_spec# cat > /tmp/test_open_async3.py << 'EOF'
+> import asyncio
+> from fsspec.asyn import AsyncFileSystem
+> from fsspec.implementations.dirfs import DirFileSystem
+>
+> class FakeAsync(AsyncFileSystem):
+>     protocol = "fakeasync"
+>     async_impl = True
+>     def __init__(self, *a, **k):
+>         super().__init__(*a, **k)
+>         self.last_path = None
+>         self.last_mode = None
+>     async def open_async(self, path, mode="rb", **kwargs):
+>         self.last_path = path
+>         self.last_mode = mode
+>         return "OPENED"
+>
+> async def t():
+>     fs = FakeAsync(asynchronous=True)
+>     dirfs = DirFileSystem(path="/mydir", fs=fs)
+>     res = await dirfs.open_async("sub/hello", "wb")
+>     assert res == "OPENED"
+>     assert fs.last_path == fs.sep.join(["/mydir", "sub/hello"]), fs.last_path
+>     assert fs.last_mode == "wb"
+>     print("delegation OK, joined path =", fs.last_path)
+>
+> asyncio.run(t())
+> EOF
+root@064410431fd1:/app/filesystem_spec# python /tmp/test_open_async3.py
+Traceback (most recent call last):
+  File "/tmp/test_open_async3.py", line 26, in <module>
+    asyncio.run(t())
+  File "/usr/local/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/local/lib/python3.9/asyncio/base_events.py", line 647, in run_until_complete
+    return future.result()
+  File "/tmp/test_open_async3.py", line 19, in t
+    dirfs = DirFileSystem(path="/mydir", fs=fs)
+  File "/app/filesystem_spec/fsspec/spec.py", line 81, in __call__
+    obj = super().__call__(*args, **kwargs)
+  File "/app/filesystem_spec/fsspec/implementations/dirfs.py", line 47, in __init__
+    raise ValueError("both dirfs and fs should be in the same sync/async mode")
+ValueError: both dirfs and fs should be in the same sync/async mode
+root@064410431fd1:/app/filesystem_spec#

@@ -1,0 +1,372 @@
+root@d4ea575e1a7f:/app# ls -la
+total 96
+drwxr-xr-x  2 root root  4096 Jul  2 15:09 .
+drwxr-xr-x 19 root root  4096 Jul  2 22:48 ..
+-rw-r--r--  1 root root 88805 Jul  2 13:59 graphene.dat
+root@d4ea575e1a7f:/app# find / -name 'graphene*' 2>/dev/null
+/app/graphene.dat
+root@d4ea575e1a7f:/app# head -20 graphene.dat
+47183,554644    19261,547207
+46588,360019    19266,089699
+46008,191298    19077,996963
+45442,488736    19173,287322
+44890,718036    19501,518253
+44352,368927    19506,586203
+43826,959593    19752,431144
+43314,029137    19812,863021
+42813,138290    19678,348151
+42323,866373    19764,871128
+41845,813826    19360,099292
+41378,600916    19413,554878
+40921,863181    19626,191780
+40475,250679    19704,066336
+40038,430487    19495,727898
+39611,084116    19672,573559
+39192,908278    19538,763458
+38783,609488    19344,943112
+38382,908122    19510,307527
+37990,536178    19552,152695
+root@d4ea575e1a7f:/app# wc -l graphene.dat
+3565 graphene.dat
+root@d4ea575e1a7f:/app# python3 -c 'import numpy, scipy; print(numpy.__version__, scipy.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy, scipy; print(numpy.__version__, scipy.__version__)
+    ^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+root@d4ea575e1a7f:/app# tail -5 graphene.dat
+1649,768294     6062,725860
+1649,507095     6005,066261
+1649,246046     6009,427936
+1648,985151     5911,446799
+1648,724404     5950,923261
+root@d4ea575e1a7f:/app# pip install numpy scipy 2>&1 | tail -5
+Successfully installed numpy-2.5.0 scipy-1.18.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@d4ea575e1a7f:/app# cat > explore.py << 'EOF'
+> import numpy as np
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> print('x range', x.min(), x.max())
+> print('y range', y.min(), y.max())
+> # find local maxima
+> from scipy.signal import argrelextrema
+> mx=argrelextrema(y, np.greater, order=20)[0]
+> for i in mx:
+>     print('peak x=%.2f y=%.2f' % (x[i], y[i]))
+> EOF
+root@d4ea575e1a7f:/app# python3 explore.py
+x range 1648.724404 47183.554644
+y range 40.090842 79400.095085
+peak x=1660.07 y=6474.28
+peak x=1666.80 y=6228.42
+peak x=1673.36 y=6135.36
+peak x=1683.65 y=5942.17
+peak x=1695.60 y=5659.82
+peak x=1720.74 y=5231.98
+peak x=1727.16 y=5331.08
+peak x=1738.35 y=5016.03
+peak x=1754.97 y=4816.16
+peak x=1783.69 y=4503.99
+peak x=1806.13 y=4406.46
+peak x=1819.90 y=4063.23
+peak x=1831.40 y=3886.86
+peak x=1848.92 y=3705.37
+peak x=1873.01 y=3397.85
+peak x=1891.86 y=3255.73
+peak x=1900.68 y=3222.97
+peak x=1912.63 y=3005.04
+peak x=1944.06 y=2754.00
+peak x=1987.80 y=2497.86
+peak x=2000.09 y=2470.39
+peak x=2011.10 y=2308.27
+peak x=2036.31 y=2054.34
+peak x=2059.79 y=2098.51
+peak x=2090.33 y=1859.28
+peak x=2111.66 y=1670.36
+peak x=2137.28 y=1620.34
+peak x=2156.33 y=1498.63
+peak x=2176.53 y=1418.59
+peak x=2198.62 y=1321.23
+peak x=2214.61 y=1353.00
+peak x=2233.70 y=1269.60
+peak x=2302.19 y=1141.39
+peak x=2352.66 y=1107.15
+peak x=2392.00 y=867.61
+peak x=2434.12 y=842.59
+peak x=2454.62 y=844.71
+peak x=2489.55 y=738.38
+peak x=2539.65 y=660.94
+peak x=2577.01 y=611.17
+peak x=2629.96 y=596.55
+peak x=2654.20 y=579.80
+peak x=2716.33 y=601.85
+peak x=2746.44 y=599.67
+peak x=2796.49 y=579.34
+peak x=2858.49 y=655.15
+peak x=2892.96 y=728.89
+peak x=2950.44 y=708.94
+peak x=2990.94 y=661.90
+peak x=3025.02 y=678.27
+peak x=3084.66 y=1300.73
+peak x=3188.04 y=878.69
+peak x=3288.94 y=1090.27
+peak x=3389.83 y=1217.01
+peak x=3745.05 y=12920.88
+peak x=3896.66 y=2277.35
+peak x=4083.58 y=2873.81
+peak x=4297.09 y=2757.39
+peak x=4468.37 y=3033.07
+peak x=4603.41 y=3291.25
+peak x=6329.37 y=13777.74
+peak x=10289.94 y=18805.24
+peak x=19139.54 y=79400.10
+peak x=33244.97 y=21252.73
+root@d4ea575e1a7f:/app# cat > viz.py << 'EOF'
+> import numpy as np
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> N=70
+> idx=np.linspace(0,len(x)-1,N).astype(int)
+> for i in idx:
+>     print('%8.1f %8.1f' % (x[i], y[i]))
+> EOF
+root@d4ea575e1a7f:/app# python3 viz.py
+  1648.7   5950.9
+  1662.2   5827.5
+  1676.4   5751.2
+  1690.7   5649.2
+  1705.8   5167.7
+  1721.4   5051.0
+  1737.1   4899.7
+  1753.7   4490.8
+  1770.8   4467.1
+  1788.2   3953.2
+  1806.5   4123.4
+  1825.4   3627.1
+  1844.7   3292.6
+  1865.0   3322.7
+  1886.1   3228.2
+  1907.5   2599.7
+  1930.1   2609.4
+  1953.7   2389.3
+  1977.7   2085.5
+  2003.1   1955.8
+  2029.5   2031.4
+  2056.5   1734.6
+  2085.2   1574.9
+  2115.2   1348.0
+  2145.8   1397.7
+  2178.5    894.9
+  2211.9   1059.0
+  2247.6    987.0
+  2285.1    751.1
+  2323.6    718.0
+  2364.8    746.8
+  2408.1    321.7
+  2452.8    532.8
+  2500.9    386.8
+  2551.6    313.0
+  2604.2    458.7
+  2660.9    546.3
+  2721.1    345.6
+  2783.8    310.9
+  2851.7    557.7
+  2924.2    411.6
+  3000.1    577.4
+  3083.0   1066.1
+  3172.0    495.5
+  3265.8    788.7
+  3369.0   1014.2
+  3480.8   1015.6
+  3599.7   1505.2
+  3731.7  11117.2
+  3873.3   1981.8
+  4031.7   2228.1
+  4206.5   2511.4
+  4396.4   2676.1
+  4612.2   2970.1
+  4854.3   3481.8
+  5122.4   3965.8
+  5433.4   4413.9
+  5790.8   4889.6
+  6197.3   5877.8
+  6683.7   6395.0
+  7263.4   6948.6
+  7951.3   7777.7
+  8817.3   8857.4
+  9916.0  11506.0
+ 11323.7  12055.7
+ 13279.4  12709.1
+ 16111.1  17840.7
+ 20467.2  13238.3
+ 28449.4  17100.6
+ 47183.6  19261.5
+root@d4ea575e1a7f:/app# cat > ident.py << 'EOF'
+> import numpy as np
+> from scipy.signal import argrelextrema
+> from scipy.optimize import curve_fit
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+>
+> def lor(x,x0,g,a,off):
+>     return off + a/(1.0+((x-x0)/g)**2)
+>
+> mx=argrelextrema(y, np.greater, order=20)[0]
+> res=[]
+> for i in mx:
+>     lo=max(0,i-60); hi=min(len(x),i+60)
+>     xw=x[lo:hi]; yw=y[lo:hi]
+>     if len(xw)<10: continue
+>     off0=yw.min(); a0=yw.max()-off0; x0_0=xw[np.argmax(yw)]
+>     g0=abs(xw[-1]-xw[0])/4
+>     try:
+>         popt,_=curve_fit(lor,xw,yw,p0=[x0_0,g0,a0,off0],maxfev=20000)
+>         yp=lor(xw,*popt)
+>         ss=((yw-yp)**2).sum(); sst=((yw-yw.mean())**2).sum()
+>         r2=1-ss/sst if sst>0 else -1
+>         res.append((r2,popt[0],popt[1],popt[2],popt[3],xw.min(),xw.max()))
+>     except Exception as e:
+>         pass
+> res.sort(reverse=True)
+> for r in res[:10]:
+>     print('R2=%.4f x0=%.1f g=%.1f amp=%.1f off=%.1f xr=[%.0f,%.0f]'%(r[0],r[1],r[2],r[3],r[4],r[5],r[6]))
+> EOF
+root@d4ea575e1a7f:/app# python3 ident.py
+R2=0.9906 x0=3745.4 g=-25.2 amp=12405.2 off=1101.8 xr=[3592,3911]
+R2=0.9838 x0=3745.4 g=22.7 amp=11739.2 off=1850.5 xr=[3729,4080]
+R2=0.9501 x0=19199.5 g=377.5 amp=72475.6 off=14065.2 xr=[14772,27215]
+R2=0.9501 x0=38939.0 g=788180.8 amp=15389988.0 off=-15369835.8 xr=[21749,47184]
+R2=0.9202 x0=6328.0 g=-33.5 amp=8316.2 off=5770.9 xr=[5836,6916]
+R2=0.8502 x0=8436.2 g=564.8 amp=156477.6 off=-321.1 xr=[4358,4879]
+R2=0.8493 x0=10438.0 g=323.0 amp=10311.5 off=9503.4 xr=[8950,12109]
+R2=0.8263 x0=6123.9 g=28027.8 amp=406697.9 off=-402493.1 xr=[4239,4725]
+R2=0.6912 x0=3086.6 g=11.0 amp=663.6 off=468.9 xr=[2934,3122]
+R2=0.6198 x0=4495.3 g=112.5 amp=525.1 off=2346.5 xr=[4087,4531]
+root@d4ea575e1a7f:/app# cat > fit.py << 'EOF'
+it_peak(3745,250)
+D=fit_peak(19139,5000)
+print('G',G)
+print('2D',D)
+out={'G':G,'2D':D}
+with open('results.json','w') as f:
+    json.dump(out,f,indent=2)
+print('written')
+EOF
+python3 fit.py
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+>
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+>
+> def lor(x,x0,g,a,off):
+>     return off + a/(1.0+((x-x0)/g)**2)
+>
+> def fit_peak(center, half0):
+>     m=(x>center-half0)&(x<center+half0)
+>     xw=x[m]; yw=y[m]
+>     off0=yw.min(); a0=yw.max()-off0; x0_0=xw[np.argmax(yw)]; g0=half0/2
+>     popt,_=curve_fit(lor,xw,yw,p0=[x0_0,g0,a0,off0],maxfev=40000)
+>     x0,g,a,off=popt
+>     # refine window to +-4*|gamma|
+>     m=(x>x0-4*abs(g))&(x<x0+4*abs(g))
+>     xw=x[m]; yw=y[m]
+>     off0=yw.min(); a0=yw.max()-off0; g0=abs(g)
+>     popt,_=curve_fit(lor,xw,yw,p0=[x0,g0,a0,off0],maxfev=40000)
+>     x0,g,a,off=popt
+>     return {'x0':float(x0),'gamma':float(abs(g)),'amplitude':float(a),'offset':float(off)}
+>
+> G=fit_peak(3745,250)
+> D=fit_peak(19139,5000)
+> print('G',G)
+> print('2D',D)
+> out={'G':G,'2D':D}
+> with open('results.json','w') as f:
+>     json.dump(out,f,indent=2)
+> print('written')
+> EOF
+root@d4ea575e1a7f:/app# python3 fit.py
+G {'x0': 3745.3382648070165, 'gamma': 27.005339291263947, 'amplitude': 12722.035348880536, 'offset': 644.9758692057496}
+2D {'x0': 19195.47984654802, 'gamma': 432.0118368934423, 'amplitude': 75718.97313285105, 'offset': 9249.348615364723}
+written
+root@d4ea575e1a7f:/app# cat results.json
+{
+  "G": {
+    "x0": 3745.3382648070165,
+    "gamma": 27.005339291263947,
+    "amplitude": 12722.035348880536,
+    "offset": 644.9758692057496
+  },
+  "2D": {
+    "x0": 19195.47984654802,
+    "gamma": 432.0118368934423,
+    "amplitude": 75718.97313285105,
+    "offset": 9249.348615364723
+  }
+}root@d4ea575e1a7f:/app# cat > verify.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> def lor(x,x0,g,a,off):
+>     return off + a/(1.0+((x-x0)/g)**2)
+> R=json.load(open('results.json'))
+> for name in ['G','2D']:
+>     p=R[name]; x0,g,a,off=p['x0'],p['gamma'],p['amplitude'],p['offset']
+>     m=(x>x0-4*g)&(x<x0+4*g); xw=x[m]; yw=y[m]
+>     yp=lor(xw,x0,g,a,off)
+>     r2=1-((yw-yp)**2).sum()/((yw-yw.mean())**2).sum()
+>     print(name,'R2=%.4f'%r2,'npts=%d'%len(xw))
+> EOF
+root@d4ea575e1a7f:/app# python3 verify.py
+G R2=0.9931 npts=81
+2D R2=0.9444 npts=37
+root@d4ea575e1a7f:/app#

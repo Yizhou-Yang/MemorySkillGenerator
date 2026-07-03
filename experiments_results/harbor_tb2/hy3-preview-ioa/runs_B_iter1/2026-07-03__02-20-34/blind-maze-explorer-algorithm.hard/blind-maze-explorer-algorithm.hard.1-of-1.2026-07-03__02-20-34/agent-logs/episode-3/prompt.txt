@@ -1,0 +1,124 @@
+New Terminal Output:
+
+root@624d0839193c:/app# cat > /app/explore.py << 'EOF'
+> #!/usr/bin/env python3
+> import sys, subprocess, os
+>
+> DIRS = {'N': (-1, 0), 'S': (1, 0), 'E': (0, 1), 'W': (0, -1)}
+> OPP = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
+>
+> class Explorer:
+>     def __init__(self, maze_id):
+>         self.maze_id = maze_id
+>         self.proc = subprocess.Popen(
+>             ['python3', '/protected/maze_server.py', str(maze_id)],
+>             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+>         self.grid = {}
+>         self.tried = set()
+>         self.entered = set()
+>         self.pos = (0, 0)
+>
+>     def read_until_prompt(self):
+>         buf = ''
+>         while True:
+>             ch = self.proc.stdout.read(1)
+>             if ch == '':
+>                 break
+>             buf += ch
+>             if buf.endswith('> '):
+>                 break
+>         return buf[:-2] if buf.endswith('> ') else buf
+>
+>     def send(self, cmd):
+>         self.proc.stdin.write(cmd + '\n')
+>         self.proc.stdin.flush()
+>         resp = self.read_until_prompt()
+>         return resp.strip()
+>
+>     def move(self, d):
+>         resp = self.send('move ' + d)
+>         dr, dc = DIRS[d]
+>         nr = self.pos[0] + dr
+>         nc = self.pos[1] + dc
+>         if resp == 'hit wall':
+>             self.grid[(nr, nc)] = '#'
+>             return False
+>         self.pos = (nr, nc)
+>         if resp == 'reached exit':
+>             self.grid[self.pos] = 'E'
+>         elif self.grid.get(self.pos) is None:
+>             self.grid[self.pos] = ' '
+>         return True
+>
+>     def explore(self):
+>         self.grid[self.pos] = 'S'
+>         self.entered.add(self.pos)
+>         self.read_until_prompt()
+>         stack = [([d for d in DIRS], None)]
+>         while stack:
+>             dirs, ret = stack[-1]
+>             if not dirs:
+>                 stack.pop()
+>                 if ret is not None:
+>                     self.move(ret)
+>                 continue
+>             d = dirs.pop()
+>             key = (self.pos, d)
+>             if key in self.tried:
+>                 continue
+>             self.tried.add(key)
+>             moved = self.move(d)
+>             if not moved:
+>                 continue
+>             if self.pos in self.entered:
+>                 self.move(OPP[d])
+>             else:
+>                 self.entered.add(self.pos)
+>                 stack.append(([dd for dd in DIRS], OPP[d]))
+>         try:
+>             self.proc.stdin.write('exit\n')
+>             self.proc.stdin.flush()
+>         except Exception:
+>             pass
+>         self.write_output()
+>
+>     def write_output(self):
+>         rows = [r for (r, c) in self.grid]
+>         cols = [c for (r, c) in self.grid]
+>         minr, maxr = min(rows), max(rows)
+>         minc, maxc = min(cols), max(cols)
+>         out = []
+>         for r in range(minr, maxr + 1):
+>             line = []
+>             for c in range(minc, maxc + 1):
+>                 line.append(self.grid.get((r, c), '#'))
+>             out.append(''.join(line))
+>         text = '\n'.join(out) + '\n'
+>         os.makedirs('/app/output', exist_ok=True)
+>         with open('/app/output/' + str(self.maze_id) + '.txt', 'w') as f:
+>             f.write(text)
+>
+> def main():
+>     if len(sys.argv) > 1:
+>         mids = [int(sys.argv[1])]
+>     else:
+>         mids = list(range(1, 11))
+>     for mid in mids:
+>         ex = Explorer(mid)
+>         ex.explore()
+>         print('maze', mid, 'done')
+>
+> if __name__ == '__main__':
+>     main()
+> EOF
+root@624d0839193c:/app# python3 -c "import py_compile; py_compile.compile('/app/explore.py', doraise=True); print('ok')"
+ok
+root@624d0839193c:/app# python3 /app/explore.py 1
+maze 1 done
+root@624d0839193c:/app# diff /app/output/1.txt /app/maze_1.txt && echo MATCH
+4c4
+< ####
+---
+> ####
+\ No newline at end of file
+root@624d0839193c:/app#

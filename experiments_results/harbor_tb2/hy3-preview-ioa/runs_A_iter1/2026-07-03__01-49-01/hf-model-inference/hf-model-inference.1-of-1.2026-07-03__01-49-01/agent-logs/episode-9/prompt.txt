@@ -1,0 +1,78 @@
+New Terminal Output:
+
+root@8ed22792a47f:/app# ls -la /app/model_cache/sentiment_model/
+total 262268
+drwxr-xr-x 2 root root      4096 Jul  2 19:15 .
+drwxr-xr-x 3 root root      4096 Jul  2 19:14 ..
+-rw-r--r-- 1 root root       766 Jul  2 19:15 config.json
+-rw------- 1 root root 267832560 Jul  2 19:15 model.safetensors
+-rw-r--r-- 1 root root    711396 Jul  2 19:15 tokenizer.json
+-rw-r--r-- 1 root root       351 Jul  2 19:15 tokenizer_config.json
+root@8ed22792a47f:/app# cat > /app/app.py << 'EOF'
+> import os
+> import json
+> import torch
+> from flask import Flask, request, jsonify
+> from transformers import AutoModelForSequenceClassification, AutoTokenizer
+>
+> MODEL_DIR = "/app/model_cache/sentiment_model"
+>
+> print("Loading model from", MODEL_DIR, flush=True)
+> tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+> model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
+> model.eval()
+> print("Model loaded.", flush=True)
+>
+> app = Flask(__name__)
+>
+> LABELS = {0: "negative", 1: "positive"}
+>
+> def softmax(logits):
+>     probs = torch.softmax(logits, dim=-1)
+>     return probs.detach().cpu().numpy()[0]
+>
+> @app.route("/sentiment", methods=["POST"])
+> def sentiment():
+>     try:
+>         data = request.get_json(silent=True)
+>         if not data or "text" not in data:
+>             return jsonify({"error": "Missing 'text' field in request body"}), 400
+>         text = data["text"]
+>         if not isinstance(text, str) or not text.strip():
+>             return jsonify({"error": "'text' must be a non-empty string"}), 400
+>     except Exception as e:
+>         return jsonify({"error": f"Invalid JSON: {e}"}), 400
+>
+>     try:
+>         inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+>         with torch.no_grad():
+>             logits = model(**inputs).logits
+>         probs = softmax(logits)
+>         pos = float(probs[1])
+>         neg = float(probs[0])
+>         pred = int(probs.argmax())
+>         sentiment_label = LABELS[pred]
+>         return jsonify({
+>             "sentiment": sentiment_label,
+>             "confidence": {
+>                 "positive": round(pos, 6),
+>                 "negative": round(neg, 6),
+>             },
+>         })
+>     except Exception as e:
+>         return jsonify({"error": f"Inference failed: {e}"}), 500
+>
+> @app.route("/health", methods=["GET"])
+> def health():
+>     return jsonify({"status": "ok"})
+>
+> if __name__ == "__main__":
+>     app.run(host="0.0.0.0", port=5000)
+> EOF
+root@8ed22792a47f:/app# head -5 /app/app.py
+import os
+import json
+import torch
+from flask import Flask, request, jsonify
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+root@8ed22792a47f:/app#

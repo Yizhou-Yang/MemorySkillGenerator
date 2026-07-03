@@ -1,0 +1,62 @@
+New Terminal Output:
+688128
+root@88975f2109d1:/app# cat > /app/extract.py << 'PYEOF'
+> import struct, os
+> ISO='/app/alpine.iso'
+> def read(lba,count=1):
+>     with open(ISO,'rb') as f:
+>         f.seek(lba*2048)
+>         return f.read(count*2048)
+> def rec_lba(r): return struct.unpack('<I',r[2:6])[0]
+> def rec_len(r): return struct.unpack('<I',r[10:14])[0]
+> def rec_isdir(r): return r[25]&2
+> def read_dir(lba,length):
+>     size=(length+2047)//2048*2048
+>     data=read(lba,size//2048)
+>     entries=[]; off=0
+>     while off<length:
+>         rl=data[off]
+>         if rl==0:
+>             off=(off+2047)//2048*2048
+>             continue
+>         rec=data[off:off+rl]
+>         nm=rec[33:33+rec[32]].decode('latin-1')
+>         entries.append((nm,rec)); off+=rl
+>     return entries
+> def walk(lba,length):
+>     out=[]
+>     for nm,r in read_dir(lba,length):
+>         if nm in ('.','..'): continue
+>         out.append((nm.rstrip('.').split(';')[0], r))
+>     return out
+> pvd=read(16)
+> root=pvd[156:156+34]
+> rootdir=walk(rec_lba(root),rec_len(root))
+> boot=None
+> for nm,r in rootdir:
+>     if rec_isdir(r) and nm.upper()=='BOOT':
+>         boot=r; break
+> bootfiles=walk(rec_lba(boot),rec_len(boot))
+> os.makedirs('/app/boot',exist_ok=True)
+> for nm,r in bootfiles:
+>     u=nm.upper()
+>     if u.startswith('VMLINUZ_LTS'): dst='/app/boot/vmlinuz'
+>     elif u.startswith('INITRAMFS_LTS'): dst='/app/boot/initramfs'
+>     else: continue
+>     print('extract', nm, dst, rec_len(r))
+>     data=read(rec_lba(r), (rec_len(r)+2047)//2048)
+>     open(dst,'wb').write(data[:rec_len(r)])
+> print('done')
+> PYEOF
+root@88975f2109d1:/app# python3 /app/extract.py
+extract INITRAMFS_LTS. /app/boot/initramfs 20486092
+extract VMLINUZ_LTS. /app/boot/vmlinuz 11879168
+ls -la /app/boot
+done
+root@88975f2109d1:/app# ls -la /app/boot
+total 31620
+drwxr-xr-x 2 root root     4096 Jul  2 18:40 .
+drwxr-xr-x 3 root root     4096 Jul  2 18:40 ..
+-rw-r--r-- 1 root root 20486092 Jul  2 18:40 initramfs
+-rw-r--r-- 1 root root 11879168 Jul  2 18:40 vmlinuz
+root@88975f2109d1:/app#

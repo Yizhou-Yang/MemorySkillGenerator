@@ -1,0 +1,140 @@
+New Terminal Output:
+
+root@85625f071eed:/app# cat > /app/server.py << 'PYEOF'
+> import requests
+> from flask import Flask, request, jsonify
+>
+> app = Flask(__name__)
+>
+> RPC_URL = "https://api.devnet.solana.com"
+> PROGRAM_ID = "Vote111111111111111111111111111111111111111"
+> SYS_ID = "11111111111111111111111111111111"
+>
+> def rpc(method, params):
+>     payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+>     r = requests.post(RPC_URL, json=payload, timeout=30)
+>     r.raise_for_status()
+>     data = r.json()
+>     if data.get("error") is not None:
+>         raise Exception(str(data["error"]))
+>     return data["result"]
+>
+> @app.route("/status")
+> def status():
+>     try:
+>         v = rpc("getVersion", [])
+>         slot = rpc("getSlot", [])
+>         nodes = rpc("getClusterNodes", [])
+>         health = rpc("getHealth", [])
+>         return jsonify({
+>             "status": "online" if health == "ok" else "offline",
+>             "network": "devnet",
+>             "current_slot": slot,
+>             "node_count": len(nodes),
+>             "version": v.get("solana-core", "unknown"),
+>         })
+>     except Exception as e:
+>         return jsonify({"error": str(e)}), 500
+>
+> @app.route("/block/<int:slot_number>")
+> def block(slot_number):
+>     try:
+>         b = rpc("getBlock", [slot_number, {"encoding": "json", "transactionDetails": "none", "rewards": False}])
+>         if b is None:
+>             return jsonify({"error": "Block not found"}), 404
+>         return jsonify({
+>             "blockhash": b["blockhash"],
+>             "parent_slot": b["parentSlot"],
+>             "previous_blockhash": b["previousBlockhash"],
+>             "block_height": b.get("blockHeight"),
+>             "block_time": b.get("blockTime"),
+>         })
+>     except Exception as e:
+>         return jsonify({"error": str(e)}), 404 if "404" in str(e) else 500
+>
+> @app.route("/transaction/<signature>")
+> def transaction(signature):
+>     try:
+>         tx = rpc("getTransaction", [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+>         if tx is None:
+>             return jsonify({"error": "Transaction not found"}), 404
+>         meta = tx.get("meta") or {}
+>         pre = meta.get("preTokenBalances") or []
+>         post = meta.get("postTokenBalances") or []
+>         transfers = []
+>         for pb in pre:
+>             idx = pb.get("accountIndex")
+>             p = next((x for x in post if x.get("accountIndex") == idx), None)
+>             if p is None:
+>                 continue
+>             pa = int((pb.get("uiTokenAmount") or {}).get("amount") or 0)
+>             po = int((p.get("uiTokenAmount") or {}).get("amount") or 0)
+>             d = pa - po
+>             if d != 0:
+>                 transfers.append({"account": pb.get("owner"), "mint": pb.get("mint"), "amount": abs(d)})
+>         txn = tx.get("transaction") or {}
+>         sigs = txn.get("signatures") if isinstance(txn, dict) else None
+>         sig = sigs[0] if sigs else signature
+>         return jsonify({
+>             "signature": sig,
+>             "slot": tx.get("slot"),
+>             "block_time": tx.get("blockTime"),
+>             "success": meta.get("err") is None,
+>             "fee": meta.get("fee"),
+>             "token_transfers": transfers,
+>         })
+>     except Exception as e:
+>         return jsonify({"error": str(e)}), 404 if "404" in str(e) else 500
+>
+> @app.route("/account/<address>")
+> def account(address):
+>     try:
+>         info = rpc("getAccountInfo", [address, {"encoding": "jsonParsed"}])
+>         if not info or info.get("value") is None:
+>             return jsonify({"error": "Account not found"}), 404
+>         val = info["value"]
+>         return jsonify({
+>             "address": address,
+>             "executable": val.get("executable", False),
+>             "lamports": val.get("lamports", 0),
+>             "owner": val.get("owner"),
+>             "rent_epoch": val.get("rentEpoch"),
+>         })
+>     except Exception as e:
+>         return jsonify({"error": str(e)}), 500
+>
+> @app.route("/program/<program_id>/accounts")
+> def program_accounts(program_id):
+>     try:
+>         try:
+>             limit = int(request.args.get("limit", 10))
+>         except Exception:
+>             limit = 10
+>         try:
+>             offset = int(request.args.get("offset", 0))
+>         except Exception:
+>             offset = 0
+>         if limit < 1 or limit > 1000:
+>             limit = 10
+>         if offset < 0:
+>             offset = 0
+>         res = rpc("getProgramAccounts", [program_id, {"encoding": "jsonParsed", "dataSlice": {"offset": 0, "length": 0}}])
+>         total = len(res)
+>         page = res[offset:offset+limit]
+>         accounts = []
+>         for a in page:
+>             v = a.get("account") or {}
+>             accounts.append({"pubkey": a.get("pubkey"), "account": {"executable": v.get("executable", False), "lamports": v.get("lamports", 0), "owner": v.get
+("owner"), "rent_epoch": v.get("rentEpoch")}})
+>         return jsonify({"program_id": program_id, "total_accounts": total, "limit": limit, "offset": offset, "accounts": accounts})
+>     except Exception as e:
+>         return jsonify({"error": str(e)}), 500
+>
+> if __name__ == "__main__":
+>     app.run(host="0.0.0.0", port=5000)
+> PYEOF
+root@85625f071eed:/app# nohup python3 /app/server.py > /app/server.log 2>&1 &
+[1] 139
+root@85625f071eed:/app# sleep 2; curl -s http://localhost:5000/status
+bash: curl: command not found
+root@85625f071eed:/app#

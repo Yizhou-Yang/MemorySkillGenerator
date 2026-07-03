@@ -1,0 +1,18 @@
+{
+  "analysis": "Pip can download from PyPI successfully, so outbound network works for pip. But urllib HTTPS to Solana fails with 'SSL WRONG_VERSION_NUMBER', which indicates a transparent proxy intercepting 443 that expects HTTP, or that pip uses a different route (perhaps a local index/mirror). I need to understand how pip reaches the network and whether Solana RPC is reachable via a proxy or plain HTTP.",
+  "plan": "Check pip's configured index URL and proxy. Then test a direct HTTP (non-TLS) connection to the Solana endpoint and test DNS resolution. This will reveal the correct way to reach Solana RPC. I'll also check if there's a local proxy to route through.",
+  "commands": [
+    {
+      "keystrokes": "pip3 config list -v 2>/dev/null; echo '---'; python3 -c \"import urllib.request; print(urllib.request.getproxies())\"\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "python3 -c \"import socket; print(socket.gethostbyname('api.devnet.solana.com')); print(socket.gethostbyname('pypi.org'))\"\n",
+      "duration": 5.0
+    },
+    {
+      "keystrokes": "python3 -c \"import urllib.request; r=urllib.request.urlopen('http://api.devnet.solana.com',timeout=12); print(r.status, r.read()[:200])\" 2>&1 | head -5\n",
+      "duration": 15.0
+    }
+  ]
+}

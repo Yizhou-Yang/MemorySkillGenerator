@@ -1,0 +1,589 @@
+root@5800c03d8045:/app# cat /etc/os-release
+PRETTY_NAME="Ubuntu 26.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+VERSION="26.04 LTS (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=resolute
+LOGO=ubuntu-logo
+root@5800c03d8045:/app# which git nginx ssh ssh-keygen openssl sshpass 2>&1; echo '---'; ls /usr/sbin/sshd 2>&1; ls -d /etc/nginx 2>&1
+/usr/bin/git
+/usr/sbin/nginx
+/usr/bin/ssh
+/usr/bin/ssh-keygen
+/usr/bin/openssl
+---
+/usr/sbin/sshd
+/etc/nginx
+root@5800c03d8045:/app# id git 2>&1; echo '---'; cat /etc/passwd | grep -E 'git|www-data'
+id: 'git': no such user
+---
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+root@5800c03d8045:/app# cat > /tmp/setup.sh <<'SETUP_EOF'
+> #!/bin/bash
+> set -e
+>
+> # 1. git user with password
+> id git >/dev/null 2>&1 || useradd -m -s /bin/bash git
+> echo 'git:password' | chpasswd
+>
+> # 2. bare repo + post-receive hook
+> mkdir -p /git
+> rm -rf /git/project
+> git init --bare /git/project >/dev/null
+> cat > /git/project/hooks/post-receive <<'HOOK_EOF'
+> #!/bin/bash
+> unset GIT_DIR
+> REPO=/git/project
+> WEB=/var/www/html
+> deploy() {
+>   local branch=$1; local target=$2
+>   if git --git-dir="$REPO" rev-parse --verify "$branch" >/dev/null 2>&1; then
+>     mkdir -p "$target"
+>     git --git-dir="$REPO" --work-tree="$target" checkout -f "$branch"
+>     chmod -R a+rX "$target"
+>   fi
+> }
+> deploy main "$WEB"
+> deploy dev "$WEB/dev"
+> HOOK_EOF
+> chmod +x /git/project/hooks/post-receive
+> chown -R git:git /git
+>
+> # 3. web root
+> mkdir -p /var/www/html
+> chown -R git:git /var/www/html
+>
+> # 4. self-signed cert
+> mkdir -p /etc/nginx/ssl
+> openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.crt -days 365 -subj "/CN=localhost" >/dev/null 2>&1
+>
+> # 5. nginx server block
+> cat > /etc/nginx/conf.d/git.conf <<'NGINX_EOF'
+> server {
+>     listen 8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/nginx.crt;
+>     ssl_certificate_key /etc/nginx/ssl/nginx.key;
+>     root /var/www/html;
+>     index index.html;
+> }
+> NGINX_EOF
+>
+> # 6. sshd password auth
+> mkdir -p /etc/ssh/sshd_config.d
+> echo 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/99-local.conf
+> sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+> grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+> mkdir -p /run/sshd
+> ssh-keygen -A >/dev/null 2>&1
+>
+> echo SETUP_DONE
+> SETUP_EOF
+root@5800c03d8045:/app# bash /tmp/setup.sh
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+SETUP_DONE
+root@5800c03d8045:/app# cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> unset GIT_DIR
+> REPO=/git/project
+> WEB=/var/www/html
+> deploy() {
+>   local branch=$1; local target=$2
+>   if git --git-dir="$REPO" rev-parse --verify "$branch" >/dev/null 2>&1; then
+>     mkdir -p "$target"
+>     git --git-dir="$REPO" --work-tree="$target" checkout -f "$branch"
+>     chmod -R a+rX "$target"
+>   fi
+> }
+> deploy main "$WEB"
+> deploy dev "$WEB/dev"
+> EOF
+root@5800c03d8045:/app# chmod +x /git/project/hooks/post-receive
+root@5800c03d8045:/app# chown git:git /git/project/hooks/post-receive
+root@5800c03d8045:/app# echo "LINES=$(wc -l < /git/project/hooks/post-receive)"; nl -ba /git/project/hooks/post-receive
+LINES=14
+     1	#!/bin/bash
+     2	unset GIT_DIR
+     3	REPO=/git/project
+     4	WEB=/var/www/html
+     5	deploy() {
+     6	  local branch=$1; local target=$2
+     7	  if git --git-dir="$REPO" rev-parse --verify "$branch" >/dev/null 2>&1; then
+     8	    mkdir -p "$target"
+     9	    git --git-dir="$REPO" --work-tree="$target" checkout -f "$branch"
+    10	    chmod -R a+rX "$target"
+    11	  fi
+    12	}
+    13	deploy main "$WEB"
+    14	deploy dev "$WEB/dev"
+root@5800c03d8045:/app# echo '=== NGINX ==='; cat /etc/nginx/conf.d/git.conf; echo '=== SSHD DROPIN ==='; cat /etc/ssh/sshd_config.d/99-local.conf; echo '=== gr
+ep ==='; grep -E '^PasswordAuthentication' /etc/ssh/sshd_config
+=== NGINX ===
+server {
+    listen 8443 ssl;
+    server_name localhost;
+    ssl_certificate /etc/nginx/ssl/nginx.crt;
+    ssl_certificate_key /etc/nginx/ssl/nginx.key;
+    root /var/www/html;
+    index index.html;
+}
+=== SSHD DROPIN ===
+PasswordAuthentication yes
+=== grep ===
+PasswordAuthentication yes
+root@5800c03d8045:/app# nginx -t 2>&1
+2026/07/02 16:29:14 [warn] 278#278: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@5800c03d8045:/app# grep -rn '8443' /etc/nginx/ 2>/dev/null
+/etc/nginx/conf.d/git.conf:2:    listen 8443 ssl;
+/etc/nginx/sites-available/default:2:    listen 8443 ssl;
+root@5800c03d8045:/app# ls -la /etc/nginx/sites-enabled/ 2>/dev/null
+total 8
+drwxr-xr-x 2 root root 4096 Jul  2 14:56 .
+drwxr-xr-x 9 root root 4096 Jul  2 16:28 ..
+lrwxrwxrwx 1 root root   34 Jul  2 14:56 default -> /etc/nginx/sites-available/default
+root@5800c03d8045:/app# cat /etc/nginx/sites-available/default
+server {
+    listen 8443 ssl;
+    server_name localhost;
+
+    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+
+    location / {
+        root /var/www/html;
+        index index.html;
+    }
+
+    location /dev {
+        root /var/www;
+        index index.html;
+    }
+}
+root@5800c03d8045:/app# rm -f /etc/nginx/sites-enabled/default
+root@5800c03d8045:/app# cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> unset GIT_DIR
+> REPO=/git/project
+> WEB=/var/www/html
+> deploy() {
+>   local branch=$1; local target=$2
+>   if git --git-dir="$REPO" rev-parse --verify "$branch" >/dev/null 2>&1; then
+>     mkdir -p "$target"
+>     git --git-dir="$REPO" archive "$branch" | tar -x -C "$target"
+>     chmod -R a+rX "$target"
+>   fi
+> }
+> deploy main "$WEB"
+> deploy dev "$WEB/dev"
+> EOF
+root@5800c03d8045:/app# chmod +x /git/project/hooks/post-receive
+root@5800c03d8045:/app# chown git:git /git/project/hooks/post-receive
+root@5800c03d8045:/app# nginx -t 2>&1; echo '---'; pgrep -a sshd; pgrep -a nginx
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+---
+root@5800c03d8045:/app# /usr/sbin/sshd; nginx
+root@5800c03d8045:/app# ss -ltnp 2>/dev/null | grep -E ':22 |:8443 '
+root@5800c03d8045:/app# pgrep -a sshd; pgrep -a nginx; echo '---SS---'; ss -ltnp 2>/dev/null | head -40
+393 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+395 nginx: master process nginx
+396 nginx: worker process
+397 nginx: worker process
+398 nginx: worker process
+399 nginx: worker process
+400 nginx: worker process
+401 nginx: worker process
+402 nginx: worker process
+403 nginx: worker process
+404 nginx: worker process
+405 nginx: worker process
+406 nginx: worker process
+407 nginx: worker process
+408 nginx: worker process
+409 nginx: worker process
+410 nginx: worker process
+411 nginx: worker process
+412 nginx: worker process
+413 nginx: worker process
+414 nginx: worker process
+415 nginx: worker process
+416 nginx: worker process
+417 nginx: worker process
+418 nginx: worker process
+419 nginx: worker process
+420 nginx: worker process
+421 nginx: worker process
+422 nginx: worker process
+423 nginx: worker process
+424 nginx: worker process
+425 nginx: worker process
+426 nginx: worker process
+427 nginx: worker process
+---SS---
+root@5800c03d8045:/app# (echo > /dev/tcp/localhost/22) 2>&1 && echo PORT22_OK; (echo > /dev/tcp/localhost/8443) 2>&1 && echo PORT8443_OK
+PORT22_OK
+PORT8443_OK
+root@5800c03d8045:/app# which sshpass; python3 --version 2>&1; ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@localhost echo hi 2>&1 | head -5
+Python 3.14.4
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost: Permission denied (publickey,password).
+root@5800c03d8045:/app# cat > /tmp/askpass.sh <<'EOF'
+> #!/bin/bash
+> echo password
+> EOF
+root@5800c03d8045:/app# chmod +x /tmp/askpass.sh
+root@5800c03d8045:/app# rm -rf /tmp/work && mkdir -p /tmp/work && cd /tmp/work && git init -q -b main && git config user.email t@t.com && git config user.name t
+ && echo '<h1>MAIN</h1>' > index.html && git add -A && git commit -qm main && git checkout -q -b dev && echo '<h1>DEV</h1>' > index.html && git commit -qm dev &
+& git remote add origin git@localhost:/git/project && echo READY
+On branch dev
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   index.html
+
+no changes added to commit (use "git add" and/or "git commit -a")
+root@5800c03d8045:/tmp/work# cd /tmp/work && GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null' SSH_ASKPASS=/tmp/askpass.
+sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 setsid git push -q origin main dev 2>&1; echo "PUSH_EXIT=$?"
+PUSH_EXIT=0
+root@5800c03d8045:/tmp/work# fatal: 'origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.                                                                                                                                     l
+--- main ---in ---'; curl -sk https://localhost:8443/index.html; echo '--- dev ---'; curl -sk https://localhost:8443/dev/index.html
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+--- dev ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+root@5800c03d8045:/tmp/work# cat > /tmp/test.sh <<'EOF'
+> #!/bin/bash
+> rm -rf /tmp/work; mkdir -p /tmp/work; cd /tmp/work
+> git init -q -b main
+> git config user.email t@t.com; git config user.name t
+> echo '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main
+> git checkout -q -b dev
+> echo '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev
+> git remote add origin git@localhost:/git/project
+> export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null'
+> export SSH_ASKPASS=/tmp/askpass.sh; export SSH_ASKPASS_REQUIRE=force; export DISPLAY=:0
+> setsid git push -q origin main dev; echo "PUSH_EXIT=$?"
+> sleep 1
+> echo '--- main ---'; curl -sk https://localhost:8443/index.html
+> echo '--- dev ---'; curl -sk https://localhost:8443/dev/index.html
+> EOF
+root@5800c03d8045:/tmp/work# bash /tmp/test.sh
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+fatal: protocol error: bad line length character: Welc
+PUSH_EXIT=128
+--- main ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+--- dev ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+root@5800c03d8045:/tmp/work# sed -i 's/^#\?PrintMotd.*/PrintMotd no/' /etc/ssh/sshd_config; grep -q '^PrintMotd no' /etc/ssh/sshd_config || echo 'PrintMotd no'
+>> /etc/ssh/sshd_config
+root@5800c03d8045:/tmp/work# sed -i 's/^#\?PrintLastLog.*/PrintLastLog no/' /etc/ssh/sshd_config; grep -q '^PrintLastLog no' /etc/ssh/sshd_config || echo 'Print
+LastLog no' >> /etc/ssh/sshd_config
+root@5800c03d8045:/tmp/work# sed -i '/pam_motd/ s/^/#/' /etc/pam.d/sshd; grep -n 'motd' /etc/pam.d/sshd
+31:# This includes a dynamically generated part from /run/motd.dynamic
+32:# and a static (admin-editable) part from /etc/motd.
+33:#session    optional     pam_motd.so  motd=/run/motd.dynamic
+34:#session    optional     pam_motd.so noupdate
+root@5800c03d8045:/tmp/work# pkill -x sshd; sleep 1; /usr/sbin/sshd; sleep 0.5; (echo > /dev/tcp/localhost/22) && echo PORT22_OK
+PORT22_OK
+root@5800c03d8045:/tmp/work# grep -nE '^Banner' /etc/ssh/sshd_config; : > /etc/motd; pkill -x sshd; sleep 1; /usr/sbin/sshd; (echo > /dev/tcp/localhost/22) && e
+cho PORT22_OK
+PORT22_OK
+root@5800c03d8045:/tmp/work# bash /tmp/test.sh > /tmp/out.txt 2>&1; echo RC=$?
+RC=0
+root@5800c03d8045:/tmp/work# echo '===== OUT ====='; cat /tmp/out.txt
+===== OUT =====
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: No such file or directory
+chdir: error retrieving current directory: getcwd: cannot access parent directories: No such file or directory
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+PUSH_EXIT=128
+--- main ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+--- dev ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+root@5800c03d8045:/tmp/work# cd /app
+root@5800c03d8045:/app# cat > /tmp/diag.sh <<'EOF'
+> #!/bin/bash
+> cd /app
+> rm -rf /tmp/work2; mkdir -p /tmp/work2; cd /tmp/work2
+> git init -q -b main
+> echo '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main
+> git checkout -q -b dev
+> echo '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev
+> git remote add origin git@localhost:/git/project
+> export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -v'
+> export SSH_ASKPASS=/tmp/askpass.sh
+> export SSH_ASKPASS_REQUIRE=force
+> export DISPLAY=:0
+> setsid git push -v origin main dev
+> echo "PUSH_EXIT=$?"
+> EOF
+root@5800c03d8045:/app# bash /tmp/diag.sh > /tmp/diag.out 2>&1; echo DONE
+DONE
+root@5800c03d8045:/app# grep -nE 'Welc|motd|Permission|denied|fatal|error|remote:|PUSH_EXIT|refusing|Hello' /tmp/diag.out | head -40
+13:fatal: unable to auto-detect email address (got 'root@5800c03d8045.(none)')
+26:fatal: unable to auto-detect email address (got 'root@5800c03d8045.(none)')
+28:error: src refspec main does not match any
+29:error: src refspec dev does not match any
+30:error: failed to push some refs to 'localhost:/git/project'
+31:PUSH_EXIT=1
+root@5800c03d8045:/app# apt-get install -y sshpass 2>&1 | tail -3; which sshpass
+Building dependency tree...
+Reading state information...
+E: Unable to locate package sshpass
+root@5800c03d8045:/app# cat > /tmp/diag.sh <<'EOF'
+> #!/bin/bash
+> cd /app
+> rm -rf /tmp/work2; mkdir -p /tmp/work2; cd /tmp/work2
+> git init -q -b main
+> git config user.email t@t.com; git config user.name t
+> echo '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main
+> git checkout -q -b dev
+> echo '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev
+> git remote add origin git@localhost:/git/project
+> export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -v'
+> export SSH_ASKPASS=/tmp/askpass.sh
+> export SSH_ASKPASS_REQUIRE=force
+> export DISPLAY=:0
+> setsid git push -v origin main dev
+> echo "PUSH_EXIT=$?"
+> sleep 1
+> echo '--- main ---'; curl -sk https://localhost:8443/index.html
+> echo '--- dev ---'; curl -sk https://localhost:8443/dev/index.html
+> EOF
+root@5800c03d8045:/app# bash /tmp/diag.sh > /tmp/diag.out 2>&1; echo DONE
+DONE
+root@5800c03d8045:/app# grep -nE 'Welc|Permission|denied|fatal|error:|PUSH_EXIT|remote:|receiving|sending|To git|<h1>|404|main\s|dev\s' /tmp/diag.out | head -40
+87:fatal: Could not read from remote repository.
+91:PUSH_EXIT=128
+92:--- main ---
+94:<head><title>404 Not Found</title></head>
+96:<center><h1>404 Not Found</h1></center>
+100:--- dev ---
+102:<head><title>404 Not Found</title></head>
+104:<center><h1>404 Not Found</h1></center>
+root@5800c03d8045:/app# cat /tmp/diag.out
+Pushing to localhost:/git/project
+debug1: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2, OpenSSL 3.5.5 27 Jan 2026
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: Reading configuration data /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+debug1: /etc/ssh/ssh_config line 21: Applying options for *
+debug1: Connecting to localhost [::1] port 22.
+debug1: Connection established.
+debug1: no pubkey loaded from /root/.ssh/id_rsa
+debug1: identity file /root/.ssh/id_rsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_rsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa
+debug1: identity file /root/.ssh/id_ecdsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: identity file /root/.ssh/id_ecdsa_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: no pubkey loaded from /root/.ssh/id_ed25519
+debug1: identity file /root/.ssh/id_ed25519 type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519
+debug1: no pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: identity file /root/.ssh/id_ed25519_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: Local version string SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: Remote protocol version 2.0, remote software version OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: compat_banner: match: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2 pat OpenSSH* compat 0x04000000
+debug1: Authenticating to localhost:22 as 'git'
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts: No such file or directory
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts2: No such file or directory
+debug1: SSH2_MSG_KEXINIT sent
+debug1: SSH2_MSG_KEXINIT received
+debug1: kex: algorithm: mlkem768x25519-sha256
+debug1: kex: host key algorithm: ssh-ed25519
+debug1: kex: server->client cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: kex: client->server cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: expecting SSH2_MSG_KEX_ECDH_REPLY
+debug1: SSH2_MSG_KEX_ECDH_REPLY received
+debug1: Server host key: ssh-ed25519 SHA256:j5tzBMOdrEHqevtKPQgmkNDGrcqy0CFDDjtpcit40cc
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts: No such file or directory
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts2: No such file or directory
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+debug1: ssh_packet_send2_wrapped: resetting send seqnr 3
+debug1: rekey out after 134217728 blocks
+debug1: SSH2_MSG_NEWKEYS sent
+debug1: Sending SSH2_MSG_EXT_INFO
+debug1: expecting SSH2_MSG_NEWKEYS
+debug1: ssh_packet_read_poll2: resetting read seqnr 3
+debug1: SSH2_MSG_NEWKEYS received
+debug1: rekey in after 134217728 blocks
+debug1: SSH2_MSG_EXT_INFO received
+debug1: kex_ext_info_client_parse: server-sig-algs=<ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-
+sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256>
+debug1: kex_ext_info_check_ver: publickey-hostbound@openssh.com=<0>
+debug1: kex_ext_info_check_ver: ping@openssh.com=<0>
+debug1: SSH2_MSG_SERVICE_ACCEPT received
+debug1: SSH2_MSG_EXT_INFO received
+debug1: kex_ext_info_client_parse: server-sig-algs=<ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-
+sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256>
+debug1: Authentications that can continue: publickey,password
+debug1: Next authentication method: publickey
+debug1: Will attempt key: /root/.ssh/id_rsa
+debug1: Will attempt key: /root/.ssh/id_ecdsa
+debug1: Will attempt key: /root/.ssh/id_ecdsa_sk
+debug1: Will attempt key: /root/.ssh/id_ed25519
+debug1: Will attempt key: /root/.ssh/id_ed25519_sk
+debug1: Trying private key: /root/.ssh/id_rsa
+debug1: Trying private key: /root/.ssh/id_ecdsa
+debug1: Trying private key: /root/.ssh/id_ecdsa_sk
+debug1: Trying private key: /root/.ssh/id_ed25519
+debug1: Trying private key: /root/.ssh/id_ed25519_sk
+debug1: Next authentication method: password
+debug1: read_passphrase: requested to askpass
+Authenticated to localhost ([::1]:22) using "password".
+debug1: channel 0: new session [client-session] (inactive timeout: 0)
+debug1: Requesting no-more-sessions@openssh.com
+debug1: Entering interactive session.
+debug1: pledge: network
+debug1: client_input_global_request: rtype hostkeys-00@openssh.com want_reply 0
+debug1: Sending environment.
+debug1: channel 0: setting env LC_CTYPE = "C.UTF-8"
+debug1: channel 0: setting env COLORTERM = "truecolor"
+debug1: Sending command: git-receive-pack '/git/project'
+debug1: pledge: fork
+debug1: client_input_channel_req: channel 0 rtype exit-status reply 0
+debug1: client_input_channel_req: channel 0 rtype eow@openssh.com reply 0
+debug1: channel 0: free: client-session, nchannels 1
+Transferred: sent 3316, received 3668 bytes, in 0.0 seconds
+Bytes per second: sent 257434.0, received 284761.1
+debug1: Exit status 254
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+PUSH_EXIT=128
+--- main ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+--- dev ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+root@5800c03d8045:/app# cat > /tmp/loc.sh <<'EOF'
+> cd /tmp
+> rm -rf wt
+> if git clone /git/project wt 2>&1; then
+>   cd wt
+>   git config user.email a@a.com; git config user.name a
+>   echo x > index.html; git add -A; git commit -qm m
+>   git push origin main 2>&1
+>   echo "PUSH_EXIT=$?"
+> else
+>   echo 'CLONE_FAILED'
+> fi
+> EOF
+root@5800c03d8045:/app# su git -c 'bash /tmp/loc.sh'
+Cloning into 'wt'...
+warning: You appear to have cloned an empty repository.
+done.
+error: src refspec main does not match any
+error: failed to push some refs to '/git/project'
+PUSH_EXIT=1
+root@5800c03d8045:/app# ls -l /usr/bin/git-receive-pack 2>&1; su git -c 'which git-receive-pack; echo PATH=$PATH'
+lrwxrwxrwx 1 root root 3 Mar  2 17:55 /usr/bin/git-receive-pack -> git
+/usr/bin/git-receive-pack
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+root@5800c03d8045:/app# su git -c 'git-receive-pack /git/project < /dev/null; echo EXIT=$?'
+00b70000000000000000000000000000000000000000 capabilities^{}report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 a
+gent=git/2.53.0-Linux
+0000fatal: the remote end hung up unexpectedly
+EXIT=128
+root@5800c03d8045:/app# mv /git/project/hooks/post-receive /tmp/hook.bak
+root@5800c03d8045:/app# cat > /tmp/push.sh <<'EOF'
+> #!/bin/bash
+> cd /app
+> rm -rf /tmp/work3; mkdir -p /tmp/work3; cd /tmp/work3
+> git init -q -b main
+> git config user.email t@t.com; git config user.name t
+> echo '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main
+> git checkout -q -b dev
+> echo '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev
+> git remote add origin git@localhost:/git/project
+> export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null'
+> export SSH_ASKPASS=/tmp/askpass.sh; export SSH_ASKPASS_REQUIRE=force; export DISPLAY=:0
+> setsid git push -v origin main dev
+> echo "PUSH_EXIT=$?"
+> EOF
+root@5800c03d8045:/app# bash /tmp/push.sh > /tmp/push.out 2>&1; echo DONE
+DONE
+root@5800c03d8045:/app# grep -nE 'fatal|error|PUSH_EXIT|remote:|Could not|<h1>|404' /tmp/push.out
+3:fatal: Could not read from remote repository.
+7:PUSH_EXIT=128
+root@5800c03d8045:/app#

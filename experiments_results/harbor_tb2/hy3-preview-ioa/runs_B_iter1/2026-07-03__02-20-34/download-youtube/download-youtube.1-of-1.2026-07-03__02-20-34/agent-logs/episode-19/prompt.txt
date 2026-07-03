@@ -1,0 +1,27 @@
+New Terminal Output:
+
+root@956bf3a912ea:/tmp# cat > /tmp/dl.py << 'EOF'
+> import urllib.request, sys
+> sys.stdout.reconfigure(encoding='utf-8')
+> url='https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz'
+> dst='/tmp/ff.tar.xz'
+> for attempt in range(6):
+>     try:
+>         req=urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0'})
+>         with urllib.request.urlopen(req, timeout=30) as r:
+>             total=int(r.headers.get('Content-Length',0))
+>             done=0
+>             with open(dst,'wb') as f:
+>                 while True:
+>                     chunk=r.read(1024*256)
+>                     if not chunk: break
+>                     f.write(chunk); done+=len(chunk)
+>             if total and done<total:
+>                 print('short',done,total); continue
+>         print('OK',done); break
+>     except Exception as e:
+>         print('retry',attempt,repr(e)[:120])
+> EOF
+root@956bf3a912ea:/tmp# python3 /tmp/dl.py
+OK 41888096
+root@956bf3a912ea:/tmp#

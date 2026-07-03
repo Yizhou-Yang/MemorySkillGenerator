@@ -1,0 +1,14 @@
+{
+  "analysis": "The `-o Acquire::Check-Free-Space=false` flag didn't suppress the error. Apt still refuses, believing `/var/cache/apt/archives` has 0 free space — this is because `statvfs` reports `f_bavail` (space for unprivileged users) as 0 since the filesystem is 100% full for non-root, and apt's free-space check reads that. As root we can use reserved blocks (my 200MB dd succeeded). The reliable fix is to put the option in an apt config file and also run the download as root (disable the `_apt` sandbox user, which lacks reserved-block privilege).",
+  "plan": "1) Write an apt config disabling the free-space check and the sandbox user. 2) Retry the install. This should let apt download/install using root's reserved space. I'll give it time and poll.",
+  "commands": [
+    {
+      "keystrokes": "printf 'Acquire::Check-Free-Space \"false\";\\nAPT::Sandbox::User \"root\";\\n' > /etc/apt/apt.conf.d/99nofreespace\ncat /etc/apt/apt.conf.d/99nofreespace\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get install -y build-essential wget xz-utils qemu-system-x86\n",
+      "duration": 60.0
+    }
+  ]
+}

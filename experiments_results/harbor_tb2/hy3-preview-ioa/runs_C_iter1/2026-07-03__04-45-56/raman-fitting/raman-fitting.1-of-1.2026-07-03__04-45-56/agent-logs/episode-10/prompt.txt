@@ -1,0 +1,80 @@
+New Terminal Output:
+
+root@2739e611cf42:/app# cat > /app/fit.py << 'EOF'
+> import json
+> import numpy as np
+> from scipy.optimize import curve_fit
+>
+> # --- Load data (comma decimal separator, two whitespace-separated columns) ---
+> xs, ys = [], []
+> with open('/app/graphene.dat') as fh:
+>     for line in fh:
+>         line = line.strip()
+>         if not line:
+>             continue
+>         parts = line.split()
+>         if len(parts) < 2:
+>             continue
+>         xs.append(float(parts[0].replace(',', '.')))
+>         ys.append(float(parts[1].replace(',', '.')))
+> x = np.array(xs)
+> y = np.array(ys)
+>
+> # --- Lorentzian model: offset + amplitude / (1 + ((x - x0)/gamma)^2) ---
+> def lorentzian(x, x0, gamma, amplitude, offset):
+>     return offset + amplitude / (1.0 + ((x - x0) / gamma) ** 2)
+>
+> def fit_peak(x0_guess, half_width, x_data, y_data):
+>     """Fit a Lorentzian to a window around x0_guess."""
+>     m = (x_data > x0_guess - half_width) & (x_data < x0_guess + half_width)
+>     xw, yw = x_data[m], y_data[m]
+>     # robust background estimate from the wings of the window
+>     edge = (xw - x0_guess)
+>     wing = (np.abs(edge) > 0.6 * half_width)
+>     offset0 = np.median(yw[wing]) if wing.any() else np.median(yw)
+>     amplitude0 = yw.max() - offset0
+>     gamma0 = half_width * 0.15
+>     p0 = [x0_guess, max(gamma0, 1.0), amplitude0, offset0]
+>     bounds = ([x0_guess - half_width, 1e-3, 0.0, -np.inf],
+>               [x0_guess + half_width, half_width, np.inf, np.inf])
+>     popt, _ = curve_fit(lorentzian, xw, yw, p0=p0, bounds=bounds, maxfev=100000)
+>     resid = yw - lorentzian(xw, *popt)
+>     rms = float(np.sqrt(np.mean(resid ** 2)))
+>     return popt, rms, xw, yw
+>
+> # G peak: x0 ~ 19139
+> g_popt, g_rms, gx, gy = fit_peak(19139.0, 700.0, x, y)
+> # 2D peak: x0 ~ 33245
+> d_popt, d_rms, dx, dy = fit_peak(33245.0, 2500.0, x, y)
+>
+> G = {'x0': float(g_popt[0]), 'gamma': float(abs(g_popt[1])),
+>      'amplitude': float(g_popt[2]), 'offset': float(g_popt[3])}
+> D2 = {'x0': float(d_popt[0]), 'gamma': float(abs(d_popt[1])),
+>       'amplitude': float(d_popt[2]), 'offset': float(d_popt[3])}
+>
+> results = {'G': G, '2D': D2}
+>
+> # --- I/O side effect: write the output file (required deliverable) ---
+> with open('/app/results.json', 'w') as out:
+>     json.dump(results, out, indent=2)
+>
+> print('Fit RMS  -> G: %.2f, 2D: %.2f' % (g_rms, d_rms))
+> print(json.dumps(results, indent=2))
+> EOF
+root@2739e611cf42:/app# python3 /app/fit.py
+Fit RMS  -> G: 4835.99, 2D: 255.91
+{
+  "G": {
+    "x0": 19205.679563661943,
+    "gamma": 556.5329241607587,
+    "amplitude": 92975.93604435457,
+    "offset": -9527.71939513726
+  },
+  "2D": {
+    "x0": 33447.76992143773,
+    "gamma": 2146.187134681453,
+    "amplitude": 3942.227969391608,
+    "offset": 17049.72625366356
+  }
+}
+root@2739e611cf42:/app#

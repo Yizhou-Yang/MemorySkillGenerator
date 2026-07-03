@@ -1,0 +1,82 @@
+New Terminal Output:
+
+root@7589788393ba:/app# cat > /tmp/extract.py << 'PYEOF'
+> import struct
+> ISO='/app/alpine.iso'
+> def rd(f,off,n):
+>     f.seek(off); return f.read(n)
+> with open(ISO,'rb') as f:
+>     pvd=None
+>     for s in range(16,16+200):
+>         buf=rd(f,s*2048,2048)
+>         if buf[1:6]==b'CD001' and buf[0]==1:
+>             pvd=buf; break
+>     assert pvd,'no PVD'
+>     def parse_dr(d):
+>         if len(d)<33: return None
+>         return (struct.unpack('<I',d[2:6])[0],struct.unpack('<I',d[10:14])[0],d[25],d[33:33+d[32]])
+>     def read_dir(ext,length):
+>         f.seek(ext*2048)
+>         data=f.read(((length+2047)//2048)*2048)
+>         out=[]; off=0
+>         while off<length:
+>             lr=data[off]
+>             if lr==0:
+>                 off=((off//2048)+1)*2048; continue
+>             rec=data[off:off+lr]
+>             e=parse_dr(rec)
+>             if e: out.append(e)
+>             off+=lr
+>         return out
+>     def nameof(b):
+>         s=b.decode('latin1')
+>         if ';' in s: s=s.split(';')[0]
+>         return s
+>     cands={'vmlinuz':[],'initramfs':[]}
+>     def walk(entries,path):
+>         for ext,length,flags,name in entries:
+>             nm=nameof(name)
+>             if nm in ('.','..'): continue
+>             isdir=bool(flags & 0x2)
+>             full=path+'/'+nm
+>             if isdir:
+>                 walk(read_dir(ext,length),full)
+>             else:
+>                 low=nm.lower()
+>                 if 'vmlinuz' in low: cands['vmlinuz'].append((ext,length,full))
+>                 if 'initramfs' in low: cands['initramfs'].append((ext,length,full))
+>     root=parse_dr(pvd[156:156+34])
+>     walk(read_dir(root[0],root[1]),'')
+>     def pick(lst):
+>         if not lst: return None
+>         for x in lst:
+>             if 'lts' in x[2].lower(): return x
+>         return lst[0]
+>     for k in ('vmlinuz','initramfs'):
+>         x=pick(cands[k])
+>         print(k,x)
+>         if x:
+>             ext,length,full=x
+>             f.seek(ext*2048)
+>             data=f.read(length)
+>             open('/app/'+k,'wb').write(data)
+>             print('wrote','/app/'+k,length)
+> PYEOF
+root@7589788393ba:/app# python3 /tmp/extract.py
+Traceback (most recent call last):
+  File "/tmp/extract.py", line 46, in <module>
+    walk(read_dir(root[0],root[1]),'')
+  File "/tmp/extract.py", line 40, in walk
+    walk(read_dir(ext,length),full)
+  File "/tmp/extract.py", line 40, in walk
+    walk(read_dir(ext,length),full)
+  File "/tmp/extract.py", line 40, in walk
+    walk(read_dir(ext,length),full)
+  [Previous line repeated 994 more times]
+  File "/tmp/extract.py", line 16, in read_dir
+    f.seek(ext*2048)
+RecursionError: maximum recursion depth exceeded while calling a Python object
+root@7589788393ba:/app# ls -la /app/vmlinuz /app/initramfs
+ls: cannot access '/app/vmlinuz': No such file or directory
+ls: cannot access '/app/initramfs': No such file or directory
+root@7589788393ba:/app#

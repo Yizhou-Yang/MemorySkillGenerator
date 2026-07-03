@@ -1,0 +1,14 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+"head -5 daily_temp_sf_high.csv; echo '---'; head -5 daily_temp_sf_low.csv\n"
+"cat daily_temp_sf_high.csv; echo '==='; cat daily_temp_sf_low.csv\n"
+'which python3\n'
+"python3 - <<'EOF'\nimport csv, re\nfrom datetime import datetime\n\ndef parse_date(s):\n    s = s.strip().split()[0]\n    for fmt in ('%Y-%m-%d','%m/%d/%Y','%m-%d-%Y'):\n        try:\n            return datetime.strptime(s, fmt).date()\n        except ValueError:\n            pass\n    raise ValueError('bad date '+s)\n\nhigh={}; low={}\nwith open('daily_temp_sf_high.csv') as f:\n    r=csv.reader(f); next(r)\n    for d,t in r:\n        if not d.strip(): continue\n        high[parse_date(d)]=float(t)\nwith open('daily_temp_sf_low.csv') as f:\n    r=csv.reader(f); next(r)\n    for d,t in r:\n        if not d.strip(): continue\n        low[parse_date(d)]=float(t)\n\ndiffs=[high[d]-low[d] for d in high if d in low]\navg=sum(diffs)/len(diffs)\nprint('n=',len(diffs),'avg=',avg)\nwith open('avg_temp.txt','w') as f:\n    f.write(str(avg))\nEOF\n"
+'cat avg_temp.txt; echo; wc -l avg_temp.txt\n'
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

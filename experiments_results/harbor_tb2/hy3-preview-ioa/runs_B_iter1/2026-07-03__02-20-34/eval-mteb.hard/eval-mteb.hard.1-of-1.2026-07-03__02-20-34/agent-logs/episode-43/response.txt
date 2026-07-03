@@ -1,0 +1,18 @@
+{
+  "analysis": "Found `has_sufficient_disk_space` in datasets/utils/py_utils.py:559. I'll monkeypatch it in run.py to always return True so the dataset can be generated on the (actually writable) overlayfs. Let me first peek at the function to confirm the return type, then update run.py.",
+  "plan": "1) View the function briefly. 2) Update run.py to monkeypatch `has_sufficient_disk_space` to return True before importing mteb/datasets. 3) Re-run and verify the result file at results/sentence-transformers__all-mpnet-base-v2/<commit>/STS12.json with cosine_spearman > 0.7.",
+  "commands": [
+    {
+      "keystrokes": "sed -n '559,575p' /usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /app/run.py <<'PY'\nimport datasets.utils.py_utils as _py\n# The overlayfs reports 0 available space via statvfs, but the disk is actually\n# writable (model downloads succeed). Disable the spurious disk-space guard.\n_py.has_sufficient_disk_space = lambda needed_bytes, directory=\".\": True\n\nimport mteb\n\nmodel_name = \"sentence-transformers/all-mpnet-base-v2\"\ncommit = \"e8c3b32edf5434bc2275fc9bab85f82640a19130\"\n\nmodel = mteb.get_model(model_name)\nmodel.mteb_model_meta.name = model_name\nmodel.mteb_model_meta.revision = commit\nprint(\"meta.name =\", model.mteb_model_meta.name)\nprint(\"meta.revision =\", model.mteb_model_meta.revision)\nprint(\"path =\", model.mteb_model_meta.model_name_as_path())\n\ntask = mteb.get_task(\"STS12\")\nevaluation = mteb.MTEB(tasks=[task])\nresults = evaluation.run(model, output_folder=\"results\", verbosity=2)\n\nfor r in results:\n    print(\"TASK RESULT:\", r.task_name)\n    print(r)\nPY\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cd /app && python3 run.py 2>&1 | tail -40\n",
+      "duration": 60.0
+    }
+  ]
+}

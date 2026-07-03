@@ -1,0 +1,30 @@
+New Terminal Output:
+
+root@20099aa7046e:/app/filesystem_spec# cat > /tmp/test_open_async.py << 'EOF'
+> import asyncio
+> import fsspec
+> from fsspec.asyn import AsyncFileSystem
+>
+>
+> class FakeAsync(AsyncFileSystem):
+>     protocol = "fakeasync"
+>     async_impl = True
+>
+>     async def open_async(self, path, mode="rb", **kwargs):
+>         return f"OPENED:{path}:{mode}"
+>
+>
+> async def async_test():
+>     fake = FakeAsync(asynchronous=True)
+>     dirfs = fsspec.filesystem('dir', path='/tmp', fs=fake, asynchronous=True)
+>     result = await dirfs.open_async('hello', 'wb')
+>     print('result:', result)
+>     assert result == "OPENED:/tmp/hello:wb", result
+>     print('SUCCESS')
+>
+> asyncio.run(async_test())
+> EOF
+root@20099aa7046e:/app/filesystem_spec# python3 /tmp/test_open_async.py
+result: OPENED:/tmp/hello:wb
+SUCCESS
+root@20099aa7046e:/app/filesystem_spec#

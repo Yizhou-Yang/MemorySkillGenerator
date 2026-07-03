@@ -1,0 +1,28 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+"find / -iname 'alpine*.iso' 2>/dev/null\n"
+'which qemu-system-x86_64 qemu-system-i386 python3 socat\n'
+'ls -l /dev/kvm 2>/dev/null; echo KVM_CHECK_DONE\n'
+''
+''
+'command -v 7z 7za xorriso isoinfo bsdtar losetup; echo TOOLS_DONE\n'
+'mkdir -p /mnt/iso && mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1; echo MOUNT_RC=$?\n'
+"cat > /app/serial_proxy.py << 'PYEOF'\nimport socket, threading, time\n\nQEMU_SOCK = '/tmp/qemu-serial.sock'\nHOST = '127.0.0.1'\nPORT = 6665\nLOG = '/app/serial.log'\n\nlogf = open(LOG, 'ab', buffering=0)\nbuf = bytearray()\nbuf_lock = threading.Lock()\nclients = []\nqemu = None\n\ndef connect_qemu():\n    while True:\n        try:\n            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n            s.connect(QEMU_SOCK)\n            return s\n        except Exception:\n            time.sleep(0.2)\n\ndef qemu_reader():\n    global qemu\n    qemu = connect_qemu()\n    while True:\n        try:\n            data = qemu.recv(4096)\n        except Exception:\n            break\n        if not data:\n            break\n        with buf_lock:\n            buf.extend(data)\n        try:\n            logf.write(data)\n        except Exception:\n            pass\n        for c in list(clients):\n            try:\n                c.sendall(data)\n            except Exception:\n                pass\n\ndef handle_client(conn):\n    global qemu\n    with buf_lock:\n        hist = bytes(buf)\n    try:\n        conn.sendall(hist)\n    except Exception:\n        return\n    while qemu is None:\n        time.sleep(0.1)\n    while True:\n        try:\n            d = conn.recv(4096)\n        except Exception:\n            break\n        if not d:\n            break\n        try:\n            qemu.sendall(d)\n        except Exception:\n            break\n\ndef server():\n    ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n    ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n    ls.bind((HOST, PORT))\n    ls.listen(5)\n    while True:\n        conn, addr = ls.accept()\n        clients.append(conn)\n        threading.Thread(target=handle_client, args=(conn,), daemon=True).start()\n\nthreading.Thread(target=qemu_reader, daemon=True).start()\nserver()\nPYEOF\n"
+'rm -f /tmp/qemu-serial.sock\nnohup qemu-system-x86_64 -m 512 -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 -net none -boot d -display none -vga none -monitor none -serial unix:/tmp/qemu-serial.sock,server,nowait >> /app/qemu.log 2>&1 &\nsleep 1\nnohup python3 /app/serial_proxy.py >> /app/proxy.log 2>&1 &\nsleep 1\necho LAUNCHED\n'
+"python3 -m py_compile /app/serial_proxy.py && echo SCRIPT_OK; echo '--- qemu.log ---'; cat /app/qemu.log; echo '--- proxy.log ---'; cat /app/proxy.log; echo '--- procs ---'; pgrep -a qemu-system 2>/dev/null; pgrep -af serial_proxy 2>/dev/null\n"
+''
+"jobs; echo '---'; ps -eo pid,comm,args | grep -E 'qemu|serial_proxy|python3' | grep -v grep; echo '---'; ls -l /tmp/qemu-serial.sock 2>&1; echo PROC_DONE\n"
+"ls -l /app/serial.log; echo '--- tail ---'; tail -c 1500 /app/serial.log 2>/dev/null; echo; echo POLL1_DONE\n"
+''
+"ls -l /app/serial.log; echo '--- tail ---'; tail -c 2000 /app/serial.log 2>/dev/null; echo; echo POLL2_DONE\n"
+''
+"ls -l /app/serial.log; echo '--- tail ---'; tail -c 2000 /app/serial.log 2>/dev/null; echo; echo '--- proxy.log ---'; tail -c 500 /app/proxy.log; echo POLL3_DONE\n"
+'jobs -l; echo \'---\'; P=$(jobs -l | awk \'/qemu-system/{print $2}\'); echo QEMU_PID=$P; cat /proc/$P/stat 2>/dev/null | awk \'{print "state="$3" utime="$14" stime="$15}\'; echo \'--- unix conns ---\'; grep -c qemu-serial /proc/net/unix 2>/dev/null; grep qemu-serial /proc/net/unix 2>/dev/null; echo DIAG_DONE\n'
+"cat > /app/probe.py << 'PYEOF'\nimport socket\ns = socket.create_connection(('127.0.0.1', 6665), timeout=5)\ns.settimeout(3.0)\ndata = b''\ntry:\n    while True:\n        d = s.recv(4096)\n        if not d: break\n        data += d\nexcept Exception:\n    pass\nprint('RECV_BYTES', len(data))\nprint(repr(data[-800:]))\ns.close()\nPYEOF\npython3 /app/probe.py; echo PROBE_DONE\n"
+'ls -l /app/serial.log; echo \'--- jobs ---\'; jobs -l; echo \'--- port check ---\'; python3 -c "import socket; s=socket.create_connection((\'127.0.0.1\',6665),timeout=5); print(\'PORT_OPEN\'); s.close()"; echo READY_DONE\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

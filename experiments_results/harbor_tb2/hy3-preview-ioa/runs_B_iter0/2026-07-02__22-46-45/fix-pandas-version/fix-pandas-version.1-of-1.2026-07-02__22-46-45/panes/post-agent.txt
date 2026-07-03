@@ -1,0 +1,59 @@
+root@fb0305d397bc:/app# ls -la
+total 12
+drwxr-xr-x  3 root root 4096 Jul  2 15:12 .
+drwxr-xr-x 19 root root 4096 Jul  2 15:12 ..
+drwxr-xr-x  2 root root 4096 Jul  2 13:59 src
+root@fb0305d397bc:/app# cat src/data_processor.py 2>/dev/null | head -50
+from typing import Any, Dict, Tuple
+
+import numpy as np  # type: ignore
+import pandas as pd  # type: ignore
+
+from .data_loader import load_sample_transactions
+
+
+def load_and_process_data(filepath) -> pd.DataFrame:
+    """Load CSV data with optimized dtypes using Arrow and handle mixed date formats.
+
+    Args:
+        filepath: Path to the CSV file containing transaction data
+
+    Returns:
+        DataFrame with properly typed columns using Arrow backend
+    """
+    # This requires pandas >= 2.0.0 for date_format and dtype_backend
+    pd.options.mode.copy_on_write = True
+
+    df = pd.read_csv(
+        filepath,
+        dtype_backend="pyarrow",
+        date_format="mixed",
+    )
+
+    # Convert date columns using the new mixed format parser
+    date_cols = ["transaction_date", "processing_date"]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], format="mixed")
+
+    return df
+
+
+def process_transactions(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Process transaction data using pandas 2.0 features.
+
+    Args:
+        df: Input DataFrame with transaction data
+
+    Returns:
+        Tuple containing:
+        - Summary DataFrame with transaction statistics
+        - Dictionary with metadata about boolean columns
+    """
+    # Get boolean columns using pyarrow dtypes
+    bool_cols = df.select_dtypes(include=["boolean[pyarrow]"]).columns.tolist()
+
+    # Calculate summary statistics
+root@fb0305d397bc:/app# python -c 'import pandas; print(pandas.__version__)'
+1.3.0
+root@fb0305d397bc:/app#

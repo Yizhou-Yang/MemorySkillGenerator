@@ -1,0 +1,84 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'ls -la /app/linux-6.9 2>/dev/null | head\n'
+'which gcc make wget curl qemu-system-x86_64 tar xz 2>/dev/null\n'
+'nproc\n'
+"ls /usr/bin | grep -E 'gcc|make|^cc$|xz|wget|curl|qemu|apt|dpkg|yum' \n"
+'command -v gcc cc make xz wget curl qemu-system-x86_64 apt-get 2>/dev/null; echo DONE\n'
+'cat /etc/os-release | head -3\n'
+'apt-get update\n'
+'apt-get install -y build-essential wget xz-utils qemu-system-x86\n'
+'df -h\n'
+'du -sh /var/cache/apt/archives 2>/dev/null; ls -la /var/cache/apt/archives\n'
+'apt-get clean; df -h\n'
+'df -h /tmp /var /usr /logs /app 2>/dev/null\n'
+'du -sh /logs /var /usr /root /tmp /home 2>/dev/null\n'
+"cat /proc/mounts | grep -E 'overlay|vdb| / ' | head\n"
+"df -i / ; echo '---'; dd if=/dev/zero of=/app/test_write.bin bs=1M count=200 2>&1 | tail -2\n"
+'ls -la /app/test_write.bin; rm -f /app/test_write.bin\n'
+'apt-get -o Acquire::Check-Free-Space=false install -y build-essential wget xz-utils qemu-system-x86\n'
+'printf \'Acquire::Check-Free-Space "false";\\nAPT::Sandbox::User "root";\\n\' > /etc/apt/apt.conf.d/99nofreespace\ncat /etc/apt/apt.conf.d/99nofreespace\n'
+'apt-get install -y build-essential wget xz-utils qemu-system-x86\n'
+"apt-config dump | grep -i -E 'freespace|sandbox' ; echo '---'; apt-get --version | head -1\n"
+'mkdir -p /mnt/cache && mount -t tmpfs -o size=20G tmpfs /mnt/cache 2>&1; echo EXIT=$?; df -h /mnt/cache\n'
+"apt-config dump -o Acquire::Check-Free-Space=false 2>/dev/null | grep -i freespace; echo '---done---'\n"
+'command -v python3; python3 --version 2>&1\n'
+'apt-get install --print-uris -y build-essential wget xz-utils qemu-system-x86 2>&1 | head -8\n'
+'apt-get install --print-uris -y build-essential wget xz-utils qemu-system-x86 > /app/uris.txt 2>/dev/null; grep -c "^\'" /app/uris.txt; wc -l /app/uris.txt\n'
+'head -3 /app/uris.txt\n'
+'grep -c "^\'" /app/uris.txt\n'
+'head -3 /app/uris.txt\n'
+'grep "^\'" /app/uris.txt | head -2\n'
+'mkdir -p /app/debs\ncat > /app/dl.py <<\'EOF\'\nimport urllib.request, re, sys, os\nout=\'/app/debs\'\nos.makedirs(out, exist_ok=True)\nurls=[]\nfor line in open(\'/app/uris.txt\'):\n    line=line.strip()\n    if not line.startswith("\'"):\n        continue\n    url=line[1:line.index("\'",1)]\n    fn=line.split()[1]\n    urls.append((url,fn))\nprint(\'total\',len(urls))\nhdr={\'User-Agent\':\'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36\',\'Accept\':\'*/*\'}\nok=0\nfor i,(url,fn) in enumerate(urls):\n    dest=os.path.join(out,fn)\n    if os.path.exists(dest) and os.path.getsize(dest)>0:\n        ok+=1; continue\n    try:\n        req=urllib.request.Request(url,headers=hdr)\n        with urllib.request.urlopen(req,timeout=120) as r, open(dest,\'wb\') as f:\n            f.write(r.read())\n        ok+=1\n    except Exception as e:\n        print(\'FAIL\',fn,e)\n    if (i+1)%50==0:\n        print(\'progress\',i+1,ok)\nprint(\'done ok\',ok,\'of\',len(urls))\nEOF\necho written\n'
+'python3 /app/dl.py\n'
+'dpkg -i /app/debs/*.deb 2>&1 | tail -20\n'
+''
+''
+''
+'gcc --version | head -1; make --version | head -1; wget --version | head -1; xz --version | head -1; qemu-system-x86_64 --version | head -1\n'
+'cd /app && wget -q --show-progress https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz -O linux-6.9.tar.xz 2>&1 | tail -3; echo EXIT=$?\n'
+'ls -la linux-6.9.tar.xz && tar -tf linux-6.9.tar.xz | head -3\n'
+'rm -f linux-6.9.tar.xz; wget --timeout=120 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz -O linux-6.9.tar.xz 2>&1 | tail -8; echo EXIT=${PIPESTATUS[0]}\n'
+'for u in \'https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz\' \'https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz\' \'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz\'; do echo "== $u"; wget -S --spider --timeout=30 "$u" 2>&1 | grep -E \'HTTP/|Content-Length|404|200\'; done\n'
+'wget -q -O - https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz 2>&1 | head -20\n'
+"wget -S --spider --timeout=30 'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.gz' 2>&1 | grep -E 'HTTP/|Content-Length'\n"
+'wget -q -O - https://cdn.kernel.org/pub/linux/kernel/v6.x/ 2>&1 | grep -ioE \'linux-6\\.9[^"<]*\' | head\n'
+'echo \'--- try a couple mirrors ---\'; for u in \'https://mirror.math.princeton.edu/pub/linux/kernel/v6.x/linux-6.9.tar.xz\' \'https://ftp.yzu.edu.tw/linux/kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz\' \'https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.9.tar.gz\'; do echo "== $u"; wget -S --spider --timeout=25 "$u" 2>&1 | grep -E \'HTTP/|Content-Length\'; done\n'
+'rm -f /app/linux-6.9.tar.xz; cd /app && wget --timeout=180 -O linux-6.9.tar.gz https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.9.tar.gz 2>&1 | tail -6; echo EXIT=${PIPESTATUS[0]}\n'
+'cd /app && tar -xzf linux-6.9.tar.gz 2>&1 | tail -3; echo DONE\n'
+'ls -ld linux-6.9* ; ls /app/linux-6.9/init/main.c /app/linux-6.9/usr/gen_init_cpio.c 2>&1\n'
+''
+''
+''
+''
+''
+''
+''
+''
+''
+"grep -n 'asmlinkage __visible void __init start_kernel' /app/linux-6.9/init/main.c\n"
+"sed -n '/^asmlinkage __visible void __init start_kernel/,/char \\*command_line/p' /app/linux-6.9/init/main.c | head -20\n"
+"grep -n 'start_kernel' /app/linux-6.9/init/main.c | head\n"
+"sed -n '882,900p' /app/linux-6.9/init/main.c\n"
+'python3 - <<\'EOF\'\np=\'/app/linux-6.9/init/main.c\'\nlines=open(p).read().split(\'\\n\')\n# find start_kernel line\nidx=None\nfor i,l in enumerate(lines):\n    if l.strip()==\'void start_kernel(void)\':\n        idx=i\n        break\nassert idx is not None, \'start_kernel not found\'\n# find opening brace after idx\nb=None\nfor j in range(idx, idx+5):\n    if lines[j].strip()==\'{\':\n        b=j\n        break\nassert b is not None\nins=\'\\tprintk(KERN_INFO "Hello, this is a custom kernel\\");\'\nlines.insert(b+1, ins)\nopen(p,\'w\').write(\'\\n\'.join(lines))\nprint(\'inserted after line\', b+1)\nEOF\n'
+"sed -n '882,886p' /app/linux-6.9/init/main.c\n"
+'cd /app/linux-6.9 && make defconfig 2>&1 | tail -5; echo DEFCFG_EXIT=${PIPESTATUS[0]}\n'
+'apt-get install --print-uris -y flex bison bc libelf-dev libssl-dev > /app/uris2.txt 2>/dev/null; grep -c "^\'" /app/uris2.txt; grep "^\'" /app/uris2.txt | head -3\n'
+'head -30 /app/uris2.txt\n'
+'cd /app && apt-get install --print-uris -y flex bison bc libelf-dev m4 zlib1g-dev libzstd-dev > /app/uris2.txt 2>/dev/null; grep -c "^\'" /app/uris2.txt; grep "^\'" /app/uris2.txt | head -5\n'
+'cat /app/uris2.txt\n'
+'cd /app && apt-get install --print-uris -y flex bison bc libelf-dev m4 zlib1g-dev libzstd-dev systemd-sysv > /app/uris2.txt 2>/dev/null; grep -c "^\'" /app/uris2.txt\n'
+'grep "^\'" /app/uris2.txt | head -8\n'
+'python3 - <<\'EOF\'\nimport urllib.request, os\nout=\'/app/debs2\'; os.makedirs(out, exist_ok=True)\nurls=[]\nfor line in open(\'/app/uris2.txt\'):\n    line=line.strip()\n    if not line.startswith("\'"): continue\n    url=line[1:line.index("\'",1)]; fn=line.split()[1]\n    urls.append((url,fn))\nhdr={\'User-Agent\':\'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36\',\'Accept\':\'*/*\'}\nok=0\nfor url,fn in urls:\n    dest=os.path.join(out,fn)\n    if os.path.exists(dest) and os.path.getsize(dest)>0:\n        ok+=1; continue\n    try:\n        req=urllib.request.Request(url,headers=hdr)\n        with urllib.request.urlopen(req,timeout=120) as r, open(dest,\'wb\') as f:\n            f.write(r.read())\n        ok+=1\n    except Exception as e:\n        print(\'FAIL\',fn,e)\nprint(\'done\',ok,\'of\',len(urls))\nEOF\n'
+'dpkg -i /app/debs2/*.deb 2>&1 | tail -8; echo DPKG_EXIT=${PIPESTATUS[0]}\n'
+'cd /app/linux-6.9 && make defconfig 2>&1 | tail -5; echo DEFCFG_EXIT=${PIPESTATUS[0]}\n'
+'cd /app/linux-6.9 && nohup make -j32 > /app/build.log 2>&1 &\necho "PID=$!"\n'
+"sleep 20; tail -5 /app/build.log; echo '---'; grep -c '\\^' /app/build.log 2>/dev/null\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+"sleep 60; tail -3 /app/build.log; echo '--- running? ---'; jobs -l\n"
+"sleep 90; tail -3 /app/build.log; echo '--- running? ---'; jobs -l\n"
+['C-d']
+['C-d']

@@ -1,0 +1,12 @@
+The fix is correct. Let me do a final, faithful verification by replicating the exact bug-report scenario (Pix2Sky_TAN's separability matrix combined with `cm`'s) through the real `separable.py` code.
+
+{
+  "analysis": "The regression test is now correct: `rot` (2x2, non-separable, mirroring Pix2Sky_TAN) as left, with the right being a precomputed 2x2 matrix. The expected 4x4 is correct. Let me run a final standalone check that mirrors the exact bug scenario using actual loaded separable.py code: left=[[1,1],[1,1]], right=[[1,0],[0,1]], and confirm _cstack yields the correct result.",
+  "plan": "Run a small harness loading the real separable.py to confirm `_cstack([[1,1],[1,1]],[[1,0],[0,1]])` produces `[[1,1,0,0],[1,1,0,0],[0,0,1,0],[0,0,0,1]]`, which is the expected (correct) separability matrix for `Pix2Sky_TAN() & cm`. Then conclude.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/verify.py << 'EOF'\nimport sys, types\nimport numpy as np\nimport importlib.util\nastropy = types.ModuleType('astropy')\nam = types.ModuleType('astropy.modeling')\nsys.modules['astropy']=astropy; sys.modules['astropy.modeling']=am\nclass Model:\n    def __init__(self,n_i,n_o,sep=True): self.n_inputs=n_i; self.n_outputs=n_o; self.separable=sep\nclass MDE(Exception): pass\ncore=types.ModuleType('astropy.modeling.core'); core.Model=Model; core.ModelDefinitionError=MDE; core.CompoundModel=Model\nsys.modules['astropy.modeling.core']=core\nclass Mapping(Model):\n    def __init__(self,m): self.mapping=m; self.n_inputs=max(m)+1; self.n_outputs=len(m); self.separable=True\nmm=types.ModuleType('astropy.modeling.mappings'); mm.Mapping=Mapping\nsys.modules['astropy.modeling.mappings']=mm\nspec=importlib.util.spec_from_file_location('s','/app/astropy/astropy/modeling/separable.py')\ns=importlib.util.module_from_spec(spec); sys.modules['s']=s; spec.loader.exec_module(s)\nleft=np.array([[1,1],[1,1]])   # Pix2Sky_TAN separability (non-separable)\nright=np.array([[1,0],[0,1]])  # cm separability\nres=s._cstack(left,right)\nprint(res)\nexp=np.array([[1,1,0,0],[1,1,0,0],[0,0,1,0],[0,0,0,1]])\nassert np.array_equal(res,exp), 'MISMATCH'\nprint('CORRECT: nested compound separability matrix is correct')\nEOF\npython /tmp/verify.py\n",
+      "duration": 3.0
+    }
+  ]
+}

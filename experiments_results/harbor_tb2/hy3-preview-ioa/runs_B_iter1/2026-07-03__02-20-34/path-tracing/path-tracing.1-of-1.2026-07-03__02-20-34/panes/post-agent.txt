@@ -1,0 +1,321 @@
+root@cc35861dabf3:/app# ls -la; file image.ppm; head -c 100 image.ppm | cat -v
+total 635132
+drwxr-xr-x  3 root root      4096 Jul  2 15:41 .
+drwxr-xr-x 20 root root      4096 Jul  2 19:46 ..
+-rw-r--r--  1 root root         5 Jul  2 15:41 .python-version
+drwxr-xr-x  4 root root      4096 Jul  2 15:41 .venv
+-rw-r--r--  1 root root         0 Jul  2 15:41 README.md
+-rw-r--r--  1 root root 648864939 Jul  2 15:39 high_res.ppm
+-rw-r--r--  1 root root   1440015 Jul  2 15:40 image.ppm
+-rw-r--r--  1 root root       395 Jul  2 13:59 install.sh
+-rw-r--r--  1 root root        81 Jul  2 15:41 main.py
+-rwxr-xr-x  1 root root     21240 Jul  2 15:37 orig
+-rw-r--r--  1 root root       171 Jul  2 15:41 pyproject.toml
+-rw-r--r--  1 root root      4602 Jul  2 15:41 uv.lock
+bash: file: command not found
+P6
+800 600
+255
+M-^_M-EM-^?M-^_M-EM-^?M-^_M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-
+EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^^M-EM-^?M-^]root@cc3
+5861dabf3:/app# cat main.py; echo '---'; cat .python-version; echo '---'; ls -la orig
+def main():
+    print("Hello from app!")
+
+
+if __name__ == "__main__":
+    main()
+---
+3.12
+---
+-rwxr-xr-x 1 root root 21240 Jul  2 15:37 orig
+root@cc35861dabf3:/app# od -An -tu1 -N 20 image.ppm
+  80  54  10  56  48  48  32  54  48  48  10  50  53  53  10 159
+ 197 255 159 197
+root@cc35861dabf3:/app# ls .venv/bin/; .venv/bin/python -c 'import numpy, PIL; print("ok")'
+activate      activate.csh   activate.nu   activate_this.py  f2py          py.test    pygmentize  python   python3.12
+activate.bat  activate.fish  activate.ps1  deactivate.bat    numpy-config  pydoc.bat  pytest      python3
+strings orig | head -50
+ok
+root@cc35861dabf3:/app# strings orig | head -50
+/lib64/ld-linux-x86-64.so.2
+_ITM_deregisterTMCloneTable
+__gmon_start__
+_ITM_registerTMCloneTable
+floor
+sqrt
+fmax
+fmin
+__stack_chk_fail
+free
+fopen
+system
+malloc
+__libc_start_main
+stderr
+fprintf
+__cxa_finalize
+sprintf
+fclose
+fwrite
+libm.so.6
+libc.so.6
+GLIBC_2.2.5
+GLIBC_2.4
+GLIBC_2.34
+PTE1
+u+UH
+Error: Could not open file %s for writing
+%d %d
+%d %d %d
+Wrote image to %s
+Creating high-resolution image: %dx%d
+This will be downsampled with ffmpeg after rendering
+Rendering high-resolution image...
+Progress: %.1f%%
+Rendering complete
+high_res.ppm
+Downsampling with ffmpeg...
+ffmpeg -i high_res.ppm -vf "scale=800:600" -y reconstructed.ppm
+Successfully downsampled to reconstructed.ppm
+Error executing ffmpeg command. Return code: %d
+You may need to install ffmpeg or run the following command manually:
+Done.
+?333?
+L>fff?
+9*3$"
+GCC: (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Scrt1.o
+__abi_tag
+crtstuff.c
+root@cc35861dabf3:/app# cat > /tmp/analyze.py << 'EOF'
+> import numpy as np
+> from PIL import Image
+> img = np.array(Image.open('image.ppm'))
+> print('shape', img.shape, 'dtype', img.dtype)
+> print('unique colors approx', len(np.unique(img.reshape(-1,3),axis=0)))
+> print('min', img.min(axis=(0,1)), 'max', img.max(axis=(0,1)))
+> # sample a few rows
+> for y in [0, 100, 300, 599]:
+>     print('row', y, 'first px', img[y,0], 'mid px', img[y,400])
+> # row difference to check gradient
+> row0 = img[0].astype(int)
+> print('row0 diff first 10 cols:', np.diff(row0[:10], axis=0).sum(axis=1))
+> # overall: is it a horizontal gradient?
+> col0 = img[:,0].astype(int)
+> print('col0 diff first 10 rows:', np.diff(col0[:10], axis=0).sum(axis=1))
+> # check if image is separable-ish: compute mean color per row and per column
+> data = img.reshape(-1,3).astype(float)
+> print('mean color', data.mean(axis=0))
+> EOF
+root@cc35861dabf3:/app# .venv/bin/python /tmp/analyze.py
+shape (600, 800, 3) dtype uint8
+unique colors approx 1301
+min [14  0  0] max [198 227 255]
+row 0 first px [159 197 255] mid px [146 190 255]
+row 100 first px [168 203 255] mid px [156 196 255]
+row 300 first px [121 125 130] mid px [51 10 10]
+row 599 first px [102 102 102] mid px [145 145 145]
+row0 diff first 10 cols: [ 0  0 -1  0  0  0  0  0  0]
+col0 diff first 10 rows: [0 0 0 1 0 0 0 0 0]
+mean color [135.41925    151.48912917 177.1025875 ]
+root@cc35861dabf3:/app# cat > /tmp/ascii.py << 'EOF'
+> import numpy as np
+> from PIL import Image
+> img = np.array(Image.open('image.ppm')).astype(float)
+> H,W,_ = img.shape
+> lum = img.mean(axis=2)
+> chars = ' .:-=+*#%@'
+> sh, sw = 50, 100
+> for j in range(sh):
+>     row=''
+>     for i in range(sw):
+>         y0=j*H//sh; y1=(j+1)*H//sh
+>         x0=i*W//sw; x1=(i+1)*W//sw
+>         v = lum[y0:y1, x0:x1].mean()
+>         row += chars[int(v/255*(len(chars)-1))]
+>     print(row)
+> EOF
+root@cc35861dabf3:/app# .venv/bin/python /tmp/ascii.py
+##################################********************************##################################
+#######################################**********************#######################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+####################################################################################################
+###############################################*+==+*###############################################
+#############################################=.  ....:=#############################################
+###########################################*.       ...:*###########################################
+------------=------------------------------.          ..:-----------------------------=-=-----------
+-=---=---=--=--=---=----------------------:            ..-------------------------=--==:==--=---=---
+-==---===-:=+=--===---=------=-------=----.             .:---=------=----=-----==---==-:-==-:-==----
+--:-=+=-::-=+=-::-===----===-------=-=----:              :-=-=-=----===----====-:-====-:-=+==-:-===-
+-==+==-::--=+==-::--====----====-----=--=--              -=----==-=-----====--:--====--:--=++=-:::-=
+=+==-:::--==+==--::--==+==--:----=====-:---:            -=====---::-===+=---::--=++==-:::--=++==-:::
++=---:::--==+===--::---=======-:-----======-:.        .==-----:-====+=----::-====+==--:::--==++==--:
+=---::----==+==----::-----=+=-----------:::.......  .-----------==------:-----====----:::---==++==--
+-:::::--=+++++==-:::::::-=+++++=-:.      .........   :::::-+++++++=-:::::::-=+++++==-::::::--=+++++=
+--::-------=+=======-::-----::.......... ..........:-=======--------:-=========--------:--======+==-
+:::::::-==+++++++=-:::::..   ...........         .=+++++++++-:::::::::-=++++++++=-:::::::::-==++++++
+:::-==++++++++=-::::::.    ............      ..:::+++++++++++-::::::::::-=+++++++++=-::::::::::-==++
+:----------=+=------:...  ...............:--------------------------------==-----------:----------==
+:::::::::-=+++++++++:..           ..:==+++++++++++:::::::::::::-++++++++++++=-::::::::::::-=++++++++
+::::::-=++++++++++++=:.........::::-++++++++++++++::::::::::::::-+++++++++++++=-:::::::::::::-=+++++
+:::-=+++++++++++++=-::::::::::::::-+++++++++++++++:::::::::::::::-++++++++++++++=-::::::::::::::-=++
+-=++++++++++++++=-:::::::::::::::-++++++++++++++++::::::::::::::::-+++++++++++++++=-:::::::::::::::-
+++++++++++++++=-::::::::::::::::-+++++++++++++++++:::::::::::::::::-++++++++++++++++=-::::::::::::::
+=============-------------------==================------------------==================-:------------
+::::::::::-=++++++++++++++++++-:::::::::::::::::::+++++++++++++++++++-::::::::::::::::::-=++++++++++
+::::::::-=+++++++++++++++++++-::::::::::::::::::::++++++++++++++++++++-:::::::::::::::::::-=++++++++
+::::::-=++++++++++++++++++++-:::::::::::::::::::::+++++++++++++++++++++-::::::::::::::::::::-=++++++
+::::-=+++++++++++++++++++++-::::::::::::::::::::::++++++++++++++++++++++-:::::::::::::::::::::-=++++
+::-=++++++++++++++++++++++-:::::::::::::::::::::::+++++++++++++++++++++++-::::::::::::::::::::::-=++
+-=+++++++++++++++++++++++-::::::::::::::::::::::::++++++++++++++++++++++++-:::::::::::::::::::::::-=
+root@cc35861dabf3:/app# cat > /tmp/prof.py << 'EOF'
+> import numpy as np
+> from PIL import Image
+> img = np.array(Image.open('image.ppm')).astype(float)
+> H,W,_ = img.shape
+> # row profile (down sample rows to 60)
+> for j in range(0,H,10):
+>     r = img[j].mean(axis=0)
+>     print(f'row {j:3d}: R{r[0]:6.1f} G{r[1]:6.1f} B{r[2]:6.1f}')
+> EOF
+root@cc35861dabf3:/app# .venv/bin/python /tmp/prof.py
+row   0: R 151.2 G 192.9 B 255.0
+row  10: R 152.0 G 193.4 B 255.0
+row  20: R 152.9 G 193.9 B 255.0
+row  30: R 153.7 G 194.4 B 255.0
+row  40: R 154.7 G 195.0 B 255.0
+row  50: R 155.6 G 195.6 B 255.0
+row  60: R 156.6 G 196.1 B 255.0
+row  70: R 157.6 G 196.8 B 255.0
+row  80: R 158.7 G 197.4 B 255.0
+row  90: R 159.8 G 198.1 B 255.0
+row 100: R 160.9 G 198.8 B 255.0
+row 110: R 162.1 G 199.5 B 255.0
+row 120: R 163.4 G 200.2 B 255.0
+row 130: R 164.6 G 200.9 B 255.0
+row 140: R 165.9 G 201.7 B 255.0
+row 150: R 167.3 G 202.6 B 255.0
+row 160: R 168.7 G 203.4 B 255.0
+row 170: R 170.1 G 204.3 B 255.0
+row 180: R 171.6 G 205.2 B 255.0
+row 190: R 173.2 G 206.1 B 255.0
+row 200: R 174.7 G 207.0 B 255.0
+row 210: R 176.2 G 207.9 B 255.0
+row 220: R 177.8 G 208.9 B 255.0
+row 230: R 179.5 G 209.9 B 255.0
+row 240: R 181.2 G 210.9 B 255.0
+row 250: R 182.9 G 211.9 B 255.0
+row 260: R 184.5 G 212.9 B 255.0
+row 270: R 185.2 G 209.5 B 249.5
+row 280: R 179.2 G 197.9 B 234.3
+row 290: R 176.3 G 192.8 B 227.3
+row 300: R 109.7 G 104.8 B 107.7
+row 310: R 102.4 G  95.4 B  95.4
+row 320: R 101.6 G  94.7 B  94.7
+row 330: R 101.1 G  94.4 B  94.4
+row 340: R 100.9 G  94.5 B  94.5
+row 350: R 101.1 G  95.1 B  95.1
+row 360: R 101.6 G  96.1 B  96.1
+row 370: R 102.6 G  97.8 B  97.8
+row 380: R 104.1 G 100.4 B 100.4
+row 390: R  99.6 G  97.9 B  97.9
+row 400: R  95.5 G  95.5 B  95.5
+row 410: R  92.5 G  92.5 B  92.5
+row 420: R  91.8 G  91.8 B  91.8
+row 430: R  91.6 G  91.6 B  91.6
+row 440: R  91.5 G  91.5 B  91.5
+row 450: R  94.0 G  94.0 B  94.0
+row 460: R  98.9 G  98.9 B  98.9
+row 470: R 105.0 G 105.0 B 105.0
+row 480: R 109.5 G 109.5 B 109.5
+row 490: R 109.5 G 109.5 B 109.5
+row 500: R 109.5 G 109.5 B 109.5
+row 510: R 109.5 G 109.5 B 109.5
+row 520: R 109.5 G 109.5 B 109.5
+row 530: R 109.5 G 109.5 B 109.5
+row 540: R 109.5 G 109.5 B 109.5
+row 550: R 109.5 G 109.5 B 109.5
+row 560: R 109.5 G 109.5 B 109.5
+row 570: R 109.5 G 109.5 B 109.5
+row 580: R 109.5 G 109.5 B 109.5
+row 590: R 109.5 G 109.5 B 109.5
+root@cc35861dabf3:/app# head -c 40 high_res.ppm | cat -v; echo; echo '---'; which ffmpeg
+P3
+8800 6600
+255
+159 197 255
+159 197 255
+---
+/usr/bin/ffmpeg
+root@cc35861dabf3:/app# md5sum image.ppm; ./orig; echo exit=$?
+df2ac251b5d4fece748708c8437985de  image.ppm
+Creating high-resolution image: 8800x6600
+This will be downsampled with ffmpeg after rendering
+Rendering high-resolution image...
+Progress: 100.0%
+Rendering complete
+Wrote image to high_res.ppm
+
+Downsampling with ffmpeg...
+ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers
+  built with gcc 13 (Ubuntu 13.2.0-23ubuntu3)
+  configuration: --prefix=/usr --extra-version=3ubuntu5 --toolchain=hardened --libdir=/usr/lib/x86_64-linux-gnu --incdir=/usr/include/x86_64-linux-gnu --arch=am
+d64 --enable-gpl --disable-stripping --disable-omx --enable-gnutls --enable-libaom --enable-libass --enable-libbs2b --enable-libcaca --enable-libcdio --enable-l
+ibcodec2 --enable-libdav1d --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libglslang --enable-libgme --enable-libgsm
+ --enable-libharfbuzz --enable-libmp3lame --enable-libmysofa --enable-libopenjpeg --enable-libopenmpt --enable-libopus --enable-librubberband --enable-libshine
+--enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libtheora --enable-libtwolame --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-lib
+webp --enable-libx265 --enable-libxml2 --enable-libxvid --enable-libzimg --enable-openal --enable-opencl --enable-opengl --disable-sndio --enable-libvpl --disab
+le-libmfx --enable-libdc1394 --enable-libdrm --enable-libiec61883 --enable-chromaprint --enable-frei0r --enable-ladspa --enable-libbluray --enable-libjack --ena
+ble-libpulse --enable-librabbitmq --enable-librist --enable-libsrt --enable-libssh --enable-libsvtav1 --enable-libx264 --enable-libzmq --enable-libzvbi --enable
+-lv2 --enable-sdl2 --enable-libplacebo --enable-librav1e --enable-pocketsphinx --enable-librsvg --enable-libjxl --enable-shared
+  libavutil      58. 29.100 / 58. 29.100
+  libavcodec     60. 31.102 / 60. 31.102
+  libavformat    60. 16.100 / 60. 16.100
+  libavdevice    60.  3.100 / 60.  3.100
+  libavfilter     9. 12.100 /  9. 12.100
+  libswscale      7.  5.100 /  7.  5.100
+  libswresample   4. 12.100 /  4. 12.100
+  libpostproc    57.  3.100 / 57.  3.100
+Input #0, ppm_pipe, from 'high_res.ppm':
+  Duration: N/A, bitrate: N/A
+  Stream #0:0: Video: ppm, rgb24, 8800x6600, 25 fps, 25 tbr, 25 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (ppm (native) -> ppm (native))
+Press [q] to stop, [?] for help
+Output #0, image2, to 'reconstructed.ppm':
+  Metadata:
+    encoder         : Lavf60.16.100
+  Stream #0:0: Video: ppm, rgb24(pc, gbr/unknown/unknown, progressive), 800x600, q=2-31, 200 kb/s, 25 fps, 25 tbn
+    Metadata:
+      encoder         : Lavc60.31.102 ppm
+[image2 @ 0x557da3acdb40] The specified filename 'reconstructed.ppm' does not contain an image sequence pattern or a pattern is invalid.
+[image2 @ 0x557da3acdb40] Use a pattern such as %03d for an image sequence or use the -update option (with -frames:v 1 if needed) to write a single image.
+[out#0/image2 @ 0x557da3acccc0] video:1406kB audio:0kB subtitle:0kB other streams:0kB global headers:0kB muxing overhead: unknown
+frame=    1 fps=0.4 q=-0.0 Lsize=N/A time=00:00:00.00 bitrate=N/A speed=   0x
+Successfully downsampled to reconstructed.ppm
+Done.
+exit=0
+root@cc35861dabf3:/app# md5sum image.ppm reconstructed.ppm; ls -la reconstructed.ppm
+df2ac251b5d4fece748708c8437985de  image.ppm
+df2ac251b5d4fece748708c8437985de  reconstructed.ppm
+-rw-r--r-- 1 root root 1440015 Jul  2 19:56 reconstructed.ppm
+root@cc35861dabf3:/app#

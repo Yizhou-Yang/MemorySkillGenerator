@@ -1,0 +1,39 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@2739e611cf42:/app# cat > /tmp/diag2.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> data=[]
+> for line in open('/app/graphene.dat'):
+>     line=line.strip()
+>     if not line: continue
+>     p=line.split()
+>     if len(p)<2: continue
+>     data.append((float(p[0].replace(',','.')), float(p[1].replace(',','.'))))
+> data=np.array(data)
+> x=data[:,0]; y=data[:,1]
+> def lor(x,x0,g,a,o): return o+a/(1+((x-x0)/g)**2)
+> c=19139.0
+> for hw in (800,1200,1800,2500,3500):
+>     m=(x>c-hw)&(x<c+hw)
+>     xw,yw=x[m],y[m]
+>     o0=np.median(yw[(np.abs(xw-c)>0.7*hw)])
+>     a0=yw.max()-o0
+>     p0=[c,hw*0.25,a0,o0]
+>     try:
+>         popt,_=curve_fit(lor,xw,yw,p0=p0,maxfev=200000)
+>         rms=np.sqrt(np.mean((yw-lor(xw,*popt))**2))
+>         print('hw=%5d  x0=%.1f g=%.1f amp=%.1f off=%.1f rms=%.1f'%(hw,popt[0],abs(popt[1]),popt[2],popt[3],rms))
+>     except Exception as e:
+>         print('hw=%5d failed: %s'%(hw,e))
+> EOF
+root@2739e611cf42:/app# python3 /tmp/diag2.py
+hw=  800  x0=19201.0 g=526.3 amp=87851.7 off=-4181.4 rms=5168.6
+hw= 1200  x0=19197.5 g=439.8 amp=76427.5 off=8392.8 rms=5616.2
+hw= 1800  x0=19196.2 g=416.4 amp=74459.0 off=10879.4 rms=5217.0
+hw= 2500  x0=19196.9 g=402.8 amp=73588.4 off=12122.2 rms=4632.2
+hw= 3500  x0=19198.3 g=388.2 amp=72874.6 off=13294.9 rms=4158.0
+root@2739e611cf42:/app#

@@ -1,0 +1,30 @@
+{
+  "analysis": "Mounting the ISO failed (no privileges for loop mount). I'll pursue two parallel tracks: (1) try booting the ISO directly with qemu and a telnet-serial, in case Alpine offers a serial getty, and (2) prepare a robust fallback that extracts the kernel+initramfs from the ISO in userspace (via a small ISO9660 parser) and boots with console=ttyS0. Both qemu and a polling helper run in the background, while I build the extractor in the foreground.",
+  "plan": "1. Write /tmp/wait_login.py — a background poller that connects to 127.0.0.1:6665, sends a newline, and checks for 'login'. 2. Launch qemu in the background booting the ISO via -cdrom with serial redirected to a telnet server on 6665. 3. Launch the poller in the background. 4. Write and run /tmp/extract.py to parse the ISO9660 filesystem, locate vmlinuz/initramfs and the bootloader config (in case I need to boot via -kernel/-initrd with console=ttyS0). Then assess which path worked.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/wait_login.py << 'PYEOF'\nimport socket, time, sys\nfor i in range(120):\n    try:\n        s = socket.create_connection(('127.0.0.1',6665), timeout=2)\n        s.settimeout(2)\n        data = b''\n        try:\n            data += s.recv(4096)\n        except Exception:\n            pass\n        try:\n            s.sendall(b'\\r\\n')\n        except Exception:\n            pass\n        time.sleep(0.6)\n        try:\n            data += s.recv(4096)\n        except Exception:\n            pass\n        s.close()\n        if b'login' in data.lower():\n            print('READY after %d tries' % i)\n            sys.exit(0)\n    except Exception:\n        pass\n    time.sleep(3)\nprint('NOTREADY')\nsys.exit(1)\nPYEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cat > /tmp/extract.py << 'PYEOF'\nimport sys\nSECTOR=2048\nf=open('/app/alpine.iso','rb')\ndef rd(lba,n):\n    f.seek(lba*SECTOR); return f.read(n*SECTOR)\npvd=rd(16,1)\nassert pvd[1:6]==b'CD001', 'no iso'\ndef parse(rec):\n    L=rec[0]\n    if L==0: return None\n    loc=int.from_bytes(rec[2:6],'little')\n    dlen=int.from_bytes(rec[10:14],'little')\n    flags=rec[25]\n    nl=rec[32]\n    name=rec[33:33+nl]\n    return dict(loc=loc,dlen=dlen,is_dir=bool(flags&2),name=name,length=L)\nroot=parse(pvd[156:156+34])\nresults=[]\ndef walk(rec, path):\n    data=rd(rec['loc'], max(1,(rec['dlen']+SECTOR-1)//SECTOR))\n    off=0\n    while off < len(data):\n        L=data[off]\n        if L==0:\n            rem=SECTOR-(off%SECTOR)\n            off+=rem\n            continue\n        nl=data[off+32]\n        nm=data[off+33:off+33+nl]\n        entry=parse(data[off:off+L])\n        off+=L\n        if entry is None: continue\n        try:\n            nmstr=nm.decode('ascii').strip()\n        except:\n            nmstr=repr(nm)\n        if ';' in nmstr:\n            nmstr=nmstr.split(';')[0]\n        full=path+'/'+nmstr\n        results.append((full,entry['loc'],entry['dlen'],entry['is_dir']))\n        if entry['is_dir'] and nm not in (b'\\x00',b'\\x01'):\n            walk(entry,full)\nwalk(root,'')\nkernels=[(p,l,d) for (p,l,d,idr) in results if (not idr) and 'VMLINUZ' in p.upper()]\ninitrds=[(p,l,d) for (p,l,d,idr) in results if (not idr) and 'INITRAM' in p.upper()]\ncfgs=[(p,l,d,idr) for (p,l,d,idr) in results if (not idr) and (p.upper().endswith('.CFG') or 'ISOLINUX' in p.upper() or 'SYSLINUX' in p.upper())]\nprint('KERNELS:')\nfor k in kernels: print('  ',k[0],k[1],k[2])\nprint('INITRDS:')\nfor k in initrds: print('  ',k[0],k[1],k[2])\nprint('CFGS:')\nfor k in cfgs: print('  ',k[0],k[1],k[2])\ndef ext(p):\n    return p.rsplit('.',1)[-1].upper() if '.' in p else ''\nkext={ext(p):(p,l,d) for p,l,d in kernels}\niext={ext(p):(p,l,d) for p,l,d in initrds}\nchosen=None\nfor tag in ['VRT','LTS','EDG']:\n    if tag in kext and tag in iext:\n        chosen=tag; break\nif chosen is None and kernels and initrds:\n    chosen=ext(kernels[0][0])\nprint('CHOSEN TAG', chosen)\nif chosen:\n    kp,kl,kd=kext[chosen]\n    ip,il,id_=iext[chosen]\n    kdata=rd(kl, (kd+SECTOR-1)//SECTOR)[:kd]\n    idata=rd(il, (id_+SECTOR-1)//SECTOR)[:id_]\n    open('/tmp/vmlinuz','wb').write(kdata)\n    open('/tmp/initramfs','wb').write(idata)\n    print('wrote /tmp/vmlinuz (%d) /tmp/initramfs (%d)'%(kd,id_))\n    if cfgs:\n        cp,cl,cd,_=cfgs[0]\n        cfgdata=rd(cl,(cd+SECTOR-1)//SECTOR)[:cd]\n        open('/tmp/cfg.txt','wb').write(cfgdata)\n        print('=== CFG ===')\n        print(cfgdata.decode('latin1'))\nPYEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "nohup qemu-system-x86_64 -m 1024 -smp 2 -no-kvm -boot d -display none -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -serial telnet:127.0.0.1:6665,server,nowait -monitor none > /tmp/qemu.log 2>&1 &\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "nohup python3 /tmp/wait_login.py > /tmp/poll.out 2>&1 &\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "sleep 1; pgrep -a qemu-system-x86_64 | head; echo '--- poll.out ---'; cat /tmp/poll.out\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "python3 /tmp/extract.py\n",
+      "duration": 5.0
+    }
+  ]
+}

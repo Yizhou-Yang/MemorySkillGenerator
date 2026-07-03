@@ -1,0 +1,42 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@6e22387de74f:/app/UPET# cat > /tmp/dbg.py << 'EOF'
+> import traceback
+> import datasets.load as dl
+> from datasets.load import HubDatasetModuleFactoryWithScript
+> orig = HubDatasetModuleFactoryWithScript.__init__
+> def new(self, name, *a, **k):
+>     try:
+>         orig(self, name, *a, **k)
+>     except Exception:
+>         print('=== WithScript factory error ===')
+>         traceback.print_exc()
+>         raise
+> HubDatasetModuleFactoryWithScript.__init__ = new
+> from datasets.load import load_dataset
+> try:
+>     load_dataset('super_glue','rte')
+> except Exception:
+>     print('=== final error ===')
+>     traceback.print_exc()
+> EOF
+root@6e22387de74f:/app/UPET# python3 /tmp/dbg.py 2>&1 | tail -40
+Traceback (most recent call last):
+  File "/tmp/dbg.py", line 15, in <module>
+    load_dataset('super_glue','rte')
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 1675, in load_dataset
+    builder_instance = load_dataset_builder(
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 1452, in load_dataset_builder
+    dataset_module = dataset_module_factory(
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 1177, in dataset_module_factory
+    raise e1 from None
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 1156, in dataset_module_factory
+    return HubDatasetModuleFactoryWithoutScript(
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 743, in __init__
+    assert self.name.count("/") == 1
+AssertionError
+=== final error ===
+root@6e22387de74f:/app/UPET#

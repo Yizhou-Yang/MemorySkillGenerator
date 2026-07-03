@@ -1,0 +1,340 @@
+root@411fe746526f:/app# asciinema rec --stdin /logs/agent.cast
+asciinema: recording asciicast to /logs/agent.cast
+asciinema: press <ctrl-d> or type "exit" when you're done
+root@411fe746526f:/app# clear
+root@411fe746526f:/app# ls -la /app
+total 980176
+drwxr-xr-x  2 root root       4096 Jul  2 15:14 .
+drwxr-xr-x 23 root root       4096 Jul  2 21:22 ..
+-rw-r--r--  1 root root     197120 Jul  2 15:14 alpine-disk.qcow2
+-rw-r--r--  1 root root 1003487232 Dec  7  2023 alpine.iso
+root@411fe746526f:/app# find / -name 'alpine*.iso' 2>/dev/null
+/app/alpine.iso
+root@411fe746526f:/app# which qemu-system-x86_64 qemu-system-i386 sshpass ssh 2>/dev/null
+/usr/bin/qemu-system-x86_64
+/usr/bin/qemu-system-i386
+/usr/bin/ssh
+root@411fe746526f:/app# which mount losetup bsdtar 7z socat nc telnet wget mkisofs xorriso; echo DONE
+/bin/mount
+/sbin/losetup
+/bin/nc
+/usr/bin/telnet
+/usr/bin/wget
+DONE
+root@411fe746526f:/app# mkdir -p /mnt/iso && mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1; echo MNT=$?
+mount: /mnt/iso: mount failed: Operation not permitted.
+MNT=1
+root@411fe746526f:/app# ls -la /mnt/iso/boot 2>/dev/null; echo ---; ls /mnt/iso/boot/grub 2>/dev/null
+---
+root@411fe746526f:/app# which python3 python; ls -l /dev/kvm 2>&1; echo ---
+/usr/bin/python3
+ls: cannot access '/dev/kvm': No such file or directory
+---
+root@411fe746526f:/app# qemu-img info /app/alpine-disk.qcow2 2>&1 | head
+image: /app/alpine-disk.qcow2
+file format: qcow2
+virtual size: 32 GiB (34359738368 bytes)
+disk size: 196 KiB
+cluster_size: 65536
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+root@411fe746526f:/app# cat > /app/launch.sh <<'EOF'
+> #!/bin/sh
+> cd /app
+> nohup qemu-system-x86_64 \
+>   -m 2048 -smp 2 \
+>   -cdrom /app/alpine.iso \
+>   -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 \
+>   -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+>   -device e1000,netdev=net0 \
+>   -display none \
+>   -serial telnet:127.0.0.1:4545,server,nowait \
+>   -monitor none \
+>   > /app/qemu.log 2>&1 &
+> echo "launched qemu pid $!"
+> EOF
+root@411fe746526f:/app# chmod +x /app/launch.sh
+root@411fe746526f:/app# bash /app/launch.sh
+launched qemu pid 236
+root@411fe746526f:/app# sleep 3; python3 -c "import socket; socket.create_connection(('127.0.0.1',4545),2); print('serial port 4545 UP')" 2>&1; echo ---; tail -
+n 20 /app/qemu.log
+serial port 4545 UP
+---
+root@411fe746526f:/app# wget -q -O /dev/null https://dl-cdn.alpinelinux.org/alpine/v3.19/main/x86_64/APKINDEX.tar.gz; echo "internet_check_exit=$?"
+internet_check_exit=0
+root@411fe746526f:/app# cat > /app/probe.py <<'PY'
+> import telnetlib, time, sys
+> try:
+>     tn = telnetlib.Telnet('127.0.0.1', 4545, timeout=30)
+> except Exception as e:
+>     print('connect error', e); sys.exit(1)
+> buf=b''
+> end=time.time()+120
+> got=False
+> while time.time()<end:
+>     try:
+>         d=tn.read_very_eager()
+>     except Exception:
+>         d=b''
+>     if d:
+>         buf+=d
+>         sys.stdout.buffer.write(d); sys.stdout.buffer.flush()
+>         if b'login:' in buf:
+>             got=True
+>             print('\n>>> LOGIN PROMPT DETECTED <<<')
+>             break
+>     time.sleep(0.1)
+> print('\n>>> PROBE_DONE got_login=%s <<<' % got)
+> PY
+root@411fe746526f:/app# python3 /app/probe.py
+
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+>>> LOGIN PROMPT DETECTED <<<
+
+>>> PROBE_DONE got_login=True <<<
+root@411fe746526f:/app# cat > /app/run_batch.py <<'PY'
+> import telnetlib, time, sys
+>
+> def expect(tn, pat, timeout=40):
+>     end=time.time()+timeout
+>     buf=b''
+>     while time.time()<end:
+>         try:
+>             d=tn.read_very_eager()
+>         except Exception:
+>             d=b''
+>         if d:
+>             buf+=d
+>             if pat in buf:
+>                 return buf
+>         time.sleep(0.05)
+>     return buf
+>
+> tn=telnetlib.Telnet('127.0.0.1',4545,timeout=30)
+> time.sleep(0.5)
+> tn.read_very_eager()
+> tn.write(b'root\n')
+> buf=expect(tn,b'localhost:~#',timeout=25)
+> sys.stdout.buffer.write(b'---LOGIN---\n'+buf)
+> sys.stdout.buffer.flush()
+>
+> for line in sys.stdin:
+>     cmd=line.rstrip('\n').encode()
+>     if not cmd.strip():
+>         continue
+>     tn.write(cmd+b'\n')
+>     time.sleep(0.3)
+>     out=expect(tn,b'localhost:~#',timeout=45)
+>     sys.stdout.buffer.write(b'\n===CMD: '+cmd+b'===\n')
+>     sys.stdout.buffer.write(out)
+>     sys.stdout.buffer.flush()
+>
+> tn.write(b'exit\n')
+> PY
+root@411fe746526f:/app# printf '%s\n' 'hostname' 'cat /etc/apk/repositories' 'which sshd ssh apk' 'ls /usr/sbin/sshd 2>&1' 'ip -o link' 'cat /etc/os-release | h
+ead -3' | python3 /app/run_batch.py
+---LOGIN---
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# ^[[40;14R
+===CMD: hostname===
+hostname
+localhost
+localhost:~# ^[[40;14R
+===CMD: cat /etc/apk/repositories===
+cat /etc/apk/repositories
+/media/cdrom/apks
+localhost:~# ^[[40;14R
+===CMD: which sshd ssh apk===
+which sshd ssh apk
+/sbin/apk
+localhost:~# ^[[40;14R
+===CMD: ls /usr/sbin/sshd 2>&1===
+ls /usr/sbin/sshd 2>&1
+ls: /usr/sbin/sshd: No such file or directory
+localhost:~# ^[[40;14R
+===CMD: ip -o link===
+ip -o link
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN qlen 1000\    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000\    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+localhost:~# ^[[40;14R
+===CMD: cat /etc/os-release | head -3===
+cat /etc/os-release | head -3
+NAME="Alpine Linux"
+ID=alpine
+VERSION_ID=3.19.0
+localhost:~# ^[[40;14Rroot@411fe746526f:/app# ;14R;14R;14R;14R;14R;14R;14Rprintf '%s\n' 'ip link set eth0 up' 'udhcpc -i eth0 -b' 'sleep 2; ip addr show eth0' '
+cat /etc/resolv.conf' 'apk add openssh' | python3 /app/run_batch.py
+bash: syntax error near unexpected token `;'
+root@411fe746526f:/app# ^C
+root@411fe746526f:/app# printf '%s\n' 'ip link set eth0 up' 'udhcpc -i eth0 -b' 'sleep 2; ip addr show eth0' 'cat /etc/resolv.conf' 'apk add openssh' | python3
+/app/run_batch.py
+---LOGIN---
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# ^[[40;14R
+===CMD: ip link set eth0 up===
+ip link set eth0 up
+localhost:~# ^[[40;14R
+===CMD: udhcpc -i eth0 -b===
+udhcpc -i eth0 -b
+udhcpc: started, v1.36.1
+udhcpc: broadcasting discover
+udhcpc: broadcasting select for 10.0.2.15, server 10.0.2.2
+udhcpc: lease of 10.0.2.15 obtained from 10.0.2.2, lease time 86400
+localhost:~# ^[[40;14R
+===CMD: sleep 2; ip addr show eth0===
+sleep 2; ip addr show eth0
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.2.15/24 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 fec0::5054:ff:fe12:3456/64 scope site dynamic flags 100
+       valid_lft 86399sec preferred_lft 14399sec
+    inet6 fe80::5054:ff:fe12:3456/64 scope link
+       valid_lft forever preferred_lft forever
+localhost:~# ^[[40;14R
+===CMD: cat /etc/resolv.conf===
+cat /etc/resolv.conf
+nameserver 10.0.2.3
+localhost:~# ^[[40;14R
+===CMD: apk add openssh===
+apk add openssh
+(1/11) Installing openssh-keygen (9.5_p1-r0)
+(2/11) Installing ncurses-terminfo-base (6.4_p20231125-r0)
+(3/11) Installing libncursesw (6.4_p20231125-r0)
+(4/11) Installing libedit (20230828.3.1-r3)
+(5/11) Installing openssh-client-common (9.5_p1-r0)
+(6/11) Installing openssh-client-default (9.5_p1-r0)
+(7/11) Installing openssh-sftp-server (9.5_p1-r0)
+(8/11) Installing openssh-server-common (9.5_p1-r0)
+(9/11) Installing openssh-server-common-openrc (9.5_p1-r0)
+(10/11) Installing openssh-server (9.5_p1-r0)
+(11/11) Installing openssh (9.5_p1-r0)
+Executing busybox-1.36.1-r15.trigger
+OK: 17 MiB in 38 packages
+localhost:~# ^[[40;14Rroot@411fe746526f:/app# ;14R;14R;14R;14R;14R;14R^C
+root@411fe746526f:/app# printf '%s\n' "echo 'root:password123' | chpasswd" 'ssh-keygen -A' "sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/; s/^#PasswordAuth
+entication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" 'grep -E "PermitRootLogin|PasswordAuthentication" /etc/ssh/sshd_config' '/usr/sbin/sshd' 'sleep
+1; ps w | grep -v grep | grep sshd' 'netstat -tln 2>/dev/null | grep :22 || ss -tln 2>/dev/null | grep :22' | python3 /app/run_batch.py
+---LOGIN---
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# ^[[40;14R
+===CMD: echo 'root:password123' | chpasswd===
+echo 'root:password123' | chpasswd
+chpasswd: password for 'root' changed
+localhost:~# ^[[40;14R
+===CMD: ssh-keygen -A===
+ssh-keygen -A
+ssh-keygen: generating new host keys: RSA ECDSA ED25519
+localhost:~# ^[[40;14R
+===CMD: sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/; s/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config===
+sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/; s/^#PasswordAut
+hentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+localhost:~# ^[[40;14R
+===CMD: grep -E "PermitRootLogin|PasswordAuthentication" /etc/ssh/sshd_config===
+grep -E "PermitRootLogin|PasswordAuthentication" /etc/ssh/sshd_conf
+ig
+PermitRootLogin yes
+PasswordAuthentication yes
+# PasswordAuthentication.  Depending on your PAM configuration,
+# the setting of "PermitRootLogin prohibit-password".
+# PAM authentication, then enable this but set PasswordAuthentication
+localhost:~# ^[[40;14R
+===CMD: /usr/sbin/sshd===
+/usr/sbin/sshd
+localhost:~# ^[[40;14R
+===CMD: sleep 1; ps w | grep -v grep | grep sshd===
+sleep 1; ps w | grep -v grep | grep sshd
+ 2071 root      0:00 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+localhost:~# ^[[40;14R
+===CMD: netstat -tln 2>/dev/null | grep :22 || ss -tln 2>/dev/null | grep :22===
+netstat -tln 2>/dev/null | grep :22 || ss -tln 2>/dev/null | grep :
+22
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN
+tcp        0      0 :::22                   :::*                    LISTEN
+localhost:~# ^[[40;14Rroot@411fe746526f:/app# ;14R;14R;14R;14R;14R;14R;14R;14RC-c
+bash: syntax error near unexpected token `;'
+root@411fe746526f:/app# nc -w3 127.0.0.1 2222 </dev/null | head -1; echo "banner_exit=$?"
+SSH-2.0-OpenSSH_9.5
+banner_exit=0
+root@411fe746526f:/app# cat > /app/test_ssh.py <<'PY'
+> import pty, os, time, sys, select
+> cmd=['ssh','-p','2222','-o','StrictHostKeyChecking=no','-o','UserKnownHostsFile=/dev/null','-o','PreferredAuthentications=password','-o','PubkeyAuthentication
+=no','root@localhost','id; hostname; echo MARKER_DONE']
+> pid, fd = pty.fork()
+> if pid==0:
+>     os.execvp('ssh', cmd)
+> buf=b''
+> end=time.time()+30
+> sent=False
+> while time.time()<end:
+>     r,_,_=select.select([fd],[],[],0.5)
+>     if r:
+>         try:
+>             d=os.read(fd,4096)
+>         except OSError:
+>             break
+>         if d:
+>             buf+=d
+>             sys.stdout.buffer.write(d); sys.stdout.buffer.flush()
+>             if (not sent) and b'assword:' in buf:
+>                 os.write(fd,b'password123\n'); sent=True
+>             if b'MARKER_DONE' in buf:
+>                 break
+> print('\n=== TEST_DONE sent_password=%s ===' % sent)
+> PY
+root@411fe746526f:/app# python3 /app/test_ssh.py
+Warning: Permanently added '[localhost]:2222' (ECDSA) to the list of known hosts.
+root@localhost's password:
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+localhost
+MARKER_DONE
+
+=== TEST_DONE sent_password=True ===
+root@411fe746526f:/app# echo 'VM status:'; pgrep -a qemu-system-x86_64 | head -1; echo 'Forward: local 2222 -> guest 22 (sshd)'; echo 'Login: ssh -p 2222 root@l
+ocalhost  (password: password123)'
+VM status:
+bash: pgrep: command not found
+Forward: local 2222 -> guest 22 (sshd)
+Login: ssh -p 2222 root@localhost  (password: password123)
+root@411fe746526f:/app# ps -e -o pid,comm | grep qemu | head; echo '---'; python3 -c "import socket; socket.create_connection(('127.0.0.1',2222),2); print('port
+ 2222 reachable')"
+bash: ps: command not found
+---
+port 2222 reachable
+root@411fe746526f:/app#

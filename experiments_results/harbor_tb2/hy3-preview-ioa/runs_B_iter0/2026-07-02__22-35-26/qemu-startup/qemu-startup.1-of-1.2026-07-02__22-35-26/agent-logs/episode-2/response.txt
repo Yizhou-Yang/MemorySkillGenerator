@@ -1,0 +1,18 @@
+{
+  "analysis": "No /dev/kvm, so we must use TCG (software emulation) — slower booting. We have mount/losetup. The Alpine ISO does not, by default, enable a serial console, so if I just boot it with a serial redirect the login prompt would appear on tty0, not ttyS0. The reliable fix is to mount the ISO, extract its kernel+initramfs, and boot via -kernel/-initrd/-append while adding `console=ttyS0,115200`. That makes Alpine spawn a getty on ttyS0, which is our telnet serial. I'll first check tooling and mount the ISO to read the boot config.",
+  "plan": "1. Check for python3/timeout. 2. Loopback-mount the ISO read-only. 3. Inspect /mnt/iso/boot to find the kernel (vmlinuz-*), initramfs, and the syslinux/isolinux append line so I can replicate Alpine's exact boot params plus console=ttyS0. Then I'll launch qemu with the serial redirected to a telnet server on 127.0.0.1:6665.",
+  "commands": [
+    {
+      "keystrokes": "which python3 timeout\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "mkdir -p /mnt/iso && mount -o loop,ro /app/alpine.iso /mnt/iso && echo MOUNTED || echo MOUNT_FAIL\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "ls -la /mnt/iso/boot\n",
+      "duration": 0.1
+    }
+  ]
+}

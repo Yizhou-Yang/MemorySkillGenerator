@@ -1,0 +1,228 @@
+root@bb91b1918065:/app# which yt-dlp ffmpeg python3 pip3 2>/dev/null; echo '---'; yt-dlp --version 2>/dev/null; ffmpeg -version 2>/dev/null | head -1
+/usr/local/bin/python3
+/usr/local/bin/pip3
+---
+root@bb91b1918065:/app# apt-get update 2>&1 | tail -2
+Fetched 9365 kB in 10s (951 kB/s)
+Reading package lists...
+root@bb91b1918065:/app# apt-get install -y ffmpeg 2>&1 | tail -5
+  gcc-12-base libgcc-s1 libstdc++6
+3 upgraded, 217 newly installed, 0 to remove and 44 not upgraded.
+Need to get 176 MB of archives.
+After this operation, 602 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@bb91b1918065:/app# df -h / /tmp /var; echo '---'; du -sh /var/cache/apt/archives 2>/dev/null
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  966G     0 100% /
+fuse-overlayfs  984G  966G     0 100% /
+fuse-overlayfs  984G  966G     0 100% /
+---
+8.0K    /var/cache/apt/archives
+root@bb91b1918065:/app# du -sh /tmp /root /app /var/log /home 2>/dev/null; echo '---'; df -i / 2>/dev/null
+12K     /tmp
+36K     /root
+4.0K    /app
+220K    /var/log
+4.0K    /home
+---
+Filesystem       Inodes    IUsed    IFree IUse% Mounted on
+fuse-overlayfs 65536000 13367165 52168835   21% /
+root@bb91b1918065:/app# du -sh /* 2>/dev/null | sort -h | tail -15
+0       /sys
+4.0K    /app
+4.0K    /boot
+4.0K    /home
+4.0K    /media
+4.0K    /mnt
+4.0K    /opt
+4.0K    /srv
+8.0K    /run
+12K     /logs
+12K     /tmp
+36K     /root
+1.4M    /etc
+26M     /var
+160M    /usr
+root@bb91b1918065:/app# df -h; echo '--- write test ---'; dd if=/dev/zero of=/tmp/testfile bs=1M count=10 2>&1; ls -la /tmp/testfile; rm -f /tmp/testfile
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  966G     0 100% /
+tmpfs            64M     0   64M   0% /dev
+tmpfs            32G     0   32G   0% /sys/fs/cgroup
+shm              64M   24K   64M   1% /dev/shm
+/dev/vdb        984G  966G     0 100% /logs
+overlay         984G  966G     0 100% /etc/hosts
+tmpfs            32G     0   32G   0% /proc/acpi
+tmpfs            32G     0   32G   0% /proc/scsi
+tmpfs            32G     0   32G   0% /sys/firmware
+--- write test ---
+10+0 records in
+10+0 records out
+10485760 bytes (10 MB, 10 MiB) copied, 0.438487 s, 23.9 MB/s
+-rw-r--r-- 1 root root 10485760 Jul  2 21:52 /tmp/testfile
+root@bb91b1918065:/app# dd if=/dev/zero of=/tmp/bigtest bs=1M count=300 2>&1; echo EXIT=$?; ls -la /tmp/bigtest 2>/dev/null; rm -f /tmp/bigtest
+300+0 records in
+300+0 records out
+314572800 bytes (315 MB, 300 MiB) copied, 0.59339 s, 530 MB/s
+EXIT=0
+-rw-r--r-- 1 root root 314572800 Jul  2 21:53 /tmp/bigtest
+root@bb91b1918065:/app# curl -sI --max-time 15 https://www.youtube.com 2>&1 | head -3; echo "YT_EXIT=$?"; echo '---pypi---'; curl -sI --max-time 15 https://pypi
+.org 2>&1 | head -1; echo "PIPY_EXIT=$?"
+bash: curl: command not found
+YT_EXIT=0
+---pypi---
+bash: curl: command not found
+PIPY_EXIT=0
+root@bb91b1918065:/app# python3 -c "import urllib.request as u;
+> for h in ['https://www.youtube.com','https://pypi.org','https://johnvansickle.com']:
+>     try:
+>         r=u.urlopen(h,timeout=15); print(h, r.status)
+>     except Exception as e: print(h,'ERR',e)"
+https://www.youtube.com 200
+https://pypi.org 200
+https://johnvansickle.com 200
+root@bb91b1918065:/app# pip3 install --quiet yt-dlp 2>&1 | tail -5; echo PIP_EXIT=$?; which yt-dlp; yt-dlp --version
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+PIP_EXIT=0
+/usr/local/bin/yt-dlp
+2026.06.09
+root@bb91b1918065:/app# cd /tmp && python3 -c "import urllib.request as u; u.urlretrieve('https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.
+tar.xz','/tmp/ff.tar.xz'); print('downloaded')"
+downloaded
+root@bb91b1918065:/tmp# tar -xf /tmp/ff.tar.xz -C /tmp 2>&1 | tail -3; echo TAR_EXIT=$?; ls -d /tmp/ffmpeg* 2>/dev/null
+tar (child): Error is not recoverable: exiting now
+tar: Child returned status 2
+tar: Error is not recoverable: exiting now
+TAR_EXIT=0
+root@bb91b1918065:/tmp# ls -la /tmp/ff.tar.xz; file /tmp/ff.tar.xz 2>/dev/null; which xz 2>/dev/null; echo '---'; head -c 6 /tmp/ff.tar.xz | xxd 2>/dev/null
+-rw-r--r-- 1 root root 41888096 Jul  2 21:55 /tmp/ff.tar.xz
+---
+root@bb91b1918065:/tmp# python3 -c "import lzma,tarfile,os; f=open('/tmp/ff.tar.xz','rb'); print('magic',f.read(6).hex())"
+magic fd377a585a00
+root@bb91b1918065:/tmp# python3 -c "import lzma,tarfile; tarfile.open('/tmp/ff.tar.xz',mode='r:xz').extractall('/tmp/ffextract'); print('extracted')" 2>&1 | tai
+l -3
+<string>:1: DeprecationWarning: Python 3.14 will, by default, filter extracted tar archives and reject files or modify their metadata. Use the filter argument t
+o control this behavior.
+  import lzma,tarfile; tarfile.open('/tmp/ff.tar.xz',mode='r:xz').extractall('/tmp/ffextract'); print('extracted')
+extracted
+root@bb91b1918065:/tmp# ls -la /tmp/ffextract; echo '---'; find /tmp/ffextract -name ffmpeg -type f
+total 12
+drwxr-xr-x 3 root root 4096 Jul  2 21:56 .
+drwxrwxrwt 4 root root 4096 Jul  2 21:56 ..
+drwxr-xr-x 4 1000 1000 4096 Aug 23  2024 ffmpeg-7.0.2-amd64-static
+---
+/tmp/ffextract/ffmpeg-7.0.2-amd64-static/ffmpeg
+root@bb91b1918065:/tmp# cp /tmp/ffextract/ffmpeg-7.0.2-amd64-static/ffmpeg /usr/local/bin/ffmpeg && chmod +x /usr/local/bin/ffmpeg && ffmpeg -version 2>/dev/nul
+l | head -1
+ffmpeg -version 2>&1 | head -1
+ffmpeg -version 2>&1 | head -1
+ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers
+root@bb91b1918065:/tmp# ffmpeg -version 2>&1 | head -1
+ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers
+root@bb91b1918065:/tmp# ffmpeg -version 2>&1 | head -1
+ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers
+root@bb91b1918065:/tmp#
+root@bb91b1918065:/tmp# echo READY; ffmpeg -version 2>&1 | head -1
+READY
+ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers
+root@bb91b1918065:/tmp# cd /app && yt-dlp -f 'mp4[ext=mp4]/best[ext=mp4]' -o 'me_at_the_zoo.%(ext)s' 'https://www.youtube.com/watch?v=jNQXAC9IVRw' 2>&1 | tail -
+15
+[youtube] Extracting URL: https://www.youtube.com/watch?v=jNQXAC9IVRw
+[youtube] jNQXAC9IVRw: Downloading webpage
+WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default; to use another runtime add  --js-runtimes RUNTIME[:PATH]  to
+ your command/config. YouTube extraction without a JS runtime has been deprecated, and some formats may be missing. See  https://github.com/yt-dlp/yt-dlp/wiki/E
+JS  for details on installing one
+[youtube] jNQXAC9IVRw: Downloading android vr player API JSON
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] jNQXAC9IVRw: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dl
+p/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtub
+e-cookies  for tips on effectively exporting YouTube cookies
+root@bb91b1918065:/app# yt-dlp --extractor-args 'youtube:player_client=tv' -f 'mp4[ext=mp4]/best[ext=mp4]' -o 'me_at_the_zoo.%(ext)s' 'https://www.youtube.com/w
+atch?v=jNQXAC9IVRw' 2>&1 | tail -12
+[youtube] Extracting URL: https://www.youtube.com/watch?v=jNQXAC9IVRw
+[youtube] jNQXAC9IVRw: Downloading webpage
+[youtube] jNQXAC9IVRw: Downloading tv client config
+[youtube] jNQXAC9IVRw: Downloading player 4918c89a-main
+[youtube] jNQXAC9IVRw: Downloading tv player API JSON
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] jNQXAC9IVRw: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dl
+p/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtub
+e-cookies  for tips on effectively exporting YouTube cookies
+root@bb91b1918065:/app# yt-dlp --extractor-args 'youtube:player_client=ios' -f 'mp4[ext=mp4]/best[ext=mp4]' -o 'me_at_the_zoo.%(ext)s' 'https://www.youtube.com/
+watch?v=jNQXAC9IVRw' 2>&1 | tail -8
+[youtube] Extracting URL: https://www.youtube.com/watch?v=jNQXAC9IVRw
+[youtube] jNQXAC9IVRw: Downloading webpage
+[youtube] jNQXAC9IVRw: Downloading ios player API JSON
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] jNQXAC9IVRw: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dl
+p/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtub
+e-cookies  for tips on effectively exporting YouTube cookies
+root@bb91b1918065:/app# yt-dlp --extractor-args 'youtube:player_client=tv,ios,mweb,web' --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.
+36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' -f 'mp4[ext=mp4]/best[ext=mp4]' -o 'me_at_the_zoo.%(ext)s' 'https://www.youtube.com/watch?v=jNQXAC9IVRw'
+2>&1 | tail -8
+[youtube] jNQXAC9IVRw: Downloading tv player API JSON
+[youtube] jNQXAC9IVRw: Downloading ios player API JSON
+[youtube] jNQXAC9IVRw: Downloading mweb client config
+[youtube] jNQXAC9IVRw: Downloading mweb player API JSON
+[youtube] jNQXAC9IVRw: Downloading web client config
+[youtube] jNQXAC9IVRw: Downloading web player API JSON
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] jNQXAC9IVRw: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dl
+p/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtub
+e-cookies  for tips on effectively exporting YouTube cookies
+root@bb91b1918065:/app# python3 -c "import urllib.request as u,urllib.parse as p,json; q=p.urlencode({'action':'query','list':'search','srsearch':'Me at the zoo
+','srnamespace':6,'format':'json'}); d=json.load(u.urlopen('https://commons.wikimedia.org/w/api.php?'+q,timeout=20)); [print(x['title']) for x in d['query']['se
+arch']]"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import urllib.request as u,urllib.parse as p,json; q=p.urlencode({'action':'query','list':'search','srsearch':'Me at the zoo','srnamespace':6,'format':'json
+'}); d=json.load(u.urlopen('https://commons.wikimedia.org/w/api.php?'+q,timeout=20)); [print(x['title']) for x in d['query']['search']]
+
+                 ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/urllib/request.py", line 189, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/urllib/request.py", line 495, in open
+    response = meth(req, response)
+  File "/usr/local/lib/python3.13/urllib/request.py", line 604, in http_response
+    response = self.parent.error(
+        'http', request, response, code, msg, hdrs)
+  File "/usr/local/lib/python3.13/urllib/request.py", line 533, in error
+    return self._call_chain(*args)
+           ~~~~~~~~~~~~~~~~^^^^^^^
+  File "/usr/local/lib/python3.13/urllib/request.py", line 466, in _call_chain
+    result = func(*args)
+  File "/usr/local/lib/python3.13/urllib/request.py", line 613, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 403: Forbidden
+root@bb91b1918065:/app# python3 -c "import urllib.request as u,urllib.parse as p,json; req=u.Request('https://commons.wikimedia.org/w/api.php?'+p.urlencode({'ac
+tion':'query','list':'search','srsearch':'Me at the zoo','srnamespace':6,'format':'json'}), headers={'User-Agent':'Mozilla/5.0'}); d=json.load(u.urlopen(req,tim
+eout=20)); [print(x['title']) for x in d['query']['search']]"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import urllib.request as u,urllib.parse as p,json; req=u.Request('https://commons.wikimedia.org/w/api.php?'+p.urlencode({'action':'query','list':'search','s
+rsearch':'Me at the zoo','srnamespace':6,'format':'json'}), headers={'User-Agent':'Mozilla/5.0'}); d=json.load(u.urlopen(req,timeout=20)); [print(x['title']) fo
+r x in d['query']['search']]
+
+                                                                                                               ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/urllib/request.py", line 189, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/urllib/request.py", line 495, in open
+    response = meth(req, response)
+  File "/usr/local/lib/python3.13/urllib/request.py", line 604, in http_response
+    response = self.parent.error(
+        'http', request, response, code, msg, hdrs)
+  File "/usr/local/lib/python3.13/urllib/request.py", line 533, in error
+    return self._call_chain(*args)
+           ~~~~~~~~~~~~~~~~^^^^^^^
+  File "/usr/local/lib/python3.13/urllib/request.py", line 466, in _call_chain
+    result = func(*args)
+  File "/usr/local/lib/python3.13/urllib/request.py", line 613, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 403: Too Many Reqs (1862a4b)
+root@bb91b1918065:/app#

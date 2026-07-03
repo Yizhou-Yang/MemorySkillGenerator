@@ -1,0 +1,34 @@
+New Terminal Output:
+
+root@5e37a165c133:/app/astropy# cat >> astropy/modeling/tests/test_separable.py << 'EOF'
+>
+>
+> def test_cstack_preserves_nested_separability():
+>     # Regression test for the bug where nesting a CompoundModel under '&'
+>     # caused the nested model's separability information to be dropped
+>     # (the right-operand branch of _cstack previously wrote 1 instead of
+>     # copying the sub-matrix).
+>     from astropy.modeling import models as m
+>
+>     cm = m.Linear1D(10) & m.Linear1D(5)
+>
+>     # The nested model on the right must keep its separable block.
+>     result = separability_matrix(m.Pix2Sky_TAN() & cm)
+>     expected = np.array([[True, True, False, False],
+>                          [True, True, False, False],
+>                          [False, False, True, False],
+>                          [False, False, False, True]])
+>     assert_allclose(result, expected)
+>
+>     # A direct check that _cstack copies a precomputed right-hand matrix
+>     # rather than filling with ones.
+>     left = _coord_matrix(m.Shift(1), 'left', 4)
+>     right_matrix = np.array([[1, 0, 0, 0],
+>                              [0, 1, 0, 0],
+>                              [0, 0, 1, 0],
+>                              [0, 0, 0, 1]])
+>     stacked = _cstack(models.Shift(1), right_matrix)
+>     assert_allclose(stacked, np.hstack([left, right_matrix]))
+> EOF
+root@5e37a165c133:/app/astropy# python -m pytest astropy/modeling/tests/test_separable.py -q 2>/dev/null
+root@5e37a165c133:/app/astropy#

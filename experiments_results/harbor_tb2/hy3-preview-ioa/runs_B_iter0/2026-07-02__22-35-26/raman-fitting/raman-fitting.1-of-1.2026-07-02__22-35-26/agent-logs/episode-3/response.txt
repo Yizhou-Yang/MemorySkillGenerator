@@ -1,0 +1,14 @@
+{
+  "analysis": "The data file has two columns with comma decimal separators. Column 1 (x) decreases monotonically from 47183 down to 1648 and is the spectroscopic axis. Column 2 (intensity) is noisy data ranging ~19000 at high x down to ~6000 at low x. The x sampling is non-uniform (large steps at high x, tiny steps ~0.26 at low x), meaning most data points are densely sampled at low x. I need to find the G and 2D peaks and fit Lorentzians. scipy isn't installed; I'll check for it / use numpy. First I'll explore the peaks empirically.",
+  "plan": "Write an exploration script that loads the data (converting commas to dots), sorts by x, finds prominent local maxima, and prints them with x positions and intensities. This tells me where the G and 2D peaks are. I'll also try to import scipy; if unavailable I'll implement a custom Levenberg-Marquardt fit in numpy.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"import numpy; print('numpy', numpy.__version__)\"\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "cat > /app/explore.py << 'EOF'\nimport numpy as np\nd = np.loadtxt('/app/graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.'))})\nx = d[:,0]; y = d[:,1]\nprint('x range', x.min(), x.max(), 'n', len(x))\nprint('monotonic decreasing?', np.all(np.diff(x) < 0))\n# local maxima\nmaxs = []\nfor i in range(1, len(x)-1):\n    if y[i] > y[i-1] and y[i] >= y[i+1]:\n        maxs.append((y[i], x[i], i))\nmaxs.sort(reverse=True)\nprint('top 15 local maxima (intensity, x, idx):')\nfor m in maxs[:15]:\n    print(m)\nEOF\npython3 /app/explore.py\n",
+      "duration": 2.0
+    }
+  ]
+}

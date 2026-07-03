@@ -1,0 +1,12 @@
+The G peak hint (~1580) is below the data minimum (1648), and the 2D window I checked had very low intensity. I need a proper peak analysis to locate the actual G and 2D peaks in this data. Let me do robust peak finding.
+
+{
+  "analysis": "Column 1 is the wavenumber x (monotonic, decreasing in file, ascending after reverse, range 1648-47183). Column 2 is intensity. The global max y is 79400 somewhere. My earlier 2D window (2550-2850) only found y~611, suggesting the 2D peak isn't there, OR there's a much larger structure. The G peak at 1580 is below the data minimum (1648). I need to find the actual peak structures via smoothing/peak-finding before fitting.",
+  "plan": "Write an exploration that smooths the data, finds local maxima, and prints peaks with positions/heights, plus the global max location. This clarifies where G and 2D peaks really are so I can choose fit windows.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/explore3.py << 'EOF'\nimport numpy as np, io\nfrom scipy.ndimage import uniform_filter1d\nwith open('/app/graphene.dat') as f:\n    txt = f.read().replace(',', '.')\ndata = np.loadtxt(io.StringIO(txt))\nx = data[:,0]; y = data[:,1]\nif x[0] > x[-1]:\n    x = x[::-1]; y = y[::-1]\nprint('x range', x.min(), x.max())\nprint('global max y', y.max(), 'at x=', x[np.argmax(y)])\n# smooth\ns = uniform_filter1d(y, size=21)\n# find local maxima\npeaks = []\nfor i in range(1, len(s)-1):\n    if s[i] > s[i-1] and s[i] >= s[i+1]:\n        peaks.append((s[i], x[i]))\npeaks.sort(reverse=True)\nprint('top 15 smoothed maxima:')\nfor v, xi in peaks[:15]:\n    print(f'  x={xi:9.2f} y={v:10.2f}')\nEOF\npython3 /app/explore3.py\n",
+      "duration": 2.0
+    }
+  ]
+}

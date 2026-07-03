@@ -1,0 +1,64 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@8ed22792a47f:/app# cat > /app/test_api.py << 'EOF'
+> import json
+> import requests
+>
+> URL = "http://127.0.0.1:5000/sentiment"
+>
+> samples = [
+>     "I absolutely loved this movie, it was fantastic!",
+>     "This was the worst experience I have ever had, totally terrible.",
+>     "The book was okay, nothing special but not bad either.",
+> ]
+>
+> for i, text in enumerate(samples, 1):
+>     try:
+>         resp = requests.post(URL, json={"text": text}, timeout=30)
+>         print(f"--- Sample {i} ---")
+>         print("Request:", json.dumps({"text": text}))
+>         print("Status:", resp.status_code)
+>         print("Response:", json.dumps(resp.json(), indent=2))
+>     except Exception as e:
+>         print(f"--- Sample {i} ---")
+>         print("Error:", e)
+>     print()
+> EOF
+root@8ed22792a47f:/app# python3 /app/test_api.py
+--- Sample 1 ---
+Request: {"text": "I absolutely loved this movie, it was fantastic!"}
+Status: 200
+Response: {
+  "confidence": {
+    "negative": 0.000119,
+    "positive": 0.999881
+  },
+  "sentiment": "positive"
+}
+
+--- Sample 2 ---
+Request: {"text": "This was the worst experience I have ever had, totally terrible."}
+Status: 200
+Response: {
+  "confidence": {
+    "negative": 0.999734,
+    "positive": 0.000266
+  },
+  "sentiment": "negative"
+}
+
+--- Sample 3 ---
+Request: {"text": "The book was okay, nothing special but not bad either."}
+Status: 200
+Response: {
+  "confidence": {
+    "negative": 0.059851,
+    "positive": 0.940149
+  },
+  "sentiment": "positive"
+}
+
+root@8ed22792a47f:/app#

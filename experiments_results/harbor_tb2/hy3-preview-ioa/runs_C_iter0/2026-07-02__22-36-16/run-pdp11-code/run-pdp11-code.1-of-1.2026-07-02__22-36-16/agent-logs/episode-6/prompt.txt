@@ -1,0 +1,90 @@
+New Terminal Output:
+
+root@26883d486a69:/app# which apt apt-get pip pip3 dpkg 2>/dev/null; echo '---'; ls /etc/apt 2>/dev/null && echo apt-present
+/usr/bin/apt
+/usr/bin/apt-get
+/usr/local/bin/pip
+/usr/local/bin/pip3
+/usr/bin/dpkg
+---
+apt.conf.d  auth.conf.d  keyrings  preferences.d  sources.list.d  trusted.gpg.d
+apt-present
+root@26883d486a69:/app# python3 - << 'EOF'
+> import struct
+> d=open('/app/data.bin','rb').read()
+> hdr=struct.unpack('<8H',d[:16])
+> text=d[16:16+hdr[1]]
+> words=[int.from_bytes(text[i:i+2],'little') for i in range(0,len(text)-1,2)]
+> from collections import Counter
+> c=Counter()
+> for w in words:
+>     c[(w>>12)&0o17]+=1
+> for k in sorted(c):
+>     print('group 0o%o : %d words'%(k,c[k]))
+> # count group 0o17 and 0o15 addresses
+> idx=0
+> fpu=[]
+> for i in range(0,len(text)-1,2):
+>     w=int.from_bytes(text[i:i+2],'little')
+>     g=(w>>12)&0o17
+>     if g in (0o15,0o17):
+>         fpu.append((i//2, oct(w)))
+> print('num 0o15/0o17 words:',len(fpu))
+> for a,o in fpu[:40]:
+>     print('  textword %4d = %s'%(a,o))
+> EOF
+group 0o0 : 312 words
+group 0o1 : 85 words
+group 0o2 : 13 words
+group 0o3 : 1 words
+group 0o4 : 6 words
+group 0o5 : 1 words
+group 0o6 : 16 words
+group 0o7 : 16 words
+group 0o10 : 11 words
+group 0o11 : 18 words
+group 0o12 : 2 words
+group 0o16 : 5 words
+group 0o17 : 45 words
+num 0o15/0o17 words: 45
+  textword    0 = 0o170011
+  textword   17 = 0o177776
+  textword   21 = 0o177775
+  textword   26 = 0o177773
+  textword   32 = 0o177776
+  textword   65 = 0o177770
+  textword   67 = 0o177766
+  textword   69 = 0o177766
+  textword   76 = 0o177770
+  textword   87 = 0o177766
+  textword   99 = 0o177766
+  textword  194 = 0o177760
+  textword  237 = 0o177766
+  textword  264 = 0o177316
+  textword  297 = 0o177214
+  textword  308 = 0o177772
+  textword  408 = 0o170246
+  textword  409 = 0o170127
+  textword  411 = 0o174046
+  textword  412 = 0o174146
+  textword  419 = 0o170500
+  textword  420 = 0o170000
+  textword  425 = 0o170700
+  textword  426 = 0o171427
+  textword  428 = 0o170501
+  textword  429 = 0o170000
+  textword  431 = 0o174046
+  textword  432 = 0o174100
+  textword  435 = 0o171467
+  textword  437 = 0o174002
+  textword  438 = 0o174100
+  textword  439 = 0o172227
+  textword  441 = 0o171627
+  textword  443 = 0o175700
+  textword  448 = 0o170500
+  textword  449 = 0o170000
+  textword  457 = 0o172426
+  textword  462 = 0o171427
+  textword  464 = 0o170501
+  textword  465 = 0o170000
+root@26883d486a69:/app#

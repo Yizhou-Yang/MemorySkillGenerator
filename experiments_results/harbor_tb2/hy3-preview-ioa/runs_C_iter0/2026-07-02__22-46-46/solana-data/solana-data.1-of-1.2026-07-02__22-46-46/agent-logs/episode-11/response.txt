@@ -1,0 +1,10 @@
+{
+  "analysis": "Found a working Solana RPC endpoint: https://mainnet.helius-rpc.com returns 200 with a proper JSON-RPC getHealth response ({\"result\":\"ok\"}). Other providers are blocked, require API keys, or return HTML. Helius is my best bet. I need to verify it actually serves the real RPC methods I need (getSlot, getVersion, getBlock, getAccountInfo, getProgramAccounts, getTransaction) before building the server.",
+  "plan": "Test https://mainnet.helius-rpc.com with the actual methods my server needs: getSlot, getVersion, getBlock (recent), getAccountInfo (System Program ID), getProgramAccounts (Vote program), and getHealth. This confirms whether I can build all endpoints against Helius.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe2.py << 'EOF'\nimport requests\nH='https://mainnet.helius-rpc.com'\ndef call(m, p=None):\n    r=requests.post(H, json={'jsonrpc':'2.0','id':1,'method':m,'params':p or []}, timeout=20)\n    return r.status_code, r.text[:200]\nfor m,p in [('getSlot',[]),('getVersion',[]),('getHealth',[]),('getSlotLeader',[])]:\n    print(m, call(m,p))\nEOF\npython3 /tmp/probe2.py\n",
+      "duration": 40.0
+    }
+  ]
+}

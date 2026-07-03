@@ -1,0 +1,18 @@
+{
+  "analysis": "Confirmed: /app/data.bin is a classic PDP-11 a.out (OMAGIC, magic 0407). Header parsed: text=1062 bytes, data=30, bss=572, symtab=276, entry=0, trsize=0, drsize=1. The symbol table (starting at file offset 0x454 = 16+1062+30) contains standard UNIX C library names (crt0, printf, ecvt, putchar, etc.), confirming this is a statically-linked PDP-11 program from a Seventh Edition UNIX-style toolchain. No emulator (qemu/simh/pdp11), nor `file`/`xxd`, is installed, but NET works. The instructions use only integer opcodes (SOB 077104, JSR 004767, MOV, CMPB, etc.) with no FPP coprocessor opcodes, so a pure-integer PDP-11 emulator should be able to run it, including any software floating point. Before writing an emulator, I want to find the printf format string in the text segment to gauge complexity and possibly avoid full emulation.",
+  "plan": "1. Dump the text (0x10-0x436) and data (0x436-0x454) segments as ASCII to locate the format string and any constants. 2. Search the binary for '%' format specifiers. 3. Check for available compilers/installers in case I fetch an emulator. Based on the format string, decide whether static analysis suffices or whether I must write a PDP-11 emulator in Python.",
+  "commands": [
+    {
+      "keystrokes": "python3 - << 'PY'\ndata=open('/app/data.bin','rb').read()\nfor start,end,label in [(0x10,0x436,'TEXT'),(0x436,0x454,'DATA')]:\n    print('====',label,'[%04x-%04x]===='%(start,end))\n    seg=data[start:end]\n    for i in range(0,len(seg),16):\n        chunk=seg[i:i+16]\n        asc=''.join(chr(c) if 32<=c<127 else '.' for c in chunk)\n        print('%04x  %s  %s'%(start+i,' '.join('%02x'%c for c in chunk),asc))\nPY\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "python3 - << 'PY'\ndata=open('/app/data.bin','rb').read()\nfor i,c in enumerate(data):\n    if c==ord('%'):\n        s=data[max(0,i-20):i+30]\n        print(hex(i), repr(s))\nPY\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "which gcc cc clang make apt apt-get pip pip3 2>/dev/null; echo DONE\n",
+      "duration": 0.3
+    }
+  ]
+}

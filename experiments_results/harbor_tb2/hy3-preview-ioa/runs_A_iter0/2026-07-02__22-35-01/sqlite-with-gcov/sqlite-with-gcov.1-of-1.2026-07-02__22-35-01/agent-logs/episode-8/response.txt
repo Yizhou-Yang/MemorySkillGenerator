@@ -1,0 +1,18 @@
+{
+  "analysis": "df reports the overlay as 100% full (0 available) even though I successfully wrote a 50MB file to /tmp. This suggests /tmp may be on tmpfs (RAM) while the real overlay/host disk is genuinely full. apt's disk-space check fails because statvfs on / reports 0. I need to determine where /tmp actually lives and whether I can install packages. Let me inspect mounts and test writing a larger file.",
+  "plan": "Check mount table to see if /tmp is tmpfs. Test writing a 200MB file to confirm /tmp capacity. Based on that, decide whether to redirect apt's cache to a writable location or free host space.",
+  "commands": [
+    {
+      "keystrokes": "mount | grep -E 'tmp| / ' \n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "df -h /tmp\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmp/bigfile bs=1M count=200 2>&1; rm -f /tmp/bigfile\n",
+      "duration": 3
+    }
+  ]
+}

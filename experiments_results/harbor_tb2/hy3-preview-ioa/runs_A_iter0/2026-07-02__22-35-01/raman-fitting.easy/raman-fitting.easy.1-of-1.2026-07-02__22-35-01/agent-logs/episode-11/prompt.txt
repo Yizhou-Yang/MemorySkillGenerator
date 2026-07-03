@@ -1,0 +1,27 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@4758e662acd5:/app# cat > /app/profile.py << 'EOF'
+> import numpy as np, io
+> from scipy.ndimage import uniform_filter1d
+> from scipy.signal import find_peaks
+> with open('/app/graphene.dat') as f:
+>     txt = f.read().replace(',', '.')
+> data = np.loadtxt(io.StringIO(txt))
+> x = data[:,0]; y = data[:,1]
+> if x[0] > x[-1]:
+>     x = x[::-1]; y = y[::-1]
+> s = uniform_filter1d(y, size=25)
+> print('=== coarse smoothed profile (every ~60 pts) ===')
+> for i in range(0, len(x), 60):
+>     print(f'  x={x[i]:9.2f}  sy={s[i]:9.2f}  ry={y[i]:9.2f}')
+> print('=== find_peaks (prominence=0.05*gmax) ===')
+> gmax=s.max()
+> pk,_=find_peaks(s, prominence=0.05*gmax)
+> for i in pk:
+>     print(f'  x={x[i]:9.2f}  sy={s[i]:9.2f}  ry={y[i]:9.2f}')
+> EOF
+root@4758e662acd5:/app# python3 /app/profile.py
+

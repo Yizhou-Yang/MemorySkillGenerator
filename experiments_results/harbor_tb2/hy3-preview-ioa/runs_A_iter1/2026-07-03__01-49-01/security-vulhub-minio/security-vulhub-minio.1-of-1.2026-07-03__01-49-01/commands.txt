@@ -1,0 +1,30 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"env | grep -i -E 'minio|aws|access|secret' \n"
+'cat /etc/hosts\n'
+'env\n'
+'ls -la /tests 2>/dev/null; ls -la /app\n'
+'which docker ssh nc curl wget kubectl minio mc 2>/dev/null\n'
+"getent hosts node1; echo '---'; cat /etc/resolv.conf\n"
+'ls -la /var/run/docker.sock 2>/dev/null; echo "DOCKER_HOST=$DOCKER_HOST"; env | grep -i docker\n'
+'command -v python3 python perl bash; ls /usr/bin | head -50\n'
+"timeout 3 bash -c 'cat < /dev/null > /dev/tcp/node1/9000 && echo OPEN' 2>&1; echo done\n"
+'python3 -c "import urllib.request as u;\\nimport sys\\ntry:\\n r=u.urlopen(\'http://node1:9000/\',timeout=4)\\n print(\'STATUS\',r.status)\\n print(r.read()[:500])\\nexcept Exception as e:\\n print(\'ERR\',repr(e))"\n'
+"cat > /tmp/probe.py << 'EOF'\nimport urllib.request as u\ntry:\n    r = u.urlopen('http://node1:9000/', timeout=4)\n    print('STATUS', r.status)\n    print(r.read()[:800])\nexcept Exception as e:\n    print('ERR', repr(e))\nEOF\npython3 /tmp/probe.py\n"
+'ls /usr/bin | grep -iE \'ssh|nc|ncat|socat|nmap|telnet|ftp|redis|postgres|mysql\' ; echo \'---python mods---\'; python3 -c "import paramiko; print(\'paramiko ok\')" 2>&1 | head -1\n'
+"cat > /tmp/scan.py << 'EOF'\nimport socket\nhost='node1'\nports=[21,22,23,80,443,2375,2376,4000,5000,8000,8080,8443,9000,9001,9002,9100,9200,11211,27017]\nfor p in ports:\n    s=socket.socket(); s.settimeout(0.4)\n    try:\n        s.connect((host,p)); print('OPEN',p)\n    except Exception as e:\n        pass\n    s.close()\nprint('scan done')\nEOF\npython3 /tmp/scan.py\n"
+"cat > /tmp/probe2.py << 'EOF'\nimport urllib.request as u\nfor url in ['http://node1:9001/','http://node1:9001/login','http://node1:9000/minio/health/live','http://node1:9000/minio/health/ready','http://node1:9000/minio/health/cluster']:\n    req=u.Request(url)\n    try:\n        r=u.urlopen(req,timeout=4)\n        print('===',url,'STATUS',r.status)\n        print('HEADERS',dict(r.headers))\n        print('BODY',r.read()[:300])\n    except Exception as e:\n        print('===',url,'ERR',repr(e))\nEOF\npython3 /tmp/probe2.py\n"
+"ip route; echo '---'; ip -4 addr show 2>/dev/null | grep inet\n"
+"cat > /tmp/scan2.py << 'EOF'\nimport socket\ncands=['192.168.144.1','192.168.144.254','172.17.0.1','host.docker.internal','192.168.144.3','192.168.144.4']\nports=[2375,2376,9000,9001]\nfor h in cands:\n    for p in ports:\n        s=socket.socket(); s.settimeout(0.3)\n        try:\n            s.connect((h,p)); print('OPEN',h,p)\n        except Exception: pass\n        s.close()\nprint('done')\nEOF\npython3 /tmp/scan2.py\n"
+"cat > /tmp/boot.py << 'EOF'\nimport urllib.request as u, json\nfor h in ['node1','192.168.144.1','192.168.144.3','192.168.144.4']:\n    for ep in ['/minio/bootstrap/v2','/minio/bootstrap/v1']:\n        url='http://%s:9000%s'%(h,ep)\n        try:\n            r=u.urlopen(url,timeout=4)\n            print('===',h,ep,'STATUS',r.status)\n            data=r.read().decode('utf-8','replace')\n            print(data[:1200])\n        except Exception as e:\n            print('===',h,ep,'ERR',repr(e))\nEOF\npython3 /tmp/boot.py\n"
+"cat /proc/net/route 2>/dev/null | awk 'NR>1{print $2}' | head; echo '---k8s---'; ls -la /var/run/secrets/kubernetes.io 2>/dev/null; ls -la /root/.kube 2>/dev/null\n"
+"find / -name 'docker.sock' 2>/dev/null; find / \\( -name 'docker-compose.yml' -o -name '*.env' -o -name 'kubeconfig' \\) 2>/dev/null | head; grep -rIl 'MINIO_ROOT' /etc /root /app /opt 2>/dev/null | head\n"
+"cat > /tmp/rt.py << 'EOF'\ndef hexip(h):\n    b=bytes.fromhex(h)\n    return '.'.join(str(x) for x in b[::-1])\nimport struct\nfor line in open('/proc/net/route'):\n    f=line.split()\n    if f[1]=='00000000':\n        print('GATEWAY', hexip(f[2]))\nEOF\npython3 /tmp/rt.py\n"
+"cat > /tmp/s3.py << 'EOF'\nimport socket\nfound=[]\nfor i in range(1,255):\n    h='192.168.144.%d'%i\n    for p in (2375,2376,2377,2222):\n        s=socket.socket(); s.settimeout(0.15)\n        try:\n            s.connect((h,p)); found.append((h,p))\n        except Exception: pass\n        s.close()\nprint('DOCKER-LIKE:',found)\nEOF\npython3 /tmp/s3.py\n"
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']
+''

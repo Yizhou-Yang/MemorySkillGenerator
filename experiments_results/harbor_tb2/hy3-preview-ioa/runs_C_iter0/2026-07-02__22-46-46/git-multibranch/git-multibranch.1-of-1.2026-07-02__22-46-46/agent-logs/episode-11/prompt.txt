@@ -1,0 +1,30 @@
+New Terminal Output:
+
+root@d5d72e93e229:/tmp/work# sed -i 's/^session.*pam_motd.so/#&/' /etc/pam.d/sshd; grep -c pam_motd /etc/pam.d/sshd
+2
+root@d5d72e93e229:/tmp/work# echo 'PrintMotd no' >> /etc/ssh/sshd_config; /usr/sbin/sshd -t && echo sshd-ok
+sshd-ok
+root@d5d72e93e229:/tmp/work# cat > /app/push.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 60
+> spawn git -c {core.sshCommand=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null} push git@localhost:/git/project main dev
+> expect {
+>   -re {(?i)password} { send "password\r"; exp_continue }
+>   eof { }
+> }
+> EOF
+root@d5d72e93e229:/tmp/work# chmod +x /app/push.exp && echo exp-ready
+exp-ready
+root@d5d72e93e229:/tmp/work# time /app/push.exp
+spawn git -c core.sshCommand=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null push git@localhost:/git/project main dev
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+
+real	0m0.831s
+user	0m0.004s
+sys	0m0.004s
+root@d5d72e93e229:/tmp/work#

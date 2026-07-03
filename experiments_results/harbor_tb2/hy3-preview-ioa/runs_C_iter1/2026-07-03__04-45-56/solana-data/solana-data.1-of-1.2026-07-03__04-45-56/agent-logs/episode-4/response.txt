@@ -1,0 +1,14 @@
+{
+  "analysis": "No proxy variables are set, yet HTTPS to Solana fails with SSL WRONG_VERSION_NUMBER, which typically indicates a transparent proxy/middlebox returning non-TLS data. I need to understand the network path. Let me probe raw connectivity: try plain HTTP to the RPC, check DNS resolution, and test a raw socket to port 443 to see what bytes come back.",
+  "plan": "1) Test plain HTTP (http://) to the API. 2) Do a raw socket connect to api.devnet.solana.com:443 and read a few bytes to see if it's HTTP or garbage. 3) Test general internet (e.g., a GET to example.com) to determine if outbound works at all and whether a proxy is required. This tells me how to route requests.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"import socket; s=socket.create_connection(('api.devnet.solana.com',443),timeout=15); s.sendall(b'GET / HTTP/1.0\\r\\n\\r\\n'); print(repr(s.recv(200)))\"\n",
+      "duration": 16.0
+    },
+    {
+      "keystrokes": "python3 -c \"import socket; s=socket.create_connection(('api.devnet.solana.com',443),timeout=15); s.sendall(b'\\x16\\x03\\x01\\x00\\x05\\x01\\x00\\x00\\x01\\x00'); print(repr(s.recv(200)))\"\n",
+      "duration": 16.0
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "analysis": "Block attributes found: block_hash (bytes), merkle_root (bytes), nonce (bytes), time (int), height (int). Transactions are accessed via `b.transactions` not `b.txs`. I need to hex-encode hash/merkleroot and convert nonce bytes to int. Let me inspect `b.transactions` and the transaction/vin/vout objects, and check `as_dict()` which may give a clean structure.",
+  "plan": "Print b.as_dict() and inspect the transactions list structure, plus transaction vin/vout/script_pubkey to finalize field mappings. Then I'll write the final service.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/btest5.py << 'EOF'\nfrom bitcoinlib.services.services import Service\ns = Service(network='bitcoin')\nb = s.getblock('000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f')\nprint('HASH hex', b.block_hash.hex())\nprint('MERKLE hex', b.merkle_root.hex())\nprint('NONCE int', int.from_bytes(b.nonce,'little'))\nprint('time', b.time, 'height', b.height)\ntxs = b.transactions\nprint('num txs', len(txs))\ntx = txs[0]\nprint('TX ATTRS', [a for a in dir(tx) if not a.startswith('_')])\nprint('txid', getattr(tx,'txid',None))\nvin = tx.vin\nprint('vin type', type(vin), 'len', len(vin))\nprint('VIN0', vin[0] if vin else None)\nif vin:\n    print('VIN0 ATTRS', [a for a in dir(vin[0]) if not a.startswith('_')])\n    print('coinbase', getattr(vin[0],'coinbase',None), 'seq', getattr(vin[0],'sequence',None))\nvout = tx.vout\nprint('vout len', len(vout))\nif vout:\n    print('VOUT0 ATTRS', [a for a in dir(vout[0]) if not a.startswith('_')])\n    print('value', vout[0].value, 'n', vout[0].n)\n    spk=vout[0].script_pubkey\n    print('SPK hex', getattr(spk,'hex',None), 'asm', getattr(spk,'asm',None), 'type', getattr(spk,'script_type',None))\nprint('errors', s.errors)\nEOF\npython3 /tmp/btest5.py\n",
+      "duration": 60
+    }
+  ]
+}

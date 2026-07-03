@@ -1,0 +1,10 @@
+{
+  "analysis": "SSL cert (mycert.pem) and key (mykey.key) are created. Now I need to generate the password hash for 'benchmarkpass' and write the jupyter_notebook_config.py with all the required settings: port 8888, 0.0.0.0, HTTPS with the cert, allow_root, and the hashed password.",
+  "plan": "Use a Python script to compute the password hash via jupyter_server.auth.passwd and write the config file. Then verify it. The config will set c.ServerApp.port=8888, c.ServerApp.ip='0.0.0.0', c.ServerApp.certfile/mykey, c.ServerApp.password=hash, c.ServerApp.allow_root=True, and disable token.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'PY'\nfrom jupyter_server.auth import passwd\nimport os\nhp = passwd('benchmarkpass')\nprint(hp)\nwith open('/app/jupyter_notebook_config.py','w') as f:\n    f.write('c.ServerApp.port = 8888\\n')\n    f.write('c.ServerApp.ip = \\'0.0.0.0\\'\\n')\n    f.write('c.ServerApp.certfile = \\'/app/mycert.pem\\'\\n')\n    f.write('c.ServerApp.keyfile = \\'/app/mykey.key\\'\\n')\n    f.write('c.ServerApp.password = ' + repr(hp) + '\\n')\n    f.write('c.ServerApp.allow_root = True\\n')\n    f.write('c.ServerApp.open_browser = False\\n')\n    f.write('c.ServerApp.token = \\'\\'\\n')\n    f.write('c.ServerApp.password_required = True\\n')\n    f.write('c.ServerApp.allow_origin = \\'*\\'\\n')\nprint('written')\nPY\n",
+      "duration": 2.0
+    }
+  ]
+}

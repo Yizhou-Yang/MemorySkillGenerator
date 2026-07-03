@@ -1,0 +1,235 @@
+root@d3ab05b92ba8:/app# ls -la /app/
+total 12
+drwxr-xr-x  2 root root 4096 Jul  2 15:55 .
+drwxr-xr-x 19 root root 4096 Jul  2 16:01 ..
+-rw-r--r--  1 root root 4096 Jul  2 13:59 trunc.db
+root@d3ab05b92ba8:/app# file /app/trunc.db
+bash: file: command not found
+root@d3ab05b92ba8:/app# xxd /app/trunc.db | head -40
+bash: xxd: command not found
+root@d3ab05b92ba8:/app# which sqlite3 python3 od hexdump xxd 2>/dev/null
+/usr/bin/python3
+/usr/bin/od
+root@d3ab05b92ba8:/app# od -A x -t x1z /app/trunc.db | head -20
+000000 0d 00 00 00 0a 0f 49 00 0f f0 0f df 0f ce 0f bd  >......I.........<
+000010 0f ac 0f 9b 0f 8a 0f 79 0f 61 0f 49 00 00 00 00  >.......y.a.I....<
+000020 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  >................<
+*
+000f40 00 00 00 00 00 00 00 00 00 16 0a 04 00 21 07 74  >.............!.t<
+000f50 65 73 74 77 6f 72 64 30 39 3f e0 00 00 00 00 00  >estword09?......<
+000f60 00 16 09 04 00 21 07 74 65 73 74 77 6f 72 64 30  >.....!.testword0<
+000f70 38 40 58 ff 5c 28 f5 c2 8f 0f 08 04 00 21 01 74  >8@X.\(.......!.t<
+000f80 65 73 74 77 6f 72 64 30 37 63 0f 07 04 00 21 01  >estword07c....!.<
+000f90 74 65 73 74 77 6f 72 64 30 36 4b 0f 06 04 00 21  >testword06K....!<
+000fa0 01 74 65 73 74 77 6f 72 64 30 35 32 0f 05 04 00  >.testword052....<
+000fb0 21 01 74 65 73 74 77 6f 72 64 30 34 2a 0f 04 04  >!.testword04*...<
+000fc0 00 21 01 74 65 73 74 77 6f 72 64 30 33 19 0f 03  >.!.testword03...<
+000fd0 04 00 21 01 74 65 73 74 77 6f 72 64 30 32 0a 0f  >..!.testword02..<
+000fe0 02 04 00 21 01 74 65 73 74 77 6f 72 64 30 31 02  >...!.testword01.<
+000ff0 0e 01 04 00 21 09 74 65 73 74 77 6f 72 64 30 30  >....!.testword00<
+001000
+root@d3ab05b92ba8:/app# cat > /tmp/parse.py << 'EOF'
+> import json, struct
+>
+> with open('/app/trunc.db','rb') as f:
+>     data = f.read()
+>
+> print('file len', len(data))
+> page_type = data[0]
+> cell_count = int.from_bytes(data[3:5], 'big')
+> cell_content_start = int.from_bytes(data[5:7], 'big')
+> print('page_type', hex(page_type), 'cell_count', cell_count, 'content_start', hex(cell_content_start))
+>
+> def read_varint(b, off):
+>     result = 0
+>     for i in range(9):
+>         x = b[off+i]
+>         if i == 8:
+>             result = (result << 8) | x
+>             return result, off+9
+>         result = (result << 7) | (x & 0x7f)
+>         if not (x & 0x80):
+>             return result, off+i+1
+>     return result, off+9
+>
+> ptrs = [int.from_bytes(data[8+i*2:10+i*2],'big') for i in range(cell_count)]
+> print('ptrs', [hex(p) for p in ptrs])
+>
+> rows = []
+> for p in ptrs:
+>     off = p
+>     plen, off = read_varint(data, off)
+>     rowid, off = read_varint(data, off)
+>     payload = data[off:off+plen]
+>     hlen, h = read_varint(payload, 0)
+>     types = []
+>     pos = h
+>     while pos < hlen:
+>         t, pos = read_varint(payload, pos)
+>         types.append(t)
+>     vals = []
+>     pos = hlen
+>     for t in types:
+>         if t == 0:
+>             vals.append(None)
+>         elif t == 1:
+>             vals.append(int.from_bytes(payload[pos:pos+1],'big',signed=True)); pos+=1
+>         elif t == 2:
+>             vals.append(int.from_bytes(payload[pos:pos+2],'big',signed=True)); pos+=2
+>         elif t == 3:
+>             vals.append(int.from_bytes(payload[pos:pos+3],'big',signed=True)); pos+=3
+>         elif t == 4:
+>             vals.append(int.from_bytes(payload[pos:pos+4],'big',signed=True)); pos+=4
+>         elif t == 5:
+>             vals.append(int.from_bytes(payload[pos:pos+6],'big',signed=True)); pos+=6
+>         elif t == 6:
+>             vals.append(int.from_bytes(payload[pos:pos+8],'big',signed=True)); pos+=8
+>         elif t == 7:
+>             vals.append(struct.unpack('>d', payload[pos:pos+8])[0]); pos+=8
+>         elif t == 8:
+>             vals.append(0)
+>         elif t == 9:
+>             vals.append(1)
+>         elif t >= 12 and t % 2 == 0:
+>             n = (t-12)//2; vals.append(payload[pos:pos+n]); pos+=n
+>         elif t >= 13 and t % 2 == 1:
+>             n = (t-13)//2; vals.append(payload[pos:pos+n].decode('utf-8','replace')); pos+=n
+>         else:
+>             vals.append('?t%d'%t)
+>     rows.append((rowid, payload, vals))
+>
+> for rowid, payload, vals in rows:
+>     print(rowid, vals)
+> EOF
+root@d3ab05b92ba8:/app# python3 /tmp/parse.py
+file len 4096
+page_type 0xd cell_count 10 content_start 0xf49
+ptrs ['0xff0', '0xfdf', '0xfce', '0xfbd', '0xfac', '0xf9b', '0xf8a', '0xf79', '0xf61', '0xf49']
+1 [None, 'testword00', 1]
+2 [None, 'testword01', 2]
+3 [None, 'testword02', 10]
+4 [None, 'testword03', 25]
+5 [None, 'testword04', 42]
+6 [None, 'testword05', 50]
+7 [None, 'testword06', 75]
+8 [None, 'testword07', 99]
+9 [None, 'testword08', 99.99]
+10 [None, 'testword09', 0.5]
+root@d3ab05b92ba8:/app# cat > /tmp/recover.py << 'EOF'
+> import json, struct
+>
+> with open('/app/trunc.db','rb') as f:
+>     data = f.read()
+>
+> cell_count = int.from_bytes(data[3:5], 'big')
+>
+> def read_varint(b, off):
+>     result = 0
+>     for i in range(9):
+>         x = b[off+i]
+>         if i == 8:
+>             result = (result << 8) | x
+>             return result, off+9
+>         result = (result << 7) | (x & 0x7f)
+>         if not (x & 0x80):
+>             return result, off+i+1
+>     return result, off+9
+>
+> ptrs = [int.from_bytes(data[8+i*2:10+i*2],'big') for i in range(cell_count)]
+> rows = []
+> for p in ptrs:
+>     off = p
+>     plen, off = read_varint(data, off)
+>     rowid, off = read_varint(data, off)
+>     payload = data[off:off+plen]
+>     hlen, h = read_varint(payload, 0)
+>     types = []
+>     pos = h
+>     while pos < hlen:
+>         t, pos = read_varint(payload, pos)
+>         types.append(t)
+>     vals = []
+>     pos = hlen
+>     for t in types:
+>         if t == 0:
+>             vals.append(None)
+>         elif t == 1:
+>             vals.append(int.from_bytes(payload[pos:pos+1],'big',signed=True)); pos+=1
+>         elif t == 2:
+>             vals.append(int.from_bytes(payload[pos:pos+2],'big',signed=True)); pos+=2
+>         elif t == 3:
+>             vals.append(int.from_bytes(payload[pos:pos+3],'big',signed=True)); pos+=3
+>         elif t == 4:
+>             vals.append(int.from_bytes(payload[pos:pos+4],'big',signed=True)); pos+=4
+>         elif t == 5:
+>             vals.append(int.from_bytes(payload[pos:pos+6],'big',signed=True)); pos+=6
+>         elif t == 6:
+>             vals.append(int.from_bytes(payload[pos:pos+8],'big',signed=True)); pos+=8
+>         elif t == 7:
+>             vals.append(struct.unpack('>d', payload[pos:pos+8])[0]); pos+=8
+>         elif t == 8:
+>             vals.append(0)
+>         elif t == 9:
+>             vals.append(1)
+>         elif t >= 12 and t % 2 == 0:
+>             n = (t-12)//2; vals.append(payload[pos:pos+n]); pos+=n
+>         elif t >= 13 and t % 2 == 1:
+>             n = (t-13)//2; vals.append(payload[pos:pos+n].decode('utf-8','replace')); pos+=n
+>         else:
+>             vals.append(None)
+>     rows.append((rowid, vals))
+>
+> rows.sort(key=lambda r: r[0])
+> out = [{"word": v[1], "value": v[2]} for _, v in rows if v[1] is not None]
+> with open('/app/recover.json','w') as f:
+>     json.dump(out, f, indent=2)
+> print(json.dumps(out, indent=2))
+> print('rows recovered:', len(out))
+> EOF
+root@d3ab05b92ba8:/app# python3 /tmp/recover.py
+[
+  {
+    "word": "testword00",
+    "value": 1
+  },
+  {
+    "word": "testword01",
+    "value": 2
+  },
+  {
+    "word": "testword02",
+    "value": 10
+  },
+  {
+    "word": "testword03",
+    "value": 25
+  },
+  {
+    "word": "testword04",
+    "value": 42
+  },
+  {
+    "word": "testword05",
+    "value": 50
+  },
+  {
+    "word": "testword06",
+    "value": 75
+  },
+  {
+    "word": "testword07",
+    "value": 99
+  },
+  {
+    "word": "testword08",
+    "value": 99.99
+  },
+  {
+    "word": "testword09",
+    "value": 0.5
+  }
+]
+rows recovered: 10
+root@d3ab05b92ba8:/app# cat /app/recover.json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("valid JSON, rows:", len(d))'
+valid JSON, rows: 10
+root@d3ab05b92ba8:/app#

@@ -1,0 +1,34 @@
+{
+  "analysis": "qemu is available. The ISO can't be mounted (no permission) and no ISO extraction tools (7z/xorriso) are present, but python3 and expect are. The alpine-disk.qcow2 is a small empty disk. My approach: boot the ISO directly in qemu with a serial console exposed on a telnet port and host port 2222 forwarded to the VM's ssh (22). I'll first probe whether the Alpine ISO emits a serial login prompt (some ISOs enable serial console automatically). I'll drive the serial via an expect script over telnet.",
+  "plan": "1) Check for telnet/nc clients. 2) Launch qemu in background: boot from the ISO, user-mode networking with hostfwd 2222->22, serial on telnet 127.0.0.1:4444, monitor on 4445. 3) Write a probe expect script that logs in as root (no password) and prints diagnostic info (apk repositories, media mount, availability of sshd/udhcpc/apk, network interfaces). 4) Run it and read the log. This tells me whether serial console works and what tooling is available, guiding the full setup.",
+  "commands": [
+    {
+      "keystrokes": "which telnet nc socat expect python3; echo DONE\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "nohup qemu-system-x86_64 -m 1024 -smp 2 -boot d -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2 -netdev user,id=n0,hostfwd=tcp::2222-:22 -device e1000,netdev=n0 -display none -serial telnet:127.0.0.1:4444,server,nowait -monitor telnet:127.0.0.1:4445,server,nowait >/tmp/qemu.log 2>&1 &\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "sleep 1; pgrep -a qemu-system; echo '---'; tail -5 /tmp/qemu.log\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "cat > /app/probe.exp <<'EOF'\n#!/usr/bin/expect -f\nlog_file -a /tmp/probe.log\nset timeout 200\nspawn telnet 127.0.0.1 4444\nexpect \"login:\"\nsend \"root\\r\"\nexpect {\n  \"Password:\" { send \"\\r\" }\n  \":~#\" { }\n}\nsend \"cat /etc/apk/repositories; echo MARK1; ls /media; echo MARK2; which sshd; which udhcpc; which apk; echo MARK3; ip -br a\\r\"\nexpect \"MARK3\"\nexpect \":~#\"\nsend \"exit\\r\"\nexpect eof\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "sleep 30\n",
+      "duration": 30.0
+    },
+    {
+      "keystrokes": "expect /app/probe.exp\n",
+      "duration": 60.0
+    },
+    {
+      "keystrokes": "echo '=====PROBE LOG====='; cat /tmp/probe.log\n",
+      "duration": 0.3
+    }
+  ]
+}

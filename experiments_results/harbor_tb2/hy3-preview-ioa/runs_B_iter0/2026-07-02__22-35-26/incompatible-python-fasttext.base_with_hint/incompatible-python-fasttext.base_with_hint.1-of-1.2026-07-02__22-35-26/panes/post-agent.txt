@@ -1,0 +1,66 @@
+root@b0ab3f8fc714:/app# ls -la
+total 104296
+drwxr-xr-x  2 root root      4096 Jul  2 14:51 .
+drwxr-xr-x 19 root root      4096 Jul  2 16:06 ..
+-rw-r--r--  1 root root 106785163 Jul  2 14:51 model.bin
+root@b0ab3f8fc714:/app# which python python3
+/usr/local/bin/python
+/usr/local/bin/python3
+root@b0ab3f8fc714:/app# python --version; python3 --version
+Python 3.13.1
+Python 3.13.1
+root@b0ab3f8fc714:/app# python -c "import fasttext; print(fasttext.__file__)"
+/usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+root@b0ab3f8fc714:/app# python -c "import fasttext; m=fasttext.load_model('model.bin'); print(m.predict('hello world'))"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; m=fasttext.load_model('model.bin'); print(m.predict('hello world'))
+                                                               ~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 239, in predict
+    return labels, np.array(probs, copy=False)
+                   ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+ValueError: Unable to avoid copy while creating an array as requested.
+If using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).
+For more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.
+root@b0ab3f8fc714:/app# grep -n "copy=False" /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+239:            return labels, np.array(probs, copy=False)
+root@b0ab3f8fc714:/app# grep -n "np.array" /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+136:        return np.array(b)
+151:        return np.array(b)
+184:        return pair[0], np.array(pair[1])
+193:        return np.array(b)
+239:            return labels, np.array(probs, copy=False)
+248:        return np.array(self.f.getInputMatrix())
+257:        return np.array(self.f.getOutputMatrix())
+268:            return (pair[0], np.array(pair[1]))
+284:                return (pair[0], np.array(pair[1]))
+root@b0ab3f8fc714:/app# cp /usr/local/lib/python3.13/site-packages/fasttext/FastText.py /usr/local/lib/python3.13/site-packages/fasttext/FastText.py.bak
+root@b0ab3f8fc714:/app# python - <<'EOF'
+> import re
+> p='/usr/local/lib/python3.13/site-packages/fasttext/FastText.py'
+> s=open(p).read()
+> # Replace np.array(X, copy=False) with np.asarray(X)
+> s2=re.sub(r'np\.array\(([^(),]+), copy=False\)', r'np.asarray(\1)', s)
+> open(p,'w').write(s2)
+> print('changed' if s2!=s else 'no change')
+> EOF
+changed
+root@b0ab3f8fc714:/app# grep -n "copy=False" /usr/local/lib/python3.13/site-packages/fasttext/FastText.py; grep -n "np.asarray" /usr/local/lib/python3.13/site-p
+ackages/fasttext/FastText.py
+41:        return np.asarray(y_scores), np.asarray(y_true)
+56:        return np.asarray(precision), np.asarray(recall)
+239:            return labels, np.asarray(probs)
+root@b0ab3f8fc714:/app# python -c "import fasttext; m=fasttext.load_model('model.bin'); print(m.predict('hello world'))"
+(('__label__4',), array([0.99451137]))
+root@b0ab3f8fc714:/app# python -c "import fasttext; m=fasttext.load_model('model.bin'); print(m.test('model.bin'))" 2>/dev/null || echo 'test needs a text file,
+ skipping'
+rm -f /usr/local/lib/python3.13/site-packages/fasttext/FastText.py.bak
+(1, 0.0, 0.0)
+root@b0ab3f8fc714:/app# rm -f /usr/local/lib/python3.13/site-packages/fasttext/FastText.py.bak
+root@b0ab3f8fc714:/app# python -c "import fasttext; m=fasttext.load_model('model.bin'); print(m.predict('this is a test sentence'))"
+(('__label__2',), array([0.53605264]))
+root@b0ab3f8fc714:/app#

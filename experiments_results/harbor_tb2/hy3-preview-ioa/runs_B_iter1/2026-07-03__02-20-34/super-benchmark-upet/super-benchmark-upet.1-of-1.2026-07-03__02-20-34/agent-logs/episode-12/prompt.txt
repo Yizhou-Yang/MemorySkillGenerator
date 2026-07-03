@@ -1,0 +1,73 @@
+New Terminal Output:
+
+ root@92de65719e3f:/app/UPET# grep -rn -i 'uncertain' --include=*.py . | head -30
+./training/sampler.py:3:Code for Uncertainty-aware Self-training (UST) for few-shot learning.
+./training/self_trainer.py:115:        description: str = "Evaluate on Unlabeled Data via MC Dropout Uncertainty Estimation",
+./training/self_trainer.py:278:        self.unlabeled_data_num = self.semi_training_args.unlabeled_data_num # self-training每轮迭代时，首先挑选一部分用于计算MC
+dropout uncertainty。-1表示全部计算uncertainty
+./training/self_trainer.py:279:        self.pseudo_sample_num_or_ratio = self.semi_training_args.pseudo_sample_num_or_ratio # MC dropout后，从所有计算过uncertai
+nty的unlabeled data上采样的样本比例/数量
+./training/self_trainer.py:453:            # Teacher模型在unlabeled data上获取pseudo-labeled data，并根据uncertainty estimation进行采样
+./training/self_trainer.py:455:            logger.info("Obtaining pseudo-labeled data and uncertainty estimation via MC dropout.")
+./training/self_trainer.py:458:            print("Obtaining pseudo-labeled data and uncertainty estimation via MC dropout.")
+./training/self_trainer_copy.py:113:        description: str = "Evaluate on Unlabeled Data via MC Dropout Uncertainty Estimation",
+./training/self_trainer_copy.py:274:        self.unlabeled_data_num = self.semi_training_args.unlabeled_data_num # self-training每轮迭代时，首先挑选一部分用于计
+算MC dropout uncertainty。-1表示全部计算uncertainty
+./training/self_trainer_copy.py:275:        self.pseudo_sample_num_or_ratio = self.semi_training_args.pseudo_sample_num_or_ratio # MC dropout后，从所有计算过unc
+ertainty的unlabeled data上采样的样本比例/数量
+./training/self_trainer_copy.py:406:            # Teacher模型在unlabeled data上获取pseudo-labeled data，并根据uncertainty estimation进行采样
+./training/self_trainer_copy.py:408:            logger.info("Obtaining pseudo-labeled data and uncertainty estimation via MC dropout.")
+./training/self_trainer_copy.py:411:            print("Obtaining pseudo-labeled data and uncertainty estimation via MC dropout.")
+root@92de65719e3f:/app/UPET# ls model training tasks/superglue
+model:
+__pycache__   head_for_question_answering.py       loss.py              parameter_freeze.py                    utils.py
+deberta.py    head_for_sequence_classification.py  model_adaptation.py  prefix_encoder.py
+debertaV2.py  head_for_token_classification.py     multiple_choice.py   prompt_for_sequence_classification.py
+
+tasks/superglue:
+dataset.py  dataset_record.py  get_trainer.py  utils.py
+
+training:
+sampler.py  self_trainer.py  self_trainer_copy.py  trainer_base.py  trainer_exp.py  trainer_qa.py
+root@92de65719e3f:/app/UPET# grep -rn -i 'dropout\|uncertain\|mc_drop\|use_pe' model/ training/ tasks/superglue/ 2>/dev/null | head -40
+model/debertaV2.py:59:        self.dropout = StableDropout(config.pooler_dropout)
+model/debertaV2.py:67:        context_token = self.dropout(context_token)
+model/debertaV2.py:113:# Copied from transformers.models.deberta.modeling_deberta.DropoutContext
+model/debertaV2.py:114:class DropoutContext(object):
+model/debertaV2.py:116:        self.dropout = 0
+model/debertaV2.py:124:    if not isinstance(local_context, DropoutContext):
+model/debertaV2.py:125:        dropout = local_context
+model/debertaV2.py:128:        dropout = local_context.dropout
+model/debertaV2.py:129:        dropout *= local_context.scale
+model/debertaV2.py:132:    if dropout > 0 and mask is None:
+model/debertaV2.py:133:        mask = (1 - torch.empty_like(input).bernoulli_(1 - dropout)).bool()
+model/debertaV2.py:135:    if isinstance(local_context, DropoutContext):
+model/debertaV2.py:139:    return mask, dropout
+model/debertaV2.py:142:# Copied from transformers.models.deberta.modeling_deberta.XDropout
+model/debertaV2.py:143:class XDropout(torch.autograd.Function):
+model/debertaV2.py:144:    """Optimized dropout function to save computation and memory by using mask operation instead of multiplication."""
+model/debertaV2.py:148:        mask, dropout = get_mask(input, local_ctx)
+model/debertaV2.py:149:        ctx.scale = 1.0 / (1 - dropout)
+model/debertaV2.py:150:        if dropout > 0:
+model/debertaV2.py:165:# Copied from transformers.models.deberta.modeling_deberta.StableDropout
+model/debertaV2.py:166:class StableDropout(nn.Module):
+model/debertaV2.py:168:    Optimized dropout module for stabilizing the training
+model/debertaV2.py:170:        drop_prob (float): the dropout probabilities
+model/debertaV2.py:183:            x (:obj:`torch.tensor`): The input tensor to apply dropout
+model/debertaV2.py:186:            return XDropout.apply(x, self.get_context())
+model/debertaV2.py:204:                self.context_stack.append(DropoutContext())
+model/debertaV2.py:206:            ctx.dropout = self.drop_prob
+model/debertaV2.py:219:        self.dropout = StableDropout(config.hidden_dropout_prob)
+model/debertaV2.py:223:        hidden_states = self.dropout(hidden_states)
+model/debertaV2.py:289:        self.dropout = StableDropout(config.hidden_dropout_prob)
+model/debertaV2.py:294:        hidden_states = self.dropout(hidden_states)
+model/debertaV2.py:347:        self.dropout = StableDropout(config.hidden_dropout_prob)
+model/debertaV2.py:354:        out = ACT2FN[self.conv_act](self.dropout(out))
+model/debertaV2.py:587:            self.pos_dropout = StableDropout(config.hidden_dropout_prob)
+model/debertaV2.py:595:        self.dropout = StableDropout(config.attention_probs_dropout_prob)
+model/debertaV2.py:664:            rel_embeddings = self.pos_dropout(rel_embeddings)
+model/debertaV2.py:686:        attention_probs = self.dropout(attention_probs)
+model/debertaV2.py:833:        self.dropout = StableDropout(config.hidden_dropout_prob)
+model/debertaV2.py:883:        embeddings = self.dropout(embeddings)
+model/debertaV2.py:1263:        drop_out = getattr(config, "cls_dropout", None)
+root@92de65719e3f:/app/UPET#

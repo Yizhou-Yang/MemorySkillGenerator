@@ -1,0 +1,24 @@
+New Terminal Output:
+
+root@07a4b9808a04:/app# cat > /tmp/d.py << 'EOF'
+> import lzma, re
+> data = open('/app/secrets.7z','rb').read()
+> body = data[32:181]
+> print('body len', len(body))
+> filt = [{'id': lzma.FILTER_LZMA1, 'dict_size': 0x00100000, 'lc':3, 'lp':0, 'pb':2}]
+> def try_dec(b):
+>     try:
+>         d = lzma.LZMADecompressor(format=lzma.FORMAT_RAW, filters=filt)
+>         return d.decompress(b)
+>     except Exception as e:
+>         return ('ERR', str(e))
+> out = try_dec(body)
+> print('whole body ->', ('ERR '+out[1]) if isinstance(out,tuple) else ('len=%d'%len(out)))
+> if isinstance(out, bytes):
+>     print('first 120 bytes:', out[:120])
+>     print('strings:', re.findall(rb'[ -~\x00-\x7f]{3,}', out)[:30])
+> EOF
+root@07a4b9808a04:/app# python3 /tmp/d.py
+body len 149
+whole body -> ERR Corrupt input data
+root@07a4b9808a04:/app#

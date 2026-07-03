@@ -1,0 +1,12 @@
+kernel.org CDN returned 404. Let me probe alternative URLs/mirrors before committing to one.
+
+{
+  "analysis": "gcc 13.3, make 4.3, bison, flex are all working. The kernel download from cdn.kernel.org returned HTTP 404 — that URL may be wrong or the host is geo/blocked. I need to find a working source for linux-6.9.tar.xz. archive.ubuntu.com worked for debs, so general internet is fine. Let me probe several candidate URLs and report status codes.",
+  "plan": "Write a python script that HEAD/GET-checks several kernel mirror URLs (kernel.org main, cdn, a few common mirrors) and prints the HTTP status, so I can pick a working URL. Then download from the one that works.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe.py <<'EOF'\nimport urllib.request\nhdr={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36'}\nurls=[\n 'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n 'https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n 'https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n 'https://ftp.plusline.net/pub/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz',\n 'https://mirrors.ustc.edu.cn/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz',\n]\nfor u in urls:\n    try:\n        req=urllib.request.Request(u,headers=hdr,method='HEAD')\n        r=urllib.request.urlopen(req,timeout=30)\n        print(r.status, u)\n    except Exception as e:\n        print('ERR', type(e).__name__, e, u)\nEOF\npython3 /tmp/probe.py\n",
+      "duration": 40.0
+    }
+  ]
+}

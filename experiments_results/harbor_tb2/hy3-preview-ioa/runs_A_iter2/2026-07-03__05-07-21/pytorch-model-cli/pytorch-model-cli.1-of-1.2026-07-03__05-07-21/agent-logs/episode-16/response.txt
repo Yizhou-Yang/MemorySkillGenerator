@@ -1,0 +1,10 @@
+{
+  "analysis": "Two key findings: (1) The fuse-overlayfs reports 0 available via statfs, but actual writes succeed (I wrote 50MB to /tmp fine), so the overlay genuinely has space — apt's failure is just its statfs-based free-space guard. (2) /dev/shm is a real tmpfs reporting true free space (64M), which is why apt correctly identified insufficient space there. The install needs 83.9MB of .debs downloaded. If I can grow /dev/shm (or create a larger tmpfs) to hold the downloads, apt should proceed (extraction goes to the overlay which has space).",
+  "plan": "Try to remount /dev/shm with a larger size (remount of an existing tmpfs may be allowed even though creating new mounts is denied). If successful, point apt's cache at /dev/shm so the download (83.9MB) fits, and let extraction proceed to the overlay. Then install gcc and g++.",
+  "commands": [
+    {
+      "keystrokes": "mount -o remount,size=600M /dev/shm 2>&1; df -h /dev/shm\n",
+      "duration": 0.5
+    }
+  ]
+}

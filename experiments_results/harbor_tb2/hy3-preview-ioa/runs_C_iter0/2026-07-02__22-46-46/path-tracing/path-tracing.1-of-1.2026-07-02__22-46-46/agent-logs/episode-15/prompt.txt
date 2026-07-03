@@ -1,0 +1,87 @@
+New Terminal Output:
+
+root@e4e667a7dedd:/app# cat > /tmp/an6.py << 'EOF'
+> import math
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> he=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[he:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> print('B top region [y, B at x=0,400,799]:')
+> for y in range(0,300,30):
+>     print(y, get(0,y)[2], get(400,y)[2], get(799,y)[2])
+>
+> def feats(u,v):
+>     return [1,v,v*v,v*v*v,u,u*u,u*u*u,u*v,u*v*v,u*u*v]
+>
+> def fit(plane, y0, y1):
+>     M=[[0.0]*10 for _ in range(10)]
+>     bb=[0.0]*10
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             u=x-400; v=y
+>             f=feats(u,v)
+>             val=plane(x,y)
+>             for i in range(10):
+>                 bb[i]+=f[i]*val
+>                 Mi=M[i]
+>                 for j in range(10):
+>                     Mi[j]+=f[i]*f[j]
+>     A=[row[:] for row in M]; b=bb[:]
+>     for p in range(10):
+>         m=p
+>         for r in range(p+1,10):
+>             if abs(A[r][p])>abs(A[m][p]): m=r
+>         A[p],A[m]=A[m],A[p]; b[p],b[m]=b[m],b[p]
+>         pv=A[p][p]
+>         for c in range(p,10): A[p][c]/=pv
+>         b[p]/=pv
+>         for r in range(10):
+>             if r!=p:
+>                 f=A[r][p]
+>                 for c in range(p,10): A[r][c]-=f*A[p][c]
+>                 b[r]-=f*b[p]
+>     return b
+>
+> def rms(coef, plane, y0, y1):
+>     e=0.0; n=0
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             u=x-400; v=y
+>             f=feats(u,v)
+>             pred=sum(coef[i]*f[i] for i in range(10))
+>             d=pred-plane(x,y); e+=d*d; n+=1
+>     return math.sqrt(e/n)
+>
+> cR=fit(lambda x,y:get(x,y)[0],0,295)
+> cG=fit(lambda x,y:get(x,y)[1],0,295)
+> print('R cubic coef:',[round(c,5) for c in cR])
+> print('R cubic RMS (train):',round(rms(cR,lambda x,y:get(x,y)[0],0,295),3))
+> print('G cubic coef:',[round(c,5) for c in cG])
+> print('G cubic RMS (train):',round(rms(cG,lambda x,y:get(x,y)[1],0,295),3))
+>
+> print('bottom R at x=0..400 step50:')
+> for y in [450,500,550,580]:
+>     print(' y',y,[get(x,y)[0] for x in range(0,401,50)])
+> print('stripe along x+y=const (should be ~const if stripes are x+y const):')
+> for s in [0,10,20,30,40,50]:
+>     print(' x',s,'y',500-s,get(s,500-s)[0])
+> print('stripe along x-y=const:')
+> for s in [0,40,80,120]:
+>     print(' x',100+s,'y',500-s,get(100+s,500-s)[0])
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an6.py
+B top region [y, B at x=0,400,799]:
+0 255 255 255
+30 255 255 255
+60 255 255 255
+90 255 255 255
+120 255 255 255
+150 255 255 255
+180 255 255 255
+210 255 255 255
+240 255 255 255
+270 255 20 255
+

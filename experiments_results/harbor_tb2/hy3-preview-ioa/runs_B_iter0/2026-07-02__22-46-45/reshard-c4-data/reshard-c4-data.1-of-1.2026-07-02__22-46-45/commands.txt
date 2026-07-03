@@ -1,0 +1,41 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'pwd; ls -la\n'
+"find . -maxdepth 3 -name 'c4_sample' -type d\n"
+'ls -la c4_sample | head -50\n'
+'ls c4_sample | wc -l\n'
+'du -sh c4_sample; du -ah c4_sample | sort -rh | head -40\n'
+''
+'df -h /app\n'
+'cat > /tmp/build_reshard.py <<\'PYEOF\'\nimport os\nimport shutil\n\nROOT = "/app"\nSAMPLE = os.path.join(ROOT, "c4_sample")\nRESHARD = os.path.join(ROOT, "c4_reshard")\n\nPER_LEAF = 30   # max files per leaf folder\nPER_GROUP = 30  # max leaf folders per group folder\n\nfiles = sorted(\n    f for f in os.listdir(SAMPLE)\n    if os.path.isfile(os.path.join(SAMPLE, f))\n)\nn = len(files)\nleaves = (n + PER_LEAF - 1) // PER_LEAF\ngroups = (leaves + PER_GROUP - 1) // PER_GROUP\n\nprint("files:", n, "leaves:", leaves, "groups:", groups)\n\nif os.path.exists(RESHARD):\n    shutil.rmtree(RESHARD)\nos.makedirs(RESHARD)\n\nfor i, fname in enumerate(files):\n    leaf = i // PER_LEAF\n    group = leaf // PER_GROUP\n    leaf_in_group = leaf % PER_GROUP\n    dest_dir = os.path.join(RESHARD, "%03d" % group, "%03d" % leaf_in_group)\n    os.makedirs(dest_dir, exist_ok=True)\n    src = os.path.join(SAMPLE, fname)\n    shutil.copy2(src, os.path.join(dest_dir, fname))\n\nprint("done")\nPYEOF\n'
+'python3 /tmp/build_reshard.py\n'
+''
+''
+''
+''
+'C-c'
+"df -h /app; echo '---'; ls c4_reshard 2>/dev/null | head\n"
+'rm -rf /app/c4_reshard\n'
+'cat > /tmp/build_reshard.py <<\'PYEOF\'\nimport os\nimport shutil\n\nROOT = "/app"\nSAMPLE = os.path.join(ROOT, "c4_sample")\nRESHARD = os.path.join(ROOT, "c4_reshard")\n\nPER_LEAF = 30    # max files per leaf folder\nPER_GROUP = 30   # max leaf folders per group folder\n\nfiles = sorted(\n    f for f in os.listdir(SAMPLE)\n    if os.path.isfile(os.path.join(SAMPLE, f))\n)\nn = len(files)\nleaves = (n + PER_LEAF - 1) // PER_LEAF\ngroups = (leaves + PER_GROUP - 1) // PER_GROUP\nprint("files:", n, "leaves:", leaves, "groups:", groups)\n\nif os.path.exists(RESHARD):\n    shutil.rmtree(RESHARD)\nos.makedirs(RESHARD)\n\nfor i, fname in enumerate(files):\n    leaf = i // PER_LEAF\n    group = leaf // PER_GROUP\n    leaf_in_group = leaf % PER_GROUP\n    dest_dir = os.path.join(RESHARD, "%03d" % group, "%03d" % leaf_in_group)\n    os.makedirs(dest_dir, exist_ok=True)\n    os.link(os.path.join(SAMPLE, fname), os.path.join(dest_dir, fname))\n\nprint("done")\nPYEOF\n'
+'python3 /tmp/build_reshard.py\n'
+''
+''
+'echo EXIT=$?; ls c4_reshard | wc -l; find c4_reshard -type f | wc -l\n'
+''
+''
+'\n'
+'echo EXIT=$?; find c4_reshard -type f | wc -l\n'
+'C-c'
+'echo READY; find c4_reshard -type f 2>/dev/null | wc -l\n'
+'rm -rf /app/c4_reshard; nohup python3 /tmp/build_reshard.py > /tmp/build.log 2>&1 & echo PID=$!\n'
+"sleep 10; echo '---log---'; cat /tmp/build.log; echo '---count---'; find /app/c4_reshard -type f 2>/dev/null | wc -l\n"
+"sleep 30; echo '---count---'; find /app/c4_reshard -type f 2>/dev/null | wc -l; echo '---log---'; cat /tmp/build.log\n"
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+"sleep 30; echo '---count---'; find /app/c4_reshard -type f 2>/dev/null | wc -l; echo '---log---'; cat /tmp/build.log\n"
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+''
+"sleep 30; echo '---count---'; find /app/c4_reshard -type f 2>/dev/null | wc -l; echo '---log---'; cat /tmp/build.log\n"
+['C-d']
+['C-d']

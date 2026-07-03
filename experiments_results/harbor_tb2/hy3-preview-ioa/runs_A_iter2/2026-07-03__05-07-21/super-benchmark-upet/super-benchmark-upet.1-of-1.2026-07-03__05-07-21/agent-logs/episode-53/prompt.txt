@@ -1,0 +1,41 @@
+Current Terminal Screen:
+    67                  logger.info(f"{key} = {value}")
+    68              self.log(self.best_metrics)
+    69
+    70          if self.control.should_save:
+    71              self._save_checkpoint(model, trial, metrics=eval_metrics)
+    72              self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+root@7bcf8a0cf7c8:/app/UPET# python3 - <<'EOF'
+> p='training/trainer_base.py'
+> s=open(p).read()
+> old='    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):'
+> new='    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval):'
+> assert old in s, 'signature not found'
+> s=s.replace(old,new)
+> open(p,'w').write(s)
+> print('patched _maybe_log_save_evaluate signature')
+> EOF
+patched _maybe_log_save_evaluate signature
+root@7bcf8a0cf7c8:/app/UPET# rm -f run_rte_upet.log; nohup bash run_rte_upet.sh > run_rte_upet.log 2>&1 &
+[1] 2849
+root@7bcf8a0cf7c8:/app/UPET# sleep 45; tail -n 25 run_rte_upet.log
+nohup: ignoring input
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 21:43:03 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.
+0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+{'entailment': 0, 'not_entailment': 1}
+{0: 'entailment', 1: 'not_entailment'}
+Running tokenizer on dataset: 100%|██████████| 277/277 [00:00<00:00, 403.38 examples/s]
+[WARNING|modeling_utils.py:4172] 2026-07-02 21:43:20,090 >> Some weights of RobertaPrefixForSequenceClassification were not initialized from the model checkpoin
+t at roberta-base and are newly initialized: ['classifier.bias', 'classifier.weight', 'prefix_encoder.embedding.weight', 'roberta.pooler.dense.bias', 'roberta.p
+ooler.dense.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Randomly sampling 5-shot training examples for each label. Total examples number is 10
+total param is 2360834
+***** total param is 2360834 *****
+07/02/2026 21:43:20 - WARNING - accelerate.utils.other - [RANK 0] Detected kernel version 5.4.241, which is below the recommended minimum of 5.5.0; this can cau
+se the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+  0%|          | 0/1 [00:00<?, ?it/s]root@7bcf8a0cf7c8:/app/UPET#

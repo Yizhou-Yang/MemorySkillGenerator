@@ -1,0 +1,106 @@
+New Terminal Output:
+
+root@3db407d7b76a:/app# cat > /tmp/convert.py << 'PYEOF'
+> import zipfile, struct, json
+> z=zipfile.ZipFile('/app/model.pth')
+> def rd(n):
+>     b=z.read(n)
+>     return list(struct.unpack('<%df'% (len(b)//4), b))
+> w0=rd('simple_mnist/data/0')  # 12544 = 16*784
+> b0=rd('simple_mnist/data/1')  # 16
+> w1=rd('simple_mnist/data/2')  # 256 = 16*16
+> b1=rd('simple_mnist/data/3')  # 16
+> w2=rd('simple_mnist/data/4')  # 160 = 10*16
+> b2=rd('simple_mnist/data/5')  # 10
+> print('counts',len(w0),len(b0),len(w1),len(b1),len(w2),len(b2))
+> import sys
+> sys.path.insert(0,'/tmp')
+> import decode as D
+> W,H,ch,raw=D.read_png('/app/image.png')
+>
+> def infer(x):
+>     # layer1
+>     h=[0.0]*16
+>     for o in range(16):
+>         s=b0[o]
+>         base=o*784
+>         for i in range(784):
+>             s+=w0[base+i]*x[i]
+>         h[o]=s if s>0 else 0.0
+>     h2=[0.0]*16
+>     for o in range(16):
+>         s=b1[o]
+>         base=o*16
+>         for i in range(16):
+>             s+=w1[base+i]*h[i]
+>         h2[o]=s if s>0 else 0.0
+>     out=[0.0]*10
+>     for o in range(10):
+>         s=b2[o]
+>         base=o*16
+>         for i in range(16):
+>             s+=w2[base+i]*h2[i]
+>         out[o]=s
+>     return out
+>
+> x=[raw[i]/255.0 for i in range(784)]
+> out=infer(x)
+> print('norm /255 pred', out.index(max(out)), 'logits', [round(v,2) for v in out])
+> mean,std=0.1307,0.3081
+> x2=[(raw[i]/255.0-mean)/std for i in range(784)]
+> out2=infer(x2)
+> print('norm mnist pred', out2.index(max(out2)), 'logits', [round(v,2) for v in out2])
+> # plain 0..255
+> x3=[float(raw[i]) for i in range(784)]
+> out3=infer(x3)
+> print('plain pred', out3.index(max(out3)))
+>
+> # write weights.json
+> obj={
+>   'shapes':{'in':784,'hidden':16,'out':10},
+>   'layers':[
+>     {'W':w0,'b':b0},
+>     {'W':w1,'b':b1},
+>     {'W':w2,'b':b2},
+>   ]
+> }
+> with open('/app/weights.json','w') as f:
+>     json.dump(obj,f)
+> print('wrote weights.json')
+> PYEOF
+root@3db407d7b76a:/app# python3 /tmp/convert.py
+counts 12544 16 256 16 160 10
+size 28 28 ch 1 max 255 min 0
+
+
+        .#####.
+        #########
+       .##   .####.
+        .#     .###.
+                 ###
+                 .##.
+                  ###
+                  .##
+                  .##
+                  .##
+                  .##
+                  ###
+       .####..    ###
+      .#######.  .##.
+     .####..#### ###
+     .##.    .#####.
+     ##.      #####. ..
+     ###.....##########
+     .#########. .#####
+        #####.     .###
+
+
+
+
+
+
+norm /255 pred 2 logits [0.01, -3.09, 1.7, -0.95, 0.25, -1.05, 0.56, -3.21, -0.76, -1.76]
+norm mnist pred 2 logits [-0.9, -12.97, 8.4, -3.77, 0.29, -3.31, 1.83, -16.38, -2.83, -8.92]
+plain pred 2
+wrote weights.json
+root@3db407d7b76a:/app#

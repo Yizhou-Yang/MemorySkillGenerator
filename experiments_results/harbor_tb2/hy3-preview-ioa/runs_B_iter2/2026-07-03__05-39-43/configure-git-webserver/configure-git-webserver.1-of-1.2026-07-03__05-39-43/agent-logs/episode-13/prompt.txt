@@ -1,0 +1,35 @@
+New Terminal Output:
+
+root@5a142b2e6920:/tmp# sed -i 's/^session.*pam_motd/#&/' /etc/pam.d/sshd
+root@5a142b2e6920:/tmp# printf 'PrintMotd no\nBanner none\n' >> /etc/ssh/sshd_config
+root@5a142b2e6920:/tmp# : > /etc/motd
+root@5a142b2e6920:/tmp# pkill -x sshd; sleep 1; /usr/sbin/sshd; sleep 1; ss -tlnp 2>/dev/null | grep -E ':22|:8080'
+LISTEN 0      511          0.0.0.0:8080       0.0.0.0:*    users:(("nginx",pid=2412,fd=5))
+LISTEN 0      128          0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=2722,fd=3))
+LISTEN 0      128             [::]:22            [::]:*    users:(("sshd",pid=2722,fd=4))
+root@5a142b2e6920:/tmp# apt-get -o Dir::Cache::archives=/dev/shm/aptcache install -y curl 2>&1 | tail -4
+Unpacking curl (8.5.0-2ubuntu10.10) ...
+Setting up libcurl4t64:amd64 (8.5.0-2ubuntu10.10) ...
+Setting up curl (8.5.0-2ubuntu10.10) ...
+Processing triggers for libc-bin (2.39-0ubuntu8.4) ...
+root@5a142b2e6920:/tmp# export GIT_SSH_COMMAND='ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+root@5a142b2e6920:/tmp# cd /tmp && rm -rf server && git clone user@server:/git/server 2>&1 | tail -4
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@5a142b2e6920:/tmp# cd /tmp/server && echo '<html>index</html>' > index.html && echo "hello world" > hello.html && git add hello.html index.html && git comm
+it -m "add index" 2>&1 | tail -3
+bash: cd: /tmp/server: No such file or directory
+root@5a142b2e6920:/tmp# git branch -M webserver && git push origin webserver 2>&1 | tail -8
+fatal: not a git repository (or any of the parent directories): .git
+root@5a142b2e6920:/tmp# curl -s https://server:8080/hello.html; echo "<END>"
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.24.0 (Ubuntu)</center>
+</body>
+</html>
+<END>
+root@5a142b2e6920:/tmp#

@@ -1,0 +1,22 @@
+{
+  "analysis": "sudo isn't available. The nginx config fix applied (reloaded fine). The seed push failed because sudo didn't exist, so /var/www is still empty and both endpoints 404. I need to seed the deploy as the git user using a different method (runuser/su) or as root with safe.directory set. The real requirement is that a push over SSH as git@localhost triggers the post-receive hook. Let me seed as root (with safe.directory) to prove the hook deploys, then separately verify SSH password auth works end-to-end.",
+  "plan": "1) Add /git/project to root's git safe.directory and run the seed push as root so the post-receive hook runs and populates /var/www/main and /var/www/dev. 2) Verify curl returns MAIN and DEV content. 3) Check if sshpass is available to test actual SSH password-auth push; if available, do a real push over SSH as git@localhost to confirm the full flow and timing. Fix any issues found.",
+  "commands": [
+    {
+      "keystrokes": "git config --global --add safe.directory /git/project\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cd /tmp && rm -rf seed && git init -q -b main seed && cd seed && git config user.email t@t && git config user.name t && echo '<h1>MAIN</h1>' > index.html && git add index.html && git commit -qm main && git checkout -q -b dev && echo '<h1>DEV</h1>' > index.html && git add index.html && git commit -qm dev && git push -q /git/project main && git push -q /git/project dev; cd / && rm -rf /tmp/seed\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "ls -la /var/www/main /var/www/dev; echo '--- MAIN ---'; curl -sk https://localhost:8443/index.html; echo '--- DEV ---'; curl -sk https://localhost:8443/dev/index.html\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "which sshpass || echo NO_SSHPASS\n",
+      "duration": 0.2
+    }
+  ]
+}

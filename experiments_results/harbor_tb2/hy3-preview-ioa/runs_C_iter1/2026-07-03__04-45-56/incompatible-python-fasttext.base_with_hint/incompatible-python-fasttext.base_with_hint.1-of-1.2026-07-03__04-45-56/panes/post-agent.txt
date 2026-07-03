@@ -1,0 +1,40 @@
+root@905cf200b012:/app# which python python3
+/usr/local/bin/python
+/usr/local/bin/python3
+root@905cf200b012:/app# python -c 'import fasttext; print(fasttext.__file__)'
+/usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+root@905cf200b012:/app# cd /app && python -c 'import fasttext; m=fasttext.load_model("model.bin"); print(m.predict("hello world"))'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; m=fasttext.load_model("model.bin"); print(m.predict("hello world"))
+                                                               ~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 239, in predict
+    return labels, np.array(probs, copy=False)
+                   ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+ValueError: Unable to avoid copy while creating an array as requested.
+If using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).
+For more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.
+root@905cf200b012:/app# grep -n 'copy=False' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+239:            return labels, np.array(probs, copy=False)
+root@905cf200b012:/app# sed -i -E 's/np\.array\(([^,]*), copy=False\)/np.asarray(\1)/g' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@905cf200b012:/app# grep -n 'copy=False' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@905cf200b012:/app# python -c 'import fasttext; m=fasttext.load_model("model.bin"); print(m.predict("hello world"))'
+(('__label__4',), array([0.99451137]))
+root@905cf200b012:/app#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,14 @@
+{
+  "analysis": "The push authenticates but fails with the generic 'Could not read from remote repository'. The direct git-receive-pack test produced no output, which is suspicious. I need to see the actual remote error. My earlier dbgexp ran git-receive-pack but showed no banner/output, suggesting the remote command may be failing to start (e.g. git-receive-pack not found in the git user's non-interactive PATH). Let me capture the real error by logging the SSH session to a file and also simulate the git user's environment with su.",
+  "plan": "1) Write an expect script that logs all SSH output to /app/out.txt and runs `echo PATH=...; which git-receive-pack; git-receive-pack /git/project; echo RC=...`. 2) cat the captured output to see the real error. 3) Separately, simulate the git user env with `su - git` to check the PATH git-receive-pack resolves under. This will pinpoint why the server-side command fails.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/dbg.exp <<'EOF'\n#!/usr/bin/expect -f\nlog_file -a /app/out.txt\nset timeout 30\nspawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost \"echo MARK_BEGIN; echo PATH=$PATH; command -v git-receive-pack; git-receive-pack /git/project; echo RC=$?; echo MARK_END\"\nexpect {\n  -re {(?i)password} { send \"password\\r\"; exp_continue }\n  eof {}\n}\nEOF\n: > /app/out.txt; /app/dbg.exp; echo '=== captured ==='; cat /app/out.txt\n",
+      "duration": 4.0
+    },
+    {
+      "keystrokes": "su - git -c 'echo PATH=$PATH; command -v git-receive-pack; id' < /dev/null\n",
+      "duration": 0.5
+    }
+  ]
+}

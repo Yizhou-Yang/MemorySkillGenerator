@@ -1,0 +1,14 @@
+{
+  "analysis": "The `Acquire::Check-Free-Space=false` flag didn't suppress the check — apt still refuses due to its statvfs-based free-space pre-flight on /var/cache/apt/archives. However, I proved the writable layer can actually absorb 200MB of writes; the '0 avail' is a misleading statvfs report. The cleanest fix is to point apt's archive cache to the real tmpfs at /sys/fs/cgroup (32G real available), where statvfs reports genuine free space, bypassing the false check. gcc/gcov will install to / (which has real write capacity).",
+  "plan": "Create an apt archives dir on the 32G tmpfs at /sys/fs/cgroup, then run apt-get pointing Dir::Cache::archives there. This satisfies apt's free-space check with real numbers while still installing to the real root. Then verify gcc/gcov/tcl.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /sys/fs/cgroup/aptarchives\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get -o Dir::Cache::archives=/sys/fs/cgroup/aptarchives install -y gcc make wget 2>&1 | tail -8\n",
+      "duration": 40.0
+    }
+  ]
+}

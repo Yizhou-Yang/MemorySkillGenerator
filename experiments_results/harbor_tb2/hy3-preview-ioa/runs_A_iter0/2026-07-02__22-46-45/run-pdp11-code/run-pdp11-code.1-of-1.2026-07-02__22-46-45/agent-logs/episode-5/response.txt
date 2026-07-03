@@ -1,0 +1,10 @@
+{
+  "analysis": "Environment has apt (2.6.1), python3, pip3, but no PDP-11 emulator. data.bin is confirmed a byte-perfect PDP-11 a.out (OMAGIC, V6/V7 UNIX C runtime: crt0, printf, ffltpr, ecvt, fcvt, etc.). The data segment contains the format string '%d ' and a newline, so the program prints numbers. To run it I'll need to emulate a PDP-11. Before building the emulator I must confirm the syscall convention (inline args vs registers) and locate _main. I'll scan the text for `sys` instructions (opcode 0x4900 = octal 104400) and dump context.",
+  "plan": "Write a scanner that: parses the a.out header, locates the text segment, scans for sys instructions (word & 0xFF00 == 0x4900), prints the syscall number and the following words (to see whether args are inline). Also parse the symbol table to find _main's address. This tells me how to build the emulator's syscall handler.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/scan.py << 'EOF'\nimport struct\nd = open('/app/data.bin','rb').read()\ndef w(off): return struct.unpack_from('<H', d, off)[0]\na_text=w(2); a_data=w(4); a_bss=w(6); a_syms=w(8); a_entry=w(10)\nprint('text',a_text,'data',a_data,'bss',a_bss,'syms',a_syms,'entry',a_entry)\ntext_off=16\nprint('=== sys instructions (opcode 0x49xx) ===')\nfor i in range(0, a_text, 2):\n    val=w(text_off+i)\n    if (val & 0xFF00)==0x4900:\n        n=val & 0x7F\n        ctx=[hex(w(text_off+i+2*k)) for k in range(1,6)]\n        print('addr %04x (file %04x) sys %d  nextwords %s'%(i, text_off+i, n, ctx))\nprint('=== symbol table ===')\n# symbol table follows header+a_text+a_data+a_bss? Actually symtab after text+data, before string table.\n# V6 a.out: header(16) + text + data + symtab(a_syms) + strtab. Let's find _main.\nst=text_off+a_text+a_data\nfor i in range(0, a_syms, 6):\n    val=w(st+i)\n    typ=w(st+i+2)\n    name=w(st+i+4)\n    print('sym off %d value %06o type %06o strx %06o'%(i,val,typ,name))\nEOF\npython3 /app/scan.py | head -120\n",
+      "duration": 0.3
+    }
+  ]
+}

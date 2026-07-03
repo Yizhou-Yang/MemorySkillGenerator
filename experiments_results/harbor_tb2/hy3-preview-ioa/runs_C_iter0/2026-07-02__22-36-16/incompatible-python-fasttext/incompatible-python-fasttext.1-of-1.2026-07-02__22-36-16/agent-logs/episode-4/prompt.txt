@@ -1,0 +1,63 @@
+New Terminal Output:
+
+root@d901f6abaf70:/app# ls -la /usr/local/lib/python3.13/site-packages/fasttext/
+total 44
+drwxr-xr-x  5 root root  4096 Jul  2 14:51 .
+drwxr-xr-x 14 root root  4096 Jul  2 14:51 ..
+-rw-r--r--  1 root root 19636 Jul  2 14:51 FastText.py
+-rw-r--r--  1 root root   659 Jul  2 14:51 __init__.py
+drwxr-xr-x  2 root root  4096 Jul  2 14:51 __pycache__
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 tests
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 util
+root@d901f6abaf70:/app# head -50 /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+# Copyright (c) 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+import fasttext_pybind as fasttext
+import numpy as np
+import multiprocessing
+from itertools import chain
+
+loss_name = fasttext.loss_name
+model_name = fasttext.model_name
+EOS = "</s>"
+BOW = "<"
+EOW = ">"
+
+displayed_errors = {}
+
+
+class _Meter:
+    def __init__(self, fasttext_model, meter):
+        self.f = fasttext_model
+        self.m = meter
+
+    def score_vs_true(self, label):
+        """Return scores and the gold of each sample for a specific label"""
+        label_id = self.f.get_label_id(label)
+        pair_list = self.m.scoreVsTrue(label_id)
+
+        if pair_list:
+            y_scores, y_true = zip(*pair_list)
+        else:
+            y_scores, y_true = ([], ())
+
+        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+
+    def precision_recall_curve(self, label=None):
+        """Return precision/recall curve"""
+        if label:
+            label_id = self.f.get_label_id(label)
+            pair_list = self.m.precisionRecallCurveLabel(label_id)
+        else:
+            pair_list = self.m.precisionRecallCurve()
+
+root@d901f6abaf70:/app#

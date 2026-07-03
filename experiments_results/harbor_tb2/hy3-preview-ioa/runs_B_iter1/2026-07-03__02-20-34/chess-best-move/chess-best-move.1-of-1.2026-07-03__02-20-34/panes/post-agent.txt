@@ -1,0 +1,766 @@
+root@d0c5892a127e:/app# ls -la /app
+total 40
+drwxr-xr-x  2 root root  4096 Jul  2 14:02 .
+drwxr-xr-x 19 root root  4096 Jul  2 19:22 ..
+-rw-r--r--  1 root root 31152 Jul  2 14:02 chess_puzzle.png
+root@d0c5892a127e:/app# python3 --version; python3 -c 'import numpy, PIL; print("numpy/PIL ok")' 2>&1
+Python 3.12.3
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'numpy'
+root@d0c5892a127e:/app# python3 -c 'import chess; print("chess ok")' 2>&1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'chess'
+root@d0c5892a127e:/app# find / -iname '*.png' 2>/dev/null | head; ls -la /app
+pip3 install pillow numpy 2>&1 | tail -5
+/usr/share/pixmaps/debian-logo.png
+/usr/share/pixmaps/ubuntu-logo-text.png
+/usr/share/pixmaps/ubuntu-logo-text-dark.png
+/usr/share/info/gnupg-card-architecture.png
+/usr/share/info/gnupg-module-overview.png
+/usr/lib/python3/dist-packages/asciinema/data/icon-256x256.png
+/app/chess_puzzle.png
+total 40
+drwxr-xr-x  2 root root  4096 Jul  2 14:02 .
+drwxr-xr-x 19 root root  4096 Jul  2 19:22 ..
+-rw-r--r--  1 root root 31152 Jul  2 14:02 chess_puzzle.png
+root@d0c5892a127e:/app# pip3 install pillow numpy 2>&1 | tail -5
+
+    See /usr/share/doc/python3.12/README.venv for more information.
+
+note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your
+ Python installation or OS, by passing --break-system-packages.
+hint: See PEP 668 for the detailed specification.
+root@d0c5892a127e:/app# pip3 install --break-system-packages pillow numpy 2>&1 | tail -8
+Collecting numpy
+  Downloading numpy-2.5.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Downloading numpy-2.5.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 25.5 MB/s eta 0:00:00
+WARNING: Skipping /usr/lib/python3.12/dist-packages/asciinema-2.4.0.dist-info due to invalid metadata entry 'name'
+Installing collected packages: numpy
+Successfully installed numpy-2.5.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a v
+irtual environment instead: https://pip.pypa.io/warnings/venv
+root@d0c5892a127e:/app# python3 -c 'import PIL; print(PIL.__version__)'
+12.3.0
+root@d0c5892a127e:/app# pip3 install --break-system-packages python-chess 2>&1 | tail -5
+Successfully built chess
+WARNING: Skipping /usr/lib/python3.12/dist-packages/asciinema-2.4.0.dist-info due to invalid metadata entry 'name'
+Installing collected packages: chess, python-chess
+Successfully installed chess-1.11.2 python-chess-1.999
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a v
+irtual environment instead: https://pip.pypa.io/warnings/venv
+root@d0c5892a127e:/app# which stockfish 2>&1; python3 -c "from PIL import Image; im=Image.open('/app/chess_puzzle.png'); print(im.size, im.mode)"
+(640, 640) RGB
+root@d0c5892a127e:/app# cat > /tmp/recon.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> a = np.array(im).astype(int)
+> print('shape', a.shape)
+> cell=80
+> # determine background colors per cell: corners are background
+> # Print occupancy map based on color variance from corner pixel
+> for r in range(8):
+>     row=''
+>     for c in range(8):
+>         sub=a[r*cell:(r+1)*cell, c*cell:(c+1)*cell]
+>         # distance of center region from background (corner)
+>         bg=sub[2,2].astype(int)
+>         d=np.abs(sub.astype(int)-bg).sum(axis=2)
+>         frac=(d>40).mean()
+>         row+= ('#' if frac>0.03 else '.')
+>     print(8-r, row)
+> EOF
+root@d0c5892a127e:/app# python3 /tmp/recon.py
+shape (640, 640, 3)
+8 #.##.#..
+7 .#...##.
+6 #.#.#...
+5 ...#####
+4 ........
+3 #.#.....
+2 .#..###.
+1 #.#.#..#
+root@d0c5892a127e:/app# cat > /tmp/recon2.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> a = np.array(im).astype(int)
+> cell=80
+> files='abcdefgh'
+> for r in range(8):
+>     for c in range(8):
+>         sub=a[r*cell:(r+1)*cell, c*cell:(c+1)*cell]
+>         bg=sub[2,2].astype(int)
+>         d=np.abs(sub.astype(int)-bg).sum(axis=2)
+>         frac=(d>40).mean()
+>         if frac>0.03:
+>             # color detection: mean hue of non-bg pixels
+>             mask=d>40
+>             cols=sub[mask]
+>             print(files[c], 8-r, 'occ=%.2f'%frac, 'R=%.0f G=%.0f B=%.0f'%(cols[:,0].mean(),cols[:,1].mean(),cols[:,2].mean()))
+> EOF
+root@d0c5892a127e:/app# python3 /tmp/recon2.py
+a 8 occ=0.14 R=29 G=26 B=21
+c 8 occ=0.09 R=29 G=27 B=22
+d 8 occ=0.13 R=34 G=26 B=19
+f 8 occ=0.14 R=18 G=13 B=10
+b 7 occ=0.13 R=13 G=12 B=10
+f 7 occ=0.13 R=13 G=12 B=10
+g 7 occ=0.13 R=9 G=7 B=5
+a 6 occ=0.14 R=19 G=17 B=14
+c 6 occ=0.14 R=26 G=24 B=20
+e 6 occ=0.13 R=13 G=12 B=10
+d 5 occ=0.14 R=26 G=24 B=20
+e 5 occ=0.08 R=242 G=233 B=227
+f 5 occ=0.16 R=46 G=41 B=34
+g 5 occ=0.09 R=19 G=15 B=11
+h 5 occ=0.07 R=253 G=250 B=246
+a 3 occ=0.08 R=240 G=231 B=223
+c 3 occ=0.04 R=227 G=210 B=196
+b 2 occ=0.08 R=242 G=233 B=227
+e 2 occ=0.08 R=250 G=243 B=232
+f 2 occ=0.08 R=242 G=233 B=227
+g 2 occ=0.07 R=253 G=250 B=246
+a 1 occ=0.08 R=235 G=222 B=211
+c 1 occ=0.07 R=238 G=228 B=219
+e 1 occ=0.10 R=238 G=227 B=218
+h 1 occ=0.07 R=250 G=243 B=235
+root@d0c5892a127e:/app# cat > /tmp/art.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> a = np.array(im).astype(int)
+> cell=80
+> files='abcdefgh'
+> for r in range(8):
+>     for c in range(8):
+>         sub=a[r*cell:(r+1)*cell, c*cell:(c+1)*cell]
+>         bg=sub[2,2].astype(int)
+>         d=np.abs(sub.astype(int)-bg).sum(axis=2)
+>         mask=(d>40)
+>         if mask.mean()>0.03:
+>             # downsample to 20x20
+>             small=np.array(Image.fromarray((mask*255).astype('uint8')).resize((20,20)))
+>             print('=== %s%d ==='%(files[c],8-r))
+>             for y in range(20):
+>                 line=''.join('#' if small[y,x]>80 else ' ' for x in range(20))
+>                 print(line)
+> EOF
+root@d0c5892a127e:/app# python3 /tmp/art.py > /tmp/art.txt 2>&1
+root@d0c5892a127e:/app# wc -l /tmp/art.txt
+525 /tmp/art.txt
+root@d0c5892a127e:/app# sed -n '1,130p' /tmp/art.txt
+=== a8 ===
+
+
+
+
+
+
+     ########
+      #######
+      ######
+       #####
+  #    #####
+  #    #####
+  #    #####
+      ######
+      #######
+     ########
+
+
+
+
+=== c8 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       ## ##
+       #####
+       ####
+       ####
+       ####
+       #####
+      ######
+
+
+
+
+=== d8 ===
+
+
+
+
+
+
+      #### #
+     ### # ###
+    ## # # ###
+     # ######
+     ########
+      #######
+      ######
+      ######
+      ######
+      ######
+
+
+
+
+=== f8 ===
+
+
+
+
+
+
+     ########
+      #######
+      ######
+       #####
+       #####
+       #####
+       #####
+      ######
+      #######
+     ########
+
+
+
+
+=== b7 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #####
+       #####
+       #####
+      #######
+     ########
+     #########
+     #########
+
+
+
+
+=== f7 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #####
+       #####
+       #####
+      #######
+     ########
+     #########
+     #########
+
+
+
+
+=== g7 ===
+
+
+
+root@d0c5892a127e:/app# sed -n '130,280p' /tmp/art.txt
+
+
+
+
+        ###
+        ###
+       ####
+       #####
+       #####
+       #####
+      #######
+     ########
+     #########
+     #########
+
+
+
+
+=== a6 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #####
+       #####
+  #    #####
+      #######
+     ########
+     #########
+     #########
+
+
+
+
+=== c6 ===
+
+
+
+
+
+
+      # ##
+      ####
+      #####
+      ######
+      ######
+     ########
+     ########
+      #######
+      #######
+      #######
+
+
+
+
+=== e6 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #####
+       #####
+       #####
+      #######
+     ########
+     #########
+     #########
+
+
+
+
+=== d5 ===
+
+
+
+
+
+
+      # ##
+      ####
+      #####
+      ######
+      ######
+     ########
+     ########
+      #######
+      #######
+      #######
+
+
+
+
+=== e5 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #  ##
+       #  ##
+       #####
+      ##   ##
+     ##     #
+     #      ##
+     #########
+
+
+
+
+=== f5 ===
+
+
+
+
+
+
+        ##
+        ###
+     #########
+    ##########
+    ##########
+    ##########
+     #########
+      #######
+      #######
+      #######
+
+
+
+
+=== g5 ===
+
+
+
+
+
+
+root@d0c5892a127e:/app# sed -n '280,420p' /tmp/art.txt
+
+        ###
+        ###
+       ####
+       ## ##
+       #####
+       ####
+       ####
+       ####
+       #####
+      ######
+
+
+
+
+=== h5 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #  ##
+       #  ##
+       #####
+      ##   ##
+     ##     #
+     #      ##
+     #########
+
+
+
+
+=== a3 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #  ##
+       #  ##
+  #    #####
+      ##   ##
+     ##     #
+     #      ##
+     #########
+
+
+
+
+=== c3 ===
+
+
+
+
+
+
+        ##
+      ####
+      #   #
+      #    #
+           #
+     #   #  #
+     ## #   #
+      ##    #
+            #
+      #     #
+
+
+
+
+=== b2 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #  ##
+       #  ##
+       #####
+      ##   ##
+     ##     #
+     #      ##
+     #########
+
+
+
+
+=== e2 ===
+
+
+
+
+
+
+         # #
+       # # #
+     # # # # #
+     # ######
+      #######
+      ######
+      ######
+      # ####
+      ######
+      ######
+
+
+
+
+=== f2 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #  ##
+       #  ##
+       #####
+      ##   ##
+     ##     #
+     #      ##
+     #########
+
+
+
+
+root@d0c5892a127e:/app# sed -n '420,525p' /tmp/art.txt
+
+=== g2 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       #  ##
+       #  ##
+       #####
+      ##   ##
+     ##     #
+     #      ##
+     #########
+
+
+
+
+=== a1 ===
+
+
+
+
+
+
+     ########
+      #    ##
+      #    #
+       #   #
+           #
+           #
+       #   #
+      #    #
+      #    ##
+     ########
+          #
+
+
+
+=== c1 ===
+
+
+
+
+
+
+        ###
+        ###
+       ####
+       ## ##
+       #####
+       ####
+       ## #
+       ## #
+       #  ##
+      ######
+          #
+
+
+
+=== e1 ===
+
+
+
+
+
+
+        ##
+        ###
+     #########
+    ##  ##   #
+    #    #   #
+    ##   #   #
+     #########
+      #######
+      #     #
+      #######
+          #
+
+
+
+=== h1 ===
+
+
+
+
+
+
+     ########
+      #    ##
+      #    #
+       #   #
+
+
+       #   #
+      #    #
+      #    ##
+     ########
+          ##
+
+
+
+root@d0c5892a127e:/app# cat > /tmp/cluster.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> a = np.array(im).astype(int)
+> cell=80
+> files='abcdefgh'
+> cells=[]
+> masks=[]
+> for r in range(8):
+>     for c in range(8):
+>         sub=a[r*cell:(r+1)*cell, c*cell:(c+1)*cell]
+>         bg=sub[2,2].astype(int)
+>         d=np.abs(sub.astype(int)-bg).sum(axis=2)
+>         mask=(d>40)
+>         if mask.mean()>0.03:
+>             ys,xs=np.where(mask)
+>             y0,y1,x0,x1=ys.min(),ys.max()+1,xs.min(),xs.max()+1
+>             m=mask[y0:y1,x0:x1]
+>             m=Image.fromarray((m*255).astype('uint8')).resize((32,32))
+>             m=np.array(m)>80
+>             cells.append((files[c],8-r))
+>             masks.append(m)
+> # classify color
+> colors=[]
+> for r in range(8):
+>     for c in range(8):
+>         pass
+> # recompute color by RGB
+> for (fc,rr) in cells:
+>     c=files.index(fc); r=8-rr
+>     sub=a[r*cell:(r+1)*cell, c*cell:(c+1)*cell]
+>     bg=sub[2,2].astype(int)
+>     d=np.abs(sub.astype(int)-bg).sum(axis=2)
+>     cols=sub[d>40]
+>     lum=cols.mean()
+>     colors.append('W' if lum>140 else 'B')
+> # cluster
+> N=len(cells)
+> dist=[[0]*N for _ in range(N)]
+> for i in range(N):
+>     for j in range(N):
+>         dist[i][j]=(masks[i]^masks[j]).mean()
+> assigned=[-1]*N; reps=[]
+> for i in range(N):
+>     if assigned[i]!=-1: continue
+>     assigned[i]=len(reps)
+>     for j in range(i+1,N):
+>         if assigned[j]==-1 and dist[i][j]<0.10:
+>             assigned[j]=len(reps)
+>     reps.append([i])
+> print('num clusters', len(reps))
+> for k,grp in enumerate(reps):
+>     print('--- cluster',k,'members:',[ (cells[i],colors[i]) for i in grp])
+>     rep=masks[grp[0]]
+>     for y in range(32):
+>         print(''.join('#' if rep[y,x] else ' ' for x in range(32)))
+> EOF
+root@d0c5892a127e:/app# python3 /tmp/cluster.py > /tmp/clusters.txt 2>&1
+root@d0c5892a127e:/app# head -1 /tmp/clusters.txt
+num clusters 16
+root@d0c5892a127e:/app# grep 'cluster' /tmp/clusters.txt
+num clusters 16
+--- cluster 0 members: [(('a', 8), 'B')]
+--- cluster 1 members: [(('c', 8), 'B')]
+--- cluster 2 members: [(('d', 8), 'B')]
+--- cluster 3 members: [(('f', 8), 'B')]
+--- cluster 4 members: [(('b', 7), 'B')]
+--- cluster 5 members: [(('a', 6), 'B')]
+--- cluster 6 members: [(('c', 6), 'B')]
+--- cluster 7 members: [(('e', 5), 'W')]
+--- cluster 8 members: [(('f', 5), 'B')]
+--- cluster 9 members: [(('a', 3), 'W')]
+--- cluster 10 members: [(('c', 3), 'W')]
+--- cluster 11 members: [(('e', 2), 'W')]
+--- cluster 12 members: [(('a', 1), 'W')]
+--- cluster 13 members: [(('c', 1), 'W')]
+--- cluster 14 members: [(('e', 1), 'W')]
+--- cluster 15 members: [(('h', 1), 'W')]
+root@d0c5892a127e:/app#

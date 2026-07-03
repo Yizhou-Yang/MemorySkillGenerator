@@ -1,0 +1,62 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'cat /etc/os-release | head -n 3\n'
+'for b in git nginx sshd openssl ssh-keygen; do printf \'%s: \' "$b"; command -v $b || echo MISSING; done\n'
+'useradd -m -s /bin/bash git\n'
+"echo 'git:password' | chpasswd\n"
+'ssh-keygen -A\n'
+"printf 'PasswordAuthentication yes\\nPubkeyAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-git.conf\n"
+'mkdir -p /run/sshd && /usr/sbin/sshd\n'
+'ps aux | grep -v grep | grep sshd\n'
+'mkdir -p /git && git init --bare /git/project && chown -R git:git /git\n'
+'mkdir -p /var/www/main /var/www/dev && chown -R git:git /var/www/main /var/www/dev\n'
+'mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/git.key -out /etc/nginx/ssl/git.crt -days 365 -subj "/CN=localhost"\n'
+"cat > /etc/nginx/conf.d/git.conf <<'EOF'\nserver {\n    listen 8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/git.crt;\n    ssl_certificate_key /etc/nginx/ssl/git.key;\n    root /var/www/main;\n    index index.html;\n    location /dev/ {\n        alias /var/www/dev/;\n    }\n}\nEOF\n"
+'cat > /git/project/hooks/post-receive <<\'EOF\'\n#!/bin/bash\nGIT_DIR=/git/project\nwhile read oldrev newrev refname; do\n  branch="${refname#refs/heads/}"\n  case "$branch" in\n    main)\n      git --git-dir="$GIT_DIR" archive main | tar -x -C /var/www/main\n      ;;\n    dev)\n      git --git-dir="$GIT_DIR" archive dev | tar -x -C /var/www/dev\n      ;;\n  esac\ndone\nEOF\n'
+'chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive\n'
+'nginx -t\n'
+'nginx\n'
+"grep -rn '8443' /etc/nginx/ 2>/dev/null\n"
+'ls /etc/nginx/sites-enabled/ /etc/nginx/conf.d/\n'
+'command -v sshpass || echo NO_SSHPASS\n'
+'head -n 20 /etc/nginx/sites-available/default\n'
+'rm -f /etc/nginx/sites-enabled/default\n'
+'nginx -t\n'
+'apt-get install -y sshpass 2>&1 | tail -n 3 || echo APT_FAILED\n'
+'command -v expect || echo NO_EXPECT\n'
+'apt-get update 2>&1 | tail -n 3\n'
+'apt-get install -y sshpass 2>&1 | tail -n 3\n'
+'git config --global user.email test@test && git config --global user.name test\n'
+"mkdir -p /root/.ssh && printf 'Host localhost\\n    StrictHostKeyChecking no\\n    UserKnownHostsFile /dev/null\\n' > /root/.ssh/config\n"
+'cat > /tmp/push.exp <<\'EOF\'\n#!/usr/bin/expect -f\nset timeout 30\nset branch [lindex $argv 0]\nspawn git push origin $branch\nexpect {\n    -re "(?i)yes/no" { send "yes\\r"; exp_continue }\n    -re "password:" { send "password\\r" }\n}\nexpect eof\nEOF\n'
+"rm -rf /tmp/wt && mkdir /tmp/wt && cd /tmp/wt && git init -q && git checkout -q -b main && echo '<h1>MAIN PAGE</h1>' > index.html && git add -A && git commit -qm init && git remote add origin git@localhost:/git/project\n"
+'expect /tmp/push.exp main\n'
+'which git-shell; grep -rn -i welcome /etc/ 2>/dev/null | head; echo BASH_ENV=$BASH_ENV\n'
+'usermod -s /usr/bin/git-shell git && getent passwd git\n'
+'expect /tmp/push.exp main\n'
+''
+"printf 'PasswordAuthentication yes\\nPubkeyAuthentication yes\\nPrintMotd no\\n' > /etc/ssh/sshd_config.d/99-git.conf\n"
+"sed -i 's/^session.*pam_motd/# &/' /etc/pam.d/sshd; grep -n motd /etc/pam.d/sshd\n"
+'pkill -HUP sshd; sleep 1; ps aux | grep -v grep | grep sshd\n'
+'expect /tmp/push.exp main\n'
+'cat > /tmp/cmd.exp <<\'EOF\'\n#!/usr/bin/expect -f\nset timeout 30\nspawn ssh git@localhost {git-receive-pack /git/project}\nexpect {\n    -re "(?i)yes/no" { send "yes\\r"; exp_continue }\n    -re "password:" { send "password\\r" }\n}\nexpect eof\nEOF\n'
+'expect /tmp/cmd.exp\n'
+'usermod -s /bin/bash git\n'
+'expect /tmp/push.exp main\n'
+"grep -in 'forcecommand' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; echo DONE\n"
+"ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa -q; mkdir -p /home/git/.ssh && cat /root/.ssh/id_rsa.pub >> /home/git/.ssh/authorized_keys && chown -R git:git /home/git/.ssh && chmod 700 /home/git/.ssh && chmod 600 /home/git/.ssh/authorized_keys\n"
+"ssh -o StrictHostKeyChecking=no git@localhost 'echo PATH=$PATH; command -v git-receive-pack; ls -la /git/project | head'\n"
+"echo '=== raw receive-pack ==='; ssh -o StrictHostKeyChecking=no git@localhost 'git-receive-pack /git/project' 2>&1 | od -c | head -20\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+'getent passwd git\n'
+"ssh -o StrictHostKeyChecking=no git@localhost 'echo OUT_TEST123; id; pwd'\n"
+"ssh -o StrictHostKeyChecking=no git@localhost '/bin/echo DIRECT_ECHO'\n"
+"grep -niE 'match|forcecommand|command|restrict|chroot' /etc/ssh/sshd_config\n"
+"su git -c 'echo HI_FROM_SU; id'\n"
+"ls -la /etc/ssh/sshrc 2>/dev/null; echo '---'; cat /etc/ssh/sshrc 2>/dev/null; echo END\n"
+"ls -la /home/git/; echo '--- bashrc ---'; cat /home/git/.bashrc 2>/dev/null; cat /home/git/.profile 2>/dev/null; cat /home/git/.bash_profile 2>/dev/null\n"
+''
+['C-d']
+['C-d']

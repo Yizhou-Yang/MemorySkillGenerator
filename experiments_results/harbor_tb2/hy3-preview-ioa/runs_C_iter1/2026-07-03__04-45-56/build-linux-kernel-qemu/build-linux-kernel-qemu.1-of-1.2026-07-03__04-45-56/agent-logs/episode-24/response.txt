@@ -1,0 +1,10 @@
+{
+  "analysis": "The lzu 'WIN' is misleading — Content-Length 101 is a small portal/redirect page (/testpow/), not the real 140MB tarball. So no mirror is serving the file directly. However, raw.githubusercontent.com returned 200, meaning GitHub is reachable. GitHub serves release tarballs at https://github.com/torvalds/linux/archive/refs/tags/v6.9.tar.gz. That's my most reliable source. Let me probe it.",
+  "plan": "Test the GitHub release-archive URL for linux tag v6.9 with a Range GET to confirm it returns a large Content-Length. If it works, I'll stream-download it to /app and extract. GitHub archives extract to a directory named linux-6.9/, matching the expected layout.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe7.py << 'EOF'\nimport urllib.request\ncands=[\n'https://github.com/torvalds/linux/archive/refs/tags/v6.9.tar.gz',\n'https://github.com/torvalds/linux/archive/refs/tags/v6.9.tar.xz',\n'https://codeload.github.com/torvalds/linux/tar.gz/refs/tags/v6.9',\n]\nhdr={'User-Agent':'Mozilla/5.0','Range':'bytes=0-100'}\nfor u in cands:\n    try:\n        req=urllib.request.Request(u,headers=hdr)\n        r=urllib.request.urlopen(req,timeout=30)\n        print('WIN',r.status,r.headers.get('Content-Length'),r.headers.get('Content-Type'),u)\n    except urllib.error.HTTPError as e:\n        print('HTTP',e.code,u)\n    except Exception as e:\n        print('ERR',str(e)[:50],u)\nEOF\npython3 /tmp/probe7.py\n",
+      "duration": 30.0
+    }
+  ]
+}

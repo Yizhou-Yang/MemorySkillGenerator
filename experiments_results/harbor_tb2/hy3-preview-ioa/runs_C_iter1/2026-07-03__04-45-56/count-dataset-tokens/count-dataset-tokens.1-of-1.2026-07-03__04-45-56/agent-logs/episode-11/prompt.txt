@@ -1,0 +1,42 @@
+New Terminal Output:
+
+root@4c85a0987440:/app# cat > /app/inspect.py << 'EOF'
+> from huggingface_hub import hf_hub_download
+> from pyarrow import parquet as pq
+> from collections import Counter
+> path = hf_hub_download("open-thoughts/OpenThoughts-114k", "metadata/train-00000-of-00012.parquet", repo_type="dataset")
+> pf = pq.ParquetFile(path)
+> print("schema:", pf.schema_arrow.names)
+> c = Counter()
+> sample = None
+> for batch in pf.iter_batches(batch_size=500):
+>     d = batch.to_pydict()["domain"]
+>     for v in d:
+>         c[v] += 1
+>     if sample is None:
+>         sample = batch.to_pydict()
+> print("domain counts:", dict(c))
+> if sample:
+>     print("keys:", list(sample.keys()))
+>     print("reason len:", len(sample.get("deepseek_reasoning",[""])[0] or ""))
+>     print("sol len:", len(sample.get("deepseek_solution",[""])[0] or ""))
+> EOF
+root@4c85a0987440:/app# python3 /app/inspect.py
+Error importing huggingface_hub.file_download: cannot import name 'hf_hub_download' from 'huggingface_hub' (/usr/local/lib/python3.13/site-packages/huggingface_
+hub/__init__.py)
+Traceback (most recent call last):
+  File "/app/inspect.py", line 1, in <module>
+    from huggingface_hub import hf_hub_download
+  File "/usr/local/lib/python3.13/site-packages/huggingface_hub/__init__.py", line 1184, in __getattr__
+    submod = importlib.import_module(submod_path)
+  File "/usr/local/lib/python3.13/importlib/__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 10, in <module>
+    from dataclasses import dataclass
+  File "/usr/local/lib/python3.13/dataclasses.py", line 5, in <module>
+    import inspect
+  File "/app/inspect.py", line 1, in <module>
+    from huggingface_hub import hf_hub_download
+ImportError: cannot import name 'hf_hub_download' from 'huggingface_hub' (/usr/local/lib/python3.13/site-packages/huggingface_hub/__init__.py)
+root@4c85a0987440:/app#

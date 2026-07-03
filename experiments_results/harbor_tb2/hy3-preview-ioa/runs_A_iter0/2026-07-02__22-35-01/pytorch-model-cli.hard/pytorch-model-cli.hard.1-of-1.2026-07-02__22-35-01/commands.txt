@@ -1,0 +1,39 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'which python3 gcc g++ cc; python3 --version\n'
+'python3 -c "import numpy, PIL; print(\'numpy\', numpy.__version__, \'PIL\', PIL.__version__)" 2>&1\n'
+'python3 -c "import torch; print(\'torch\', torch.__version__)" 2>&1; python3 -c "import sklearn; print(\'sklearn\', sklearn.__version__)" 2>&1\n'
+'curl -sI https://github.com 2>&1 | head -3; echo \'---\'; python3 -c "import urllib.request; print(urllib.request.urlopen(\'https://pypi.org\', timeout=5).status)" 2>&1\n'
+'cat /app/model.py\n'
+'python3 -c "import struct; print(open(\'/app/image.png\',\'rb\').read(8))"\n'
+'head -c 200 /app/model.pth | xxd | head -20\n'
+'python3 -c "import struct,zlib; d=open(\'/app/image.png\',\'rb\').read(); w,h=struct.unpack(\'>II\', d[16:24]); print(\'dims\', w, h, \'colortype\', d[25], \'bitdepth\', d[24])"\n'
+'pip install torch --quiet 2>&1 | tail -5\n'
+''
+''
+''
+''
+''
+''
+''
+''
+''
+'python3 -c "import torch; print(\'torch\', torch.__version__)"\n'
+"python3 << 'EOF'\nimport torch\nfrom model import MnistModel\nsd = torch.load('model.pth', map_location='cpu')\nprint(type(sd))\nif isinstance(sd, dict):\n    print(list(sd.keys()))\n    for k,v in sd.items():\n        print(k, tuple(v.shape))\nEOF\n"
+''
+''
+''
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+''
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+"cat > /tmp/test_preproc.py << 'EOF'\nimport torch, math\nfrom model import MnistModel\nfrom torch.nn import functional as F\n\nsd = torch.load('model.pth', map_location='cpu')\nmodel = MnistModel(784, 16, 10)\nmodel.load_state_dict(sd)\nmodel.eval()\n\n# load PNG grayscale\ndef read_png(path):\n    import struct, zlib\n    d = open(path,'rb').read()\n    assert d[:8]==b'\\x89PNG\\r\\n\\x1a\\n'\n    pos=8; width=height=None; bitd=colt=None; idat=b''\n    while pos < len(d):\n        ln = struct.unpack('>I', d[pos:pos+4])[0]; typ=d[pos+4:pos+8]; data=d[pos+8:pos+8+ln]\n        if typ==b'IHDR':\n            width,height,bitd,colt = struct.unpack('>IIBB', data[:10])\n        elif typ==b'IDAT':\n            idat+=data\n        elif typ==b'IEND':\n            break\n        pos += 12+ln\n    raw = zlib.decompress(idat)\n    # colortype 0 grayscale 8-bit, no filter per scanline: bpp=1, each row has 1 filter byte\n    stride = width\n    out = bytearray()\n    idx=0\n    for y in range(height):\n        f = raw[idx]; idx+=1\n        row = raw[idx:idx+stride]; idx+=stride\n        out+=row\n    return width,height,bytes(out)\n\nw,h,px = read_png('/app/image.png')\nprint('png', w, h, len(px))\npix = [float(b)/255.0 for b in px]\n\ndef run(name, vec):\n    x = torch.tensor(vec, dtype=torch.float32).unsqueeze(0)\n    with torch.no_grad():\n        logits = model(x)\n        probs = F.softmax(logits, dim=1)[0]\n    pred = int(probs.argmax())\n    conf = float(probs[pred])\n    print(f'{name}: pred={pred} conf={conf:.4f}')\n\nrun('raw/255', pix)\nrun('norm(m=0.1307,s=0.3081)', [(v-0.1307)/0.3081 for v in pix])\nrun('inv/255', [1.0-v for v in pix])\nrun('inv_norm', [(1.0-v-0.1307)/0.3081 for v in pix])\nrun('scale_only_*256', [v*256 for v in pix][:1]+pix) if False else None\n# try pixel as 0-255 raw\nrun('raw0-255', [float(b) for b in px])\nEOF\npython3 /tmp/test_preproc.py\n"
+'PYTHONPATH=/app python3 /tmp/test_preproc.py\n'
+''
+"cat > /app/export_weights.py << 'EOF'\nimport torch, json\nfrom model import MnistModel\n\nsd = torch.load('/app/model.pth', map_location='cpu')\nmodel = MnistModel(784, 16, 10)\nmodel.load_state_dict(sd)\nmodel.eval()\n\ndef t2l(t):\n    return t.detach().cpu().reshape(-1).tolist()\n\ndef t2m(t):\n    return t.detach().cpu().tolist()  # row-major [out][in]\n\nW1 = sd['input_layer.weight']; b1 = sd['input_layer.bias']\nW2 = sd['hidden_layer.weight']; b2 = sd['hidden_layer.bias']\nW3 = sd['output_layer.weight']; b3 = sd['output_layer.bias']\n\nout = {\n    'input_dim': W1.shape[1],\n    'hidden_dim': W2.shape[1],\n    'num_classes': W3.shape[0],\n    'preprocess': {'mean': 0.1307, 'std': 0.3081},\n    'input_layer': {'weight': t2m(W1), 'bias': t2l(b1)},\n    'hidden_layer': {'weight': t2m(W2), 'bias': t2l(b2)},\n    'output_layer': {'weight': t2m(W3), 'bias': t2l(b3)},\n}\nwith open('/app/weights.json','w') as f:\n    json.dump(out, f)\nprint('wrote weights.json')\nprint('shapes', W1.shape, W2.shape, W3.shape)\nEOF\nPYTHONPATH=/app python3 /app/export_weights.py\n"
+'ls -la /app/weights.json; head -c 200 /app/weights.json; echo\n'
+''
+['C-d']
+['C-d']

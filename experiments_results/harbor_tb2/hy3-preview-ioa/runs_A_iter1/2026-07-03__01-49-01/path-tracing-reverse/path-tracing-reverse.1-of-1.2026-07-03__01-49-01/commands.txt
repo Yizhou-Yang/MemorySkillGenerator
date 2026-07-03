@@ -1,0 +1,40 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+'file ./mystery\n'
+'./mystery\n'
+'cat main.py install.sh pyproject.toml\n'
+'ls -la; ./mystery; ls -la\n'
+'head -c 64 image.ppm | od -c | head\n'
+'which objdump gdb strings nm readelf xxd python3\n'
+'ls .venv/bin\n'
+'cp image.ppm /tmp/ref.ppm\n'
+'strings -n 4 mystery\n'
+'cp image.ppm /tmp/ref.ppm\n'
+'objdump -d -M intel mystery > /tmp/disasm.txt 2>&1; wc -l /tmp/disasm.txt\n'
+"nm mystery | grep -i ' t ' \n"
+"sed -n '1,200p' /tmp/disasm.txt\n"
+'objdump -s -j .rodata mystery > /tmp/rodata.txt 2>&1; cat /tmp/rodata.txt\n'
+"sed -n '200,420p' /tmp/disasm.txt\n"
+"python3 - <<'EOF'\nimport struct\ndata=open('mystery','rb').read()\n# find .rodata vaddr 0x3000; file offset unknown, parse via readelf later. Instead read /tmp/rodata.txt hex.\nimport re\nlines=open('/tmp/rodata.txt').read().splitlines()\nfor ln in lines:\n    m=re.match(r'\\s*([0-9a-f]+) ((?:[0-9a-f]{2,8}\\s?){1,4})',ln)\n    if m:\n        addr=int(m.group(1),16)\n        b=m.group(2).replace(' ','')\n        bs=bytes.fromhex(b)\n        for i in range(0,len(bs)-3,4):\n            f=struct.unpack('<f',bs[i:i+4])[0]\n            print(hex(addr+i), f)\nEOF\n"
+'awk \'/^Disassembly of section .text.:/{f=1} f&&/^000000000000/{name=$2} f{print > ("/tmp/fn_" name ".txt")}\' /tmp/disasm.txt; ls /tmp/fn_* | head -50\n'
+'wc -l /tmp/fn_*.txt\n'
+"python3 - <<'EOF'\nimport re\nlines=open('/tmp/disasm.txt').read().splitlines()\ncur=None\nout={}\nfor ln in lines:\n    m=re.match(r'^([0-9a-f]+) <([^>]+)>:',ln)\n    if m:\n        cur=m.group(2)\n        out[cur]=[]\n    if cur is not None:\n        out[cur].append(ln)\nfor k,v in out.items():\n    open('/tmp/fn_%s.txt'%k,'w').write('\\n'.join(v)+'\\n')\nprint('\\n'.join(sorted(out.keys())))\nEOF\n"
+'cat /tmp/fn_allocate_image.txt\n'
+'cat /tmp/fn_vector_create.txt /tmp/fn_vector_add.txt /tmp/fn_vector_subtract.txt /tmp/fn_vector_multiply.txt\n'
+"readelf -S mystery | grep -i -E 'debug|line|info'\n"
+'cat /tmp/fn_vector_dot.txt /tmp/fn_vector_length.txt /tmp/fn_vector_normalize.txt\n'
+'cat /tmp/fn_ray_create.txt /tmp/fn_ray_at.txt\n'
+'cat /tmp/fn_sphere_intersect.txt /tmp/fn_plane_intersect.txt\n'
+'cat /tmp/fn_trace.txt\n'
+'which gcc cc; gcc --version | head -1\n'
+'head -c 30 /tmp/ref.ppm | od -c\n'
+'cat /tmp/fn_sky_color.txt /tmp/fn_is_in_shadow.txt\n'
+'wc -l /tmp/fn_main.txt /tmp/fn_trace.txt /tmp/fn_write_image.txt\n'
+"sed -n '1,140p' /tmp/fn_main.txt\n"
+'cat /tmp/fn_write_image.txt\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

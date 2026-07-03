@@ -1,0 +1,14 @@
+{
+  "analysis": "No ISO extraction tools (7z, isoinfo, xorriso, bsdtar, pycdlib) are available, and mounting is not permitted. I must extract the kernel (vmlinuz-lts) and initramfs (initramfs-lts) from the Alpine ISO by parsing the ISO9660 filesystem directly with a small Python script. Once extracted, I can boot qemu with -kernel/-initrd plus console=ttyS0,115200, and redirect the serial port to a telnet server on 127.0.0.1:6665.",
+  "plan": "1) Write a Python ISO9660 parser to /tmp/extract.py that locates boot/VMLINUZ.LTS and boot/INITRAMFS.LTS and writes them to /tmp/vmlinuz and /tmp/initramfs. 2) Run it and verify the files. 3) Then launch qemu in the background with the serial port mapped to a telnet server on port 6665 and wait until the login prompt is reachable.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/extract.py << 'EOF'\nimport struct\nISO='/app/alpine.iso'\nf=open(ISO,'rb')\nf.seek(16*2048)\npvd=f.read(2048)\nassert pvd[1:6]==b'CD001', 'not iso9660'\ndef parse(data,i):\n    rl=data[i]\n    if rl==0: return None\n    extent=struct.unpack('<I',data[i+2:i+6])[0]\n    dlen=struct.unpack('<I',data[i+10:i+14])[0]\n    flags=data[i+25]\n    nlen=data[i+32]\n    name=data[i+33:i+33+nlen]\n    return name,extent,dlen,(flags&2),rl\ndef readdir(extent,dlen):\n    f.seek(extent*2048)\n    data=f.read(dlen)\n    out=[]; i=0\n    while i < len(data):\n        rec=parse(data,i)\n        if rec is None:\n            i=((i//2048)+1)*2048\n            continue\n        name,extent,dlen,isdir,rl=rec\n        i+=rl\n        nm=name.split(b';')[0]\n        if nm in (b'.',b'\\x00'): continue\n        out.append((nm,extent,dlen,isdir))\n    return out\ndef find(entries,name):\n    for nm,e,dl,d in entries:\n        if nm.upper()==name.upper(): return e,dl,d\n    return None\nroot_ext=struct.unpack('<I',pvd[158:162])[0]\nroot_len=struct.unpack('<I',pvd[166:170])[0]\nroot=readdir(root_ext,root_len)\nboot=find(root,b'BOOT')\nassert boot and boot[2], 'no boot dir'\nbootdir=readdir(boot[0],boot[1])\nk=find(bootdir,b'VMLINUZ')\ni=find(bootdir,b'INITRAMFS')\nassert k, 'no vmlinuz'; assert i,'no initramfs'\nfor nm,e,dl,fn in [('vmlinuz',k[0],k[1],'/tmp/vmlinuz'),('initramfs',i[0],i[1],'/tmp/initramfs')]:\n    f.seek(e*2048)\n    d=f.read(dl)\n    open(fn,'wb').write(d)\n    print('wrote',fn,dl)\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /tmp/extract.py\n",
+      "duration": 2.0
+    }
+  ]
+}

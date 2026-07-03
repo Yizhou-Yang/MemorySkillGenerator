@@ -1,0 +1,14 @@
+{
+  "analysis": "Auth succeeds but the server-side `git-receive-pack '/git/project'` exits 254 ('Could not read from remote repository'). pam_motd is now disabled which fixed the protocol corruption; now there's a genuine server-side command failure. Rather than fight git-shell's argument parsing, I'll diagnose by switching git's shell to /bin/bash (which is clean now that pam_motd is off) and re-running the push to surface the real error. If bash works, I can keep it (or fix git-shell afterward).",
+  "plan": "1) Temporarily set git's shell to /bin/bash for diagnosis. 2) Re-run the main push with full output to see the actual server error. 3) Based on result, either fix git-shell or keep bash. Likely the underlying repo/permissions are fine and git-shell just needs the proper command form.",
+  "commands": [
+    {
+      "keystrokes": "chsh -s /bin/bash git; getent passwd git\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' expect /tmp/push.exp main 2>&1 | tail -20\n",
+      "duration": 4.0
+    }
+  ]
+}

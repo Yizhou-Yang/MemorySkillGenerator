@@ -1,0 +1,10 @@
+{
+  "analysis": "412 .deb URLs are available in /tmp/uris.txt with the format 'URL' filename size MD5Sum:.... I'll download all of them with python to /tmp/debs, then install via dpkg -i (which doesn't perform the statvfs free-space check that apt fails on). The download is ~323MB, which my dd test proved writes fine.",
+  "plan": "1) Write a python script to parse the URLs and download each .deb with retries. 2) Run it. 3) Then install with dpkg. First create the downloader script and run it.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/dl.py << 'PYEOF'\nimport re, os, sys, urllib.request\nos.makedirs('/tmp/debs', exist_ok=True)\nurls=[]\nfor line in open('/tmp/uris.txt'):\n    line=line.strip()\n    m=re.match(r\"^'(http[^\"]+)'\\s+(\\S+)\\s\", line)\n    if m:\n        urls.append((m.group(1), m.group(2)))\nprint('total', len(urls), file=sys.stderr)\nok=0\nfor i,(u,f) in enumerate(urls):\n    dest='/tmp/debs/'+f\n    if os.path.exists(dest) and os.path.getsize(dest)>0:\n        ok+=1; continue\n    for attempt in range(4):\n        try:\n            req=urllib.request.Request(u, headers={'User-Agent':'Debian APT'})\n            data=urllib.request.urlopen(req, timeout=60).read()\n            open(dest,'wb').write(data)\n            ok+=1\n            break\n        except Exception as e:\n            if attempt==3: print('FAIL', f, e, file=sys.stderr)\n    if (i+1)%50==0: print('progress', i+1, ok, file=sys.stderr)\nprint('done ok', ok, file=sys.stderr)\nPYEOF\npython3 /tmp/dl.py 2>&1 | tail -20\n",
+      "duration": 120.0
+    }
+  ]
+}

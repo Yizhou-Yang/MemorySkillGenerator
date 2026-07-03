@@ -1,0 +1,141 @@
+New Terminal Output:
+
+root@efee5c6aa36b:/app# cat > /tmp/wait_login.py << 'PYEOF'
+> import socket, time, sys
+> for i in range(120):
+>     try:
+>         s = socket.create_connection(('127.0.0.1',6665), timeout=2)
+>         s.settimeout(2)
+>         data = b''
+>         try:
+>             data += s.recv(4096)
+>         except Exception:
+>             pass
+>         try:
+>             s.sendall(b'\r\n')
+>         except Exception:
+>             pass
+>         time.sleep(0.6)
+>         try:
+>             data += s.recv(4096)
+>         except Exception:
+>             pass
+>         s.close()
+>         if b'login' in data.lower():
+>             print('READY after %d tries' % i)
+>             sys.exit(0)
+>     except Exception:
+>         pass
+>     time.sleep(3)
+> print('NOTREADY')
+> sys.exit(1)
+> PYEOF
+root@efee5c6aa36b:/app# cat > /tmp/extract.py << 'PYEOF'
+> import sys
+> SECTOR=2048
+> f=open('/app/alpine.iso','rb')
+> def rd(lba,n):
+>     f.seek(lba*SECTOR); return f.read(n*SECTOR)
+> pvd=rd(16,1)
+> assert pvd[1:6]==b'CD001', 'no iso'
+> def parse(rec):
+>     L=rec[0]
+>     if L==0: return None
+>     loc=int.from_bytes(rec[2:6],'little')
+>     dlen=int.from_bytes(rec[10:14],'little')
+>     flags=rec[25]
+>     nl=rec[32]
+>     name=rec[33:33+nl]
+>     return dict(loc=loc,dlen=dlen,is_dir=bool(flags&2),name=name,length=L)
+> root=parse(pvd[156:156+34])
+> results=[]
+> def walk(rec, path):
+>     data=rd(rec['loc'], max(1,(rec['dlen']+SECTOR-1)//SECTOR))
+>     off=0
+>     while off < len(data):
+>         L=data[off]
+>         if L==0:
+>             rem=SECTOR-(off%SECTOR)
+>             off+=rem
+>             continue
+>         nl=data[off+32]
+>         nm=data[off+33:off+33+nl]
+>         entry=parse(data[off:off+L])
+>         off+=L
+>         if entry is None: continue
+>         try:
+>             nmstr=nm.decode('ascii').strip()
+>         except:
+>             nmstr=repr(nm)
+>         if ';' in nmstr:
+>             nmstr=nmstr.split(';')[0]
+>         full=path+'/'+nmstr
+>         results.append((full,entry['loc'],entry['dlen'],entry['is_dir']))
+>         if entry['is_dir'] and nm not in (b'\x00',b'\x01'):
+>             walk(entry,full)
+> walk(root,'')
+> kernels=[(p,l,d) for (p,l,d,idr) in results if (not idr) and 'VMLINUZ' in p.upper()]
+> initrds=[(p,l,d) for (p,l,d,idr) in results if (not idr) and 'INITRAM' in p.upper()]
+> cfgs=[(p,l,d,idr) for (p,l,d,idr) in results if (not idr) and (p.upper().endswith('.CFG') or 'ISOLINUX' in p.upper() or 'SYSLINUX' in p.upper())]
+> print('KERNELS:')
+> for k in kernels: print('  ',k[0],k[1],k[2])
+> print('INITRDS:')
+> for k in initrds: print('  ',k[0],k[1],k[2])
+> print('CFGS:')
+> for k in cfgs: print('  ',k[0],k[1],k[2])
+> def ext(p):
+>     return p.rsplit('.',1)[-1].upper() if '.' in p else ''
+> kext={ext(p):(p,l,d) for p,l,d in kernels}
+> iext={ext(p):(p,l,d) for p,l,d in initrds}
+> chosen=None
+> for tag in ['VRT','LTS','EDG']:
+>     if tag in kext and tag in iext:
+>         chosen=tag; break
+> if chosen is None and kernels and initrds:
+>     chosen=ext(kernels[0][0])
+> print('CHOSEN TAG', chosen)
+> if chosen:
+>     kp,kl,kd=kext[chosen]
+>     ip,il,id_=iext[chosen]
+>     kdata=rd(kl, (kd+SECTOR-1)//SECTOR)[:kd]
+>     idata=rd(il, (id_+SECTOR-1)//SECTOR)[:id_]
+>     open('/tmp/vmlinuz','wb').write(kdata)
+>     open('/tmp/initramfs','wb').write(idata)
+>     print('wrote /tmp/vmlinuz (%d) /tmp/initramfs (%d)'%(kd,id_))
+>     if cfgs:
+>         cp,cl,cd,_=cfgs[0]
+>         cfgdata=rd(cl,(cd+SECTOR-1)//SECTOR)[:cd]
+>         open('/tmp/cfg.txt','wb').write(cfgdata)
+>         print('=== CFG ===')
+>         print(cfgdata.decode('latin1'))
+> PYEOF
+root@efee5c6aa36b:/app# nohup qemu-system-x86_64 -m 1024 -smp 2 -no-kvm -boot d -display none -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if=virti
+o,format=qcow2 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -serial telnet:127.0.0.1:6665,server,nowait -monitor none > /tmp/qemu.log 2>&1 &
+[1] 227
+root@efee5c6aa36b:/app# nohup python3 /tmp/wait_login.py > /tmp/poll.out 2>&1 &
+[2] 235
+root@efee5c6aa36b:/app# sleep 1; pgrep -a qemu-system-x86_64 | head; echo '--- poll.out ---'; cat /tmp/poll.out
+python3 /tmp/extract.py
+[1]-  Exit 1                  nohup qemu-system-x86_64 -m 1024 -smp 2 -no-kvm -boot d -display none -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if
+=virtio,format=qcow2 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -serial telnet:127.0.0.1:6665,server,nowait -monitor none > /tmp/qemu.log 2>&1
+bash: pgrep: command not found
+--- poll.out ---
+nohup: ignoring input
+root@efee5c6aa36b:/app# python3 /tmp/extract.py
+KERNELS:
+   /BOOT/VMLINUZ_LTS. 483188 11879168
+INITRDS:
+   /BOOT/INITRAMFS_LTS. 377583 20486092
+CFGS:
+   /APKS/X86_64/SYSLINUX_6_04_PRE1_R15.APK 352702 2105853
+   /BOOT/GRUB/GRUB.CFG 387586 182
+   /BOOT/SYSLINUX/BOOT.CAT 103 2048
+   /BOOT/SYSLINUX/ISOHDPFX.BIN 479461 432
+   /BOOT/SYSLINUX/ISOLINUX.BIN 104 43008
+   /BOOT/SYSLINUX/LDLINUX.C32 480215 115468
+   /BOOT/SYSLINUX/LIBCOM32.C32 480272 178532
+   /BOOT/SYSLINUX/LIBUTIL.C32 480360 23636
+   /BOOT/SYSLINUX/MBOOT.C32 480372 11712
+   /BOOT/SYSLINUX/SYSLINUX.CFG 480378 235
+CHOSEN TAG
+root@efee5c6aa36b:/app#

@@ -1,0 +1,14 @@
+{
+  "analysis": "Now I can see all the data. The high file has 7 days (2025-04-19 to 2025-04-25). The low file has 7 entries with inconsistent date formats (MM/DD/YYYY and MM-DD-YYYY, with time). All 7 dates match the high dates. I'll write a Python script to robustly parse dates, match by calendar date, compute high-low differences, average them, and save just the number.",
+  "plan": "Use a Python script with date parsing via datetime to normalize date formats (handling both slash and dash separators and optional time). Match highs and lows by date, compute differences, average, and write the result to avg_temp.txt with no extra text.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"\nimport csv, datetime\n\ndef parse_date(s):\n    s=s.split()[0]\n    for fmt in ('%Y-%m-%d','%m/%d/%Y','%m-%d-%Y'):\n        try: return datetime.datetime.strptime(s,fmt).date()\n        except: pass\n    raise ValueError(s)\n\nhigh={}; low={}\nwith open('daily_temp_sf_high.csv') as f:\n    r=csv.reader(f); next(r)\n    for d,t in r:\n        if d.strip(): high[parse_date(d)]=float(t)\nwith open('daily_temp_sf_low.csv') as f:\n    r=csv.reader(f); next(r)\n    for d,t in r:\n        if d.strip(): low[parse_date(d)]=float(t)\n\ndiffs=[high[d]-low[d] for d in high if d in low]\navg=sum(diffs)/len(diffs)\nwith open('avg_temp.txt','w') as f: f.write(str(avg))\nprint('avg=',avg,'n=',len(diffs))\n\"\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "cat avg_temp.txt; echo\n",
+      "duration": 0.1
+    }
+  ]
+}

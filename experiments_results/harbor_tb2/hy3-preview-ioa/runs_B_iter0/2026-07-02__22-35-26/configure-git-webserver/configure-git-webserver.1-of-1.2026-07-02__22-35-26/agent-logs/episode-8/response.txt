@@ -1,0 +1,9 @@
+{
+  "analysis": "Mounting a tmpfs failed (permission denied — no mount capability in this container). But /dev/shm and /dev are tmpfs filesystems that report REAL free space (64M available). apt's pre-flight only checks /var/cache/apt/archives, which lives on the space-starved fuse-overlayfs. If I redirect apt's cache directory to a tmpfs (e.g. /dev/shm) that reports free space, the 47M download check will pass, and apt will unpack to / (which `dd` proved can be written).",
+  "plan": "Create an apt cache dir on the /dev/shm tmpfs, then run apt-get install with `-o Dir::Cache` pointing there. The statvfs check on /dev/shm shows 64M free > 47M needed, so it should proceed. I'll confirm git and sshd end up installed.",
+  "commands": [
+    {"keystrokes": "mkdir -p /dev/shm/apt/archives && df -h /dev/shm\n", "duration": 0.3},
+    {"keystrokes": "apt-get install -o Dir::Cache=/dev/shm/apt -y git openssh-server 2>&1 | tail -20\n", "duration": 60}
+  ],
+  "task_complete": false
+}

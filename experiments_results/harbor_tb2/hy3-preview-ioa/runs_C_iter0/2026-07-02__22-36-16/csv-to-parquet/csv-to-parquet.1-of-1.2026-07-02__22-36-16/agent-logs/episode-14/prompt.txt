@@ -1,0 +1,30 @@
+New Terminal Output:
+
+root@36ff4f9164b5:/app# python3 - << 'EOF'
+> c = open('/app/make_parquet.py').read()
+> bad = '''    if type_code is not None:
+>         fields.append((1, I32, render_i32(type_code)))
+>         fields.append((2, I32, render_i32(repetition)))
+>     if num_children is not None:
+>         fields.append((5, I32, render_i32(num_children)))
+>     fields.append((3, BINARY, render_binary(name.encode())))
+>     if converted_type is not None:
+>         fields.append((6, I32, render_i32(converted_type)))'''
+> good = '''    if type_code is not None:
+>         fields.append((1, I32, render_i32(type_code)))
+>         fields.append((3, I32, render_i32(repetition)))
+>     if num_children is not None:
+>         fields.append((5, I32, render_i32(num_children)))
+>     fields.append((4, BINARY, render_binary(name.encode())))
+>     if converted_type is not None:
+>         fields.append((6, I32, render_i32(converted_type)))'''
+> assert bad in c, 'bad pattern not found'
+> open('/app/make_parquet.py','w').write(c.replace(bad, good))
+> print('reverted schema_element to spec-correct field numbering')
+> EOF
+reverted schema_element to spec-correct field numbering
+root@36ff4f9164b5:/app# python3 /app/make_parquet.py && python3 /app/verify_parquet.py
+Wrote /app/data.parquet size 501 rows 5 cols 3
+VERIFY OK: rows=5 cols=3
+schema: ['name']
+root@36ff4f9164b5:/app#

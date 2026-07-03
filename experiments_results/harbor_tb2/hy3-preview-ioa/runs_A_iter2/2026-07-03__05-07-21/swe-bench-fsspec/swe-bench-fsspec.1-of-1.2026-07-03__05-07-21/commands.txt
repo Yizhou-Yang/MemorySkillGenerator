@@ -1,0 +1,36 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'grep -rn "class DirFileSystem" fsspec/\n'
+'cat fsspec/implementations/dirfs.py\n'
+'grep -n "def open_async" fsspec/asyn.py\n'
+"sed -n '905,915p' fsspec/asyn.py\n"
+'cat >> fsspec/implementations/dirfs.py << \'EOF\'\n\n    async def open_async(self, path, mode="rb", **kwargs):\n        return await self.fs.open_async(self._join(path), mode=mode, **kwargs)\nEOF\n'
+'tail -n 8 fsspec/implementations/dirfs.py\n'
+'python -c "import fsspec; print(\'import ok\')"\n'
+"python -m py_compile fsspec/implementations/dirfs.py && echo 'compile ok'\n"
+'pip install -e . -q 2>&1 | tail -n 5\n'
+"cat > /tmp/test_open_async.py << 'EOF'\nimport asyncio\nimport fsspec\n\nasync def async_test():\n    dirfs = fsspec.filesystem('dir', path='/tmp', asynchronous=True)\n    file = await dirfs.open_async('hello_async_test', 'wb')\n    await file.close()\n    print('open_async OK')\n    import os\n    os.remove('/tmp/hello_async_test')\n\nasyncio.run(async_test())\nEOF\npython /tmp/test_open_async.py\n"
+"cat > /tmp/test_open_async2.py << 'EOF'\nimport asyncio\nimport fsspec\nfrom fsspec.implementations.dirfs import DirFileSystem\n\nasync def async_test():\n    underlying = fsspec.filesystem('memory', asynchronous=True)\n    dirfs = DirFileSystem(path='/', fs=underlying)\n    f = await dirfs.open_async('hello', 'wb')\n    await f.write(b'data')\n    await f.close()\n    g = await dirfs.open_async('hello', 'rb')\n    data = await g.read()\n    await g.close()\n    assert data == b'data', data\n    print('open_async delegation OK')\n\nasyncio.run(async_test())\nEOF\npython /tmp/test_open_async2.py\n"
+'grep -rn "def open_async" fsspec/implementations/\n'
+'cat > /tmp/test_open_async3.py << \'EOF\'\nimport asyncio\nfrom fsspec.asyn import AsyncFileSystem\nfrom fsspec.implementations.dirfs import DirFileSystem\n\nclass FakeAsync(AsyncFileSystem):\n    protocol = "fakeasync"\n    async_impl = True\n    def __init__(self, *a, **k):\n        super().__init__(*a, **k)\n        self.last_path = None\n        self.last_mode = None\n    async def open_async(self, path, mode="rb", **kwargs):\n        self.last_path = path\n        self.last_mode = mode\n        return "OPENED"\n\nasync def t():\n    fs = FakeAsync(asynchronous=True)\n    dirfs = DirFileSystem(path="/mydir", fs=fs)\n    res = await dirfs.open_async("sub/hello", "wb")\n    assert res == "OPENED"\n    assert fs.last_path == fs.sep.join(["/mydir", "sub/hello"]), fs.last_path\n    assert fs.last_mode == "wb"\n    print("delegation OK, joined path =", fs.last_path)\n\nasyncio.run(t())\nEOF\npython /tmp/test_open_async3.py\n'
+'sed -i \'s/    dirfs = DirFileSystem(path="\\/mydir", fs=fs)/    dirfs = DirFileSystem(path="\\/mydir", fs=fs, asynchronous=True)/\' /tmp/test_open_async3.py\npython /tmp/test_open_async3.py\n'
+'ls fsspec/implementations/tests/ | grep -i dir; echo \'---\'; grep -n "async def\\|open_async\\|asynchronous" fsspec/implementations/tests/test_dirfs.py | head -n 40\n'
+"sed -n '40,75p' fsspec/implementations/tests/test_dirfs.py\n"
+"sed -n '114,135p' fsspec/implementations/tests/test_dirfs.py\n"
+'grep -n "def test_open\\|def test_async_open\\|\\.open(" fsspec/implementations/tests/test_dirfs.py\n'
+"sed -n '590,600p' fsspec/implementations/tests/test_dirfs.py\n"
+'cat >> fsspec/implementations/tests/test_dirfs.py << \'EOF\'\n\n\n@pytest.mark.asyncio\nasync def test_async_open(mocker, adirfs):\n    adirfs.fs.open_async = mocker.AsyncMock()\n    assert (\n        await adirfs.open_async("file", *ARGS, **KWARGS)\n        == adirfs.fs.open_async.return_value\n    )\n    adirfs.fs.open_async.assert_called_once_with(f"{PATH}/file", *ARGS, **KWARGS)\nEOF\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -n 20\n'
+'pip install pytest pytest-asyncio -q 2>&1 | tail -n 3\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -n 25\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py::test_open -q 2>&1 | tail -n 30\n'
+'pip install pytest-mock -q 2>&1 | tail -n 2\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -n 15\n'
+'python - << \'EOF\'\nimport re\np = \'fsspec/implementations/dirfs.py\'\ns = open(p).read()\nold = \'\'\'    async def open_async(self, path, mode="rb", **kwargs):\n        return await self.fs.open_async(self._join(path), mode=mode, **kwargs)\'\'\'\nnew = \'\'\'    async def open_async(self, path, *args, **kwargs):\n        return await self.fs.open_async(self._join(path), *args, **kwargs)\'\'\'\nassert old in s, \'old not found\'\ns = s.replace(old, new)\nopen(p, \'w\').write(s)\nprint(\'patched\')\nEOF\n'
+'tail -n 4 fsspec/implementations/dirfs.py\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -n 8\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

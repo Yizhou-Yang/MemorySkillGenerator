@@ -1,0 +1,27 @@
+New Terminal Output:
+
+root@6ad192c4ff49:/app/filesystem_spec# cat >> fsspec/implementations/tests/test_dirfs.py << 'EOF'
+>
+>
+> @pytest.mark.asyncio
+> async def test_open_async(mocker, asyncfs):
+>     asyncfs.open_async = mocker.AsyncMock()
+>     dirfs = DirFileSystem(PATH, asyncfs, asynchronous=True)
+>     assert await dirfs.open_async("file", *ARGS, **KWARGS) == asyncfs.open_async.return_value
+>     asyncfs.open_async.assert_awaited_once_with(f"{PATH}/file", *ARGS, **KWARGS)
+> EOF
+root@6ad192c4ff49:/app/filesystem_spec# rm -f fsspec/_version.py
+root@6ad192c4ff49:/app/filesystem_spec# tail -12 fsspec/implementations/tests/test_dirfs.py
+    fs, _ = url_to_fs("dir::memory://inner")
+    assert fs.ls("", False) == ["file"]
+    assert fs.ls("", True)[0]["name"] == "file"
+    assert fs.cat("file") == b"data"
+
+
+@pytest.mark.asyncio
+async def test_open_async(mocker, asyncfs):
+    asyncfs.open_async = mocker.AsyncMock()
+    dirfs = DirFileSystem(PATH, asyncfs, asynchronous=True)
+    assert await dirfs.open_async("file", *ARGS, **KWARGS) == asyncfs.open_async.return_value
+    asyncfs.open_async.assert_awaited_once_with(f"{PATH}/file", *ARGS, **KWARGS)
+root@6ad192c4ff49:/app/filesystem_spec#

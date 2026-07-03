@@ -1,0 +1,112 @@
+New Terminal Output:
+
+United,On Hold,D005-E001;D005-E002,2025-11-30,D005root@555417f86d4d:/app# cat > /app/build.py << 'PYEOF'
+> import csv, json, os
+> from datetime import datetime, timezone
+> from collections import defaultdict
+>
+> DATA = '/app/data'
+>
+> def read_csv(name):
+>     with open(os.path.join(DATA, name), newline='', encoding='utf-8') as f:
+>         return list(csv.DictReader(f))
+>
+> departments = read_csv('departments.csv')
+> employees = read_csv('employees.csv')
+> projects = read_csv('projects.csv')
+>
+> dept_by_id = {d['id']: d for d in departments}
+> emp_by_id = {e['id']: e for e in employees}
+>
+> # group employees by department
+> emps_by_dept = defaultdict(list)
+> for e in employees:
+>     emps_by_dept[e['department_id']].append(e)
+>
+> projs_by_dept = defaultdict(list)
+> for p in projects:
+>     projs_by_dept[p['department_id']].append(p)
+>
+> def build_employee(e):
+>     return {
+>         'id': e['id'],
+>         'name': e['name'],
+>         'position': e['position'],
+>         'skills': [s.strip() for s in e['skills'].split(';') if s.strip()],
+>         'years_of_service': int(e['years_of_service']),
+>     }
+>
+> def build_project(p):
+>     return {
+>         'name': p['name'],
+>         'status': p['status'],
+>         'members': [m.strip() for m in p['member_ids'].split(';') if m.strip()],
+>         'deadline': p['deadline'],
+>     }
+>
+> # statistics
+> budgets = [float(d['budget']) for d in departments]
+> average_dept_budget = round(sum(budgets) / len(budgets), 2)
+> total_employees = len(employees)
+>
+> skill_dist = defaultdict(int)
+> for e in employees:
+>     for s in e['skills'].split(';'):
+>         s = s.strip()
+>         if s:
+>             skill_dist[s] += 1
+>
+> dept_sizes = {}
+> for d in departments:
+>     dept_sizes[d['name']] = len(emps_by_dept.get(d['id'], []))
+>
+> status_dist = defaultdict(int)
+> for p in projects:
+>     status_dist[p['status']] += 1
+>
+> avg_years = round(sum(int(e['years_of_service']) for e in employees) / total_employees, 2)
+>
+> org_departments = []
+> for d in departments:
+>     did = d['id']
+>     org_departments.append({
+>         'id': did,
+>         'name': d['name'],
+>         'budget': float(d['budget']),
+>         'employees': [build_employee(e) for e in emps_by_dept.get(did, [])],
+>         'projects': [build_project(p) for p in projs_by_dept.get(did, [])],
+>     })
+>
+> output = {
+>     'metadata': {
+>         'version': '1.0',
+>         'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+>         'generator': 'CSV to JSON Processor',
+>     },
+>     'organization': {
+>         'name': 'Global Tech Organization',
+>         'founded': '2000-01-01',
+>         'departments': org_departments,
+>     },
+>     'statistics': {
+>         'averageDepartmentBudget': average_dept_budget,
+>         'totalEmployees': total_employees,
+>         'skillDistribution': dict(skill_dist),
+>         'departmentSizes': dept_sizes,
+>         'projectStatusDistribution': dict(status_dist),
+>         'averageYearsOfService': avg_years,
+>     },
+> }
+>
+> with open('/app/organization.json', 'w', encoding='utf-8') as f:
+>     json.dump(output, f, indent=2, ensure_ascii=False)
+>
+> print('Wrote /app/organization.json')
+> print('Departments:', len(org_departments), 'Employees:', total_employees, 'Projects:', len(projects))
+> print('avgBudget:', average_dept_budget, 'avgYears:', avg_years)
+> PYEOF
+root@555417f86d4d:/app# python3 /app/build.py
+Wrote /app/organization.json
+Departments: 5 Employees: 12 Projects: 7
+avgBudget: 1060000.0 avgYears: 7.25
+root@555417f86d4d:/app#

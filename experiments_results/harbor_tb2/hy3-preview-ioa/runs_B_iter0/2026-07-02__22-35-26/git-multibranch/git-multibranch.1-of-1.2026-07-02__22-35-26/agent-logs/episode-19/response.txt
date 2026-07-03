@@ -1,0 +1,19 @@
+{
+  "analysis": "Authentication now works and the MOTD corruption is gone. The failure is server-side: `git-receive-pack '/git/project'` exits with status 254 over SSH, causing the client's 'Could not read from remote repository'. The local `git-receive-pack` invocation printed capabilities fine (the /dev/null case just hit EOF, which is expected, not a real error). I need to isolate whether the post-receive hook is causing git-receive-pack to fail. I'll temporarily disable the hook and re-run the SSH push.",
+  "plan": "1) Move the post-receive hook aside. 2) Re-run the SSH push via the askpass helper. 3) If it succeeds, the hook is the culprit and I'll debug it; if it still fails, the repo/server config is the problem. Capture results to a file.",
+  "commands": [
+    {
+      "keystrokes": "mv /git/project/hooks/post-receive /tmp/hook.bak\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /tmp/push.sh <<'EOF'\n#!/bin/bash\ncd /app\nrm -rf /tmp/work3; mkdir -p /tmp/work3; cd /tmp/work3\ngit init -q -b main\ngit config user.email t@t.com; git config user.name t\necho '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main\ngit checkout -q -b dev\necho '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev\ngit remote add origin git@localhost:/git/project\nexport GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null'\nexport SSH_ASKPASS=/tmp/askpass.sh; export SSH_ASKPASS_REQUIRE=force; export DISPLAY=:0\nsetsid git push -v origin main dev\necho \"PUSH_EXIT=$?\"\nEOF\nbash /tmp/push.sh > /tmp/push.out 2>&1; echo DONE\n",
+      "duration": 5.0
+    },
+    {
+      "keystrokes": "grep -nE 'fatal|error|PUSH_EXIT|remote:|Could not|<h1>|404' /tmp/push.out\n",
+      "duration": 0.3
+    }
+  ],
+  "task_complete": false
+}

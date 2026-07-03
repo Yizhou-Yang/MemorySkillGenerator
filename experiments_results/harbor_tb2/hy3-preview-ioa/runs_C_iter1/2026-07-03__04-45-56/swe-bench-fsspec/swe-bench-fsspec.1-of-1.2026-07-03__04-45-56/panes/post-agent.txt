@@ -1,0 +1,581 @@
+root@f57cd087e35b:/app/filesystem_spec# ls
+LICENSE  README.md  ci  docs  fsspec  install_s3fs.sh  pyproject.toml  readthedocs.yml  setup.cfg
+root@f57cd087e35b:/app/filesystem_spec# grep -rn "class DirFileSystem" fsspec/
+fsspec/implementations/dirfs.py:5:class DirFileSystem(AsyncFileSystem):
+root@f57cd087e35b:/app/filesystem_spec# cat fsspec/implementations/dirfs.py
+from .. import filesystem
+from ..asyn import AsyncFileSystem
+
+
+class DirFileSystem(AsyncFileSystem):
+    """Directory prefix filesystem
+
+    The DirFileSystem is a filesystem-wrapper. It assumes every path it is dealing with
+    is relative to the `path`. After performing the necessary paths operation it
+    delegates everything to the wrapped filesystem.
+    """
+
+    protocol = "dir"
+
+    def __init__(
+        self,
+        path=None,
+        fs=None,
+        fo=None,
+        target_protocol=None,
+        target_options=None,
+        **storage_options,
+    ):
+        """
+        Parameters
+        ----------
+        path: str
+            Path to the directory.
+        fs: AbstractFileSystem
+            An instantiated filesystem to wrap.
+        target_protocol, target_options:
+            if fs is none, construct it from these
+        fo: str
+            Alternate for path; do not provide both
+        """
+        super().__init__(**storage_options)
+        if fs is None:
+            fs = filesystem(protocol=target_protocol, **(target_options or {}))
+        if (path is not None) ^ (fo is not None) is False:
+            raise ValueError("Provide path or fo, not both")
+        path = path or fo
+
+        if self.asynchronous and not fs.async_impl:
+            raise ValueError("can't use asynchronous with non-async fs")
+
+        if fs.async_impl and self.asynchronous != fs.asynchronous:
+            raise ValueError("both dirfs and fs should be in the same sync/async mode")
+
+        self.path = fs._strip_protocol(path)
+        self.fs = fs
+
+    def _join(self, path):
+        if isinstance(path, str):
+            if not self.path:
+                return path
+            if not path:
+                return self.path
+            return self.fs.sep.join((self.path, self._strip_protocol(path)))
+        if isinstance(path, dict):
+            return {self._join(_path): value for _path, value in path.items()}
+        return [self._join(_path) for _path in path]
+
+    def _relpath(self, path):
+        if isinstance(path, str):
+            if not self.path:
+                return path
+            # We need to account for S3FileSystem returning paths that do not
+            # start with a '/'
+            if path == self.path or (
+                self.path.startswith(self.fs.sep) and path == self.path[1:]
+            ):
+                return ""
+            prefix = self.path + self.fs.sep
+            if self.path.startswith(self.fs.sep) and not path.startswith(self.fs.sep):
+                prefix = prefix[1:]
+            assert path.startswith(prefix)
+            return path[len(prefix) :]
+        return [self._relpath(_path) for _path in path]
+
+    # Wrappers below
+
+    @property
+    def sep(self):
+        return self.fs.sep
+
+    async def set_session(self, *args, **kwargs):
+        return await self.fs.set_session(*args, **kwargs)
+
+    async def _rm_file(self, path, **kwargs):
+        return await self.fs._rm_file(self._join(path), **kwargs)
+
+    def rm_file(self, path, **kwargs):
+        return self.fs.rm_file(self._join(path), **kwargs)
+
+    async def _rm(self, path, *args, **kwargs):
+        return await self.fs._rm(self._join(path), *args, **kwargs)
+
+    def rm(self, path, *args, **kwargs):
+        return self.fs.rm(self._join(path), *args, **kwargs)
+
+    async def _cp_file(self, path1, path2, **kwargs):
+        return await self.fs._cp_file(self._join(path1), self._join(path2), **kwargs)
+
+    def cp_file(self, path1, path2, **kwargs):
+        return self.fs.cp_file(self._join(path1), self._join(path2), **kwargs)
+
+    async def _copy(
+        self,
+        path1,
+        path2,
+        *args,
+        **kwargs,
+    ):
+        return await self.fs._copy(
+            self._join(path1),
+            self._join(path2),
+            *args,
+            **kwargs,
+        )
+
+    def copy(self, path1, path2, *args, **kwargs):
+        return self.fs.copy(
+            self._join(path1),
+            self._join(path2),
+            *args,
+            **kwargs,
+        )
+
+    async def _pipe(self, path, *args, **kwargs):
+        return await self.fs._pipe(self._join(path), *args, **kwargs)
+
+    def pipe(self, path, *args, **kwargs):
+        return self.fs.pipe(self._join(path), *args, **kwargs)
+
+    async def _pipe_file(self, path, *args, **kwargs):
+        return await self.fs._pipe_file(self._join(path), *args, **kwargs)
+
+    def pipe_file(self, path, *args, **kwargs):
+        return self.fs.pipe_file(self._join(path), *args, **kwargs)
+
+    async def _cat_file(self, path, *args, **kwargs):
+        return await self.fs._cat_file(self._join(path), *args, **kwargs)
+
+    def cat_file(self, path, *args, **kwargs):
+        return self.fs.cat_file(self._join(path), *args, **kwargs)
+
+    async def _cat(self, path, *args, **kwargs):
+        ret = await self.fs._cat(
+            self._join(path),
+            *args,
+            **kwargs,
+        )
+
+        if isinstance(ret, dict):
+            return {self._relpath(key): value for key, value in ret.items()}
+
+        return ret
+
+    def cat(self, path, *args, **kwargs):
+        ret = self.fs.cat(
+            self._join(path),
+            *args,
+            **kwargs,
+        )
+
+        if isinstance(ret, dict):
+            return {self._relpath(key): value for key, value in ret.items()}
+
+        return ret
+
+    async def _put_file(self, lpath, rpath, **kwargs):
+        return await self.fs._put_file(lpath, self._join(rpath), **kwargs)
+
+    def put_file(self, lpath, rpath, **kwargs):
+        return self.fs.put_file(lpath, self._join(rpath), **kwargs)
+
+    async def _put(
+        self,
+        lpath,
+        rpath,
+        *args,
+        **kwargs,
+    ):
+        return await self.fs._put(
+            lpath,
+            self._join(rpath),
+            *args,
+            **kwargs,
+        )
+
+    def put(self, lpath, rpath, *args, **kwargs):
+        return self.fs.put(
+            lpath,
+            self._join(rpath),
+            *args,
+            **kwargs,
+        )
+
+    async def _get_file(self, rpath, lpath, **kwargs):
+        return await self.fs._get_file(self._join(rpath), lpath, **kwargs)
+
+    def get_file(self, rpath, lpath, **kwargs):
+        return self.fs.get_file(self._join(rpath), lpath, **kwargs)
+
+    async def _get(self, rpath, *args, **kwargs):
+        return await self.fs._get(self._join(rpath), *args, **kwargs)
+
+    def get(self, rpath, *args, **kwargs):
+        return self.fs.get(self._join(rpath), *args, **kwargs)
+
+    async def _isfile(self, path):
+        return await self.fs._isfile(self._join(path))
+
+    def isfile(self, path):
+        return self.fs.isfile(self._join(path))
+
+    async def _isdir(self, path):
+        return await self.fs._isdir(self._join(path))
+
+    def isdir(self, path):
+        return self.fs.isdir(self._join(path))
+
+    async def _size(self, path):
+        return await self.fs._size(self._join(path))
+
+    def size(self, path):
+        return self.fs.size(self._join(path))
+
+    async def _exists(self, path):
+        return await self.fs._exists(self._join(path))
+
+    def exists(self, path):
+        return self.fs.exists(self._join(path))
+
+    async def _info(self, path, **kwargs):
+        return await self.fs._info(self._join(path), **kwargs)
+
+    def info(self, path, **kwargs):
+        return self.fs.info(self._join(path), **kwargs)
+
+    async def _ls(self, path, detail=True, **kwargs):
+        ret = (await self.fs._ls(self._join(path), detail=detail, **kwargs)).copy()
+        if detail:
+            out = []
+            for entry in ret:
+                entry = entry.copy()
+                entry["name"] = self._relpath(entry["name"])
+                out.append(entry)
+            return out
+
+        return self._relpath(ret)
+
+    def ls(self, path, detail=True, **kwargs):
+        ret = self.fs.ls(self._join(path), detail=detail, **kwargs).copy()
+        if detail:
+            out = []
+            for entry in ret:
+                entry = entry.copy()
+                entry["name"] = self._relpath(entry["name"])
+                out.append(entry)
+            return out
+
+        return self._relpath(ret)
+
+    async def _walk(self, path, *args, **kwargs):
+        async for root, dirs, files in self.fs._walk(self._join(path), *args, **kwargs):
+            yield self._relpath(root), dirs, files
+
+    def walk(self, path, *args, **kwargs):
+        for root, dirs, files in self.fs.walk(self._join(path), *args, **kwargs):
+            yield self._relpath(root), dirs, files
+
+    async def _glob(self, path, **kwargs):
+        detail = kwargs.get("detail", False)
+        ret = await self.fs._glob(self._join(path), **kwargs)
+        if detail:
+            return {self._relpath(path): info for path, info in ret.items()}
+        return self._relpath(ret)
+
+    def glob(self, path, **kwargs):
+        detail = kwargs.get("detail", False)
+        ret = self.fs.glob(self._join(path), **kwargs)
+        if detail:
+            return {self._relpath(path): info for path, info in ret.items()}
+        return self._relpath(ret)
+
+    async def _du(self, path, *args, **kwargs):
+        total = kwargs.get("total", True)
+        ret = await self.fs._du(self._join(path), *args, **kwargs)
+        if total:
+            return ret
+
+        return {self._relpath(path): size for path, size in ret.items()}
+
+    def du(self, path, *args, **kwargs):
+        total = kwargs.get("total", True)
+        ret = self.fs.du(self._join(path), *args, **kwargs)
+        if total:
+            return ret
+
+        return {self._relpath(path): size for path, size in ret.items()}
+
+    async def _find(self, path, *args, **kwargs):
+        detail = kwargs.get("detail", False)
+        ret = await self.fs._find(self._join(path), *args, **kwargs)
+        if detail:
+            return {self._relpath(path): info for path, info in ret.items()}
+        return self._relpath(ret)
+
+    def find(self, path, *args, **kwargs):
+        detail = kwargs.get("detail", False)
+        ret = self.fs.find(self._join(path), *args, **kwargs)
+        if detail:
+            return {self._relpath(path): info for path, info in ret.items()}
+        return self._relpath(ret)
+
+    async def _expand_path(self, path, *args, **kwargs):
+        return self._relpath(
+            await self.fs._expand_path(self._join(path), *args, **kwargs)
+        )
+
+    def expand_path(self, path, *args, **kwargs):
+        return self._relpath(self.fs.expand_path(self._join(path), *args, **kwargs))
+
+    async def _mkdir(self, path, *args, **kwargs):
+        return await self.fs._mkdir(self._join(path), *args, **kwargs)
+
+    def mkdir(self, path, *args, **kwargs):
+        return self.fs.mkdir(self._join(path), *args, **kwargs)
+
+    async def _makedirs(self, path, *args, **kwargs):
+        return await self.fs._makedirs(self._join(path), *args, **kwargs)
+
+    def makedirs(self, path, *args, **kwargs):
+        return self.fs.makedirs(self._join(path), *args, **kwargs)
+
+    def rmdir(self, path):
+        return self.fs.rmdir(self._join(path))
+
+    def mv(self, path1, path2, **kwargs):
+        return self.fs.mv(
+            self._join(path1),
+            self._join(path2),
+            **kwargs,
+        )
+
+    def touch(self, path, **kwargs):
+        return self.fs.touch(self._join(path), **kwargs)
+
+    def created(self, path):
+        return self.fs.created(self._join(path))
+
+    def modified(self, path):
+        return self.fs.modified(self._join(path))
+
+    def sign(self, path, *args, **kwargs):
+        return self.fs.sign(self._join(path), *args, **kwargs)
+
+    def __repr__(self):
+        return f"{self.__class__.__qualname__}(path='{self.path}', fs={self.fs})"
+
+    def open(
+        self,
+        path,
+        *args,
+        **kwargs,
+    ):
+        return self.fs.open(
+            self._join(path),
+            *args,
+            **kwargs,
+        )
+root@f57cd087e35b:/app/filesystem_spec# grep -n "def open_async" fsspec/asyn.py
+907:    async def open_async(self, path, mode="rb", **kwargs):
+root@f57cd087e35b:/app/filesystem_spec# sed -n '900,915p' fsspec/asyn.py
+
+    async def _mkdir(self, path, create_parents=True, **kwargs):
+        pass  # not necessary to implement, may not have directories
+
+    async def _makedirs(self, path, exist_ok=False):
+        pass  # not necessary to implement, may not have directories
+
+    async def open_async(self, path, mode="rb", **kwargs):
+        if "b" not in mode or kwargs.get("compression"):
+            raise ValueError
+        raise NotImplementedError
+
+
+def mirror_sync_methods(obj):
+    """Populate sync and async methods for obj
+
+root@f57cd087e35b:/app/filesystem_spec# python - <<'EOF'
+> import re
+> path = 'fsspec/implementations/dirfs.py'
+> with open(path) as f:
+>     src = f.read()
+>
+> anchor = '''    def open(
+>         self,
+>         path,
+>         *args,
+>         **kwargs,
+>     ):
+>         return self.fs.open(
+>             self._join(path),
+>             *args,
+>             **kwargs,
+>         )
+> '''
+>
+> addition = anchor + '''
+>     async def open_async(self, path, mode="rb", **kwargs):
+>         return await self.fs.open_async(self._join(path), mode=mode, **kwargs)
+> '''
+>
+> assert anchor in src, 'anchor not found'
+> assert 'open_async' not in src, 'open_async already present'
+> src = src.replace(anchor, addition)
+> with open(path, 'w') as f:
+>     f.write(src)
+> print('done')
+> EOF
+done
+root@f57cd087e35b:/app/filesystem_spec# grep -n "open_async" fsspec/implementations/dirfs.py
+374:    async def open_async(self, path, mode="rb", **kwargs):
+375:        return await self.fs.open_async(self._join(path), mode=mode, **kwargs)
+root@f57cd087e35b:/app/filesystem_spec# cat > /tmp/test_dirfs_async.py <<'EOF'
+> import asyncio
+> import fsspec
+>
+>
+> async def async_test():
+>     fs = fsspec.filesystem("memory")
+>     dirfs = fsspec.filesystem("dir", path="/myroot", fs=fs, asynchronous=True)
+>     f = await dirfs.open_async("hello", "wb")
+>     await f.write(b"world")
+>     await f.close()
+>
+>     f = await dirfs.open_async("hello", "rb")
+>     data = await f.read()
+>     await f.close()
+>     assert data == b"world", data
+>     print("OK", data)
+>
+>
+> asyncio.run(async_test())
+> EOF
+root@f57cd087e35b:/app/filesystem_spec# python /tmp/test_dirfs_async.py
+Traceback (most recent call last):
+  File "/tmp/test_dirfs_async.py", line 2, in <module>
+    import fsspec
+ModuleNotFoundError: No module named 'fsspec'
+root@f57cd087e35b:/app/filesystem_spec# PYTHONPATH=/app/filesystem_spec python /tmp/test_dirfs_async.py
+Traceback (most recent call last):
+  File "/tmp/test_dirfs_async.py", line 2, in <module>
+    import fsspec
+  File "/app/filesystem_spec/fsspec/__init__.py", line 4, in <module>
+    from ._version import __version__  # noqa: F401
+ModuleNotFoundError: No module named 'fsspec._version'
+root@f57cd087e35b:/app/filesystem_spec# ls fsspec/ | head -40
+__init__.py
+__pycache__
+archive.py
+asyn.py
+caching.py
+callbacks.py
+compression.py
+config.py
+conftest.py
+core.py
+dircache.py
+exceptions.py
+fuse.py
+generic.py
+gui.py
+implementations
+json.py
+mapping.py
+parquet.py
+registry.py
+spec.py
+tests
+transaction.py
+utils.py
+root@f57cd087e35b:/app/filesystem_spec# grep -n "_version" pyproject.toml setup.cfg 2>/dev/null | head
+pyproject.toml:142:version-file = "fsspec/_version.py"
+pyproject.toml:149:exclude = [".tox", "build", "docs/source/conf.py", "fsspec/_version"]
+setup.cfg:6:exclude = .tox,build,docs/source/conf.py,fsspec/_version
+setup.cfg:32:    fsspec/_version
+root@f57cd087e35b:/app/filesystem_spec# echo '__version__ = "0.0.0+test"' > fsspec/_version.py
+root@f57cd087e35b:/app/filesystem_spec# PYTHONPATH=/app/filesystem_spec python /tmp/test_dirfs_async.py
+Traceback (most recent call last):
+  File "/tmp/test_dirfs_async.py", line 19, in <module>
+    asyncio.run(async_test())
+  File "/usr/local/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/local/lib/python3.9/asyncio/base_events.py", line 647, in run_until_complete
+    return future.result()
+  File "/tmp/test_dirfs_async.py", line 7, in async_test
+    dirfs = fsspec.filesystem("dir", path="/myroot", fs=fs, asynchronous=True)
+  File "/app/filesystem_spec/fsspec/registry.py", line 303, in filesystem
+    return cls(**storage_options)
+  File "/app/filesystem_spec/fsspec/spec.py", line 81, in __call__
+    obj = super().__call__(*args, **kwargs)
+  File "/app/filesystem_spec/fsspec/implementations/dirfs.py", line 44, in __init__
+    raise ValueError("can't use asynchronous with non-async fs")
+ValueError: can't use asynchronous with non-async fs
+root@f57cd087e35b:/app/filesystem_spec# PYTHONPATH=/app/filesystem_spec python -c "import fsspec; print('local', fsspec.filesystem('file').async_impl); print('m
+emory', fsspec.filesystem('memory').async_impl)"
+local False
+memory False
+root@f57cd087e35b:/app/filesystem_spec# cat > /tmp/test_dirfs_async2.py <<'EOF'
+> import asyncio
+> import fsspec
+> from fsspec.asyn import AsyncFileSystem
+>
+>
+> class FakeAsync(AsyncFileSystem):
+>     protocol = "fakeasync"
+>     async_impl = True
+>
+>     def __init__(self, *a, **k):
+>         super().__init__(*a, **k)
+>         self.calls = []
+>
+>     async def open_async(self, path, mode="rb", **kwargs):
+>         class F:
+>             async def write(self, d): pass
+>             async def read(self): return b""
+>             async def close(self): pass
+>         self.calls.append((path, mode))
+>         return F()
+>
+>
+> async def main():
+>     fs = FakeAsync()
+>     dirfs = fsspec.filesystem("dir", path="/myroot", fs=fs, asynchronous=True)
+>     f = await dirfs.open_async("hello", "wb")
+>     await f.close()
+>     assert fs.calls == [("/myroot/hello", "wb")], fs.calls
+>     print("OK delegation ->", fs.calls)
+>
+>
+> asyncio.run(main())
+> EOF
+root@f57cd087e35b:/app/filesystem_spec# PYTHONPATH=/app/filesystem_spec python /tmp/test_dirfs_async2.py
+Traceback (most recent call last):
+  File "/tmp/test_dirfs_async2.py", line 32, in <module>
+    asyncio.run(main())
+  File "/usr/local/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/local/lib/python3.9/asyncio/base_events.py", line 647, in run_until_complete
+    return future.result()
+  File "/tmp/test_dirfs_async2.py", line 25, in main
+    dirfs = fsspec.filesystem("dir", path="/myroot", fs=fs, asynchronous=True)
+  File "/app/filesystem_spec/fsspec/registry.py", line 303, in filesystem
+    return cls(**storage_options)
+  File "/app/filesystem_spec/fsspec/spec.py", line 81, in __call__
+    obj = super().__call__(*args, **kwargs)
+  File "/app/filesystem_spec/fsspec/implementations/dirfs.py", line 47, in __init__
+    raise ValueError("both dirfs and fs should be in the same sync/async mode")
+ValueError: both dirfs and fs should be in the same sync/async mode
+root@f57cd087e35b:/app/filesystem_spec# sed -i 's/    fs = FakeAsync()/    fs = FakeAsync(asynchronous=True)/' /tmp/test_dirfs_async2.py
+root@f57cd087e35b:/app/filesystem_spec# PYTHONPATH=/app/filesystem_spec python /tmp/test_dirfs_async2.py
+OK delegation -> [('/myroot/hello', 'wb')]
+root@f57cd087e35b:/app/filesystem_spec# rm -f fsspec/_version.py /tmp/test_dirfs_async.py /tmp/test_dirfs_async2.py
+root@f57cd087e35b:/app/filesystem_spec# sed -n '368,376p' fsspec/implementations/dirfs.py
+        return self.fs.open(
+            self._join(path),
+            *args,
+            **kwargs,
+        )
+
+    async def open_async(self, path, mode="rb", **kwargs):
+        return await self.fs.open_async(self._join(path), mode=mode, **kwargs)
+root@f57cd087e35b:/app/filesystem_spec#

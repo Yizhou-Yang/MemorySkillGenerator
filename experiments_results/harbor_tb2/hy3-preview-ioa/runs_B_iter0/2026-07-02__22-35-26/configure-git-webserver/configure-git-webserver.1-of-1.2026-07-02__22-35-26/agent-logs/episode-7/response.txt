@@ -1,0 +1,10 @@
+{
+  "analysis": "The `APT::No-Cache-Pre-Flight` option didn't help — apt's free-space pre-flight still checks `/var/cache/apt/archives/` via statvfs and refuses because the overlay reports 0 free. But `dd` proved we can actually write 200MB to the overlay. The real blocker is just apt's statvfs-based check. Solution: mount a tmpfs over `/var/cache/apt/archives` so statvfs reports real free space there; the 47MB download fits in tmpfs, and apt unpacks to the overlay (which can write).",
+  "plan": "1) apt-get clean to empty archives. 2) Mount a 400M tmpfs at /var/cache/apt/archives. 3) Re-run apt-get install. The download check should now pass. If apt next complains about install free-space on /, I'll address that, but typically apt only pre-checks the cache dir. I'll observe the tail output.",
+  "commands": [
+    {"keystrokes": "apt-get clean\n", "duration": 1},
+    {"keystrokes": "mount -t tmpfs -o size=400M tmpfs /var/cache/apt/archives && echo MOUNTED\n", "duration": 0.5},
+    {"keystrokes": "df -h /var/cache/apt/archives\n", "duration": 0.2}
+  ],
+  "task_complete": false
+}

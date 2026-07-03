@@ -1,0 +1,14 @@
+{
+  "analysis": "Now I can see all data. High file: 7 dates (2025-04-19 to 04-25). Low file: same 7 dates in mixed formats (MM/DD/YYYY and MM-DD-YYYY with time). I'll match by normalized date, compute high-low differences, average them. Expected diffs: 16,11,22,18,5,3,5 → sum 80, avg ≈ 11.4286.",
+  "plan": "Write a Python script to normalize dates to YYYY-MM-DD, build dictionaries, match highs and lows, compute differences, average, and write the result (only the number) to avg_temp.txt. Then verify the output.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"\nimport csv\nfrom datetime import datetime\ndef norm(d):\n    d=d.split()[0]\n    for fmt in ('%Y-%m-%d','%m/%d/%Y','%m-%d-%Y'):\n        try:\n            return datetime.strptime(d,fmt).strftime('%Y-%m-%d')\n        except ValueError:\n            continue\n    return None\ndef load(fn):\n    m={}\n    with open(fn) as f:\n        r=csv.reader(f)\n        next(r)\n        for row in r:\n            if not row: continue\n            m[norm(row[0])]=float(row[1])\n    return m\nh=load('daily_temp_sf_high.csv')\nl=load('daily_temp_sf_low.csv')\ndiffs=[h[d]-l[d] for d in h if d in l]\navg=sum(diffs)/len(diffs)\nwith open('avg_temp.txt','w') as f:\n    f.write(str(avg))\nprint('count',len(diffs),'avg',avg)\n\"\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat avg_temp.txt; echo\n",
+      "duration": 0.1
+    }
+  ]
+}

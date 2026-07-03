@@ -1,0 +1,26 @@
+New Terminal Output:
+
+root@d19349f51450:/app# cat > /app/dl.py << 'EOF'
+> import re, urllib.request, sys, os
+> os.makedirs('/app/debs', exist_ok=True)
+> urls=[]
+> for line in open('/app/uris.txt'):
+>     m=re.search(r"'(https?://[^']+)'\s+(\S+)\s+(\d+)", line)
+>     if m:
+>         urls.append((m.group(1), m.group(2)))
+> print('found', len(urls), 'packages')
+> for i,(u,name) in enumerate(urls):
+>     dest='/app/debs/'+name
+>     if os.path.exists(dest): continue
+>     try:
+>         urllib.request.urlretrieve(u, dest)
+>         print('ok', i, name, os.path.getsize(dest))
+>     except Exception as e:
+>         print('FAIL', i, name, e)
+> EOF
+root@d19349f51450:/app# python3 /app/dl.py
+found 73 packages
+ok 0 gcc-12-base_12.2.0-14+deb12u1_amd64.deb 37596
+ok 1 libgcc-s1_12.2.0-14+deb12u1_amd64.deb 49856
+ok 2 libstdc++6_12.2.0-14+deb12u1_amd64.deb 612604
+

@@ -1,0 +1,22 @@
+{
+  "analysis": "cpio and file aren't available, so I'll use Python to inspect the initramfs. I have everything I need conceptually: extracted vmlinuz-lts + initramfs-lts, openssh-server present in the ISO's local APK cache, and host internet as backup. I just need to inspect the initramfs to (a) confirm whether it auto-spawns a serial getty (definitely want ttyS0 console), and (b) understand how it locates modloop/the boot media so my -kernel/-initrd/-cdrom boot works. Let me unpack the initramfs with a small Python cpio parser and check the init script and bundled modules.",
+  "plan": "1) Write /tmp/unpack.py that detects gzip, decompresses, parses newc cpio, and extracts all files to /tmp/ir. 2) Run it, then inspect the init script (search for 'getty', 'ttyS', 'console', 'modloop', 'find_media'/'alpine_dev') and list bundled .ko modules. This tells me exactly how to boot and whether the live ISO's inittab already gives a serial login.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/unpack.py << 'EOF'\nimport os, gzip, struct\nsrc='/app/extracted/initramfs_lts'\ndata=open(src,'rb').read()\nif data[:2]==b'\\x1f\\x8b':\n    data=gzip.decompress(data); print('gzip decompressed to',len(data))\nelse:\n    print('not gzip, using raw',len(data))\nos.makedirs('/tmp/ir',exist_ok=True)\ni=0\nwhile i < len(data):\n    if data[i:i+6] not in (b'070701',b'070702'):\n        # skip until magic\n        i+=1; continue\n    hdr=data[i:i+110]\n    names=['c_ino','c_mode','c_uid','c_gid','c_nlink','c_mtime','c_filesize','c_devmajor','c_devminor','c_rdevmajor','c_rdevminor','c_namesize','c_check']\n    vals={}; off=6\n    for n in names:\n        vals[n]=int(hdr[off:off+8],16); off+=8\n    name=data[i+110:i+110+vals['c_namesize']].rstrip(b'\\x00').decode('latin1')\n    dstart=i+110+vals['c_namesize']\n    dstart=(dstart+3)&~3\n    size=vals['c_filesize']\n    body=data[dstart:dstart+size]\n    nxt=dstart+((size+3)&~3)\n    if name=='TRAILER!!!':\n        break\n    if name:\n        out='/tmp/ir/'+name.lstrip('/')\n        if name.endswith('/'):\n            os.makedirs(out,exist_ok=True)\n        else:\n            os.makedirs(os.path.dirname(out),exist_ok=True)\n            open(out,'wb').write(body)\n    i=nxt\nprint('done')\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cd /tmp; python3 /tmp/unpack.py\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "echo '--- files count ---'; find /tmp/ir -type f | wc -l; echo '--- modules ---'; find /tmp/ir -name '*.ko' | sed 's#.*/##' | sort | tr '\\n' ' '; echo\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "echo '--- init grep ---'; grep -aoE 'ttyS[0-9]|getty|modloop|alpine_dev|find_media|console=' /tmp/ir/init 2>/dev/null | sort | uniq -c | head; echo '--- head of init ---'; head -c 1500 /tmp/ir/init 2>/dev/null\n",
+      "duration": 0.3
+    }
+  ]
+}

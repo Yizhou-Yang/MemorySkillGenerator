@@ -1,0 +1,26 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@0be47ff82c40:/app/astropy# python - << 'EOF'
+> import re
+> p = '/app/astropy/astropy/modeling/separable.py'
+> s = open(p).read()
+> old = "        cright = np.zeros((noutp, right.shape[1]))\n        cright[-right.shape[0]:, -right.shape[1]:] = 1"
+> new = "        cright = np.zeros((noutp, right.shape[1]))\n        cright[-right.shape[0]:, -right.shape[1]:] = right"
+> assert old in s, 'pattern not found'
+> s = s.replace(old, new)
+> open(p,'w').write(s)
+> print('patched')
+> EOF
+patched
+root@0be47ff82c40:/app/astropy# sed -n '241,247p' /app/astropy/astropy/modeling/separable.py
+    if isinstance(right, Model):
+        cright = _coord_matrix(right, 'right', noutp)
+    else:
+        cright = np.zeros((noutp, right.shape[1]))
+        cright[-right.shape[0]:, -right.shape[1]:] = right
+
+    return np.hstack([cleft, cright])
+root@0be47ff82c40:/app/astropy#

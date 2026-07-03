@@ -1,0 +1,18 @@
+{
+  "analysis": "The 7z is encrypted with 7zAES. 7z2john.pl needs a Perl module I can't easily install (no apt/cpan). However, I have a working `7zz` binary that correctly verifies passwords (exit 0 = correct, exit 2 = wrong) and the full password.lst (1.8M entries). Rather than fight the perl dependency, I'll brute-force by using 7zz as the oracle, parallelized across all 32 cores. Since workers test line-by-line across the whole list, a common password is found in seconds; worst case is ~1 hour for a deep entry. Once found, the script will extract secret_file.txt and write its content to /app/solution.txt.",
+  "plan": "1) Write /app/brute.py: load password.lst (skip comments/blanks), split across all CPUs, each worker calls `7zz t -p<PASS> secrets.7z` with suppressed output; first correct match (returncode 0) is reported. The parent then extracts the file with 7zz and writes the secret word to /app/solution.txt. 2) Launch it in background and poll the output log.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/brute.py << 'EOF'\nimport subprocess, multiprocessing as mp, sys\n\nARCHIVE='/app/secrets.7z'\nZZ='/app/7zz'\nWORDLIST='/app/john/run/password.lst'\n\ndef worker(chunk, out_q, stop):\n    for pw in chunk:\n        if stop.is_set():\n            return\n        try:\n            r = subprocess.run([ZZ, 't', b'-p'+pw, ARCHIVE],\n                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n        except Exception:\n            continue\n        if r.returncode == 0:\n            out_q.put(pw)\n            stop.set()\n            return\n\ndef main():\n    pws = []\n    with open(WORDLIST,'rb') as f:\n        for line in f:\n            line = line.rstrip(b'\\r\\n')\n            if not line:\n                continue\n            if line.startswith(b'#!'):\n                continue\n            pws.append(line)\n    sys.stderr.write('total candidates: %d\\n' % len(pws))\n    sys.stderr.flush()\n    n = mp.cpu_count()\n    chunks = [pws[i::n] for i in range(n)]\n    mgr = mp.Manager()\n    out_q = mgr.Queue()\n    stop = mgr.Event()\n    procs = [mp.Process(target=worker, args=(c, out_q, stop)) for c in chunks]\n    for p in procs:\n        p.start()\n    res = out_q.get()\n    stop.set()\n    for p in procs:\n        p.join()\n    sys.stderr.write('FOUND_PASSWORD:%s\\n' % res.decode('utf-8','replace'))\n    # extract\n    subprocess.run([ZZ, 'x', '-p'+res.decode('utf-8','replace'), '-y', '-o/tmp/out', ARCHIVE],\n                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n    data = open('/tmp/out/secrets/secret_file.txt','rb').read()\n    sys.stderr.write('SECRET:%r\\n' % data)\n    with open('/app/solution.txt','wb') as f:\n        f.write(data)\n    sys.stderr.write('WROTE /app/solution.txt\\n')\n\nif __name__ == '__main__':\n    main()\nEOF\necho done\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "nohup python3 /app/brute.py > /app/brute.out 2>&1 &\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "sleep 5; cat /app/brute.out\n",
+      "duration": 6.0
+    }
+  ]
+}

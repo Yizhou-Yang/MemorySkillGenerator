@@ -1,0 +1,25 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /app/mykey.key -out /app/mycert.pem -subj "/C=US/ST=NA/L=NA/O=NA/CN=localhost"\n'
+'ls -la /app/mycert.pem /app/mykey.key && which python3 pip3\n'
+'pip3 install notebook matplotlib numpy 2>&1 | tail -15\n'
+"python3 - <<'PY'\nimport os\nfrom notebook.auth import passwd\npwd_hash = passwd('benchmarkpass')\nos.makedirs('/root/.jupyter', exist_ok=True)\nconfig = '''c.ServerApp.ip = '0.0.0.0'\nc.ServerApp.port = 8888\nc.ServerApp.open_browser = False\nc.ServerApp.certfile = '/app/mycert.pem'\nc.ServerApp.keyfile = '/app/mykey.key'\nc.ServerApp.password = '%s'\nc.ServerApp.allow_root = True\nc.ServerApp.base_url = '/'\n''' % pwd_hash\nwith open('/root/.jupyter/jupyter_server_config.py', 'w') as f:\n    f.write(config)\nprint('config written, hash set')\nPY\n"
+'cat /root/.jupyter/jupyter_server_config.py\n'
+"python3 - <<'PY'\nimport os\nfrom jupyter_server.auth import passwd\npwd_hash = passwd('benchmarkpass')\nos.makedirs('/root/.jupyter', exist_ok=True)\nconfig = '''c.ServerApp.ip = '0.0.0.0'\nc.ServerApp.port = 8888\nc.ServerApp.open_browser = False\nc.ServerApp.certfile = '/app/mycert.pem'\nc.ServerApp.keyfile = '/app/mykey.key'\nc.ServerApp.password = '%s'\nc.ServerApp.allow_root = True\nc.ServerApp.base_url = '/'\n''' % pwd_hash\nwith open('/root/.jupyter/jupyter_server_config.py', 'w') as f:\n    f.write(config)\nprint('config written, hash set')\nPY\n"
+'cat /root/.jupyter/jupyter_server_config.py\n'
+"python3 - <<'PY'\nimport nbformat as nbf\nnb = nbf.v4.new_notebook()\nmd = nbf.v4.new_markdown_cell('## Jupyter Notebook\\n\\nJupyter Notebook is an open-source web application that allows you to create and share documents containing live code, equations, visualizations, and narrative text. It supports many programming languages, with Python being the most common. Notebooks are made up of cells that can be executed independently, making it easy to iterate on code and document the results inline.')\ncode = nbf.v4.new_code_cell('import numpy as np\\nimport matplotlib.pyplot as plt\\n\\nx = np.linspace(0, 2 * np.pi, 500)\\ny = np.sin(x)\\n\\nplt.figure(figsize=(8, 4))\\nplt.plot(x, y, label=\\'sin(x)\\')\\nplt.title(\\'Sine Wave\\')\\nplt.xlabel(\\'x\\')\\nplt.ylabel(\\'sin(x)\\')\\nplt.legend()\\nplt.grid(True)\\nplt.show()')\nnb['cells'] = [md, code]\nwith open('/app/test_notebook.ipynb', 'w') as f:\n    nbf.write(nb, f)\nprint('notebook created')\nPY\n"
+'ls -la /app/test_notebook.ipynb\n'
+''
+'cd /app && nohup jupyter notebook --config=/root/.jupyter/jupyter_server_config.py > /app/jupyter.log 2>&1 &\n'
+'sleep 5 && cat /app/jupyter.log\n'
+'kill %1 2>/dev/null; sleep 2\n'
+"python3 - <<'PY'\nimport os\nfrom jupyter_server.auth import passwd\npwd_hash = passwd('benchmarkpass')\nos.makedirs('/root/.jupyter', exist_ok=True)\nconfig = '''c.ServerApp.ip = '0.0.0.0'\nc.ServerApp.port = 8888\nc.ServerApp.open_browser = False\nc.ServerApp.certfile = '/app/mycert.pem'\nc.ServerApp.keyfile = '/app/mykey.key'\nc.ServerApp.password = '%s'\nc.ServerApp.allow_root = True\nc.ServerApp.base_url = '/'\nc.PasswordIdentityProvider.hashed_password = '%s'\nc.IdentityProvider.token = ''\n''' % (pwd_hash, pwd_hash)\nwith open('/root/.jupyter/jupyter_server_config.py', 'w') as f:\n    f.write(config)\nprint('config updated')\nPY\n"
+'cd /app && nohup jupyter notebook --config=/root/.jupyter/jupyter_server_config.py > /app/jupyter.log 2>&1 &\n'
+'sleep 5 && tail -5 /app/jupyter.log\n'
+'curl -sk https://127.0.0.1:8888/ -o /dev/null -w "HTTP %{http_code}\\n"\n'
+'curl -sk https://127.0.0.1:8888/tree -o /dev/null -w "tree HTTP %{http_code}\\n"\n'
+'ss -ltnp 2>/dev/null | grep 8888 || netstat -ltnp 2>/dev/null | grep 8888\n'
+'python3 -c "import nbformat; nb=nbformat.read(\'/app/test_notebook.ipynb\', as_version=4); print(\'cells:\', len(nb.cells)); print([c.cell_type for c in nb.cells])"\n'
+''
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']

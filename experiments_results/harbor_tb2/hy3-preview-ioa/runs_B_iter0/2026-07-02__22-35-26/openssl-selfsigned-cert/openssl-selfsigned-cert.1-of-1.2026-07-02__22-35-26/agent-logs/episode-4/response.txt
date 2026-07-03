@@ -1,0 +1,16 @@
+The script runs but Common Name extraction failed (printed empty) because openssl outputs `CN = ...` with a space around `=`. Let me fix the CN parsing.
+
+{
+  "analysis": "The script works and prints 'Certificate verification successful', but the Common Name was extracted as empty because the subject format is 'CN = dev-internal.company.local' with spaces around '='. My split logic looked for 'CN=' exactly. I need to fix the CN extraction using a regex that tolerates spaces.",
+  "plan": "Rewrite check_cert.py to extract CN with a regex handling 'CN = value'. Re-run to confirm CN shows correctly.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/check_cert.py << 'EOF'\n#!/usr/bin/env python3\nimport ssl\nimport subprocess\nimport sys\nimport os\nimport re\nfrom datetime import datetime\n\nCERT_PATH = \"/app/ssl/server.crt\"\nKEY_PATH = \"/app/ssl/server.key\"\nPEM_PATH = \"/app/ssl/server.pem\"\n\n\ndef main():\n    # Verify the files exist\n    for path in (CERT_PATH, KEY_PATH, PEM_PATH):\n        if not os.path.exists(path):\n            raise FileNotFoundError(path)\n\n    # Verify the certificate can be loaded (cert + key)\n    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)\n    context.load_cert_chain(certfile=PEM_PATH)\n\n    # Use openssl to get subject (Common Name) and dates\n    subject = subprocess.check_output(\n        [\"openssl\", \"x509\", \"-in\", CERT_PATH, \"-noout\", \"-subject\"],\n        text=True,\n    ).strip()\n\n    dates = subprocess.check_output(\n        [\"openssl\", \"x509\", \"-in\", CERT_PATH, \"-noout\", \"-dates\"],\n        text=True,\n    ).strip()\n\n    print(\"Certificate subject:\")\n    print(subject)\n\n    # Extract Common Name (tolerates spaces around '=')\n    m = re.search(r\"CN\\s*=\\s*([^,]+)\", subject)\n    cn = m.group(1).strip() if m else \"\"\n    print(\"Common Name:\", cn)\n\n    # Extract expiration date (notAfter)\n    not_after = \"\"\n    for line in dates.splitlines():\n        if line.startswith(\"notAfter=\"):\n            not_after = line.split(\"=\", 1)[1]\n    exp_date = datetime.strptime(not_after, \"%b %d %H:%M:%S %Y %Z\").strftime(\"%Y-%m-%d\")\n    print(\"Expiration date:\", exp_date)\n\n    print(\"Certificate verification successful\")\n\n\nif __name__ == \"__main__\":\n    try:\n        main()\n    except Exception as e:\n        print(\"Certificate verification failed:\", e, file=sys.stderr)\n        sys.exit(1)\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/check_cert.py\n",
+      "duration": 1.0
+    }
+  ]
+}

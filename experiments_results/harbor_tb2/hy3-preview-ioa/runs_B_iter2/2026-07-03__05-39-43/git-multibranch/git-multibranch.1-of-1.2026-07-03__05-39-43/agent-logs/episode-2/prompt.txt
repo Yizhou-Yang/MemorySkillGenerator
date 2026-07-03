@@ -1,0 +1,108 @@
+New Terminal Output:
+
+no git user
+ [ - ]  dbus
+ [ - ]  nginx
+ [ - ]  procps
+ [ - ]  ssh
+root@81c09d9438d3:/app# useradd -m -s /bin/bash git 2>/dev/null; echo 'git:password' | chpasswd; id git
+uid=1001(git) gid=1001(git) groups=1001(git)
+root@81c09d9438d3:/app# mkdir -p /git /var/www/main /var/www/dev; git init --bare -b main /git/project >/dev/null; ls /git/project
+HEAD  config  description  hooks  info  objects  refs
+root@81c09d9438d3:/app# cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> while read oldrev newrev refname; do
+>   [ "$newrev" = "0000000000000000000000000000000000000000" ] && continue
+>   branch="${refname#refs/heads/}"
+>   case "$branch" in
+>     main) target=/var/www/main ;;
+>     dev) target=/var/www/dev ;;
+>     *) continue ;;
+>   esac
+>   mkdir -p "$target"
+>   find "$target" -mindepth 1 -delete
+>   git --git-dir=/git/project archive "$newrev" | tar -x -C "$target"
+> done
+> EOF
+root@81c09d9438d3:/app# chmod +x /git/project/hooks/post-receive; chown -R git:git /git /var/www; ls -la /git/project/hooks/
+total 76
+drwxr-xr-x 2 git git 4096 Jul  2 22:23 .
+drwxr-xr-x 6 git git 4096 Jul  2 22:23 ..
+-rwxr-xr-x 1 git git  478 Jul  2 22:23 applypatch-msg.sample
+-rwxr-xr-x 1 git git  896 Jul  2 22:23 commit-msg.sample
+-rwxr-xr-x 1 git git 4726 Jul  2 22:23 fsmonitor-watchman.sample
+-rwxr-xr-x 1 git git  400 Jul  2 22:23 post-receive
+-rwxr-xr-x 1 git git  189 Jul  2 22:23 post-update.sample
+-rwxr-xr-x 1 git git  424 Jul  2 22:23 pre-applypatch.sample
+-rwxr-xr-x 1 git git 1649 Jul  2 22:23 pre-commit.sample
+-rwxr-xr-x 1 git git  416 Jul  2 22:23 pre-merge-commit.sample
+-rwxr-xr-x 1 git git 1374 Jul  2 22:23 pre-push.sample
+-rwxr-xr-x 1 git git 4898 Jul  2 22:23 pre-rebase.sample
+-rwxr-xr-x 1 git git  544 Jul  2 22:23 pre-receive.sample
+-rwxr-xr-x 1 git git 1492 Jul  2 22:23 prepare-commit-msg.sample
+-rwxr-xr-x 1 git git 2783 Jul  2 22:23 push-to-checkout.sample
+-rwxr-xr-x 1 git git 2308 Jul  2 22:23 sendemail-validate.sample
+-rwxr-xr-x 1 git git 3650 Jul  2 22:23 update.sample
+root@81c09d9438d3:/app# mkdir -p /etc/nginx/ssl; openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.
+crt -subj "/CN=localhost" 2>/dev/null; ls -la /etc/nginx/ssl/
+total 16
+drwxr-xr-x 2 root root 4096 Jul  2 22:23 .
+drwxr-xr-x 9 root root 4096 Jul  2 22:23 ..
+-rw-r--r-- 1 root root 1115 Jul  2 22:23 nginx.crt
+-rw------- 1 root root 1704 Jul  2 22:23 nginx.key
+root@81c09d9438d3:/app# cat > /etc/nginx/conf.d/git.conf <<'EOF'
+> server {
+>     listen 8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/nginx.crt;
+>     ssl_certificate_key /etc/nginx/ssl/nginx.key;
+>     root /var/www/main;
+>     index index.html;
+>     location /dev {
+>         alias /var/www/dev;
+>     }
+> }
+> EOF
+root@81c09d9438d3:/app# mkdir -p /etc/ssh/sshd_config.d
+root@81c09d9438d3:/app# cat > /etc/ssh/sshd_config.d/99-git.conf <<'EOF'
+> PasswordAuthentication yes
+> PubkeyAuthentication yes
+> EOF
+root@81c09d9438d3:/app# mkdir -p /run/sshd && /usr/sbin/sshd && nginx -t && nginx
+2026/07/02 22:23:17 [warn] 255#255: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+2026/07/02 22:23:17 [warn] 256#256: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+root@81c09d9438d3:/app# cd /tmp && rm -rf seed && git init -q -b main seed && cd seed && git config user.email t@t && git config user.name t && echo '<h1>MAIN</
+h1>' > index.html && git add index.html && git commit -qm main && git checkout -q -b dev && echo '<h1>DEV</h1>' > index.html && git add index.html && git commit
+ -qm dev && git push -q /git/project main && git push -q /git/project dev && cd / && rm -rf /tmp/seed
+fatal: detected dubious ownership in repository at '/git/project'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /git/project
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@81c09d9438d3:/tmp/seed# chown -R git:git /git /var/www
+root@81c09d9438d3:/tmp/seed# ss -tln 2>/dev/null | grep -E ':22|:8443'; echo '--- procs ---'; ps -ef | grep -v grep | grep -E 'sshd|nginx' | wc -l; echo '--- MA
+IN ---'; curl -sk https://localhost:8443/index.html; echo '--- DEV ---'; curl -sk https://localhost:8443/dev/index.html
+--- procs ---
+34
+--- MAIN ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+--- DEV ---
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx/1.28.3 (Ubuntu)</center>
+</body>
+</html>
+root@81c09d9438d3:/tmp/seed#

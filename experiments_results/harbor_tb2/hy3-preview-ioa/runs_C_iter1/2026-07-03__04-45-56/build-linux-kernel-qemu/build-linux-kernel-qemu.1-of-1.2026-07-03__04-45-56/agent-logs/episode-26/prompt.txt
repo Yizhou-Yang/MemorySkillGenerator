@@ -1,0 +1,40 @@
+New Terminal Output:
+
+root@b3e0557ff45d:/app# cat > /tmp/getk.py << 'EOF'
+> import urllib.request
+> u='https://codeload.github.com/torvalds/linux/tar.gz/refs/tags/v6.9'
+> req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'})
+> r=urllib.request.urlopen(req,timeout=60)
+> total=0
+> with open('/app/linux-6.9.tgz','wb') as f:
+>     while True:
+>         b=r.read(1<<20)
+>         if not b: break
+>         f.write(b); total+=len(b)
+>         if total%(20<<20)<(1<<20): print('...',total>>20,'MB')
+> print('DONE',total,'bytes')
+> EOF
+root@b3e0557ff45d:/app# python3 /tmp/getk.py
+Traceback (most recent call last):
+  File "/tmp/getk.py", line 4, in <module>
+    r=urllib.request.urlopen(req,timeout=60)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/urllib/request.py", line 215, in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/urllib/request.py", line 521, in open
+    response = meth(req, response)
+               ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/urllib/request.py", line 630, in http_response
+    response = self.parent.error(
+               ^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/urllib/request.py", line 559, in error
+    return self._call_chain(*args)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/urllib/request.py", line 492, in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+  File "/usr/lib/python3.12/urllib/request.py", line 639, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 429: Too Many Requests
+root@b3e0557ff45d:/app#

@@ -1,0 +1,63 @@
+New Terminal Output:
+
+root@efee5c6aa36b:/app# cat > /tmp/extract2.py << 'PYEOF'
+> import re
+> SECTOR=2048
+> f=open('/app/alpine.iso','rb')
+> def rd(lba,n):
+>     f.seek(lba*SECTOR); return f.read(n*SECTOR)
+> pvd=rd(16,1)
+> def parse(rec):
+>     L=rec[0]
+>     if L==0: return None
+>     loc=int.from_bytes(rec[2:6],'little')
+>     dlen=int.from_bytes(rec[10:14],'little')
+>     flags=rec[25]; nl=rec[32]; name=rec[33:33+nl]
+>     return dict(loc=loc,dlen=dlen,is_dir=bool(flags&2),length=L)
+> root=parse(pvd[156:156+34])
+> found={}
+> def walk(rec,path):
+>     data=rd(rec['loc'],max(1,(rec['dlen']+SECTOR-1)//SECTOR)); off=0
+>     while off < len(data):
+>         L=data[off]
+>         if L==0:
+>             off+=SECTOR-(off%SECTOR); continue
+>         nl=data[off+32]; nm=data[off+33:off+33+nl]
+>         e=parse(data[off:off+L]); off+=L
+>         if e is None: continue
+>         try: n=nm.decode('ascii').strip()
+>         except: n=repr(nm)
+>         if ';' in n: n=n.split(';')[0]
+>         fp=path+'/'+n
+>         if not e['is_dir']: found[fp.upper()]=e
+>         if e['is_dir'] and nm not in (b'\x00',b'\x01'): walk(e,fp)
+> walk(root,'')
+> for key in found:
+>     if key.endswith('/VMLINUZ_LTS') or key.endswith('VMLINUZ_LTS'):
+>         e=found[key]
+>         d=rd(e['loc'],(e['dlen']+SECTOR-1)//SECTOR)[:e['dlen']]
+>         open('/tmp/vmlinuz','wb').write(d); print('kernel',key,len(d))
+>     if key.endswith('/INITRAMFS_LTS') or key.endswith('INITRAMFS_LTS'):
+>         e=found[key]
+>         d=rd(e['loc'],(e['dlen']+SECTOR-1)//SECTOR)[:e['dlen']]
+>         open('/tmp/initramfs','wb').write(d); print('initrd',key,len(d))
+> for k in found:
+>     if k.endswith('SYSLINUX.CFG'):
+>         e=found[k]
+>         d=rd(e['loc'],(e['dlen']+SECTOR-1)//SECTOR)[:e['dlen']]
+>         print('=== %s ==='%k); print(d.decode('latin1'))
+> PYEOF
+root@efee5c6aa36b:/app# python3 /tmp/extract2.py
+=== /BOOT/SYSLINUX/SYSLINUX.CFG ===
+TIMEOUT 10
+PROMPT 1
+DEFAULT lts
+
+LABEL lts
+MENU LABEL Linux lts
+KERNEL /boot/vmlinuz-lts
+INITRD /boot/intel-ucode.img,/boot/amd-ucode.img,/boot/initramfs-lts
+FDTDIR /boot/dtbs-lts
+APPEND modules=loop,squashfs,sd-mod,usb-storage quiet
+
+root@efee5c6aa36b:/app#

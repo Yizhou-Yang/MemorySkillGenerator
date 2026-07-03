@@ -1,0 +1,10 @@
+{
+  "analysis": "Root cause identified: the fuse-overlayfs filesystem reports 0 available bytes via statvfs, but actual writes succeed (dd proved 500MB writes work). apt's free-space pre-check reads statvfs and always fails, even when redirected to /tmp. The robust fix is to bypass apt's installer entirely: use `apt-get --print-uris` (which computes download URLs without doing the space check or downloading) to get the .deb URLs, download them with python, and install directly with dpkg (which doesn't do a statvfs free-space check). I'll use yt-dlp as a standalone script (also python-downloaded) so I don't even need to pull extra pip packages, and call tesseract via subprocess from python.",
+  "plan": "1) Generate the list of .deb download URLs with `apt-get --print-uris`. 2) Download all .debs to /tmp/debs with a python script. 3) Install them with dpkg -i /tmp/debs/*.deb (and a follow-up --configure -a if needed). This avoids apt's failing space check while still getting ffmpeg, tesseract, and pip installed on disk.",
+  "commands": [
+    {
+      "keystrokes": "apt-get --print-uris -y install ffmpeg tesseract-ocr tesseract-ocr-eng python3-pip > /tmp/uris.txt 2>/tmp/urise.txt; echo EXIT=$?; echo '---LINES---'; wc -l /tmp/uris.txt; echo '---HEAD---'; head -3 /tmp/uris.txt; echo '---ERR(excerpt)---'; grep -i 'free space' /tmp/urise.txt | head -2\n",
+      "duration": 15.0
+    }
+  ]
+}

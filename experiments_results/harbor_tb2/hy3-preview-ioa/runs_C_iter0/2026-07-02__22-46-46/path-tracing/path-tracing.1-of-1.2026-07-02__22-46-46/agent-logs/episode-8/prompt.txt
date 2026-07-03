@@ -1,0 +1,42 @@
+New Terminal Output:
+
+root@e4e667a7dedd:/app# cat > /tmp/an2.py << 'EOF'
+> import math
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> hdr_end=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[hdr_end:]
+> # build channel arrays
+> R=[0]*(w*h);G=[0]*(w*h);B=[0]*(w*h)
+> for i in range(w*h):
+>     R[i]=px[i*3];G[i]=px[i*3+1];B[i]=px[i*3+2]
+> def idx(x,y):return y*w+x
+> # noise estimate: std of second difference along x within a row (smooth region top)
+> res=[]
+> for y in range(0,50):
+>     for x in range(2,w-2):
+>         for ch in (R,G,B):
+>             res.append(ch[idx(x,y)]-2*ch[idx(x-1,y)]+ch[idx(x-2,y)])
+> import statistics
+> print('2nd-diff std (top rows):', statistics.pstdev(res))
+> # try gradient correlation: correlation of R with x and y
+> xs=[i%w for i in range(w*h)]; ys=[i//w for i in range(w*h)]
+> def corr(a,b):
+>     n=len(a); ma=sum(a)/n; mb=sum(b)/n
+>     num=sum((a[i]-ma)*(b[i]-mb) for i in range(n))
+>     da=math.sqrt(sum((v-ma)**2 for v in a)); db=math.sqrt(sum((v-mb)**2 for v in b))
+>     return num/(da*db)
+> print('R vs x',corr(R,xs),'R vs y',corr(R,ys))
+> print('G vs x',corr(G,xs),'G vs y',corr(G,ys))
+> print('B vs x',corr(B,xs),'B vs y',corr(B,ys))
+> # distance from center squared
+> cx,cy=400,300
+> for name,ch in [('R',R),('G',G),('B',B)]:
+>     d2=[((i%w)-cx)**2+((i//w)-cy)**2 for i in range(w*h)]
+>     print(name,'vs dist2',corr(ch,d2))
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an2.py
+2nd-diff std (top rows): 0.18202287159315708
+R vs x -0.0015474626222410795 R vs y -0.5333057791907595
+

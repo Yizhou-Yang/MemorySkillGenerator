@@ -1,0 +1,18 @@
+{
+  "analysis": "Key finding: the fuse-overlayfs reports Avail=0 to df, but actual writes succeed (the 500MB dd test returned EXIT=0). This is a statvfs misreport; the writable upper layer actually has space. apt aborts on its conservative free-space check. The workaround: use `apt-get install --print-uris` (which plans the full dependency set and prints .deb URLs without doing the install-space check), download those .debs with wget (writes work), then install with `dpkg -i` which won't abort on the bogus statvfs. I'll drop qemu to save space/time since the deliverable is bzImage + gen_init_cpio + the printk.",
+  "plan": "1) Create /tmp/debs and use `apt-get install --print-uris` to get the full list of .deb URLs for the build toolchain. 2) Verify urls.txt is populated. Then in a later step, wget all of them and dpkg -i them. This avoids apt's free-space gate.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /tmp/debs && cd /tmp/debs\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get install --print-uris -y build-essential flex bison libssl-dev xz-utils wget bc 2>/dev/null | grep \"^'\" | cut -d\"'\" -f2 > urls.txt\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "wc -l urls.txt; head -3 urls.txt\n",
+      "duration": 0.1
+    }
+  ]
+}

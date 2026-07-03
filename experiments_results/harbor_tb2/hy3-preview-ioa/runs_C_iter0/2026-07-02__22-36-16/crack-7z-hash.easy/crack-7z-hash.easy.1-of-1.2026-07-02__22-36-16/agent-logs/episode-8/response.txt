@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: `df /` reports 0 available (954G used) but `du -x /` shows only 836M actually in this overlay, and I CAN write files (touch and a 5MB dd both succeeded). This means the host backing filesystem is full but root still has reserved blocks to write into. apt refused to install because its statvfs space check sees 0 available. The .deb files I need are small (~1.8MB), so the real fix is to bypass apt's space check — download the .debs to a custom cache dir and install with dpkg. First let me confirm writable space and try downloading.",
+  "plan": "1. Test writing a larger file (~100MB) to confirm real writable capacity. 2. Create a custom apt cache dir and use `apt-get download` with `Dir::Cache` overridden to fetch the two .deb packages. 3. Install them with dpkg. This avoids apt's refusing space check.",
+  "commands": [
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmptest bs=1M count=100 2>&1; rm -f /tmptest\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "mkdir -p /tmp/aptcache && apt-get -o Dir::Cache=/tmp/aptcache update 2>&1 | tail -3\n",
+      "duration": 15.0
+    }
+  ]
+}

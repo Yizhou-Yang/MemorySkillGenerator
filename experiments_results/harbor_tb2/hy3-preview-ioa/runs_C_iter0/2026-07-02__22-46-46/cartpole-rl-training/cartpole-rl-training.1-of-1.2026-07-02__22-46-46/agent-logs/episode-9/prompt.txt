@@ -1,0 +1,80 @@
+New Terminal Output:
+
+root@6accac3b74d4:/app# cat > /app/train.py << 'PYEOF'
+> import random
+> import numpy as np
+> import torch
+> import torch.nn as nn
+> import torch.optim as optim
+> from collections import deque
+>
+> import gymnasium as gym
+> from agent import Agent, DQN
+>
+>
+> BATCH_SIZE = 128
+> GAMMA = 0.99
+> LR = 1e-3
+> BUFFER_SIZE = 50000
+> TARGET_UPDATE = 10
+> EPISODES = 1200
+>
+>
+> def train():
+>     env = gym.make('CartPole-v1')
+>     agent = Agent()
+>     agent.training = True
+>     policy_net = agent.policy_net
+>     target_net = DQN()
+>     target_net.load_state_dict(policy_net.state_dict())
+>     target_net.eval()
+>     optimizer = optim.Adam(policy_net.parameters(), lr=LR)
+>     buffer = deque(maxlen=BUFFER_SIZE)
+>     eps_start, eps_end, eps_decay = 1.0, 0.02, 4000
+>
+>     steps = 0
+>     for ep in range(EPISODES):
+>         obs, _ = env.reset()
+>         total = 0
+>         agent.epsilon = eps_end + (eps_start - eps_end) * np.exp(-steps / eps_decay)
+>         while True:
+>             steps += 1
+>             action = agent.select_action(obs)
+>             next_obs, reward, term, trunc, _ = env.step(action)
+>             done = term or trunc
+>             buffer.append((obs, action, reward, next_obs, done))
+>             obs = next_obs
+>             total += reward
+>             if len(buffer) >= BATCH_SIZE:
+>                 batch = random.sample(buffer, BATCH_SIZE)
+>                 s = torch.FloatTensor(np.array([b[0] for b in batch]))
+>                 a = torch.LongTensor([b[1] for b in batch]).unsqueeze(1)
+>                 r = torch.FloatTensor([b[2] for b in batch])
+>                 ns = torch.FloatTensor(np.array([b[3] for b in batch]))
+>                 d = torch.FloatTensor([b[4] for b in batch])
+>                 q_sa = policy_net(s).gather(1, a).squeeze(1)
+>                 with torch.no_grad():
+>                     next_q = target_net(ns).max(1)[0]
+>                     target = r + GAMMA * next_q * (1 - d)
+>                 loss = nn.functional.mse_loss(q_sa, target)
+>                 optimizer.zero_grad()
+>                 loss.backward()
+>                 optimizer.step()
+>             if done:
+>                 break
+>         if ep % TARGET_UPDATE == 0:
+>             target_net.load_state_dict(policy_net.state_dict())
+>         if ep % 50 == 0:
+>             print(f'Ep {ep} reward {total:.0f} eps {agent.epsilon:.3f}')
+>
+>     env.close()
+>     agent.training = False
+>     agent.save('/app/trained_model')
+>     print('Saved model to /app/trained_model')
+>
+>
+> if __name__ == '__main__':
+>     train()
+> PYEOF
+root@6accac3b74d4:/app# cd /app && python3 train.py
+

@@ -1,0 +1,40 @@
+New Terminal Output:
+
+root@e067fc5e1a11:/app# cat > /app/occ.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> arr = np.array(im).astype(int)
+> S=80
+> def sq(r,c): return arr[r*S:(r+1)*S, c*S:(c+1)*S]
+> bg_cache={}
+> def bg(r,c):
+>     p=sq(r,c).reshape(-1,3)
+>     return np.median(p,axis=0)
+> for r in range(8):
+>     occ=[]
+>     for c in range(8):
+>         p=sq(r,c).reshape(-1,3)
+>         b=bg(r,c)
+>         d=np.abs(p-b).sum(axis=1)
+>         mask=d>60
+>         cnt=mask.sum()
+>         if cnt>150:
+>             fill=p[mask].mean(axis=0)
+>             # classify color: white piece -> fill bright, black piece -> fill dark
+>             lum=fill.mean()
+>             occ.append('%3d %3d'%(cnt, lum))
+>         else:
+>             occ.append('  .   ')
+>     print(r, ' | '.join(occ))
+> EOF
+root@e067fc5e1a11:/app# python3 /app/occ.py
+0 897  23 |   .    | 571  22 | 786  21 |   .    | 869  12 |   .    |   .
+1   .    | 846  10 |   .    |   .    |   .    | 846  10 | 840   6 |   .
+2 870  15 |   .    | 856  21 |   .    | 846  10 |   .    |   .    |   .
+3   .    |   .    |   .    | 856  21 | 472 236 | 1021  38 | 566  13 | 416 251
+4   .    |   .    |   .    |   .    |   .    |   .    |   .    |   .
+5 492 234 |   .    | 268 213 |   .    |   .    |   .    |   .    |   .
+6   .    | 472 236 |   .    |   .    | 402 245 | 472 236 | 416 251 |   .
+7 512 226 |   .    | 406 230 |   .    | 596 229 |   .    |   .    | 430 244
+root@e067fc5e1a11:/app#

@@ -1,0 +1,109 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@6011adc3f64a:/app# cat > /app/recog.py << 'EOF'
+> from PIL import Image
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> W,H = im.size
+> px = im.load()
+> S = W//8  # 80
+>
+> def bg_of(r,c):
+>     # sample border ring pixels of this square
+>     xs=[]
+>     x0,y0 = c*S, r*S
+>     for i in range(S):
+>         for (sx,sy) in [((x0+i),y0+2),((x0+i),y0+S-3), (x0+2,y0+i),(x0+S-3,y0+i)]:
+>             xs.append(px[sx,sy])
+>     # median
+>     xsr = sorted(x[0] for x in xs)
+>     xsg = sorted(x[1] for x in xs)
+>     xsb = sorted(x[2] for x in xs)
+>     n=len(xs)
+>     return (xsr[n//2], xsg[n//2], xsb[n//2])
+>
+> def dist(a,b):
+>     return sum((a[i]-b[i])**2 for i in range(3))**0.5
+>
+> N=32
+> masks={}
+> info={}
+> for r in range(8):
+>     for c in range(8):
+>         bg = bg_of(r,c)
+>         x0,y0=c*S,r*S
+>         # build mask at NxN, downsample average
+>         mask=[[0]*N for _ in range(N)]
+>         cnt=[[0]*N for _ in range(N)]
+>         diffpix=[]
+>         for yy in range(S):
+>             for xx in range(S):
+>                 p=px[x0+xx,y0+yy]
+>                 d=dist(p,bg)
+>                 ni=yy*N//S; nj=xx*N//S
+>                 cnt[ni][nj]+=1
+>                 if d>45:
+>                     mask[ni][nj]+=1
+>                     diffpix.append(p)
+>         tot=sum(sum(rr) for rr in cnt)
+>         pp=sum(sum(rr) for rr in mask)
+>         if pp < 30:  # mostly background -> empty
+>             continue
+>         frac=[[ (1.0 if mask[i][j]*2>=cnt[i][j] else 0.0) for j in range(N)] for i in range(N)]
+>         # piece color: avg brightness of diff pix vs bg brightness
+>         if diffpix:
+>             avgr=sum(p[0] for p in diffpix)/len(diffpix)
+>             avgg=sum(p[1] for p in diffpix)/len(diffpix)
+>             avgb=sum(p[2] for p in diffpix)/len(diffpix)
+>             apix=(avgr,avgg,avgb)
+>         else:
+>             apix=bg
+>         side = 'W' if dist(apix,bg) and apix[0]+apix[1]+apix[2] > bg[0]+bg[1]+bg[2] else 'B'
+>         # actually compare brightness
+>         bpix = bg[0]+bg[1]+bg[2]
+>         cpix = apix[0]+apix[1]+apix[2]
+>         side = 'W' if cpix > bpix else 'B'
+>         masks[(r,c)]=frac
+>         info[(r,c)]=(side,pp,cpix,bpix)
+>
+> # cluster
+> reps=[]
+> labels={}
+> def diffmask(a,b):
+>     d=0
+>     for i in range(N):
+>         for j in range(N):
+>             if a[i][j]!=b[i][j]: d+=1
+>     return d/(N*N)
+> for sq,m in masks.items():
+>     best=-1;bestd=1
+>     for k,rm in enumerate(reps):
+>         dd=diffmask(m,rm)
+>         if dd<bestd: bestd=dd;best=k
+>     if bestd<0.12:
+>         labels[sq]=best
+>     else:
+>         labels[sq]=len(reps)
+>         reps.append(m)
+>
+> print('num clusters', len(reps))
+> # print board grid
+> for r in range(8):
+>     row=''
+>     for c in range(8):
+>         if (r,c) in labels:
+>             row+= '%d%s '%(labels[(r,c)], info[(r,c)][0])
+>         else:
+>             row+='  .  '
+>     print(row)
+>
+> # print representative ascii per cluster
+> for k,rm in enumerate(reps):
+>     print('=== cluster',k,'===')
+>     for i in range(N):
+>         print(''.join('#' if rm[i][j]>0.5 else '.' for j in range(N)))
+> EOF
+root@6011adc3f64a:/app# python3 /app/recog.py
+

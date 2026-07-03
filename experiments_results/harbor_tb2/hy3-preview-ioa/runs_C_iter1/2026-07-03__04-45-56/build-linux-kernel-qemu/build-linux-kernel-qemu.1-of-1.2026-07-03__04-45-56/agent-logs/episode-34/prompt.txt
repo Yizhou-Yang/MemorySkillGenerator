@@ -1,0 +1,29 @@
+New Terminal Output:
+
+root@b3e0557ff45d:/app/linux-6.9# python3 - << 'EOF'
+> import io
+> p='init/main.c'
+> with open(p) as f: lines=f.readlines()
+> # line index 882 -> zero-based 881 is 'void start_kernel(void)'
+> # find the '{' after it
+> for i in range(881, min(891,len(lines))):
+>     if lines[i].rstrip()=='{':
+>         insert=('\tprintk(KERN_INFO "Hello, this is a custom kernel");\n')
+>         lines.insert(i+1, insert)
+>         print('inserted after line', i+1)
+>         break
+> with open(p,'w') as f: f.writelines(lines)
+> EOF
+inserted after line 883
+root@b3e0557ff45d:/app/linux-6.9# grep -n 'Hello, this is a custom kernel' init/main.c; sed -n '882,890p' init/main.c
+884:    printk(KERN_INFO "Hello, this is a custom kernel");
+void start_kernel(void)
+{
+        printk(KERN_INFO "Hello, this is a custom kernel");
+        char *command_line;
+        char *after_dashes;
+
+        set_task_stack_end_magic(&init_task);
+        smp_setup_processor_id();
+        debug_objects_early_init();
+root@b3e0557ff45d:/app/linux-6.9#

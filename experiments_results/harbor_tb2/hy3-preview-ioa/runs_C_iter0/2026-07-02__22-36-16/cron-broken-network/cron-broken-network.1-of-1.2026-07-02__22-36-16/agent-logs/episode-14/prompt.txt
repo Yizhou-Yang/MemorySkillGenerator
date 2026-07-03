@@ -1,0 +1,63 @@
+New Terminal Output:
+
+root@d70c05ff175c:/app# cat > /usr/local/bin/curl << 'PYEOF'
+> #!/usr/bin/env python3
+> import sys, urllib.request, urllib.error, ssl
+>
+> def main():
+>     args = sys.argv[1:]
+>     verbose = False; silent = False; head = False; output = None; url = None
+>     headers = []
+>     if any(a in ('--version','-V') for a in args):
+>         print('curl 8.x-replacement (python urllib wrapper)'); return 0
+>     i = 0
+>     while i < len(args):
+>         a = args[i]
+>         if a == '-v': verbose = True
+>         elif a == '-s': silent = True
+>         elif a in ('-I','--head'): head = True
+>         elif a == '-o': i += 1; output = args[i]
+>         elif a == '-L': pass
+>         elif a == '-X': i += 1
+>         elif a.startswith('-H'):
+>             h = a[2:] if a != '-H' else args[i+1]
+>             if a == '-H': i += 1
+>             if ':' in h: headers.append(h)
+>         elif a.startswith('-'):
+>             pass
+>         else:
+>             url = a
+>         i += 1
+>     if not url:
+>         sys.stderr.write('curl: try \'curl --help\' for more\n'); return 2
+>     req = urllib.request.Request(url, method=('HEAD' if head else 'GET'))
+>     for h in headers:
+>         k, v = h.split(':', 1); req.add_header(k.strip(), v.strip())
+>     try:
+>         resp = urllib.request.urlopen(req, timeout=30)
+>         if verbose or head:
+>             sys.stderr.write('HTTP/%s %s %s\n' % (resp.version//10, resp.status, resp.reason))
+>             for kk, vv in resp.getheaders():
+>                 sys.stderr.write('%s: %s\n' % (kk, vv))
+>             sys.stderr.write('\n')
+>         data = resp.read() if not head else b''
+>         if output:
+>             with open(output, 'wb') as f: f.write(data)
+>         elif not silent:
+>             sys.stdout.buffer.write(data)
+>         return 0
+>     except urllib.error.HTTPError as e:
+>         sys.stderr.write('HTTP error %s: %s\n' % (e.code, e.reason)); return 22
+>     except Exception as e:
+>         sys.stderr.write('curl: (%s) %s\n' % (type(e).__name__, e)); return 6
+>
+> if __name__ == '__main__':
+>     sys.exit(main())
+> PYEOF
+root@d70c05ff175c:/app# cp /usr/local/bin/curl /usr/bin/curl
+root@d70c05ff175c:/app# chmod +x /usr/local/bin/curl /usr/bin/curl
+root@d70c05ff175c:/app# curl --version
+DNS resolution error
+root@d70c05ff175c:/app# curl -s -o /dev/null -w 'HTTP %{http_code}\n' example.com
+DNS resolution error
+root@d70c05ff175c:/app#

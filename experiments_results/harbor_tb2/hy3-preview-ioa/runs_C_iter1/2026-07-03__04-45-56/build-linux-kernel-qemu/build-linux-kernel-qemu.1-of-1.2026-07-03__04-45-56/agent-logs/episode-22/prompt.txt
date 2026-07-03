@@ -1,0 +1,30 @@
+New Terminal Output:
+
+root@b3e0557ff45d:/app# cat > /tmp/probe4.py << 'EOF'
+> import urllib.request
+> tests={
+>  'korg_xz':'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',
+>  'korg_gz':'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.gz',
+>  'korg6_8':'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.tar.xz',
+> }
+> hdr={'User-Agent':'Mozilla/5.0'}
+> for name,u in tests.items():
+>     try:
+>         req=urllib.request.Request(u,headers=hdr)
+>         r=urllib.request.urlopen(req,timeout=30)
+>         data=r.read(300)
+>         print(name,r.status,r.headers.get('Content-Length'),repr(data[:120]))
+>     except urllib.error.HTTPError as e:
+>         body=e.read(300)
+>         print(name,'HTTP',e.code,repr(body[:200]))
+>     except Exception as e:
+>         print(name,'ERR',str(e)[:100])
+> EOF
+root@b3e0557ff45d:/app# python3 /tmp/probe4.py
+korg_xz HTTP 404 b'<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</b
+ody>\r\n</html>\r\n'
+korg_gz HTTP 404 b'<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</b
+ody>\r\n</html>\r\n'
+korg6_8 HTTP 404 b'<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</b
+ody>\r\n</html>\r\n'
+root@b3e0557ff45d:/app#

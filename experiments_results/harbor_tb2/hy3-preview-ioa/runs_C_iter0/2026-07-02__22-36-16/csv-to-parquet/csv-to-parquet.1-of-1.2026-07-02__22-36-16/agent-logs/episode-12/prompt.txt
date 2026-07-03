@@ -1,0 +1,43 @@
+New Terminal Output:
+
+root@36ff4f9164b5:/app# python3 - << 'EOF'
+> content = open('/app/make_parquet.py').read()
+> old = '''def schema_element(name, type_code=None, num_children=None, converted_type=None, repetition=1):
+>     fields = []
+>     if type_code is not None:
+>         fields.append((1, I32, render_i32(type_code)))
+>     if num_children is not None:
+>         fields.append((5, I32, render_i32(num_children)))
+>     fields.append((3, I32, render_i32(repetition)))
+>     fields.append((4, BINARY, render_binary(name.encode())))
+>     if converted_type is not None:
+>         fields.append((6, I32, render_i32(converted_type)))
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)'''
+> new = '''def schema_element(name, type_code=None, num_children=None, converted_type=None, repetition=1):
+>     fields = []
+>     if type_code is not None:
+>         fields.append((1, I32, render_i32(type_code)))
+>         fields.append((2, I32, render_i32(repetition)))
+>     if num_children is not None:
+>         fields.append((5, I32, render_i32(num_children)))
+>     fields.append((3, BINARY, render_binary(name.encode())))
+>     if converted_type is not None:
+>         fields.append((6, I32, render_i32(converted_type)))
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)'''
+> assert old in content, 'pattern not found'
+> open('/app/make_parquet.py','w').write(content.replace(old, new))
+> print('patched')
+> EOF
+patched
+root@36ff4f9164b5:/app# python3 /app/make_parquet.py && python3 /app/verify_parquet.py
+Wrote /app/data.parquet size 501 rows 5 cols 3
+VERIFY OK: rows=5 cols=3
+schema: ['name']
+root@36ff4f9164b5:/app# ls -la /app/data.parquet; xxd /app/data.parquet | tail -4
+-rw-r--r-- 1 root root 501 Jul  2 17:16 /app/data.parquet
+bash: xxd: command not found
+root@36ff4f9164b5:/app#

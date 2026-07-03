@@ -1,0 +1,212 @@
+root@104b66a35d61:/app# asciinema rec --stdin /logs/agent.cast
+asciinema: recording asciicast to /logs/agent.cast
+asciinema: press <ctrl-d> or type "exit" when you're done
+root@104b66a35d61:/app# clear
+root@104b66a35d61:/app# ls -la /app
+total 980176
+drwxr-xr-x  2 root root       4096 Jul  2 15:14 .
+drwxr-xr-x 23 root root       4096 Jul  2 22:17 ..
+-rw-r--r--  1 root root     197120 Jul  2 15:14 alpine-disk.qcow2
+-rw-r--r--  1 root root 1003487232 Dec  7  2023 alpine.iso
+root@104b66a35d61:/app# which qemu-system-x86_64; qemu-system-x86_64 --version 2>&1 | head -1
+/usr/bin/qemu-system-x86_64
+QEMU emulator version 5.2.0 (Debian 1:5.2+dfsg-11+deb11u5)
+root@104b66a35d61:/app# ls -l /dev/kvm 2>&1; echo '---'; nproc
+ls: cannot access '/dev/kvm': No such file or directory
+---
+32
+root@104b66a35d61:/app# which python3 7z 7za isoinfo mount 2>&1
+/usr/bin/python3
+/bin/mount
+root@104b66a35d61:/app# ls -la /tmp/vmlinuz /tmp/initramfs 2>&1
+ls: cannot access '/tmp/vmlinuz': No such file or directory
+ls: cannot access '/tmp/initramfs': No such file or directory
+root@104b66a35d61:/app# mkdir -p /mnt/iso
+root@104b66a35d61:/app# mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1; echo EXIT=$?
+mount: /mnt/iso: mount failed: Operation not permitted.
+EXIT=1
+root@104b66a35d61:/app# ls -la /mnt/iso/boot 2>&1
+ls: cannot access '/mnt/iso/boot': No such file or directory
+root@104b66a35d61:/app# cat > /tmp/extract.py <<'PYEOF'
+> import struct
+> ISO='/app/alpine.iso'
+> f=open(ISO,'rb')
+> SEC=2048
+> def rd(lba,count=1):
+>     f.seek(lba*SEC); return f.read(count*SEC)
+> pvd=None; lba=16
+> for _ in range(200):
+>     s=rd(lba)
+>     if s[1:6]!=b'CD001': break
+>     if s[0]==1: pvd=s; break
+>     if s[0]==255: break
+>     lba+=1
+> assert pvd, 'no PVD'
+> root=pvd[156:190]
+> def name_of(off,data):
+>     fi=data[off+32]; name=data[off+33:off+33+fi]
+>     rec=data[off]; sysuse=data[off+33+fi:off+rec]
+>     i=0
+>     while i+4<=len(sysuse):
+>         sl=sysuse[i]
+>         if sl==0: break
+>         if sl+i>len(sysuse): break
+>         if sysuse[i+1:i+3]==b'NM':
+>             rr=sysuse[i+4:sl]
+>             if rr.endswith(b'\x00'): rr=rr[:-1]
+>             return rr.decode('utf-8','replace')
+>         i+=sl
+>     if name in (b'\x00',b'\x01'): return '.' if name==b'\x00' else '..'
+>     if b';' in name: name=name.split(b';')[0]
+>     return name.decode('latin1')
+> def parse_dir(lba,length):
+>     data=rd(lba,(length+SEC-1)//SEC); out=[]; off=0
+>     while off<length:
+>         rl=data[off]
+>         if rl==0:
+>             off=(off+SEC)&~(SEC-1); continue
+>         e_lba=struct.unpack('<I',data[off+2:off+6])[0]
+>         e_size=struct.unpack('<I',data[off+10:off+14])[0]
+>         flags=data[off+25]; nm=name_of(off,data)
+>         out.append((nm,e_lba,e_size,bool(flags&2))); off+=rl
+>     return out
+> def walk(lba,length,path,files):
+>     for nm,el,es,isdir in parse_dir(lba,length):
+>         if nm in ('.','..'): continue
+>         full=(path+'/'+nm) if path else nm
+>         if isdir: walk(el,es,full,files)
+>         else: files.append((full,el,es))
+> files=[]
+> walk(struct.unpack('<I',root[2:6])[0],struct.unpack('<I',root[10:14])[0],'',files)
+> vl=[x for x in files if 'vmlinuz' in x[0].lower()]
+> inr=[x for x in files if 'initramfs' in x[0].lower()]
+> def pick(c):
+>     for suf in ('lts','virt'):
+>         for x in c:
+>             if suf in x[0].lower(): return x
+>     return c[0] if c else None
+> v=pick(vl); ii=pick(inr)
+> def extract(x,dst):
+>     _,lba,size=x; f.seek(lba*SEC); open(dst,'wb').write(f.read(size)); print('wrote',dst,size)
+> if v: extract(v,'/tmp/vmlinuz')
+> else: print('NO VMLINUZ')
+> if ii: extract(ii,'/tmp/initramfs')
+> else: print('NO INITRAMFS')
+> print('vmlinuz:',v[0] if v else None)
+> print('initramfs:',ii[0] if ii else None)
+> PYEOF
+root@104b66a35d61:/app# python3 /tmp/extract.py
+wrote /tmp/vmlinuz 11879168
+wrote /tmp/initramfs 20486092
+vmlinuz: BOOT/VMLINUZ_LTS.
+initramfs: BOOT/INITRAMFS_LTS.
+root@104b66a35d61:/app# nohup qemu-system-x86_64 -m 1024 -smp 2 -machine pc,accel=tcg -display none -monitor none -kernel /tmp/vmlinuz -initrd /tmp/initramfs -a
+ppend 'console=ttyS0,115200' -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 -serial telnet:127.0.0.1:6665,server,nowait > /tmp
+/qemu.log 2>&1 &
+[1] 239
+root@104b66a35d61:/app# sleep 2; echo '--- qemu.log ---'; cat /tmp/qemu.log; echo '--- ps ---'; ps aux | grep qemu | grep -v grep | head
+--- qemu.log ---
+nohup: ignoring input
+--- ps ---
+bash: ps: command not found
+root@104b66a35d61:/app# ls /proc/239 2>&1 | head -1; echo '---'; ls -l /proc/239/exe 2>&1
+arch_status
+---
+lrwxrwxrwx 1 root root 0 Jul  2 22:21 /proc/239/exe -> /usr/bin/qemu-system-x86_64
+root@104b66a35d61:/app# cat > /tmp/wait_ready.py <<'PYEOF'
+> import socket, time, sys
+> port=6665; deadline=time.time()+180; last=''
+> while time.time()<deadline:
+>     try:
+>         s=socket.create_connection(('127.0.0.1',port),timeout=5)
+>         s.settimeout(2.0)
+>         buf=b''; t0=time.time()
+>         while time.time()-t0<90:
+>             try:
+>                 d=s.recv(4096)
+>                 if not d: break
+>                 buf+=d
+>                 if b'login:' in buf.lower() or b'welcome' in buf.lower():
+>                     print('LOGIN_PROMPT_READY'); sys.stdout.flush(); s.close(); sys.exit(0)
+>             except socket.timeout:
+>                 try: s.sendall(b'\n')
+>                 except: break
+>         print('LAST:',buf[-200:].decode('latin1','replace'))
+>         s.close(); sys.exit(0)
+>     except Exception as e:
+>         time.sleep(2)
+> print('TIMEOUT_NO_CONNECT')
+> sys.exit(1)
+> PYEOF
+root@104b66a35d61:/app# python3 /tmp/wait_ready.py
+LAST:  [ ok ]
+ * Remounting devtmpfs on /dev ... [ ok ]
+ * Mounting /dev/mqueue ...
+
+
+ [ ok ]
+
+
+
+
+
+
+
+
+
+
+ * Mounting modloop  ... * Verifying modloop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+root@104b66a35d61:/app# python3 /tmp/wait_ready.py
+LOGIN_PROMPT_READY
+root@104b66a35d61:/app# ls /proc/239/exe 2>&1; echo '---'; python3 -c "import socket; s=socket.create_connection(('127.0.0.1',6665),5); s.settimeout(2); s.senda
+ll(b'\n'); print('PORT_OPEN', repr(s.recv(200))); s.close()"
+/proc/239/exe
+---
+PORT_OPEN b'\xff\xfb\x01\xff\xfb\x03\xff\xfb\x00\xff\xfd\x00'
+root@104b66a35d61:/app# python3 -c "import socket,time; s=socket.create_connection(('127.0.0.1',6665),5); s.settimeout(3.0); time.sleep(0.5); s.sendall(b'\n');
+buf=b'';\nt=time.time()\nwhile time.time()-t<5:\n  try: buf+=s.recv(512)\n  except: break\nprint('REPLY', repr(buf[-160:]))\nprint('LOGIN_SEEN', b'login:' in bu
+f.lower())\ns.close()"
+  File "<string>", line 1
+SyntaxError: unexpected character after line continuation character
+root@104b66a35d61:/app# cat > /tmp/verify.py <<'PYEOF'
+> import socket, time
+> s=socket.create_connection(('127.0.0.1',6665),5)
+> s.settimeout(3.0)
+> time.sleep(0.5)
+> s.sendall(b'\n')
+> buf=b''; t=time.time()
+> while time.time()-t<6:
+>     try:
+>         d=s.recv(512); buf+=d
+>     except socket.timeout:
+>         break
+> s.close()
+> print('REPLY', repr(buf[-160:]))
+> print('LOGIN_SEEN', b'login:' in buf.lower())
+> PYEOF
+root@104b66a35d61:/app# python3 /tmp/verify.py
+REPLY b'\xff\xfb\x01\xff\xfb\x03\xff\xfb\x00\xff\xfd\x00\r\r\nWelcome to Alpine Linux 3.19\r\n\rKernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)\r\n\r\r\n\rlocalhos
+t login: '
+LOGIN_SEEN True
+root@104b66a35d61:/app#

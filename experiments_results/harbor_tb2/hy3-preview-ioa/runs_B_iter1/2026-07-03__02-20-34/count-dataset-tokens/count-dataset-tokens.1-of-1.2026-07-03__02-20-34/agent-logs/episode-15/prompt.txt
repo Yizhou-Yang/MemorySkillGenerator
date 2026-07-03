@@ -1,0 +1,62 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@a2a36590ae88:/app# cat > /app/solve.py << 'EOF'
+> import os
+> from huggingface_hub import hf_hub_download
+> from pyarrow import parquet as pq
+> from transformers import AutoTokenizer
+>
+> tok = AutoTokenizer.from_pretrained('Qwen/Qwen2.5-1.5B-Instruct')
+> REPO='open-thoughts/OpenThoughts-114k'
+> shards=[f'metadata/train-{i:05d}-of-00012.parquet' for i in range(12)]
+> SCI={'biology','physics','chemistry'}
+> total=0
+> for sh in shards:
+>     path=hf_hub_download(repo_id=REPO, filename=sh, repo_type='dataset')
+>     t=pq.read_table(path, columns=['domain','deepseek_reasoning','deepseek_solution'])
+>     dom=t.column('domain').to_pylist()
+>     sci=[i for i,d in enumerate(dom) if d in SCI]
+>     del dom
+>     cnt=0
+>     if sci:
+>         reasoning=t.column('deepseek_reasoning').to_pylist()
+>         solution=t.column('deepseek_solution').to_pylist()
+>         txts=[]
+>         for i in sci:
+>             txts.append(reasoning[i] or '')
+>             txts.append(solution[i] or '')
+>         del reasoning, solution
+>         batch=500
+>         for j in range(0,len(txts),batch):
+>             ids=tok(txts[j:j+batch], add_special_tokens=False, truncation=False)['input_ids']
+>             cnt+=sum(len(x) for x in ids)
+>         del txts
+>     total+=cnt
+>     print(f'{sh} sci_examples={len(sci)} tokens={cnt} running_total={total}', flush=True)
+>     del t
+>     os.remove(path)
+> print('TOTAL', total, flush=True)
+> with open('/app/answer.txt','w') as f:
+>     f.write(str(total))
+> EOF
+root@a2a36590ae88:/app# nohup python3 /app/solve.py > /app/solve.log 2>&1 &
+[1] 940
+root@a2a36590ae88:/app# sleep 35; cat /app/solve.log
+nohup: ignoring input
+[transformers] PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+metadata/train-00000-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00001-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00002-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00003-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00004-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00005-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00006-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00007-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00008-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00009-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+metadata/train-00010-of-00012.parquet sci_examples=0 tokens=0 running_total=0
+root@a2a36590ae88:/app#

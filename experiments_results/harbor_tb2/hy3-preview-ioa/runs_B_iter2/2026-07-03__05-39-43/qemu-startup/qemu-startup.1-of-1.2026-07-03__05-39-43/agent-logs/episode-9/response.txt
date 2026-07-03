@@ -1,0 +1,11 @@
+{
+  "analysis": "Port 6665 is open and the telnet server is responding (it returned IAC negotiation bytes). However, a fresh telnet connection only receives data the guest sends *after* connecting — the initial 'login:' prompt was already printed during boot and isn't replayed to late joiners. My earlier wait_ready.py caught the live prompt while still booting. To be confident the grader will actually see a login prompt, I should verify that when a client connects and presses Enter, getty re-displays 'login:'. If so, the session is usable for login.",
+  "plan": "Run a verification that connects to 6665, sends a newline (mimicking the grader pressing Enter at a blank screen), and confirms 'login:' is returned. This confirms the login flow works. Qemu remains running in the background. If confirmed, I'll mark complete.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"import socket,time; s=socket.create_connection(('127.0.0.1',6665),5); s.settimeout(3.0); time.sleep(0.5); s.sendall(b'\\n'); buf=b'';\\nt=time.time()\\nwhile time.time()-t<5:\\n  try: buf+=s.recv(512)\\n  except: break\\nprint('REPLY', repr(buf[-160:]))\\nprint('LOGIN_SEEN', b'login:' in buf.lower())\\ns.close()\"\n",
+      "duration": 8.0
+    }
+  ],
+  "task_complete": false
+}

@@ -1,0 +1,29 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'pwd && ls -la\n'
+"git log --oneline -5 2>/dev/null; echo '---'; git status 2>/dev/null | head -20\n"
+"grep -rniE 'hf_|huggingface|access_key|secret|token|api[_-]?key|password|passwd|bearer|authorization' --include='*' . --exclude-dir=.git 2>/dev/null | grep -viE 'node_modules' | head -80\n"
+"grep -rn 'AKIA1234567890123456\\|D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF\\|hf_abcdefghijklmnopqrstuvwxyz123456' . --exclude-dir=.git\n"
+"grep -rniE 'BEGIN (RSA|OPENSSH|PRIVATE) KEY|-----BEGIN|ghp_|sk-|xoxb|glpat|AIza|aws_secret|aws_access|HF_TOKEN|HUGGING_FACE' . --exclude-dir=.git | head -40\n"
+"sed -i 's/AKIA1234567890123456/<your-aws-access-key-id>/g; s/D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF/<your-aws-secret-access-key>/g' ray_processing/process.py\n"
+"sed -i 's/AKIA1234567890123456/<your-aws-access-key-id>/g; s/D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF/<your-aws-secret-access-key>/g; s/hf_abcdefghijklmnopqrstuvwxyz123456/<your-huggingface-token>/g; s/ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789/<your-github-token>/g' ray_processing/ray_cluster.yaml\n"
+"echo '=== verify secrets gone ==='; grep -rn 'AKIA1234567890123456\\|D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF\\|hf_abcdefghijklmnopqrstuvwxyz123456\\|ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789' . --exclude-dir=.git; echo 'exit:' $?\n"
+"grep -n 'AWS_ACCESS_KEY_ID\\|AWS_SECRET_ACCESS_KEY\\|huggingface-cli\\|git clone' ray_processing/process.py ray_processing/ray_cluster.yaml\n"
+"echo '=== final secret scan ==='; grep -rnE 'AKIA[0-9A-Z]{16}|hf_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}' . --exclude-dir=.git; echo 'exit:' $?\n"
+"grep -oE 'hf_[A-Za-z0-9]{20,}' exp_data/datasets/tokenized/rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json | sort -u | head\n"
+"echo '=== exact secret strings in exp_data ==='; grep -rn 'AKIA1234567890123456\\|D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF\\|hf_abcdefghijklmnopqrstuvwxyz123456\\|ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789' exp_data 2>/dev/null; echo 'exit:' $?\n"
+"grep -oE '.{40}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.{40}' exp_data/datasets/tokenized/rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json | head -c 600; echo\n"
+"echo '=== all occurrences of that token in repo ==='; grep -rln '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' . --exclude-dir=.git\n"
+"echo '=== any other hf_ tokens in repo ==='; grep -roE 'hf_[A-Za-z0-9]{20,}' . --exclude-dir=.git | sort -u\n"
+"sed -i 's/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/<your-huggingface-token>/g' exp_data/datasets/tokenized/rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json\n"
+"echo '=== all known secret strings gone? ==='; grep -rn 'AKIA1234567890123456\\|D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF\\|hf_abcdefghijklmnopqrstuvwxyz123456\\|ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789\\|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' . --exclude-dir=.git; echo 'exit:' $?\n"
+"echo '=== broader secret scan ==='; grep -rniE 'WANDB_API_KEY|sk-[A-Za-z0-9]{20}|xox[baprs]-|glpat-|BEGIN (RSA|OPENSSH|PRIVATE) KEY|BEGIN EC PRIVATE' . --exclude-dir=.git | head -30; echo 'broad-exit:' $?\n"
+"echo '=== any remaining hf_/ghp_/AKIA patterns ==='; grep -roE 'hf_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' . --exclude-dir=.git | sort -u; echo 'pattern-exit:' $?\n"
+'grep -rniE \'WANDB_API_KEY|sk-[A-Za-z0-9]{20}|xox[baprs]-|glpat-|BEGIN (RSA|OPENSSH|EC )?PRIVATE KEY|AWS_SECRET|HF_TOKEN=\' . --exclude-dir=.git; echo "grep-exit:$?"\n'
+'echo \'--- files with any hf_/ghp_/AKIA/ghp pattern (plain, no pipe) ---\'; grep -rEl \'hf_[A-Za-z0-9]{20}|ghp_[A-Za-z0-9]{20}|AKIA[0-9A-Z]{16}\' . --exclude-dir=.git; echo "grep2-exit:$?"\n'
+"grep -c '<your-huggingface-token>\\|<your-aws-access-key-id>\\|<your-aws-secret-access-key>\\|<your-github-token>' exp_data/datasets/tokenized/rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json ray_processing/process.py ray_processing/ray_cluster.yaml\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

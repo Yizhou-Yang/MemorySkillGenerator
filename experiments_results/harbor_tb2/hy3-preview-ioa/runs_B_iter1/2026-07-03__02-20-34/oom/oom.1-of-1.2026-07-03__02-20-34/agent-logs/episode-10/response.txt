@@ -1,0 +1,14 @@
+{
+  "analysis": "The API listing didn't return file sizes, but the earlier download attempt showed the weights files are large (one ~268MB combined). Since /root/.cache tmpfs only has 98M free and can't be enlarged, I should cache only the essential files needed for offline use with transformers: config.json, pytorch_model.bin (weights), spiece.model, tokenizer_config.json, tokenizer.json. This keeps the footprint well under 98M while enabling `from_pretrained(..., local_files_only=True)` for both model and tokenizer. I'll first clean the partial cache.",
+  "plan": "1. Remove the partial/failed cache for the model. 2. Run snapshot_download with allow_patterns limited to essential files (exclude tf/flax/rust/with-prefix variants) to stay within the 98M tmpfs. 3. Verify offline loading with local_files_only=True for both AutoTokenizer and AutoModel.",
+  "commands": [
+    {
+      "keystrokes": "rm -rf /root/.cache/huggingface/hub/models--albert--albert-base-v2\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "python3 - <<'EOF'\nfrom huggingface_hub import snapshot_download\npath = snapshot_download(\n    repo_id=\"albert/albert-base-v2\",\n    allow_patterns=[\"config.json\",\"pytorch_model.bin\",\"spiece.model\",\"tokenizer_config.json\",\"tokenizer.json\",\"special_tokens_map.json\"],\n)\nprint(\"CACHED_AT:\", path)\nEOF\n",
+      "duration": 30.0
+    }
+  ]
+}

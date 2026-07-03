@@ -1,0 +1,23 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+'pwd\n'
+'head -50 graphene.dat\n'
+'wc -l graphene.dat\n'
+'tail -5 graphene.dat\n'
+'awk -F\'[ ,]+\' \'NR>1{if($1+0>mx){mx=$1+0;mxline=NR;mxv=$1} if($1+0<mn||NR==2){mn=$1+0}} END{print "max_x="mx" at line "mxline" min_x="mn}\' graphene.dat\n'
+'pip3 install numpy scipy 2>&1 | tail -5\n'
+''
+"cat > explore.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.'))})\nx = data[:,0]; y = data[:,1]\nprint('shape', data.shape)\nprint('x range', x.min(), x.max())\nprint('y range', y.min(), y.max())\n# check for G ~1580 and 2D ~2700\nfor target in [1580, 2700]:\n    idx = np.argmin(np.abs(x-target))\n    print('target', target, '-> x=', x[idx], 'y=', y[idx])\nEOF\npython3 explore.py\n"
+"cat > explore.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('graphene.dat', delimiter=None,\n                  converters={0: lambda s: float(s.replace(',','.')),\n                              1: lambda s: float(s.replace(',','.'))})\nx = data[:,0]; y = data[:,1]\nprint('shape', data.shape)\nprint('x range', x.min(), x.max())\nprint('y range', y.min(), y.max())\nfor target in [1580, 2700]:\n    idx = np.argmin(np.abs(x-target))\n    print('target', target, '-> x=', x[idx], 'y=', y[idx])\nEOF\npython3 explore.py\n"
+"cat > peaks.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('graphene.dat', delimiter=None,\n                  converters={0: lambda s: float(s.replace(',','.')),\n                              1: lambda s: float(s.replace(',','.'))})\nx = data[:,0]; y = data[:,1]\n# local maxima (excluding edges)\nmask = (y[1:-1] > y[:-2]) & (y[1:-1] >= y[2:])\nidx = np.where(mask)[0] + 1\ntops = sorted(idx, key=lambda i: -y[i])[:15]\nprint('Top local maxima:')\nfor i in tops:\n    print(f'  x={x[i]:.2f}  y={y[i]:.2f}')\nprint('global max y at x=', x[np.argmax(y)], 'y=', y.max())\nEOF\npython3 peaks.py\n"
+"cat > peaks2.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('graphene.dat', delimiter=None,\n                  converters={0: lambda s: float(s.replace(',','.')),\n                              1: lambda s: float(s.replace(',','.'))})\nx = data[:,0]; y = data[:,1]\nmask = (y[1:-1] > y[:-2]) & (y[1:-1] >= y[2:])\nidx = np.where(mask)[0] + 1\nprint('num local maxima:', len(idx))\nfor i in idx:\n    print(f'  x={x[i]:10.3f}  y={y[i]:10.2f}')\nEOF\npython3 peaks2.py\n"
+"cat > fit.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\nimport json\n\ndata = np.loadtxt('graphene.dat', delimiter=None,\n                  converters={0: lambda s: float(s.replace(',','.')),\n                              1: lambda s: float(s.replace(',','.'))})\nx = data[:,0]; y = data[:,1]\n\ndef lor(x, x0, gamma, amp, off):\n    return off + amp*gamma**2/((x - x0)**2 + gamma**2)\n\ndef fit(xc, half):\n    lo, hi = xc - half, xc + half\n    m = (x >= lo) & (x <= hi)\n    xw, yw = x[m], y[m]\n    off0 = np.percentile(yw, 10)\n    amp0 = yw.max() - off0\n    x00 = xw[np.argmax(yw)]\n    g0 = (hi - lo) * 0.03\n    popt, pcov = curve_fit(lor, xw, yw, p0=[x00, g0, amp0, off0],\n                          bounds=([lo, 0, 0, off0 - amp0],\n                                  [hi, hi - lo, 2*amp0, off0 + amp0]),\n                          maxfev=200000)\n    return popt, (lo, hi)\n\npoptG, wG = fit(19139.0, 1500.0)\npopt2D, w2D = fit(33244.0, 1600.0)\nprint('G native  :', poptG)\nprint('2D native :', popt2D)\n\nscale = poptG[0] / 1580.0\nprint('scale (native/cm-1) =', scale)\nprint('G  cm-1 x0 =', poptG[0]/scale, ' gamma =', poptG[1]/scale)\nprint('2D cm-1 x0 =', popt2D[0]/scale, ' gamma =', popt2D[1]/scale)\n\nres = {\n  'G': {\n    'x0': poptG[0]/scale,\n    'gamma': poptG[1]/scale,\n    'amplitude': poptG[2],\n    'offset': poptG[3],\n  },\n  '2D': {\n    'x0': popt2D[0]/scale,\n    'gamma': popt2D[1]/scale,\n    'amplitude': popt2D[2],\n    'offset': popt2D[3],\n  },\n}\nprint(json.dumps(res, indent=2))\nwith open('results.json', 'w') as f:\n    json.dump(res, f, indent=2)\nprint('written results.json')\nEOF\npython3 fit.py\n"
+''
+'cat results.json\n'
+'python3 -c "import json; d=json.load(open(\'results.json\')); print(\'valid json\'); print(\'G peak height above baseline =\', d[\'G\'][\'amplitude\']); print(\'2D peak height above baseline =\', d[\'2D\'][\'amplitude\'])"\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

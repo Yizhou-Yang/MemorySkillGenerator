@@ -1,0 +1,63 @@
+New Terminal Output:
+
+root@35efa9265d7f:/app# cat > /tmp/explore7.py << 'EOF'
+> from bitcoinlib.services.services import Service
+> s = Service(network='bitcoin')
+> bh = s.blockcount()
+> blk = s.getblock(bh)
+> tx = blk.transactions[1]
+> print("tx txid", tx.txid)
+> print("tx block_hash", tx.block_hash, "height", tx.block_height)
+> out = tx.outputs[0]
+> sp = out.script
+> print("=== Script public methods ===")
+> for a in dir(sp):
+>     if not a.startswith('__'):
+>         print(" ", a, "callable" if callable(getattr(sp,a)) else repr(getattr(sp,a))[:60])
+> print("=== try getrawtransaction verbose ===")
+> rt = s.getrawtransaction(tx.txid, format='dict')
+> print(type(rt))
+> if isinstance(rt, dict):
+>     print(list(rt.keys()))
+>     print("blockhash", rt.get('blockhash'))
+> EOF
+root@35efa9265d7f:/app# python3 /tmp/explore7.py
+tx txid e77006ada51e57e9429503d415b648bf41f53e0f77894696a9c3ac338cda63ce
+tx block_hash None height 956410
+=== Script public methods ===
+  _blueprint [0, 'data-20']
+  _raw b"\x00\x14\xe5GO[\xaci\x82c\x17\xb4\xe9\xc0]\x1a'\x08\xb5r\x
+  as_bytes callable
+  as_hex callable
+  blueprint [0, 'data-20']
+  commands [0, b"\xe5GO[\xaci\x82c\x17\xb4\xe9\xc0]\x1a'\x08\xb5r\xb3\x
+  env_data {}
+  evaluate callable
+  hash_type None
+  is_locking True
+  keys []
+  message None
+  parse callable
+  parse_bytes callable
+  parse_bytesio callable
+  parse_hex callable
+  parse_str callable
+  public_hash b"\xe5GO[\xaci\x82c\x17\xb4\xe9\xc0]\x1a'\x08\xb5r\xb3\xd3"
+WARNING:root:Call to deprecated function raw.
+WARNING:root:Call to deprecated function raw.
+  raw b"\x00\x14\xe5GO[\xaci\x82c\x17\xb4\xe9\xc0]\x1a'\x08\xb5r\x
+  redeemscript b''
+  redeemscript_obj None
+  script_types ['p2wpkh']
+  serialize callable
+  serialize_list callable
+  signatures []
+  sigs_required 1
+  stack []
+  view callable
+=== try getrawtransaction verbose ===
+Traceback (most recent call last):
+  File "/tmp/explore7.py", line 15, in <module>
+    rt = s.getrawtransaction(tx.txid, format='dict')
+TypeError: Service.getrawtransaction() got an unexpected keyword argument 'format'
+root@35efa9265d7f:/app#

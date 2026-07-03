@@ -1,0 +1,23 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+'pwd\n'
+'cat schema.json\n'
+'ls -la data\n'
+'cat data/departments.csv\n'
+"echo '---EMPLOYEES---'\n"
+'cat data/employees.csv\n'
+"echo '---PROJECTS---'\n"
+'cat data/projects.csv\n'
+"cat > /app/process.py << 'PYEOF'\nimport csv, json, sys, datetime, os\n\nDATA = '/app/data'\n\ndef read_csv(name):\n    with open(os.path.join(DATA, name), newline='', encoding='utf-8') as f:\n        return list(csv.DictReader(f))\n\ndepartments = read_csv('departments.csv')\nemployees = read_csv('employees.csv')\nprojects = read_csv('projects.csv')\n\n# index departments by id\ndept_by_id = {d['id']: d for d in departments}\n\n# group employees and projects by department\ndept_employees = {}\ndept_projects = {}\nfor e in employees:\n    dept_employees.setdefault(e['department_id'], []).append(e)\nfor p in projects:\n    dept_projects.setdefault(p['department_id'], []).append(p)\n\ndef split_list(s):\n    return [x.strip() for x in s.split(';') if x.strip()]\n\ndepts_out = []\nfor d in departments:\n    did = d['id']\n    emp_list = []\n    for e in dept_employees.get(did, []):\n        emp_list.append({\n            'id': e['id'],\n            'name': e['name'],\n            'position': e['position'],\n            'skills': split_list(e['skills']),\n            'years_of_service': int(e['years_of_service'])\n        })\n    proj_list = []\n    for p in dept_projects.get(did, []):\n        proj_list.append({\n            'name': p['name'],\n            'status': p['status'],\n            'members': split_list(p['member_ids']),\n            'deadline': p['deadline']\n        })\n    depts_out.append({\n        'id': d['id'],\n        'name': d['name'],\n        'budget': float(d['budget']),\n        'employees': emp_list,\n        'projects': proj_list\n    })\n\n# statistics\nbudgets = [float(d['budget']) for d in departments]\naverage_dept_budget = round(sum(budgets) / len(budgets), 2) if budgets else 0\ntotal_employees = len(employees)\n\nskill_dist = {}\nfor e in employees:\n    for s in split_list(e['skills']):\n        skill_dist[s] = skill_dist.get(s, 0) + 1\n\ndept_sizes = {}\nfor d in departments:\n    dept_sizes[d['name']] = len(dept_employees.get(d['id'], []))\n\nproj_status = {}\nfor p in projects:\n    proj_status[p['status']] = proj_status.get(p['status'], 0) + 1\n\nyears = [int(e['years_of_service']) for e in employees]\navg_years = round(sum(years) / len(years), 2) if years else 0\n\nresult = {\n    'metadata': {\n        'version': '1.0.0',\n        'timestamp': datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),\n        'generator': 'csv-to-json-processor'\n    },\n    'organization': {\n        'name': 'Global Enterprises',\n        'founded': '2015-01-01',\n        'departments': depts_out\n    },\n    'statistics': {\n        'averageDepartmentBudget': average_dept_budget,\n        'totalEmployees': total_employees,\n        'skillDistribution': skill_dist,\n        'departmentSizes': dept_sizes,\n        'projectStatusDistribution': proj_status,\n        'averageYearsOfService': avg_years\n    }\n}\n\nwith open('/app/organization.json', 'w', encoding='utf-8') as f:\n    json.dump(result, f, indent=2, ensure_ascii=False)\n\nprint('Wrote organization.json')\nprint('Departments:', len(depts_out), 'Employees:', total_employees, 'Projects:', len(projects))\nPYEOF\n"
+'python3 /app/process.py\n'
+''
+'python3 -c "import jsonschema" 2>/dev/null && echo \'jsonschema available\' || echo \'jsonschema NOT available\'\n'
+'python3 -c "import json,sys; d=json.load(open(\'/app/organization.json\')); print(\'valid json, keys:\', list(d.keys()))"\n'
+''
+'python3 -c "import json,jsonschema; s=json.load(open(\'/app/schema.json\')); d=json.load(open(\'/app/organization.json\')); jsonschema.validate(d,s); print(\'SCHEMA VALIDATION PASSED\')"\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

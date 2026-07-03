@@ -1,0 +1,19 @@
+{
+  "analysis": "The root cause is clear: the overlay's backing disk reports 0 available to unprivileged users because ~5% (≈49G) is reserved for root, while only ~27G is genuinely free. `apt` drops to the `_apt` user (sandbox) to check free space via statvfs f_bavail, sees 0, and aborts with 'not enough free space in /var/cache/apt/archives'. I verified I can actually write files to / (10MB dd succeeded), so the space is real — it's purely a reserved-blocks statvfs reporting issue. The fix: mount a tmpfs over the apt archives directory so the cache-space check sees genuine free space. If apt also checks the target filesystem, I'll handle it then.",
+  "plan": "Mount a 1.5G tmpfs over /var/cache/apt/archives so apt's free-space pre-check passes, then retry the install. If it then complains about the install target (/), I'll address dpkg's space check. Let me mount and re-run the install.",
+  "commands": [
+    {
+      "keystrokes": "mount -t tmpfs -o size=1536M tmpfs /var/cache/apt/archives\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "df -h /var/cache/apt/archives\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "DEBIAN_FRONTEND=noninteractive apt-get -o APT::Sandbox::User=root install -y git openssh-server nginx ca-certificates\n",
+      "duration": 45.0
+    }
+  ],
+  "task_complete": false
+}

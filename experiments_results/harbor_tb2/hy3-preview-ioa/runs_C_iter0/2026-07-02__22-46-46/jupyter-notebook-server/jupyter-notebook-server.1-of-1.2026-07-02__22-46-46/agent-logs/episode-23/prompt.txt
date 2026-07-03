@@ -1,0 +1,105 @@
+New Terminal Output:
+
+root@4737eecf794c:/app# bash /tests/run-tests.sh; tmux wait -S done
+Collecting pytest
+  Downloading pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+Requirement already satisfied: requests in /usr/local/lib/python3.13/site-packages (2.34.2)
+Collecting iniconfig>=1.0.1 (from pytest)
+  Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+Requirement already satisfied: packaging>=22 in /usr/local/lib/python3.13/site-packages (from pytest) (26.2)
+Collecting pluggy<2,>=1.5 (from pytest)
+  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+Requirement already satisfied: pygments>=2.7.2 in /usr/local/lib/python3.13/site-packages (from pytest) (2.20.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.13/site-packages (from requests) (3.18)
+Requirement already satisfied: urllib3<3,>=1.26 in /usr/local/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in /usr/local/lib/python3.13/site-packages (from requests) (2026.6.17)
+Downloading pytest-9.1.1-py3-none-any.whl (386 kB)
+Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+Installing collected packages: pluggy, iniconfig, pytest
+Successfully installed iniconfig-2.3.0 pluggy-1.6.0 pytest-9.1.1
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you a
+re doing and want to suppress this warning.
+===================================================================== test session starts ======================================================================
+platform linux -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python
+cachedir: .pytest_cache
+rootdir: /tests
+plugins: anyio-4.14.1
+collected 4 items
+
+../tests/test_outputs.py::test_jupyter_server_running PASSED                                                                                             [ 25%]
+../tests/test_outputs.py::test_jupyter_config_exists FAILED                                                                                              [ 50%]
+../tests/test_outputs.py::test_sample_notebook_exists kill %1 2>/dev/null; pkill -f 'jupyter notebook' 2>/dev/null; sleep 1; echo killed
+PASSED                                                                                             [ 75%]
+../tests/test_outputs.py::test_password_authentication FAILED                                                                                            [100%]
+
+=========================================================================== FAILURES ===========================================================================
+__________________________________________________________________ test_jupyter_config_exists __________________________________________________________________
+
+    def test_jupyter_config_exists():
+        """Test that Jupyter configuration exists with correct settings."""
+        config_path = Path.home() / ".jupyter" / "jupyter_notebook_config.py"
+>       assert config_path.exists(), "Jupyter configuration file does not exist"
+E       AssertionError: Jupyter configuration file does not exist
+E       assert False
+E        +  where False = exists()
+E        +    where exists = PosixPath('/root/.jupyter/jupyter_notebook_config.py').exists
+
+/tests/test_outputs.py:41: AssertionError
+_________________________________________________________________ test_password_authentication _________________________________________________________________
+
+    def test_password_authentication():
+        """Test that password authentication is configured correctly."""
+
+        config_path = Path.home() / ".jupyter" / "jupyter_notebook_config.py"
+>       config_content = config_path.read_text()
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:90:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/local/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = PosixPath('/root/.jupyter/jupyter_notebook_config.py'), mode = 'r', buffering = -1, encoding = 'locale', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/root/.jupyter/jupyter_notebook_config.py'
+
+/usr/local/lib/python3.13/pathlib/_local.py:537: FileNotFoundError
+======================================================================= warnings summary =======================================================================
+test_outputs.py::test_sample_notebook_exists
+  /usr/local/lib/python3.13/site-packages/nbformat/__init__.py:96: MissingIDFieldWarning: Cell is missing an id field, this will become a hard error in future n
+bformat versions. You may want to use `normalize()` on your notebooks before validations (available since nbformat 5.1.4). Previous versions of nbformat are fix
+ing this issue transparently, and will stop doing so in the future.
+    validate(nb)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================================================================ PASSES ============================================================================
+=================================================================== short test summary info ====================================================================
+PASSED ../tests/test_outputs.py::test_jupyter_server_running
+PASSED ../tests/test_outputs.py::test_sample_notebook_exists
+FAILED ../tests/test_outputs.py::test_jupyter_config_exists - AssertionError: Jupyter configuration file does not exist
+FAILED ../tests/test_outputs.py::test_password_authentication - FileNotFoundError: [Errno 2] No such file or directory: '/root/.jupyter/jupyter_notebook_config.
+py'
+============================================================ 2 failed, 2 passed, 1 warning in 7.53s ============================================================
+root@4737eecf794c:/app# kill %1 2>/dev/null; pkill -f 'jupyter notebook' 2>/dev/null; sleep 1; echo killed
+HASH=$(python3 -c "from jupyter_server.auth import passwd; print(passwd('benchmarkpass'))"); echo "HASH=$HASH"
+killed
+root@4737eecf794c:/app# HASH=$(python3 -c "from jupyter_server.auth import passwd; print(passwd('benchmarkpass'))"); echo "HASH=$HASH"
+

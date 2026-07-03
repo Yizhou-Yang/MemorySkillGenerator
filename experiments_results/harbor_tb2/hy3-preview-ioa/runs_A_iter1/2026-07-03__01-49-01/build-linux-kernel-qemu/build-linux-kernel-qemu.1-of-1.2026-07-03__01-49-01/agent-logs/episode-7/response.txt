@@ -1,0 +1,14 @@
+{
+  "analysis": "There's a huge discrepancy: df reports 958G used / 0 available on root, but du only accounts for ~200M across major directories. This usually means deleted files are still held open by processes, or there's space consumed somewhere du didn't traverse. I need to find what's consuming the space. Let me look for deleted-but-open files and other large consumers.",
+  "plan": "Check for large deleted files held open by processes (lsof), and do a broader du to find hidden large files. If a deleted file is the cause, I may be able to free it by killing/restarting the relevant process or truncating. As a fallback, I can try relocating apt's cache to a location with space.",
+  "commands": [
+    {
+      "keystrokes": "du -sh /* 2>/dev/null | sort -h | tail -20\n",
+      "duration": 10.0
+    },
+    {
+      "keystrokes": "lsof +L1 2>/dev/null | awk '$7>1000000{print $7, $1, $2}' | sort -n | tail -20\n",
+      "duration": 3.0
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+New Terminal Output:
+
+root@0ee6ec3050e7:/app# cat > gfit.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+> d = np.loadtxt('graphene.dat', delimiter=None,
+>    converters={0: lambda s: float(str(s).replace(',','.')), 1: lambda s: float(str(s).replace(',','.'))})
+> x=d[:,0]; y=d[:,1]; o=np.argsort(x); x=x[o]; y=y[o]
+> mfit=(x>1649)&(x<30000)
+> xf=x[mfit]; yf=y[mfit]
+> def lor(x,x0,g,a): return a*g**2/((x-x0)**2+g**2)
+> def model(x,p):
+>     poly=np.polyval(p[:6], x)
+>     return poly + lor(x,p[6],p[7],p[8]) + lor(x,p[9],p[10],p[11])
+> deg=5
+> pc=np.polyfit(xf,yf,deg)
+> p0=list(pc)+[10431,340,10000,19222,430,70000]
+> lb=[-1e9]*6+[0,0,0,0,0,0]
+> ub=[ 1e9]*12
+> popt,_=curve_fit(model,xf,yf,p0=p0,bounds=(lb,ub),maxfev=400000)
+> resid=yf-model(xf,popt)
+> rms=np.sqrt(np.mean(resid**2))
+> print('global RMS=%.1f'%rms)
+> x0g,gg,ag=popt[6],popt[7],popt[8]
+> x02,g2,a2=popt[9],popt[10],popt[11]
+> off_g=np.polyval(popt[:6],x0g)
+> off_2=np.polyval(popt[:6],x02)
+> print('G  x0=%.2f gamma=%.2f amp=%.2f offset=%.2f'%(x0g,gg,ag,off_g))
+> print('2D x0=%.2f gamma=%.2f amp=%.2f offset=%.2f'%(x02,g2,a2,off_2))
+> G={'x0':float(x0g),'gamma':float(gg),'amplitude':float(ag),'offset':float(off_g)}
+> D={'x0':float(x02),'gamma':float(g2),'amplitude':float(a2),'offset':float(off_2)}
+> with open('results.json','w') as f: json.dump({'G':G,'2D':D},f,indent=2)
+> print('\nFINAL'); print(json.dumps({'G':G,'2D':D},indent=2))
+> EOF
+root@0ee6ec3050e7:/app# python3 gfit.py
+Traceback (most recent call last):
+  File "/app/gfit.py", line 18, in <module>
+    popt,_=curve_fit(model,xf,yf,p0=p0,bounds=(lb,ub),maxfev=400000)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_minpack_py.py", line 1035, in curve_fit
+    res = least_squares(func, p0, jac=jac, bounds=bounds, method=method,
+                        **kwargs)
+  File "/usr/local/lib/python3.13/site-packages/scipy/_lib/_util.py", line 660, in inner
+    return func(*args, **kwargs)
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_lsq/least_squares.py", line 926, in least_squares
+    vector_fun = VectorFunction(
+        fun_wrapped,
+    ...<6 lines>...
+        workers=workers
+    )
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_differentiable_functions.py", line 614, in __init__
+    self._update_fun()
+    ~~~~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_differentiable_functions.py", line 707, in _update_fun
+    self.f = self.fun_wrapped(xp_copy(self.x))
+             ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_differentiable_functions.py", line 424, in __call__
+    return np.atleast_1d(self.fun(x))
+                         ~~~~~~~~^^^
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_lsq/least_squares.py", line 263, in __call__
+    return self.f(x, *self.args, **self.kwargs)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_minpack_py.py", line 523, in _memoized_func
+    val = f(params)
+  File "/usr/local/lib/python3.13/site-packages/scipy/optimize/_minpack_py.py", line 540, in func_wrapped
+    return func(xdata, *params) - ydata
+           ~~~~^^^^^^^^^^^^^^^^
+TypeError: model() takes 2 positional arguments but 13 were given
+root@0ee6ec3050e7:/app#

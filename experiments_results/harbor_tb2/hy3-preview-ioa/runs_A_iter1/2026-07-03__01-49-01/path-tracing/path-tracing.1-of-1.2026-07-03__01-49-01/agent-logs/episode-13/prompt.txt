@@ -1,0 +1,99 @@
+New Terminal Output:
+
+root@7fc162ec8b21:/app# cat > /tmp/fit.py << 'PYEOF'
+> import numpy as np, math
+> def load_ppm(path):
+>     with open(path,'rb') as f: data=f.read()
+>     arr=np.frombuffer(data,dtype=np.uint8,offset=15).reshape(600,800,3).astype(np.float64)
+>     return arr
+> full=load_ppm('/app/image.ppm')
+> def downsample(img,nw,nh):
+>     h,w=img.shape[:2]
+>     xs=np.linspace(0,w,nw+1).astype(int); ys=np.linspace(0,h,nh+1).astype(int)
+>     out=np.zeros((nh,nw,3))
+>     for j in range(nh):
+>         for i in range(nw):
+>             out[j,i]=img[ys[j]:ys[j+1], xs[i]:xs[i+1]].mean((0,1))
+>     return out
+> FW,FH=200,150
+> target=downsample(full,FW,FH)
+> lightc=np.array([152.,152.,152.]); darkc=np.array([67.,67.,67.])
+> def render(p,W,H):
+>     eye=p['eye']; camz=p['camz']; fov=p['fov']; sx=p['sx']; sz=p['sz']; R=p['R']
+>     scol=np.array([p['sr'],p['sg'],p['sb']]); la=p['la']; le=p['le']; cs=p['cs']
+>     amb=p['amb']; lint=p['lint']; sdark=p['sdark']
+>     zen=np.array([p['zr'],p['zg'],p['zb']]); hor=np.array([p['hr'],p['hg'],p['hb']])
+>     L=np.array([math.cos(le)*math.sin(la), math.sin(le), math.cos(le)*math.cos(la)])
+>     fwd=np.array([0.,0.,-1.]); rt=np.array([1.,0.,0.]); up=np.array([0.,1.,0.])
+>     half_h=math.tan(fov/2.0); aspect=W/H; half_w=half_h*aspect
+>     i=np.arange(W); j=np.arange(H)
+>     su=((i+0.5)/W-0.5)*2*half_w; sv=((j+0.5)/H-0.5)*2*half_h
+>     dirs=np.zeros((H,W,3))
+>     dirs[...,0]=su[None,:]*rt[0]+sv[:,None]*up[0]
+>     dirs[...,1]=su[None,:]*rt[1]+sv[:,None]*up[1]
+>     dirs[...,2]=-1.0+su[None,:]*rt[2]+sv[:,None]*up[2]
+>     dn=np.sqrt((dirs**2).sum(-1,keepdims=True)); dirs/=dn
+>     orig=np.array([0.,eye,camz]); sc=np.array([sx,R,sz])
+>     oc=orig-sc; b=(dirs*oc).sum(-1); c=(oc*oc).sum()-R*R
+>     disc=np.maximum(b*b-c,0.0); sq=np.sqrt(disc)
+>     t_sph=np.where(disc>1e-9,-b-sq,np.inf)
+>     t_pl=np.where(dirs[...,1]<0,-orig[1]/dirs[...,1],np.inf)
+>     sph=np.isfinite(t_sph)&(t_sph>0)&(t_sph<t_pl)
+>     pln=np.isfinite(t_pl)&(t_pl>0)&(~sph)
+>     dy=dirs[...,1]; tsky=np.clip(dy,0.0,1.0)
+>     col=hor[None,None,:]*(1-tsky)[...,None]+zen[None,None,:]*tsky[...,None]
+>     if sph.any():
+>         P=orig[None,None,:]+t_sph[:,:,None]*dirs
+>         n=(P-sc)/R
+>         diff=np.clip((n*L).sum(-1),0,1)
+>         col[sph]=scol[None,None,:]*(amb+diff[...,None]*lint)
+>     if pln.any():
+>         P=orig[None,None,:]+t_pl[:,:,None]*dirs
+>         X=P[...,0]; Z=P[...,2]
+>         ch=((np.floor(X/cs)+np.floor(Z/cs)).astype(int)&1)
+>         basecol=np.where(ch[...,None]==0,lightc[None,None,:],darkc[None,None,:])
+>         diff=L[1]
+>         oc2=P-sc; bb=(oc2*L).sum(-1); cc=(oc2*oc2).sum(-1)-R*R
+>         d2=np.maximum(bb*bb-cc,0.0); sq2=np.sqrt(d2)
+>         tsh=np.where(d2>1e-9,-bb-sq2,np.inf)
+>         inshadow=tsh>1e-3
+>         lit=amb+(1-inshadow.astype(float))*diff*lint
+>         col[pln]=basecol[pln]*lit[pln][...,None]
+>     return np.clip(col,0,255)
+> def err(p):
+>     c=render(p,FW,FH); d=c-target; return math.sqrt((d*d).sum())/math.sqrt((target*target).sum())
+> keys=['eye','camz','fov','sx','sz','R','sr','sg','sb','la','le','cs','amb','lint','sdark','zr','zg','zb','hr','hg','hb']
+> start=dict(eye=2.0,camz=8.0,fov=1.0,sx=0.0,sz=-4.0,R=1.0,sr=200.,sg=25.,sb=25.,la=0.4,le=0.7,cs=2.0,amb=0.15,lint=1.0,sdark=0.25,zr=158,zg=197,zb=255,hr=190,h
+g=216,hb=255)
+> step=dict(eye=0.5,camz=1.0,fov=0.15,sx=0.5,sz=1.0,R=0.2,sr=20.,sg=5.,sb=5.,la=0.2,le=0.2,cs=0.5,amb=0.05,lint=0.2,sdark=0.1,zr=10,zg=10,zb=10,hr=10,hg=10,hb=1
+0)
+> best=dict(start); be=err(best); print('start',round(be,4))
+> for sweep in range(25):
+>     improved=False
+>     for k in keys:
+>         cur=best[k]; beste=be; bestv=cur
+>         for v in [cur,cur+step[k],cur-step[k],cur+2*step[k],cur-2*step[k]]:
+>             best[k]=v; e=err(best)
+>             if e<beste: beste=e; bestv=v; improved=True
+>         best[k]=bestv; be=beste
+>     print('sweep',sweep,'err',round(be,4))
+>     for k in keys: step[k]*=0.7
+>     if not improved: break
+> print('FINAL',round(be,4))
+> for k in keys: print(k,round(best[k],4))
+> PYEOF
+root@7fc162ec8b21:/app# /app/.venv/bin/python /tmp/fit.py
+/app/.venv/lib/python3.12/site-packages/numpy/_core/_methods.py:49: RuntimeWarning: invalid value encountered in reduce
+  return umr_sum(a, axis, dtype, out, keepdims, initial, where)
+Traceback (most recent call last):
+  File "/tmp/fit.py", line 65, in <module>
+    best=dict(start); be=err(best); print('start',round(be,4))
+                         ^^^^^^^^^
+  File "/tmp/fit.py", line 61, in err
+    c=render(p,FW,FH); d=c-target; return math.sqrt((d*d).sum())/math.sqrt((target*target).sum())
+      ^^^^^^^^^^^^^^^
+  File "/tmp/fit.py", line 46, in render
+    col[sph]=scol[None,None,:]*(amb+diff[...,None]*lint)
+    ~~~^^^^^
+ValueError: shape mismatch: value array of shape (150,200,3) could not be broadcast to indexing result of shape (410,3)
+root@7fc162ec8b21:/app#

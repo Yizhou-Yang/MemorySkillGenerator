@@ -1,0 +1,52 @@
+New Terminal Output:
+
+root@330095186d5d:/app# cat > /app/check_cert.py << 'PYEOF'
+> import ssl
+> import subprocess
+> import os
+> from datetime import datetime
+>
+> CERT_PATH = "/app/ssl/server.crt"
+>
+> def main():
+>     if not os.path.exists(CERT_PATH):
+>         print("Certificate not found at " + CERT_PATH)
+>         return
+>     result = subprocess.run(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject", "-dates"],
+>         capture_output=True, text=True,
+>     )
+>     if result.returncode != 0:
+>         print("Failed to load certificate")
+>         print(result.stderr)
+>         return
+>     output = result.stdout
+>     subject_line = [l for l in output.splitlines() if l.startswith("subject=")]
+>     cn = None
+>     if subject_line:
+>         line = subject_line[0]
+>         idx = line.find("CN =")
+>         if idx == -1:
+>             idx = line.find("CN=")
+>         if idx != -1:
+>             rest = line[idx + 3:].lstrip(" =")
+>             cn = rest.split(",")[0].strip()
+>     dates = [l for l in output.splitlines() if l.startswith("notAfter=")]
+>     expiration = None
+>     if dates:
+>         date_str = dates[0].replace("notAfter=", "").strip()
+>         fields = date_str.split()
+>         dt = datetime.strptime(" ".join(fields[:4]), "%b %d %H:%M:%S %Y")
+>         expiration = dt.strftime("%Y-%m-%d")
+>     print("Common Name: " + str(cn))
+>     print("Expiration Date: " + str(expiration))
+>     print("Certificate verification successful")
+>
+> if __name__ == "__main__":
+>     main()
+> PYEOF
+root@330095186d5d:/app# python3 /app/check_cert.py
+Common Name: dev-internal.company.local
+Expiration Date: 2027-07-02
+Certificate verification successful
+root@330095186d5d:/app#

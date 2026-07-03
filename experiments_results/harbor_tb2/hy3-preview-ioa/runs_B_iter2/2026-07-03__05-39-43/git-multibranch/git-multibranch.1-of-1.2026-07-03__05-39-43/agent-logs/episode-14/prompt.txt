@@ -1,0 +1,40 @@
+Current terminal state:
+New Terminal Output:
+
+root@81c09d9438d3:/# git --git-dir=/git/project update-ref -d refs/heads/main 2>/dev/null; git --git-dir=/git/project update-ref -d refs/heads/dev 2>/dev/null;
+echo 'refs:'; git --git-dir=/git/project for-each-ref; echo '(empty above = good)'
+refs:
+(empty above = good)
+root@81c09d9438d3:/# rm -f /var/www/main/* /var/www/dev/*; ls -A /var/www/main /var/www/dev; echo 'cleaned'
+/var/www/dev:
+
+/var/www/main:
+cleaned
+root@81c09d9438d3:/# echo '== hook =='; cat /git/project/hooks/post-receive; echo '== listen =='; ss -tlnp 2>/dev/null | grep -E ':22 |:8443 '; echo '== procs =
+='; ps -ef | grep -v grep | grep -E 'sshd|nginx' | wc -l
+== hook ==
+#!/bin/bash
+while read oldrev newrev refname; do
+  [ "$newrev" = "0000000000000000000000000000000000000000" ] && continue
+  branch="${refname#refs/heads/}"
+  case "$branch" in
+    main) target=/var/www/main ;;
+    dev) target=/var/www/dev ;;
+    *) continue ;;
+  esac
+  mkdir -p "$target"
+  find "$target" -mindepth 1 -delete
+  git --git-dir=/git/project archive "$newrev" | tar -x -C "$target"
+done
+== listen ==
+== procs ==
+34
+root@81c09d9438d3:/# echo '== HTTPS check (404 expected, repo empty) =='; curl -sk -o /dev/null -w 'main:%{http_code}\n' https://localhost:8443/index.html; curl
+ -sk -o /dev/null -w 'dev:%{http_code}\n' https://localhost:8443/dev/index.html
+== HTTPS check (404 expected, repo empty) ==
+main:404
+dev:404
+root@81c09d9438d3:/#
+
+
+Are you sure you want to mark the task as complete? This will trigger your solution to be graded and you won't be able to make any further corrections. If so, include "task_complete": true in your JSON response again.

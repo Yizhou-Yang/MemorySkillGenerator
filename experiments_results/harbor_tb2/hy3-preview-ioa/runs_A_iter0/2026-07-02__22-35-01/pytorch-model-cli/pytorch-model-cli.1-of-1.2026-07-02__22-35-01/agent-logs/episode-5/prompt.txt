@@ -1,0 +1,78 @@
+New Terminal Output:
+
+root@13028e079751:/app# cat > /app/convert.py << 'EOF'
+> import zipfile, struct, io, json, collections, pickle
+> from types import SimpleNamespace
+>
+> def get_flat(storage, offset, size, stride):
+>     size = tuple(size); stride = tuple(stride)
+>     if len(size) == 1:
+>         return [storage[offset + i*stride[0]] for i in range(size[0])]
+>     result = []
+>     for i in range(size[0]):
+>         result.extend(get_flat(storage, offset + i*stride[0], size[1:], stride[1:]))
+>     return result
+>
+> class MyUnpickler(pickle.Unpickler):
+>     def __init__(self, file, zf):
+>         super().__init__(file)
+>         self.zf = zf
+>     def find_class(self, module, name):
+>         if module == 'torch.storage' and name == '_get_storage_from_record':
+>             def f(key, numel, cls):
+>                 k = key if key.startswith('simple_mnist/') else 'simple_mnist/' + key
+>                 data = self.zf.read(k)
+>                 return list(struct.unpack('<%df' % numel, data))
+>             return f
+>         if module == 'torch.storage' and name == '_load_from_bytes':
+>             def f(b):
+>                 numel = len(b)//4
+>                 return list(struct.unpack('<%df' % numel, b))
+>             return f
+>         if module == 'torch._utils' and name == '_rebuild_tensor_v2':
+>             def f(storage, offset, size, stride, requires_grad=False, *rest):
+>                 t = SimpleNamespace()
+>                 t.size = tuple(size)
+>                 t.flat = get_flat(storage, offset, size, stride)
+>                 return t
+>             return f
+>         if module == 'torch._utils' and name == '_rebuild_parameter':
+>             def f(data, requires_grad=False, *rest):
+>                 return data
+>             return f
+>         if module == 'collections' and name == 'OrderedDict':
+>             return collections.OrderedDict
+>         return super().find_class(module, name)
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+> data = zf.read('simple_mnist/data.pkl')
+> sd = MyUnpickler(io.BytesIO(data), zf).load()
+> for k, v in sd.items():
+>     print(k, v.size, len(v.flat))
+>
+> order = ['input_layer','hidden_layer','output_layer']
+> layer_list = []
+> for name in order:
+>     w = sd[name + '.weight'].flat
+>     b = sd[name + '.bias'].flat
+>     rows = sd[name + '.weight'].size[0]
+>     cols = sd[name + '.weight'].size[1]
+>     layer_list.append({'rows':rows,'cols':cols,'w':w,'b':b})
+>
+> input_dim = layer_list[0]['cols']
+> hidden_dim = layer_list[0]['rows']
+> num_classes = layer_list[2]['rows']
+> out = {'input_dim':input_dim,'hidden_dim':hidden_dim,'num_classes':num_classes,'layers':layer_list}
+> with open('/app/weights.json','w') as fo:
+>     json.dump(out, fo)
+> print('written weights.json input=%d hidden=%d classes=%d' % (input_dim,hidden_dim,num_classes))
+> EOF
+root@13028e079751:/app# python3 /app/convert.py
+Traceback (most recent call last):
+  File "/app/convert.py", line 46, in <module>
+    sd = MyUnpickler(io.BytesIO(data), zf).load()
+  File "/app/convert.py", line 42, in find_class
+    return super().find_class(module, name)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'torch'
+root@13028e079751:/app#

@@ -1,0 +1,14 @@
+{
+  "analysis": "Verified: c4_reshard has 9898 files with max 30 files per subfolder, c4_sample is now empty (files moved out), and the manifest has 9898 entries. Now I need to write revert.py in /app (the parent of c4_sample) that restores c4_sample to its original state using the manifest — but NOT run it.",
+  "plan": "Write /app/revert.py that reads /app/c4_reshard_manifest.json, moves each file from its destination folder back to c4_sample, recreates c4_sample if missing, and removes now-empty batch folders. Then display it to confirm it's in place (without executing it).",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/revert.py <<'PYEOF'\n#!/usr/bin/env python3\n\"\"\"Revert the resharding done by reshard.py.\n\nReads /app/c4_reshard_manifest.json and moves every file back from its\nresharded location under c4_reshard/ to its original path inside c4_sample/.\nAny batch_* folders left empty afterwards are removed. The manifest is\nleft in place; it is not deleted by this script.\n\nRun:  python3 /app/revert.py\n\"\"\"\nimport os\nimport json\nimport shutil\n\nMANIFEST = '/app/c4_reshard_manifest.json'\n\n\ndef main():\n    with open(MANIFEST) as f:\n        data = json.load(f)\n    src = data['src']\n    dst = data['dst']\n\n    if not os.path.isdir(dst):\n        raise SystemExit('resharded folder not found: ' + dst)\n\n    os.makedirs(src, exist_ok=True)\n\n    moved = 0\n    for entry in data['entries']:\n        orig = entry['orig']\n        dest_rel = entry['dest']\n        dest_path = os.path.join(dst, dest_rel)\n        orig_path = os.path.join(src, orig)\n        if not os.path.isfile(dest_path):\n            print('WARNING: missing file, skipping: ' + dest_path)\n            continue\n        os.makedirs(os.path.dirname(orig_path), exist_ok=True)\n        shutil.move(dest_path, orig_path)\n        moved += 1\n\n    # remove empty batch folders\n    if os.path.isdir(dst):\n        for name in sorted(os.listdir(dst)):\n            p = os.path.join(dst, name)\n            if os.path.isdir(p) and not os.listdir(p):\n                os.rmdir(p)\n        # if c4_reshard itself is now empty, optionally leave it; do not delete.\n\n    print('restored %d files back to %s' % (moved, src))\n\n\nif __name__ == '__main__':\n    main()\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ls -la /app/revert.py /app/c4_reshard_manifest.json && echo '--- revert.py NOT run ---' && head -5 /app/revert.py\n",
+      "duration": 0.3
+    }
+  ]
+}

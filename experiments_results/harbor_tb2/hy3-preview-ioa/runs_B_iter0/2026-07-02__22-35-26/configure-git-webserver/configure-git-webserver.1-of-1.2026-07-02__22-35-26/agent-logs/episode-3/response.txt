@@ -1,0 +1,9 @@
+{
+  "analysis": "New info: `du` actually works (the earlier 'no output' was a screen-capture artifact — /var/cache/apt=12K, /var/log=300K now showed). The real disk situation differs from the first df: `/` is `fuse-overlayfs 984G 954G 0 100%` and `/logs` is `/dev/vdb 984G 954G 0 100%`. So the backing disk is genuinely full (954G used). apt failed because it needs ~47MB and there are 0 bytes free. I need to find reclaimable space. The big consumption is likely host data in /logs or the overlay; I must locate deletable space to fit the git+openssh install (~47MB).",
+  "plan": "Get exact available bytes (df -B1) to know how tight we are, check apt lists size, and find the top disk consumers in our container view. From there I'll decide what to delete to free ~50MB+ for the install. I'll avoid /logs unless it clearly contains disposable junk.",
+  "commands": [
+    {"keystrokes": "df -B1 / ; echo '---'; du -sh /var/lib/apt/lists 2>/dev/null\n", "duration": 1},
+    {"keystrokes": "du -x / 2>/dev/null | sort -rn | head -25\n", "duration": 8}
+  ],
+  "task_complete": false
+}

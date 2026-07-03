@@ -1,0 +1,29 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"find /app/astropy -path '*modeling/separable.py' \n"
+'cat /app/astropy/astropy/modeling/separable.py\n'
+'cd /app/astropy && python -c "\nfrom astropy.modeling import models as m\nfrom astropy.modeling.separable import separability_matrix\nimport numpy as np\ncm = m.Linear1D(10) & m.Linear1D(5)\nprint(\'cm:\')\nprint(separability_matrix(cm))\nprint(\'nested:\')\nprint(separability_matrix(m.Pix2Sky_TAN() & cm))\n"\n'
+'pip install packaging 2>&1 | tail -5\n'
+'python -c "\nfrom astropy.modeling import models as m\nfrom astropy.modeling.separable import separability_matrix\nimport numpy as np\ncm = m.Linear1D(10) & m.Linear1D(5)\nprint(\'cm:\')\nprint(separability_matrix(cm))\nprint(\'nested:\')\nprint(separability_matrix(m.Pix2Sky_TAN() & cm))\n" 2>&1 | tail -20\n'
+'pip install pyerfa numpy 2>&1 | tail -5\n'
+'python -c "import astropy; print(astropy.__file__)" 2>&1 | tail -20\n'
+'python - <<\'EOF\'\nimport re\np = \'/app/astropy/astropy/modeling/separable.py\'\ns = open(p).read()\nold = "        cright = np.zeros((noutp, right.shape[1]))\\n        cright[-right.shape[0]:, -right.shape[1]:] = 1"\nnew = "        cright = np.zeros((noutp, right.shape[1]))\\n        cright[-right.shape[0]:, -right.shape[1]:] = right"\nassert old in s, \'pattern not found\'\ns = s.replace(old, new)\nopen(p,\'w\').write(s)\nprint(\'patched\')\nEOF\n'
+'python setup.py build_ext --inplace 2>&1 | tail -15\n'
+'pip install extension_helpers 2>&1 | tail -3\n'
+'python setup.py build_ext --inplace 2>&1 | tail -15\n'
+"pip install 'setuptools<66' 2>&1 | tail -3\n"
+'python setup.py build_ext --inplace 2>&1 | tail -15\n'
+'which gcc cc clang apt-get yum apk 2>/dev/null; echo done\n'
+'apt-get install -y gcc 2>&1 | tail -5\n'
+"cat > /tmp/verify_sep.py <<'EOF'\nimport sys, types, importlib.util\nimport numpy as np\n\nastropy = types.ModuleType('astropy'); astropy.__path__ = []\nmodeling = types.ModuleType('astropy.modeling'); modeling.__path__ = []\nsys.modules['astropy'] = astropy\nsys.modules['astropy.modeling'] = modeling\n\ncore = types.ModuleType('astropy.modeling.core')\nclass Model:\n    separable = True\n    def __init__(self, n_inputs, n_outputs, separable=True):\n        self.n_inputs = n_inputs; self.n_outputs = n_outputs; self.separable = separable\n    def _calculate_separability_matrix(self):\n        return NotImplemented\nclass CompoundModel(Model):\n    def __init__(self, left, op, right, n_inputs, n_outputs):\n        super().__init__(n_inputs, n_outputs)\n        self.left = left; self.right = right; self.op = op\nclass ModelDefinitionError(Exception):\n    pass\ncore.Model = Model; core.CompoundModel = CompoundModel; core.ModelDefinitionError = ModelDefinitionError\nsys.modules['astropy.modeling.core'] = core\n\nmappings = types.ModuleType('astropy.modeling.mappings')\nclass Mapping(Model):\n    def __init__(self, mapping, n_inputs):\n        self.mapping = mapping; self.n_inputs = n_inputs\n        self.n_outputs = len(mapping); self.separable = True\n    def _calculate_separability_matrix(self):\n        return NotImplemented\nmappings.Mapping = Mapping\nsys.modules['astropy.modeling.mappings'] = mappings\n\nspec = importlib.util.spec_from_file_location('astropy.modeling.separable',\n        '/app/astropy/astropy/modeling/separable.py')\nsep = importlib.util.module_from_spec(spec)\nsys.modules['astropy.modeling.separable'] = sep\nspec.loader.exec_module(sep)\n\n# Pix2Sky_TAN-like: 2 inputs, 2 outputs, not separable\nclass Pix2Sky(Model):\n    pass\npix = Pix2Sky(2, 2, separable=False)\n\n# Linear1D-like: 1 input, 1 output, separable\nclass Lin(Model):\n    pass\nlinA = Lin(1, 1, separable=True)\nlinB = Lin(1, 1, separable=True)\n\ncm = CompoundModel(linA, '&', linB, n_inputs=2, n_outputs=2)\ntop = CompoundModel(pix, '&', cm, n_inputs=4, n_outputs=4)\n\nM = sep.separability_matrix(top)\nprint(M)\nexpected = np.array([\n  [True, True, False, False],\n  [True, True, False, False],\n  [False, False, True, False],\n  [False, False, False, True]])\nassert np.array_equal(M, expected), 'FAILED: matrix does not match expected'\nprint('PASS: nested compound model separability is correct')\nEOF\npython /tmp/verify_sep.py\n"
+"find /app/astropy -name '*separab*' -path '*test*'\n"
+"sed -n '1,60p' /app/astropy/astropy/modeling/tests/test_separable.py\n"
+"grep -n 'def test' /app/astropy/astropy/modeling/tests/test_separable.py\n"
+"sed -n '80,160p' /app/astropy/astropy/modeling/tests/test_separable.py\n"
+'cat >> /app/astropy/astropy/modeling/tests/test_separable.py <<\'EOF\'\n\n\ndef test_nested_compound_model_separability():\n    """Regression test: separability of a nested CompoundModel used as a\n    sub-expression in \'&\' must be computed correctly, i.e. the nested\n    model\'s own separability must be preserved rather than overwritten\n    with all-ones.\n    """\n    cm = models.Linear1D(10) & models.Linear1D(5)\n    nested = models.Pix2Sky_TAN() & cm\n\n    expected = np.array([\n        [True, True, False, False],\n        [True, True, False, False],\n        [False, False, True, False],\n        [False, False, False, True],\n    ])\n    assert_allclose(separability_matrix(nested), expected)\nEOF\necho appended\n'
+"grep -n 'cright' /app/astropy/astropy/modeling/separable.py\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

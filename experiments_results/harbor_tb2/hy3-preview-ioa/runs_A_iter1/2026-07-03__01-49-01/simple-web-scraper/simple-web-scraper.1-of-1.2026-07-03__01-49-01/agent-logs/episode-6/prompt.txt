@@ -1,0 +1,79 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@5a1643855ec1:/app# cat > /app/scraper.py << 'EOF'
+> import re
+> import requests
+> from bs4 import BeautifulSoup
+> import pandas as pd
+>
+> URL = "http://server:8000"
+>
+>
+> def first_group(text, pattern):
+>     m = re.search(pattern, text)
+>     return m.group(1) if m else None
+>
+>
+> def main():
+>     resp = requests.get(URL, timeout=15)
+>     resp.raise_for_status()
+>     soup = BeautifulSoup(resp.text, "html.parser")
+>
+>     books = []
+>     for book in soup.find_all("div", class_="book"):
+>         title_tag = book.find("div", class_="book-title")
+>         author_tag = book.find("div", class_="book-author")
+>         year_tag = book.find("span", class_="book-year")
+>         rating_tag = book.find("span", class_="book-rating")
+>         price_tag = book.find("span", class_="book-price")
+>
+>         title = title_tag.get_text(strip=True) if title_tag else ""
+>         author = ""
+>         if author_tag:
+>             author = re.sub(r"^by\s+", "", author_tag.get_text(strip=True)).strip()
+>         year = first_group(year_tag.get_text(), r"(\d{4})") if year_tag else None
+>         rating = first_group(rating_tag.get_text(), r"([\d.]+)\s*/\s*5") if rating_tag else None
+>         price = first_group(price_tag.get_text(), r"\$?\s*([\d.]+)") if price_tag else None
+>
+>         books.append({
+>             "title": title,
+>             "author": author,
+>             "year": int(year) if year is not None else None,
+>             "rating": float(rating) if rating is not None else None,
+>             "price": float(price) if price is not None else None,
+>         })
+>
+>     df = pd.DataFrame(books, columns=["title", "author", "year", "rating", "price"])
+>     df.to_csv("/app/books.csv", index=False)
+>
+>     total = len(df)
+>     avg_price = df["price"].mean()
+>     highest = df.loc[df["rating"].idxmax()]
+>
+>     lines = [
+>         "Book Store Scraping Summary Report",
+>         "=" * 40,
+>         f"Total number of books scraped: {total}",
+>         f"Average book price: ${avg_price:.2f}",
+>         f"Highest rated book: {highest['title']} by {highest['author']} (Rating: {highest['rating']}/5)",
+>     ]
+>
+>     with open("/app/report.txt", "w") as f:
+>         f.write("\n".join(lines) + "\n")
+>
+>     print("\n".join(lines))
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@5a1643855ec1:/app# python3 /app/scraper.py
+Book Store Scraping Summary Report
+========================================
+Total number of books scraped: 7
+Average book price: $13.85
+Highest rated book: To Kill a Mockingbird by Harper Lee (Rating: 4.8/5)
+root@5a1643855ec1:/app#

@@ -1,0 +1,18 @@
+{
+  "analysis": "Deeper diagnosis: the filesystem is 100% full (0 bytes available) on the overlay, so apt cannot download/install the real curl. The container's own files only use ~252M (per du), but the host-backed overlay reports 956G/984G used. The biggest removable chunk inside our writable layer is /var/lib/apt/lists at 49M. I need to free space there so apt can proceed. Note: the actual root cause of 'curl failing' is that /usr/bin/curl is a fake 46-byte script printing 'DNS resolution error' and exiting 11 — DNS/network are actually fine (getent resolved example.com). The fix is to restore the genuine curl binary.",
+  "plan": "1) Free the 49M apt lists cache (this is in our writable layer and should free host-backed space). 2) Run apt-get update to refresh package lists. 3) Install the real curl package (it was never truly installed — the fake script occupied /usr/bin/curl). 4) Verify with curl -v example.com and confirm /usr/bin/curl is a real binary. If space remains insufficient, I'll look for more to clean.",
+  "commands": [
+    {
+      "keystrokes": "rm -rf /var/lib/apt/lists/*\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "df -h / \n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get update\n",
+      "duration": 30.0
+    }
+  ]
+}

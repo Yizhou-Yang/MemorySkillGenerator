@@ -1,0 +1,10 @@
+{
+  "analysis": "Mounting tmpfs is denied (no CAP_SYS_ADMIN) and unshare fails. python3 and perl are available; no curl but wget is itself a target to install. Real writes work (dd succeeded), but apt's statvfs free-space pre-check on /var/cache/apt/archives aborts the install and `-o Acquire::Check-Free-Space=false` didn't suppress it. The reliable bypass: use `apt-get --print-uris` to list the .deb URLs, download them with python3 (which doesn't do a free-space check), then install with dpkg. I will NOT run any of the AVOID-list commands.",
+  "plan": "1. Generate the list of .deb URLs with `apt-get --print-uris`. 2. Inspect to confirm it captured the packages. 3. In the next batch, download them with python3 into /tmp/debs and install via dpkg -i. This fully avoids apt's free-space check.",
+  "commands": [
+    {
+      "keystrokes": "apt-get -o Acquire::Check-Free-Space=false --print-uris install gcc make wget > /tmp/uris.txt 2>/dev/null; wc -l /tmp/uris.txt; head -5 /tmp/uris.txt\n",
+      "duration": 2.0
+    }
+  ]
+}

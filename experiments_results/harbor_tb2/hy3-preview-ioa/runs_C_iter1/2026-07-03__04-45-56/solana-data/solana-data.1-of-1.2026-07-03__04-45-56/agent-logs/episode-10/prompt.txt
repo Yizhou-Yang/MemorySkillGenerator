@@ -1,0 +1,65 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@fc303ee72101:/app# cat > /tmp/scan.py << 'EOF'
+> import socket, json, urllib.request
+> hosts = [
+>   ('rpc.ankr.com','/solana'),
+>   ('solana-mainnet.g.alchemy.com','/'),
+>   ('rpc-mainnet-fork.epochs.studio',''),
+>   ('ssc-dao.genesysgo.net',''),
+>   ('api.mainnet-beta.solana.com',''),
+>   ('solana-api.projectserum.com',''),
+>   ('public.delegand.xyz',''),
+>   ('solana.rpcpool.com',''),
+>   ('mainnet.rpcpool.com',''),
+>   ('rpc.ankr.com','/solana'),
+>   ('solana.getblock.io','/mainnet/'),
+>   ('solana-mainnet.core.chainstack.com',''),
+>   ('api.testnet.solana.com',''),
+>   ('api.devnet.solana.com',''),
+> ]
+> for h,path in hosts:
+>     try:
+>         s=socket.create_connection((h,443),timeout=10)
+>         s.sendall(b'\x16\x03\x01\x00\x05\x01\x00\x00\x01\x00')
+>         data=s.recv(50)
+>         tls = data[:1] in (b'\x16',b'\x15')
+>         s.close()
+>     except Exception as e:
+>         print(h,'TCP-ERR',repr(e)[:60]); continue
+>     if not tls:
+>         print(h,'PROXY-502'); continue
+>     url='https://%s%s'%(h,path)
+>     try:
+>         req=urllib.request.Request(url, data=json.dumps({'jsonrpc':'2.0','id':1,'method':'getHealth'}).encode(), headers={'Content-Type':'application/json','U
+ser-Agent':'Mozilla/5.0'})
+>         r=urllib.request.urlopen(req, timeout=20)
+>         print(h,'JSONRPC-OK', r.read().decode()[:80])
+>     except urllib.error.HTTPError as e:
+>         print(h,'HTTP',e.code, e.read().decode()[:80])
+>     except Exception as e:
+>         print(h,'ERR',repr(e)[:80])
+> EOF
+root@fc303ee72101:/app# python3 /tmp/scan.py
+rpc.ankr.com HTTP 403 {"error":"message: API key is not allowed to access blockchain, json-rpc code: -
+solana-mainnet.g.alchemy.com PROXY-502
+rpc-mainnet-fork.epochs.studio TCP-ERR gaierror(-2, 'Name or service not known')
+ssc-dao.genesysgo.net JSONRPC-OK <!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+api.mainnet-beta.solana.com PROXY-502
+solana-api.projectserum.com PROXY-502
+public.delegand.xyz TCP-ERR gaierror(-2, 'Name or service not known')
+solana.rpcpool.com HTTP 403  {"jsonrpc":"2.0","error":{"code": 403,"message":"Access forbidden"}, "id": 1 }
+mainnet.rpcpool.com HTTP 403  {"jsonrpc":"2.0","error":{"code": 403,"message":"Access forbidden"}, "id": 1 }
+rpc.ankr.com HTTP 403 {"error":"message: API key is not allowed to access blockchain, json-rpc code: -
+solana.getblock.io TCP-ERR gaierror(-2, 'Name or service not known')
+solana-mainnet.core.chainstack.com HTTP 401 Access token missing or invalid. Make sure you are using the correct node endpoi
+api.testnet.solana.com PROXY-502
+api.devnet.solana.com PROXY-502
+root@fc303ee72101:/app#

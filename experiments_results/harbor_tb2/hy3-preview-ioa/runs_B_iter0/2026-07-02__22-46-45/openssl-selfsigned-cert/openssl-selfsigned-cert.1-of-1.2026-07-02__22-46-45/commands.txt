@@ -1,0 +1,20 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'mkdir -p /app/ssl\n'
+'openssl genrsa -out /app/ssl/server.key 2048\n'
+'chmod 600 /app/ssl/server.key\n'
+'openssl req -x509 -new -key /app/ssl/server.key -days 365 -out /app/ssl/server.crt -subj "/O=DevOps Team/CN=dev-internal.company.local"\n'
+'cat /app/ssl/server.key /app/ssl/server.crt > /app/ssl/server.pem\n'
+'{ echo "Subject:"; openssl x509 -in /app/ssl/server.crt -noout -subject; echo "Validity:"; openssl x509 -in /app/ssl/server.crt -noout -dates; echo "SHA-256 Fingerprint:"; openssl x509 -in /app/ssl/server.crt -noout -fingerprint -sha256; } > /app/ssl/verification.txt\n'
+'cat > /app/check_cert.py << \'PYEOF\'\nimport ssl\nimport subprocess\nimport os\nfrom datetime import datetime\n\nCERT_PATH = "/app/ssl/server.crt"\n\ndef main():\n    if not os.path.exists(CERT_PATH):\n        print("Certificate not found at " + CERT_PATH)\n        return\n    result = subprocess.run(\n        ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject", "-dates"],\n        capture_output=True, text=True,\n    )\n    if result.returncode != 0:\n        print("Failed to load certificate")\n        print(result.stderr)\n        return\n    output = result.stdout\n    subject_line = [l for l in output.splitlines() if l.startswith("subject=")]\n    cn = None\n    if subject_line:\n        parts = subject_line[0].split("CN=")\n        if len(parts) > 1:\n            cn = parts[1].split("/")[0].strip()\n    dates = [l for l in output.splitlines() if l.startswith("notAfter=")]\n    expiration = None\n    if dates:\n        date_str = dates[0].replace("notAfter=", "").strip()\n        fields = date_str.split()\n        dt = datetime.strptime(" ".join(fields[:4]), "%b %d %H:%M:%S %Y")\n        expiration = dt.strftime("%Y-%m-%d")\n    print("Common Name: " + str(cn))\n    print("Expiration Date: " + str(expiration))\n    print("Certificate verification successful")\n\nif __name__ == "__main__":\n    main()\nPYEOF\n'
+'python3 /app/check_cert.py\n'
+'openssl x509 -in /app/ssl/server.crt -noout -subject\n'
+'cat /app/ssl/verification.txt\n'
+'cat > /app/check_cert.py << \'PYEOF\'\nimport ssl\nimport subprocess\nimport os\nfrom datetime import datetime\n\nCERT_PATH = "/app/ssl/server.crt"\n\ndef main():\n    if not os.path.exists(CERT_PATH):\n        print("Certificate not found at " + CERT_PATH)\n        return\n    result = subprocess.run(\n        ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject", "-dates"],\n        capture_output=True, text=True,\n    )\n    if result.returncode != 0:\n        print("Failed to load certificate")\n        print(result.stderr)\n        return\n    output = result.stdout\n    subject_line = [l for l in output.splitlines() if l.startswith("subject=")]\n    cn = None\n    if subject_line:\n        line = subject_line[0]\n        idx = line.find("CN =")\n        if idx == -1:\n            idx = line.find("CN=")\n        if idx != -1:\n            rest = line[idx + 3:].lstrip(" =")\n            cn = rest.split(",")[0].strip()\n    dates = [l for l in output.splitlines() if l.startswith("notAfter=")]\n    expiration = None\n    if dates:\n        date_str = dates[0].replace("notAfter=", "").strip()\n        fields = date_str.split()\n        dt = datetime.strptime(" ".join(fields[:4]), "%b %d %H:%M:%S %Y")\n        expiration = dt.strftime("%Y-%m-%d")\n    print("Common Name: " + str(cn))\n    print("Expiration Date: " + str(expiration))\n    print("Certificate verification successful")\n\nif __name__ == "__main__":\n    main()\nPYEOF\n'
+'python3 /app/check_cert.py\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+'ls -la /app/ssl/ /app/check_cert.py\n'
+['C-d']
+['C-d']

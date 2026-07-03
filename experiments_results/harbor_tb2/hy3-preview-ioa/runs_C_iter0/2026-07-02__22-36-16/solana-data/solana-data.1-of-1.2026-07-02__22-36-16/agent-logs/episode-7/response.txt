@@ -1,0 +1,14 @@
+{
+  "analysis": "HTTPS to pypi.org works fine, but HTTPS to api.devnet.solana.com returns 'SSL WRONG_VERSION_NUMBER' — meaning the connection to Solana is being intercepted by something that speaks plain HTTP (likely a transparent proxy or DNS hijack to a proxy that expects HTTP CONNECT, or a local Solana RPC). I need to determine the real way to reach Solana. Let me check local listening ports (maybe a local validator on 8899) and try the HTTP path via a proper script.",
+  "plan": "1) Check what's listening locally and look for a Solana validator/CLI. 2) Write a proper test script to /tmp to try HTTP JSON-RPC to Solana and to a possible localhost RPC. 3) Inspect /etc/hosts. This will tell me how the grader expects the server to reach Solana.",
+  "commands": [
+    {
+      "keystrokes": "cat /etc/hosts; echo '---PORTS---'; (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || python3 -c \"import socket;\\n[print(p) for p in [(h,int(p2)) for h in ['127.0.0.1'] for p2 in __import__('os').popen('cat /proc/net/tcp 2>/dev/null').read().split()]] if False]\")\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "cat > /tmp/rpctest.py << 'EOF'\nimport urllib.request, json, socket\n\ndef post(url, body, timeout=12, raw=False):\n    data = json.dumps(body).encode()\n    req = urllib.request.Request(url, data=data, headers={'Content-Type':'application/json'})\n    try:\n        r = urllib.request.urlopen(req, timeout=timeout)\n        return r.status, r.read().decode()\n    except Exception as e:\n        return 'ERR', repr(e)\n\n# Try HTTP (not https) to Solana endpoints\ntests = [\n  ('http://api.devnet.solana.com', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),\n  ('http://localhost:8899', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),\n  ('https://localhost:8899', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),\n  ('http://127.0.0.1:8899', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),\n]\nfor url, body in tests:\n    s, out = post(url, body)\n    print(url, s, str(out)[:150])\nEOF\npython3 /tmp/rpctest.py\n",
+      "duration": 30.0
+    }
+  ]
+}

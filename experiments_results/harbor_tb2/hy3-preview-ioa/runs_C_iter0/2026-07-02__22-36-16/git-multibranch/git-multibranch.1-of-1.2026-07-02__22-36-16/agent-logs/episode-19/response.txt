@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: `git-receive-pack /git/project` works perfectly when run locally as the git user (it printed the capabilities advertisement), so the repo and binary are fine. But over SSH, even a trivial `echo MARKER` produces no output — meaning SSH authenticates but the remote command is never actually executed (or the session closes immediately). This points to a PAM session failure or an sshd config issue for non-interactive sessions, not a git problem. I need to capture the full raw SSH exchange to see what's happening.",
+  "plan": "1) Check effective sshd config (PasswordAuthentication, UsePAM) and that home/repo dirs are sane. 2) Use an expect script with log_file to capture the COMPLETE SSH session (including any PAM/permission errors and whether 'echo PONG' actually runs). This will reveal why the remote command produces no output.",
+  "commands": [
+    {
+      "keystrokes": "sshd -T 2>/dev/null | grep -iE 'passwordauthentication|usepam|permitrootlogin'; ls -ld /home/git /git /git/project\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /tmp/diag.exp <<'EOF'\n#!/usr/bin/expect -f\nlog_file -noappend /tmp/ssh.log\nset timeout 20\nspawn ssh -v git@localhost \"echo PONG; id; which git-receive-pack; ls /git/project/hooks\"\nexpect {\n  -re {[Pp]assword:} { send \"password\\r\"; exp_continue }\n  eof\n}\nEOF\nchmod +x /tmp/diag.exp; expect /tmp/diag.exp; echo '=== LOG ==='; cat /tmp/ssh.log\n",
+      "duration": 6.0
+    }
+  ]
+}

@@ -1,0 +1,386 @@
+root@11af9af5740e:/app# cd /app && ls -la && head -50 data.hex
+total 16
+drwxr-xr-x  2 root root 4096 Jul  2 14:47 .
+drwxr-xr-x 19 root root 4096 Jul  2 14:47 ..
+-rw-r--r--  1 root root 5548 Jul  2 13:59 data.hex
+0000000 000407 002046 000036 001074 000424 000000 000000 000001
+0000020 170011 010600 011046 005720 010066 000002 004767 000150
+0000040 022626 005000 104401 004567 001354 000002 016500 000004
+0000060 072027 177776 016501 000004 072127 177775 074100 016501
+0000100 000004 072127 177773 074100 016501 000004 074100 042700
+0000120 177776 072027 000017 016501 000004 006201 050100 000400
+0000140 000167 001300 004567 001256 000002 017516 000004 004737
+0000160 000026 010075 000004 010001 005701 006700 071065 000006
+0000200 010100 000400 000167 001234 004567 001212 000006 012765
+0000220 002322 177770 005065 177766 026527 177766 000024 002035
+0000240 012716 000144 010546 062716 177770 004737 000124 005726
+0000260 010016 012746 002046 004737 000316 005726 016501 177766
+0000300 005201 006700 071027 000012 005701 001004 012716 002052
+0000320 004737 000316 005265 177766 000737 000167 001106 004567
+0000340 001064 000200 016567 000004 001556 010504 062704 000006
+0000360 117700 001544 001411 005267 001536 020027 000045 001406
+0000400 010016 004737 001224 000764 000167 001030 005067 001512
+0000420 005067 001476 127727 001500 000055 001004 005267 001470
+0000440 005267 001466 004367 000474 002106 005067 001456 020027
+0000460 000056 001003 004367 000454 002102 010603 012701 000472
+0000500 012102 001736 020021 001374 000112 000542 000144 000670
+0000520 000157 000662 000170 000764 000146 000776 000145 000620
+0000540 000143 000636 000163 000556 000154 001010 000162 000000
+0000560 000000 012401 002005 005401 112723 000055 000401 012401
+0000600 004767 000002 000516 005000 071027 000012 010146 010001
+0000620 001402 004767 177760 012600 062700 000060 110023 000207
+0000640 112423 001001 005303 112423 001074 005303 000472 016701
+0000660 001240 005003 011402 105722 001402 005203 077104 012402
+0000700 000462 012702 002054 000402 012702 002060 012401 001405
+0000720 005767 001176 001402 112723 000060 005000 004767 000002
+0000740 000440 010146 073012 001402 004767 177766 012600 046200
+0000760 000002 062700 000060 020027 000071 003402 062700 000007
+0001000 110023 000207 016702 001124 004767 000216 000412 016702
+0001020 001112 004767 000204 000405 012404 012467 001072 000167
+0001040 177316 010602 160203 010446 012746 000040 010304 005403
+0001060 066703 001042 003406 005767 001040 001003 004737 001224
+0001100 077303 005704 001404 112216 004737 001224 077404 005703
+0001120 003405 012716 000040 004737 001224 077303 005726 012604
+0001140 000167 177214 005067 000764 005001 117700 000752 005267
+0001160 000746 162700 000060 020027 177772 001002 012400 000403
+0001200 020027 000011 101006 005267 000722 070127 000012 060001
+0001220 000754 062700 000060 010133 000203 062704 000010 112723
+0001240 000077 000207 010546 010605 016700 000666 001004 004767
+0001260 000054 016700 000654 116520 000004 001407 005267 000642
+0001300 005367 000634 003002 004767 000024 016500 000004 012605
+0001320 000207 010546 010605 004767 000004 012605 000207 016700
+0001340 000600 001412 162700 002124 010067 000534 016700 000556
+0001360 001001 005200 104400 002064 012767 002124 000544 012767
+0001400 001000 000534 026727 000526 000002 101003 012767 000001
+0001420 000516 000207 005725 010500 010605 010446 010346 010246
+root@11af9af5740e:/app# cat > /app/reconstruct.py << 'EOF'
+> out = bytearray()
+> with open('/app/data.hex') as f:
+>     for line in f:
+>         line = line.strip()
+>         if not line:
+>             continue
+>         parts = line.split()
+>         for p in parts[1:]:
+>             val = int(p, 8)
+>             out += val.to_bytes(2, 'little')
+> with open('/app/data.bin', 'wb') as g:
+>     g.write(out)
+> print('wrote', len(out), 'bytes')
+> EOF
+root@11af9af5740e:/app# python3 /app/reconstruct.py
+wrote 1384 bytes
+root@11af9af5740e:/app# hexdump /app/data.bin > /app/data.recheck && diff /app/data.hex /app/data.recheck && echo MATCH
+bash: hexdump: command not found
+root@11af9af5740e:/app# file /app/data.bin
+bash: file: command not found
+root@11af9af5740e:/app# cat > /app/verify.py << 'EOF'
+> lines=open('/app/data.hex').read().split('\n')
+> for ln in lines:
+>     ln=ln.rstrip()
+>     if not ln.strip(): continue
+>     parts=ln.split()
+>     off=int(parts[0],8)
+>     words=parts[1:]
+>     recon=''.join('%07o'%(int(w,8)) for w in words)
+>     # rebuild bytes
+>     b=b''.join(int(w,8).to_bytes(2,'little') for w in words)
+>     print(ln)
+> EOF
+root@11af9af5740e:/app# python3 /app/verify.py | diff - /app/data.hex && echo ROUNDTRIP_OK || echo ROUNDTRIP_FAIL
+ROUNDTRIP_OK
+root@11af9af5740e:/app# python3 -c "print(' '.join('%02x'%c for c in open('/app/data.bin','rb').read(32)))"
+07 01 26 04 1e 00 3c 02 14 01 00 00 00 00 01 00 09 f0 80 11 26 12 d0 0b 36 10 02 00 f7 09 68 00
+root@11af9af5740e:/app# which simh pdp11 vax qemu-system-vax qemu-system-x86_64 qemu-system-arm dosbox 2>/dev/null; echo '---'; ls /usr/bin 2>/dev/null | grep -
+iE 'sim|pdp|vax|qemu|emu' ; echo '---done'
+---
+---done
+root@11af9af5740e:/app# cat > /app/analyze.py << 'EOF'
+> import struct, re
+> d = open('/app/data.bin','rb').read()
+> def w(off): return struct.unpack_from('<H', d, off)[0]
+> print('len', len(d))
+> for i,n in enumerate(['magic','a_text','a_data','a_bss','a_syms','a_entry','a_trsize','a_drsize']):
+>     print(n, oct(w(2*i)))
+> # strings
+> print('--- strings ---')
+> for m in re.finditer(rb'[\x20-\x7e]{3,}', d):
+>     print(m.start(), m.group())
+> # data segment (try both interpretations)
+> for label, tstart in [('hdr=16',16), ('text after header', 16+w(2))]:
+>     ds = w(2)
+>     seg = d[tstart:tstart+ds]
+>     print(label, 'data@',tstart,'hex', seg.hex(), 'ascii', seg)
+> EOF
+root@11af9af5740e:/app# python3 /app/analyze.py
+len 1384
+magic 0o407
+a_text 0o2046
+a_data 0o36
+a_bss 0o1074
+a_syms 0o424
+a_entry 0o0
+a_trsize 0o0
+a_drsize 0o1
+--- strings ---
+60 b'@xA'
+70 b'@xA'
+942 b' BA'
+964 b'W |'
+976 b' B@'
+1078 b'%d '
+1108 b'crt0.o'
+1120 b'a.o'
+1132 b'printf.o'
+1144 b'ffltpr.o'
+1156 b'putchr.o'
+1168 b'rsave.o'
+1180 b'ecvt.o'
+1192 b'savr5'
+1204 b'_main'
+1228 b'rsave'
+1240 b'rretrn'
+1264 b'_printf'
+1276 b'_ndigit'
+1288 b'pfloat'
+1300 b'pscien'
+1312 b'_putchar"'
+1324 b'_flush'
+1336 b'_fout'
+1348 b'mrsave'
+1360 b'ecvt'
+1372 b'fcvt'
+hdr=16 data@ 16 hex 09f080112612d00b36100200f70968009625000a01897709ec020200401d04001774feff411d04005774fdff4078411d04005774fbff4078411d04004078c045feff17740f00
+411d0400810c405000017700c0027709ae0202004e1f0400df0916003d1004000110c10bc00d357206004010000177009c0277098a020600f515d204f8ff350af6ff572df6ff14001d04ce1564006611
+ce65f8ffdf095400d60b0e10e6152604df09ce00d60b411df6ff810ac00d17720a00c10b0402ce152a04df09ce00b50af6ffdf0177004602770934028000771d04006e034411c4650600c09f64030903
+b70a5e031720250006030e10df099402f40177001802370a4a03370a3e03d7af40032d000402b70a3803b70a3603f7083c014604370a2e0317202e000302f7082c0142048311c1153a014214de031120
+fc024a0062016400b8016f00b2017800f4016600fe016500900163009e0173006e016c00080272000000000001150504010bd3952d0001010115f70902004e01000a17720a00661001100203f709f0ff
+8015c06530001390870013950102c30a13953c02c30a3a01c11da002030a0213d28b0203830a447e02153201c2152c040201c215300401150503f70b7e020203d3953000000af7090200200166100a76
+0203f709f6ff8015804c0200c0653000172039000207c065070013908700c21d5402f7098e000a01c21d4a02f70984000501041537153a027700cefe821183e02611e6152000c410030bc36d22020607
+f70b20020302df099402c37ec40b04038e94df099402047fc30b0507ce152000df099402c37ed60b841577008cfe370af401010ac09fea01b70ae601c0e530001720faff020200150301172009000682
+b70ad20157700a000160ec01c06530005b108300c4650800d3953f00870066118511c01db6010402f7092c00c01dac01509d04000703b70aa201f70a9c010206f7091400401d04008515870066118511
+f709040085158700c01d80010a03c0e5540437105c01c01d6e010102800a00893404f71554046401f71500025c01d72d560102000382f71501004e018700d50b401185112611e610a61006e44800c5e5
+0600461182158315841585158700370a56030301f71501004e03a6f057f0800026f866f8e610c1155406020a370a360340f100f025030306b70a2a03c0f117f3804041f100f01e0326f840f8c3157c06
+37f3d00002f840f897f44c3e97f32042c0fbc06530002390820a40f100f0f002c1155406d194d7207c06fc8716f50b01820a0901c20a17f3204241f100f0fa03820af7091600f70904000d01fc015720
+7c060886ce65020017f3204240fbc065300011908700c0155406c06d6e00f70ba602010280601720540611870392c3650500c89017a239000a07c8953000172054060283a08af601c8953100820ac11d
+7402c01d3600f70b6e0201028060308a5406c0155406831556f516f556f08700 ascii b'\t\xf0\x80\x11&\x12\xd0\x0b6\x10\x02\x00\xf7\th\x00\x96%\x00\n\x01\x89w\t\xec\x02\x02\x
+00@\x1d\x04\x00\x17t\xfe\xffA\x1d\x04\x00Wt\xfd\xff@xA\x1d\x04\x00Wt\xfb\xff@xA\x1d\x04\x00@x\xc0E\xfe\xff\x17t\x0f\x00A\x1d\x04\x00\x81\x0c@P\x00\x01w\x00\xc0\
+x02w\t\xae\x02\x02\x00N\x1f\x04\x00\xdf\t\x16\x00=\x10\x04\x00\x01\x10\xc1\x0b\xc0\r5r\x06\x00@\x10\x00\x01w\x00\x9c\x02w\t\x8a\x02\x06\x00\xf5\x15\xd2\x04\xf8\
+xff5\n\xf6\xffW-\xf6\xff\x14\x00\x1d\x04\xce\x15d\x00f\x11\xcee\xf8\xff\xdf\tT\x00\xd6\x0b\x0e\x10\xe6\x15&\x04\xdf\t\xce\x00\xd6\x0bA\x1d\xf6\xff\x81\n\xc0\r\x
+17r\n\x00\xc1\x0b\x04\x02\xce\x15*\x04\xdf\t\xce\x00\xb5\n\xf6\xff\xdf\x01w\x00F\x02w\t4\x02\x80\x00w\x1d\x04\x00n\x03D\x11\xc4e\x06\x00\xc0\x9fd\x03\t\x03\xb7\
+n^\x03\x17 %\x00\x06\x03\x0e\x10\xdf\t\x94\x02\xf4\x01w\x00\x18\x027\nJ\x037\n>\x03\xd7\xaf@\x03-\x00\x04\x02\xb7\n8\x03\xb7\n6\x03\xf7\x08<\x01F\x047\n.\x03\x1
+7 .\x00\x03\x02\xf7\x08,\x01B\x04\x83\x11\xc1\x15:\x01B\x14\xde\x03\x11 \xfc\x02J\x00b\x01d\x00\xb8\x01o\x00\xb2\x01x\x00\xf4\x01f\x00\xfe\x01e\x00\x90\x01c\x00
+\x9e\x01s\x00n\x01l\x00\x08\x02r\x00\x00\x00\x00\x00\x01\x15\x05\x04\x01\x0b\xd3\x95-\x00\x01\x01\x01\x15\xf7\t\x02\x00N\x01\x00\n\x17r\n\x00f\x10\x01\x10\x02\x
+03\xf7\t\xf0\xff\x80\x15\xc0e0\x00\x13\x90\x87\x00\x13\x95\x01\x02\xc3\n\x13\x95<\x02\xc3\n:\x01\xc1\x1d\xa0\x02\x03\n\x02\x13\xd2\x8b\x02\x03\x83\nD~\x02\x152\
+x01\xc2\x15,\x04\x02\x01\xc2\x150\x04\x01\x15\x05\x03\xf7\x0b~\x02\x02\x03\xd3\x950\x00\x00\n\xf7\t\x02\x00 \x01f\x10\nv\x02\x03\xf7\t\xf6\xff\x80\x15\x80L\x02\
+x00\xc0e0\x00\x17 9\x00\x02\x07\xc0e\x07\x00\x13\x90\x87\x00\xc2\x1dT\x02\xf7\t\x8e\x00\n\x01\xc2\x1dJ\x02\xf7\t\x84\x00\x05\x01\x04\x157\x15:\x02w\x00\xce\xfe\
+x82\x11\x83\xe0&\x11\xe6\x15 \x00\xc4\x10\x03\x0b\xc3m"\x02\x06\x07\xf7\x0b \x02\x03\x02\xdf\t\x94\x02\xc3~\xc4\x0b\x04\x03\x8e\x94\xdf\t\x94\x02\x04\x7f\xc3\x0
+b\x05\x07\xce\x15 \x00\xdf\t\x94\x02\xc3~\xd6\x0b\x84\x15w\x00\x8c\xfe7\n\xf4\x01\x01\n\xc0\x9f\xea\x01\xb7\n\xe6\x01\xc0\xe50\x00\x17 \xfa\xff\x02\x02\x00\x15\
+x03\x01\x17 \t\x00\x06\x82\xb7\n\xd2\x01Wp\n\x00\x01`\xec\x01\xc0e0\x00[\x10\x83\x00\xc4e\x08\x00\xd3\x95?\x00\x87\x00f\x11\x85\x11\xc0\x1d\xb6\x01\x04\x02\xf7\
+t,\x00\xc0\x1d\xac\x01P\x9d\x04\x00\x07\x03\xb7\n\xa2\x01\xf7\n\x9c\x01\x02\x06\xf7\t\x14\x00@\x1d\x04\x00\x85\x15\x87\x00f\x11\x85\x11\xf7\t\x04\x00\x85\x15\x8
+7\x00\xc0\x1d\x80\x01\n\x03\xc0\xe5T\x047\x10\\\x01\xc0\x1dn\x01\x01\x02\x80\n\x00\x894\x04\xf7\x15T\x04d\x01\xf7\x15\x00\x02\\\x01\xd7-V\x01\x02\x00\x03\x82\xf
+7\x15\x01\x00N\x01\x87\x00\xd5\x0b@\x11\x85\x11&\x11\xe6\x10\xa6\x10\x06\xe4H\x00\xc5\xe5\x06\x00F\x11\x82\x15\x83\x15\x84\x15\x85\x15\x87\x007\nV\x03\x03\x01\x
+f7\x15\x01\x00N\x03\xa6\xf0W\xf0\x80\x00&\xf8f\xf8\xe6\x10\xc1\x15T\x06\x02\n7\n6\x03@\xf1\x00\xf0%\x03\x03\x06\xb7\n*\x03\xc0\xf1\x17\xf3\x80@A\xf1\x00\xf0\x1e
+\x03&\xf8@\xf8\xc3\x15|\x067\xf3\xd0\x00\x02\xf8@\xf8\x97\xf4L>\x97\xf3 B\xc0\xfb\xc0e0\x00#\x90\x82\n@\xf1\x00\xf0\xf0\x02\xc1\x15T\x06\xd1\x94\xd7 |\x06\xfc\x
+87\x16\xf5\x0b\x01\x82\n\t\x01\xc2\n\x17\xf3 BA\xf1\x00\xf0\xfa\x03\x82\n\xf7\t\x16\x00\xf7\t\x04\x00\r\x01\xfc\x01W |\x06\x08\x86\xcee\x02\x00\x17\xf3 B@\xfb\x
+c0e0\x00\x11\x90\x87\x00\xc0\x15T\x06\xc0mn\x00\xf7\x0b\xa6\x02\x01\x02\x80`\x17 T\x06\x11\x87\x03\x92\xc3e\x05\x00\xc8\x90\x17\xa29\x00\n\x07\xc8\x950\x00\x17
+T\x06\x02\x83\xa0\x8a\xf6\x01\xc8\x951\x00\x82\n\xc1\x1dt\x02\xc0\x1d6\x00\xf7\x0bn\x02\x01\x02\x80`0\x8aT\x06\xc0\x15T\x06\x83\x15V\xf5\x16\xf5V\xf0\x87\x00'
+text after header data@ 1078 hex 256420000a00fcfff0fffdfff8ff048954040000cc3ecccccccccdcc0a00637274302e6f00001f000000612e6f00000000001f0016007072696e74662e6f1f0
+0ce0066666c7470722e6f1f008a027075746368722e6f1f00940272736176652e6f001f000403656376742e6f00001f0024037361767235000000240044045f6d61696e000000220078005f6e0000000
+000002200160072736176650000002200060372726574726e0000220014035f72000000000000220054005f7072696e7466002200ce005f6e6469676974002300420470666c6f6174000022008a02707
+36369656e000022008a025f70757463686172220094025f666c75736800002200c2025f666f757400000024004e046d7273617665000022000403656376740000000022002a036663767400000000220
+02403 ascii b'%d \x00\n\x00\xfc\xff\xf0\xff\xfd\xff\xf8\xff\x04\x89T\x04\x00\x00\xcc>\xcc\xcc\xcc\xcc\xcd\xcc\n\x00crt0.o\x00\x00\x1f\x00\x00\x00a.o\x00\x00\x00
+\x00\x00\x1f\x00\x16\x00printf.o\x1f\x00\xce\x00ffltpr.o\x1f\x00\x8a\x02putchr.o\x1f\x00\x94\x02rsave.o\x00\x1f\x00\x04\x03ecvt.o\x00\x00\x1f\x00$\x03savr5\x00\
+x00\x00$\x00D\x04_main\x00\x00\x00"\x00x\x00_n\x00\x00\x00\x00\x00\x00"\x00\x16\x00rsave\x00\x00\x00"\x00\x06\x03rretrn\x00\x00"\x00\x14\x03_r\x00\x00\x00\x00\x
+00\x00"\x00T\x00_printf\x00"\x00\xce\x00_ndigit\x00#\x00B\x04pfloat\x00\x00"\x00\x8a\x02pscien\x00\x00"\x00\x8a\x02_putchar"\x00\x94\x02_flush\x00\x00"\x00\xc2\
+x02_fout\x00\x00\x00$\x00N\x04mrsave\x00\x00"\x00\x04\x03ecvt\x00\x00\x00\x00"\x00*\x03fcvt\x00\x00\x00\x00"\x00$\x03'
+root@11af9af5740e:/app# which apt apt-get dpkg pip3 python3 gcc cc clang 2>&1; echo '==='
+/usr/bin/apt
+/usr/bin/apt-get
+/usr/bin/dpkg
+/usr/local/bin/pip3
+/usr/local/bin/python3
+===
+root@11af9af5740e:/app# find / -iname '*pdp11*' -o -iname '*simh*' 2>/dev/null | head; echo '==='
+timeout 8 bash -c 'apt-get --version 2>&1 | head -1'; echo done
+===
+root@11af9af5740e:/app# timeout 8 bash -c 'apt-get --version 2>&1 | head -1'; echo done
+apt 2.6.1 (amd64)
+done
+root@11af9af5740e:/app# cat > /app/scan.py << 'EOF'
+> import struct
+> d = open('/app/data.bin','rb').read()
+> def w(off): return struct.unpack_from('<H', d, off)[0]
+> a_text=w(2); a_data=w(4); a_bss=w(6); a_syms=w(8); a_entry=w(10)
+> print('text',a_text,'data',a_data,'bss',a_bss,'syms',a_syms,'entry',a_entry)
+> text_off=16
+> print('=== sys instructions (opcode 0x49xx) ===')
+> for i in range(0, a_text, 2):
+>     val=w(text_off+i)
+>     if (val & 0xFF00)==0x4900:
+>         n=val & 0x7F
+>         ctx=[hex(w(text_off+i+2*k)) for k in range(1,6)]
+>         print('addr %04x (file %04x) sys %d  nextwords %s'%(i, text_off+i, n, ctx))
+> print('=== symbol table ===')
+> # symbol table follows header+a_text+a_data+a_bss? Actually symtab after text+data, before string table.
+> # V6 a.out: header(16) + text + data + symtab(a_syms) + strtab. Let's find _main.
+> st=text_off+a_text+a_data
+> for i in range(0, a_syms, 6):
+>     val=w(st+i)
+>     typ=w(st+i+2)
+>     name=w(st+i+4)
+>     print('sym off %d value %06o type %06o strx %06o'%(i,val,typ,name))
+> EOF
+root@11af9af5740e:/app# python3 /app/scan.py | head -120
+text 1062 data 30 bss 572 syms 276 entry 0
+=== sys instructions (opcode 0x49xx) ===
+=== symbol table ===
+sym off 0 value 071143 type 030164 strx 067456
+sym off 6 value 000000 type 000037 strx 000000
+sym off 12 value 027141 type 000157 strx 000000
+sym off 18 value 000000 type 000037 strx 000026
+sym off 24 value 071160 type 067151 strx 063164
+sym off 30 value 067456 type 000037 strx 000316
+sym off 36 value 063146 type 072154 strx 071160
+sym off 42 value 067456 type 000037 strx 001212
+sym off 48 value 072560 type 061564 strx 071150
+sym off 54 value 067456 type 000037 strx 001224
+sym off 60 value 071562 type 073141 strx 027145
+sym off 66 value 000157 type 000037 strx 001404
+sym off 72 value 061545 type 072166 strx 067456
+sym off 78 value 000000 type 000037 strx 001444
+sym off 84 value 060563 type 071166 strx 000065
+sym off 90 value 000000 type 000044 strx 002104
+sym off 96 value 066537 type 064541 strx 000156
+sym off 102 value 000000 type 000042 strx 000170
+sym off 108 value 067137 type 000000 strx 000000
+sym off 114 value 000000 type 000042 strx 000026
+sym off 120 value 071562 type 073141 strx 000145
+sym off 126 value 000000 type 000042 strx 001406
+sym off 132 value 071162 type 072145 strx 067162
+sym off 138 value 000000 type 000042 strx 001424
+sym off 144 value 071137 type 000000 strx 000000
+sym off 150 value 000000 type 000042 strx 000124
+sym off 156 value 070137 type 064562 strx 072156
+sym off 162 value 000146 type 000042 strx 000316
+sym off 168 value 067137 type 064544 strx 064547
+sym off 174 value 000164 type 000043 strx 002102
+sym off 180 value 063160 type 067554 strx 072141
+sym off 186 value 000000 type 000042 strx 001212
+sym off 192 value 071560 type 064543 strx 067145
+sym off 198 value 000000 type 000042 strx 001212
+sym off 204 value 070137 type 072165 strx 064143
+sym off 210 value 071141 type 000042 strx 001224
+sym off 216 value 063137 type 072554 strx 064163
+sym off 222 value 000000 type 000042 strx 001302
+sym off 228 value 063137 type 072557 strx 000164
+sym off 234 value 000000 type 000044 strx 002116
+sym off 240 value 071155 type 060563 strx 062566
+sym off 246 value 000000 type 000042 strx 001404
+sym off 252 value 061545 type 072166 strx 000000
+sym off 258 value 000000 type 000042 strx 001452
+sym off 264 value 061546 type 072166 strx 000000
+sym off 270 value 000000 type 000042 strx 001444
+root@11af9af5740e:/app# cat > /app/scope.py << 'EOF'
+> import struct
+> from collections import Counter
+> d=open('/app/data.bin','rb').read()
+> def w(off): return struct.unpack_from('<H',d,off)[0]
+> a_text=w(2); a_data=w(4); a_bss=w(6); a_syms=w(8)
+> text_off=16
+> text=d[text_off:text_off+a_text]
+> words=[int.from_bytes(text[i:i+2],'little') for i in range(0,len(text),2)]
+> hb=Counter(x>>8 for x in words)
+> print('text words:', len(words))
+> print('high byte histogram:')
+> for k in sorted(hb): print('  %s : %d'%(hex(k), hb[k]))
+> print('sys instructions (opcode 0x89xx):')
+> for i,x in enumerate(words):
+>     if (x & 0xFF00)==0x8900:
+>         n=x&0x7F
+>         after=[hex(words[i+1+j]) for j in range(min(5,len(words)-i-1))]
+>         print('  textidx %4d (file %04x) sys %d  after: %s'%(i, text_off+2*i, n, after))
+> EOF
+root@11af9af5740e:/app# python3 /app/scope.py
+text words: 531
+high byte histogram:
+  0x0 : 98
+  0x1 : 46
+  0x2 : 37
+  0x3 : 27
+  0x4 : 12
+  0x6 : 12
+  0x7 : 4
+  0x8 : 2
+  0x9 : 24
+  0xa : 32
+  0xb : 15
+  0xc : 1
+  0xd : 2
+  0x10 : 15
+  0x11 : 14
+  0x12 : 1
+  0x13 : 1
+  0x14 : 1
+  0x15 : 35
+  0x1d : 17
+  0x1f : 1
+  0x20 : 10
+  0x25 : 1
+  0x2d : 2
+  0x3e : 1
+  0x40 : 1
+  0x42 : 3
+  0x45 : 1
+  0x4c : 1
+  0x50 : 1
+  0x60 : 3
+  0x65 : 11
+  0x6d : 2
+  0x70 : 1
+  0x72 : 3
+  0x74 : 4
+  0x76 : 1
+  0x78 : 3
+  0x7e : 3
+  0x7f : 1
+  0x82 : 2
+  0x83 : 1
+  0x86 : 1
+  0x87 : 2
+  0x89 : 2
+  0x8a : 2
+  0x8b : 1
+  0x90 : 5
+  0x92 : 1
+  0x94 : 2
+  0x95 : 7
+  0x9d : 1
+  0x9f : 2
+  0xa2 : 1
+  0xaf : 1
+  0xe0 : 1
+  0xe4 : 1
+  0xe5 : 3
+  0xf0 : 8
+  0xf1 : 5
+  0xf3 : 5
+  0xf4 : 1
+  0xf5 : 3
+  0xf8 : 6
+  0xfb : 2
+  0xfe : 2
+  0xff : 13
+sys instructions (opcode 0x89xx):
+  textidx   10 (file 0024) sys 1  after: ['0x977', '0x2ec', '0x2', '0x1d40', '0x4']
+  textidx  370 (file 02f4) sys 0  after: ['0x434', '0x15f7', '0x454', '0x164', '0x15f7']
+root@11af9af5740e:/app# python3 - <<'EOF'
+> import urllib.request
+> try:
+>     r=urllib.request.urlopen('https://en.wikipedia.org/wiki/PDP-11_architecture', timeout=8)
+>     data=r.read()
+>     print('NET OK', r.status, len(data))
+> except Exception as e:
+>     print('NET FAIL', repr(e))
+> EOF
+

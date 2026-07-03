@@ -1,0 +1,30 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"which yt-dlp ffmpeg tesseract python3 pip3 2>/dev/null; echo '---'; cat /etc/os-release 2>/dev/null | head -2\n"
+"apt-get --version 2>/dev/null | head -1; echo '---net test---'; timeout 10 curl -sI https://www.youtube.com 2>&1 | head -3\n"
+'python3 -c "import urllib.request; print(urllib.request.urlopen(\'https://www.youtube.com\', timeout=10).status)" 2>&1 | head -5\n'
+'apt-get update 2>&1 | tail -5\n'
+'DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg tesseract-ocr tesseract-ocr-eng python3-pip 2>&1 | tail -15\n'
+"df -h / /tmp /var 2>&1; echo '---'; du -sh /var/cache/apt/archives 2>/dev/null\n"
+'du -sh /* 2>/dev/null | sort -rh | head -20\n'
+"df -i / 2>&1; echo '---write test---'; dd if=/dev/zero of=/tmp/testfile bs=1M count=100 2>&1; echo exit=$?; ls -la /tmp/testfile; rm -f /tmp/testfile\n"
+'apt-get install --print-uris -y ffmpeg tesseract-ocr tesseract-ocr-eng > /tmp/pkglist.txt 2>&1; echo exit=$?; wc -l /tmp/pkglist.txt; head -5 /tmp/pkglist.txt\n'
+''
+'grep "^\'" /tmp/pkglist.txt | awk \'{print $1}\' | tr -d "\'" > /tmp/urls.txt; wc -l /tmp/urls.txt; head -3 /tmp/urls.txt\n'
+"mkdir -p /tmp/debs; cat > /tmp/dl.py << 'EOF'\nimport urllib.request, sys, os\nurls=[l.strip() for l in open('/tmp/urls.txt') if l.strip()]\nfail=[]\nfor i,u in enumerate(urls):\n    fn=os.path.join('/tmp/debs', os.path.basename(u.split('?')[0]))\n    if os.path.exists(fn) and os.path.getsize(fn)>0:\n        continue\n    ok=False\n    for attempt in range(3):\n        try:\n            urllib.request.urlretrieve(u, fn)\n            ok=True\n            break\n        except Exception as e:\n            print('retry', u, e)\n    if not ok:\n        fail.append(u)\n    if i%20==0:\n        print(i, len(urls))\nprint('FAILED', len(fail))\nfor f in fail: print(f)\nEOF\necho written\n"
+'python3 -m pip install --quiet yt-dlp 2>&1 | tail -5; echo pip_done=$?\n'
+'python3 /tmp/dl.py\n'
+'C-c'
+"cat > /tmp/dl.py << 'EOF'\nimport urllib.request, os\nurls=[l.strip() for l in open('/tmp/urls.txt') if l.strip()]\nhdr={'User-Agent':'Debian APT-HTTP/1.3 (2.7.14)'}\nfail=[]\nfor i,u in enumerate(urls):\n    fn=os.path.join('/tmp/debs', os.path.basename(u.split('?')[0]))\n    if os.path.exists(fn) and os.path.getsize(fn)>0:\n        continue\n    ok=False\n    for attempt in range(4):\n        try:\n            req=urllib.request.Request(u, headers=hdr)\n            with urllib.request.urlopen(req, timeout=60) as r:\n                data=r.read()\n            open(fn,'wb').write(data)\n            ok=True\n            break\n        except Exception as e:\n            print('retry', os.path.basename(u), e)\n    if not ok:\n        fail.append(u)\n    if i%30==0:\n        print('proc',i,'/',len(urls))\nprint('FAILED', len(fail))\nfor f in fail: print(f)\nEOF\necho written\n"
+'python3 /tmp/dl.py\n'
+'dpkg -i /tmp/debs/*.deb > /tmp/dpkg.log 2>&1; echo exit=$?; tail -15 /tmp/dpkg.log\n'
+''
+''
+''
+''
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

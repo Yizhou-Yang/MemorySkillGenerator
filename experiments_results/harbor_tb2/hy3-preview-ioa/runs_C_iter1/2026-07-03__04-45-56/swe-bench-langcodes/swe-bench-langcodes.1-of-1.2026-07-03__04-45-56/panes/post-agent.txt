@@ -1,0 +1,48 @@
+root@4a3ae5d02635:/app/langcodes# grep -n '__hash__' langcodes/__init__.py
+1503:    def __hash__(self) -> int:
+root@4a3ae5d02635:/app/langcodes# grep -n '_str_tag' langcodes/__init__.py | head
+133:        self._str_tag: str = None
+365:        if self._str_tag is not None:
+366:            return self._str_tag
+385:        self._str_tag = '-'.join(subtags)
+386:        return self._str_tag
+1501:        return self._str_tag == other._str_tag
+root@4a3ae5d02635:/app/langcodes# sed -n '1495,1510p' langcodes/__init__.py
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, Language):
+            return False
+        return self._str_tag == other._str_tag
+
+    def __hash__(self) -> int:
+        return hash(id(self))
+
+    def __getitem__(self, key: str) -> Optional[Union[str, List[str]]]:
+        if key in self.ATTRIBUTES:
+            return getattr(self, key)
+        else:
+            raise KeyError(key)
+root@4a3ae5d02635:/app/langcodes# sed -i 's/        return hash(id(self))/        return hash(self._str_tag)/' langcodes/__init__.py
+root@4a3ae5d02635:/app/langcodes# sed -n '1503,1505p' langcodes/__init__.py
+    def __hash__(self) -> int:
+        return hash(self._str_tag)
+
+root@4a3ae5d02635:/app/langcodes# python3 -c "
+> import pickle
+> from langcodes import Language
+> print('same id:', id(Language.get('en')) == id(Language.get('en')))
+> print('same hash:', hash(Language.get('en')) == hash(Language.get('en')))
+> with open('test_file','wb') as f:
+>     pickle.dump(Language.get('en'), f)
+> with open('test_file','rb') as f:
+>     c = pickle.load(f)
+> print('diff id:', id(c) == id(Language.get('en')))
+> print('same hash after pickle:', hash(c) == hash(Language.get('en')))
+> "
+same id: True
+same hash: True
+diff id: False
+same hash after pickle: True
+root@4a3ae5d02635:/app/langcodes#

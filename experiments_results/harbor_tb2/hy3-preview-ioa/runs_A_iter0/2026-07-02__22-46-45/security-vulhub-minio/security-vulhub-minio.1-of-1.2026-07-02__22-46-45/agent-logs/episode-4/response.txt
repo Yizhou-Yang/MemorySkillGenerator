@@ -1,0 +1,14 @@
+{
+  "analysis": "Only python3 is available (no ssh/curl/wget/nc). node1 resolves to 192.168.112.4. To read node1's environment variables I likely need shell access to node1. There's no ssh client, but python may have paramiko, or node1 may expose an SSH daemon. I need to probe node1 and check available python modules.",
+  "plan": "Check for python modules (paramiko), scan node1's open ports (22, 9000) with python, and look for any SSH client or credentials. This determines how to reach node1's environment.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c 'import paramiko; print(\"paramiko ok\")' 2>&1; python3 -c 'import docker; print(\"docker ok\")' 2>&1\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "for p in 22 9000 2375 2376 9090; do python3 -c \"import socket; s=socket.socket(); s.settimeout(0.7); r=s.connect_ex(('192.168.112.4',$p)); print('$p', 'OPEN' if r==0 else 'closed', r); s.close()\" 2>&1; done\n",
+      "duration": 5
+    }
+  ]
+}

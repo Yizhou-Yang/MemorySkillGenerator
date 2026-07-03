@@ -1,0 +1,220 @@
+root@8f11c9b1977b:/app# cat /etc/os-release | head -n 3
+PRETTY_NAME="Ubuntu 26.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+root@8f11c9b1977b:/app# for b in git nginx sshd openssl ssh-keygen; do printf '%s: ' "$b"; command -v $b || echo MISSING; done
+git: /usr/bin/git
+nginx: /usr/sbin/nginx
+sshd: /usr/sbin/sshd
+openssl: /usr/bin/openssl
+ssh-keygen: /usr/bin/ssh-keygen
+root@8f11c9b1977b:/app# useradd -m -s /bin/bash git
+echo 'git:password' | chpasswd
+ssh-keygen -A
+root@8f11c9b1977b:/app# echo 'git:password' | chpasswd
+root@8f11c9b1977b:/app# ssh-keygen -A
+root@8f11c9b1977b:/app# printf 'PasswordAuthentication yes\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/99-git.conf
+root@8f11c9b1977b:/app# mkdir -p /run/sshd && /usr/sbin/sshd
+root@8f11c9b1977b:/app# ps aux | grep -v grep | grep sshd
+root         191  0.0  0.0  10728  1156 ?        Ss   16:35   0:00 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+root@8f11c9b1977b:/app# mkdir -p /git && git init --bare /git/project && chown -R git:git /git
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /git/project/
+root@8f11c9b1977b:/app# mkdir -p /var/www/main /var/www/dev && chown -R git:git /var/www/main /var/www/dev
+root@8f11c9b1977b:/app# mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/git.key -out /etc/nginx/ssl/git.crt -days 36
+5 -subj "/CN=localhost"
+..............+..+..........+..+.........+....+.....+......+.+.....+....+......+.....+...+..........+.....+...+....+...+..++++++++++++++++++++++++++++++++++++++
++*......+........+.......+...+..+.+++++++++++++++++++++++++++++++++++++++*.+.......+.................+.......+...+..+....+..+...+.+...+......+......+......+..+.
++.....+............+....+........+.......+...+..+................+...+........................+...........+.+...+...+........+............+.........+.+........+
+....+........+...+....+......+..+.......+........+....+......+.....+...+......+.+..................+..+.......+........+...+.......+............+.....+.+.......
+.......++++++
+..........+.........+.....+......+.........+.+...+..+.+...+.....+.........+.+..............+...+....+...+......+............+........+.+........+...+...+.+...+.
+..........+.......+...+...........+......+.......+..+....+.........+...+..+.+.....+....+..+.+...+...........+......+.......+..+......+.........+....+.........+.
+....+...+....+++++++++++++++++++++++++++++++++++++++*...........+.+...........+++++++++++++++++++++++++++++++++++++++*.+............+..+....+.................+.
+..............+.......+...........+.+......+..+.+.........++++++
+-----
+root@8f11c9b1977b:/app# cat > /etc/nginx/conf.d/git.conf <<'EOF'
+> server {
+>     listen 8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/git.crt;
+>     ssl_certificate_key /etc/nginx/ssl/git.key;
+>     root /var/www/main;
+>     index index.html;
+>     location /dev/ {
+>         alias /var/www/dev/;
+>     }
+> }
+> EOF
+root@8f11c9b1977b:/app# cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> GIT_DIR=/git/project
+> while read oldrev newrev refname; do
+>   branch="${refname#refs/heads/}"
+>   case "$branch" in
+>     main)
+>       git --git-dir="$GIT_DIR" archive main | tar -x -C /var/www/main
+>       ;;
+>     dev)
+>       git --git-dir="$GIT_DIR" archive dev | tar -x -C /var/www/dev
+>       ;;
+>   esac
+> done
+> EOF
+root@8f11c9b1977b:/app# chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive
+root@8f11c9b1977b:/app# nginx -t
+2026/07/02 16:35:11 [warn] 249#249: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@8f11c9b1977b:/app# nginx
+2026/07/02 16:35:12 [warn] 256#256: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+root@8f11c9b1977b:/app# grep -rn '8443' /etc/nginx/ 2>/dev/null
+/etc/nginx/conf.d/git.conf:2:    listen 8443 ssl;
+/etc/nginx/sites-available/default:2:    listen 8443 ssl;
+root@8f11c9b1977b:/app# ls /etc/nginx/sites-enabled/ /etc/nginx/conf.d/
+/etc/nginx/conf.d/:
+git.conf
+
+/etc/nginx/sites-enabled/:
+default
+root@8f11c9b1977b:/app# command -v sshpass || echo NO_SSHPASS
+NO_SSHPASS
+root@8f11c9b1977b:/app# head -n 20 /etc/nginx/sites-available/default
+server {
+    listen 8443 ssl;
+    server_name localhost;
+
+    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+
+    location / {
+        root /var/www/html;
+        index index.html;
+    }
+
+    location /dev {
+        root /var/www;
+        index index.html;
+    }
+}
+root@8f11c9b1977b:/app# rm -f /etc/nginx/sites-enabled/default
+root@8f11c9b1977b:/app# nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@8f11c9b1977b:/app# apt-get install -y sshpass 2>&1 | tail -n 3 || echo APT_FAILED
+Building dependency tree...
+Reading state information...
+E: Unable to locate package sshpass
+root@8f11c9b1977b:/app# command -v expect || echo NO_EXPECT
+/usr/bin/expect
+root@8f11c9b1977b:/app# apt-get update 2>&1 | tail -n 3
+Get:15 http://archive.ubuntu.com/ubuntu resolute-updates/universe amd64 Packages [236 kB]
+Fetched 24.8 MB in 4s (5977 kB/s)
+Reading package lists...
+root@8f11c9b1977b:/app# apt-get install -y sshpass 2>&1 | tail -n 3
+Need to get 11.5 kB of archives.
+After this operation, 38.9 kB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@8f11c9b1977b:/app# git config --global user.email test@test && git config --global user.name test
+root@8f11c9b1977b:/app# mkdir -p /root/.ssh && printf 'Host localhost\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n' > /root/.ssh/config
+root@8f11c9b1977b:/app# cat > /tmp/push.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 30
+> set branch [lindex $argv 0]
+> spawn git push origin $branch
+> expect {
+>     -re "(?i)yes/no" { send "yes\r"; exp_continue }
+>     -re "password:" { send "password\r" }
+> }
+> expect eof
+> EOF
+root@8f11c9b1977b:/app# rm -rf /tmp/wt && mkdir /tmp/wt && cd /tmp/wt && git init -q && git checkout -q -b main && echo '<h1>MAIN PAGE</h1>' > index.html && git
+ add -A && git commit -qm init && git remote add origin git@localhost:/git/project
+root@8f11c9b1977b:/tmp/wt# expect /tmp/push.exp main
+spawn git push origin main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: protocol error: bad line length character: Welc
+root@8f11c9b1977b:/tmp/wt# which git-shell; grep -rn -i welcome /etc/ 2>/dev/null | head; echo BASH_ENV=$BASH_ENV
+/usr/bin/git-shell
+usermod -s /usr/bin/git-shell git && getent passwd git
+expect /tmp/push.exp main
+/etc/update-motd.d/00-header:29:printf "Welcome to %s (%s %s %s)\n" "$DISTRIB_DESCRIPTION" "$(uname -o)" "$(uname -r)" "$(uname -m)"
+BASH_ENV=
+root@8f11c9b1977b:/tmp/wt# usermod -s /usr/bin/git-shell git && getent passwd git
+git:x:1001:1001::/home/git:/usr/bin/git-shell
+root@8f11c9b1977b:/tmp/wt# expect /tmp/push.exp main
+spawn git push origin main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: protocol error: bad line length character: Welc
+root@8f11c9b1977b:/tmp/wt# printf 'PasswordAuthentication yes\nPubkeyAuthentication yes\nPrintMotd no\n' > /etc/ssh/sshd_config.d/99-git.conf
+root@8f11c9b1977b:/tmp/wt# sed -i 's/^session.*pam_motd/# &/' /etc/pam.d/sshd; grep -n motd /etc/pam.d/sshd
+31:# This includes a dynamically generated part from /run/motd.dynamic
+32:# and a static (admin-editable) part from /etc/motd.
+33:# session    optional     pam_motd.so  motd=/run/motd.dynamic
+34:# session    optional     pam_motd.so noupdate
+root@8f11c9b1977b:/tmp/wt# pkill -HUP sshd; sleep 1; ps aux | grep -v grep | grep sshd
+expect /tmp/push.exp main
+root         191  0.0  0.0  10728  7392 ?        Ss   16:35   0:00 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+root@8f11c9b1977b:/tmp/wt# expect /tmp/push.exp main
+spawn git push origin main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@8f11c9b1977b:/tmp/wt# cat > /tmp/cmd.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 30
+> spawn ssh git@localhost {git-receive-pack /git/project}
+> expect {
+>     -re "(?i)yes/no" { send "yes\r"; exp_continue }
+>     -re "password:" { send "password\r" }
+> }
+> expect eof
+> EOF
+root@8f11c9b1977b:/tmp/wt# expect /tmp/cmd.exp
+spawn ssh git@localhost git-receive-pack /git/project
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+root@8f11c9b1977b:/tmp/wt# usermod -s /bin/bash git
+root@8f11c9b1977b:/tmp/wt# expect /tmp/push.exp main
+spawn git push origin main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@8f11c9b1977b:/tmp/wt# grep -in 'forcecommand' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; echo DONE
+/etc/ssh/sshd_config:145:#	ForceCommand cvs server
+DONE
+root@8f11c9b1977b:/tmp/wt# ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa -q; mkdir -p /home/git/.ssh && cat /root/.ssh/id_rsa.pub >> /home/git/.ssh/authorized_ke
+ys && chown -R git:git /home/git/.ssh && chmod 700 /home/git/.ssh && chmod 600 /home/git/.ssh/authorized_keys
+ssh -o StrictHostKeyChecking=no git@localhost 'echo PATH=$PATH; command -v git-receive-pack; ls -la /git/project | head'
+root@8f11c9b1977b:/tmp/wt# ssh -o StrictHostKeyChecking=no git@localhost 'echo PATH=$PATH; command -v git-receive-pack; ls -la /git/project | head'
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+root@8f11c9b1977b:/tmp/wt# echo '=== raw receive-pack ==='; ssh -o StrictHostKeyChecking=no git@localhost 'git-receive-pack /git/project' 2>&1 | od -c | head -2
+0
+=== raw receive-pack ===
+0000000   W   a   r   n   i   n   g   :       P   e   r   m   a   n   e
+0000020   n   t   l   y       a   d   d   e   d       '   l   o   c   a
+0000040   l   h   o   s   t   '       (   E   D   2   5   5   1   9   )
+0000060       t   o       t   h   e       l   i   s   t       o   f
+0000100   k   n   o   w   n       h   o   s   t   s   .  \r  \n
+0000116
+root@8f11c9b1977b:/tmp/wt#

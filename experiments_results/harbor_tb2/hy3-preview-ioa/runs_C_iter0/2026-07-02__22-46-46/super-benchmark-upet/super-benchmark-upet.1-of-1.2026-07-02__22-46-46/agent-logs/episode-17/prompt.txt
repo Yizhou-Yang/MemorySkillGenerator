@@ -1,0 +1,209 @@
+New Terminal Output:
+
+transformers            4.40.2
+root@2623c8c1b420:/app/UPET# pip list 2>/dev/null | head -50
+Package                 Version
+----------------------- -----------
+absl-py                 2.4.0
+annotated-types         0.7.0
+beautifulsoup4          4.15.0
+blis                    0.7.11
+build                   1.2.1
+catalogue               2.0.10
+certifi                 2026.6.17
+cffi                    2.0.0
+charset-normalizer      3.4.7
+click                   8.4.2
+cloudpathlib            0.16.0
+cloudpickle             3.1.2
+cmake                   3.27.9
+confection              0.1.5
+contourpy               1.3.2
+cryptography            49.0.0
+cycler                  0.12.1
+cymem                   2.0.13
+Cython                  3.0.10
+en-core-web-sm          3.7.1
+filelock                3.29.4
+fonttools               4.63.0
+fsspec                  2023.6.0
+future                  1.0.0
+gdown                   5.1.0
+gensim                  4.3.2
+google-auth             2.55.1
+google-auth-oauthlib    1.4.0
+grpcio                  1.81.1
+hf-xet                  1.5.1
+huggingface_hub         0.36.2
+hyperopt                0.2.7
+idna                    3.18
+jieba                   0.42.1
+Jinja2                  3.1.6
+joblib                  1.5.3
+jsonpickle              3.0.4
+kiwisolver              1.5.0
+langcodes               3.5.1
+libclang                18.1.1
+Markdown                3.10.2
+MarkupSafe              3.0.3
+matplotlib              3.7.1
+mpmath                  1.4.1
+murmurhash              1.0.15
+networkx                3.4.2
+nltk                    3.8.1
+numpy                   1.25.2
+root@2623c8c1b420:/app/UPET# cat run.py
+import logging
+import os
+import sys
+import numpy as np
+from typing import Dict
+
+import datasets
+import transformers
+from transformers import set_seed, Trainer
+from transformers.trainer_utils import get_last_checkpoint
+
+from arguments import get_args
+
+from tasks.utils import *
+
+os.environ["WANDB_DISABLED"] = "true"
+
+logger = logging.getLogger(__name__)
+
+def train(trainer, resume_from_checkpoint=None, last_checkpoint=None):
+    checkpoint = None
+    if resume_from_checkpoint is not None:
+        checkpoint = resume_from_checkpoint
+    elif last_checkpoint is not None:
+        checkpoint = last_checkpoint
+    train_result = trainer.train(resume_from_checkpoint=checkpoint)
+    # trainer.save_model()，
+
+    try:
+        metrics = train_result.metrics
+
+        trainer.log_metrics("train", metrics)
+        trainer.save_metrics("train", metrics)
+        trainer.save_state()
+
+        trainer.log_best_metrics()
+    except:
+        pass
+
+def evaluate(trainer):
+    logger.info("*** Evaluate ***")
+    metrics = trainer.evaluate()
+
+    trainer.log_metrics("eval", metrics)
+    trainer.save_metrics("eval", metrics)
+
+def predict(trainer, predict_dataset=None):
+    if predict_dataset is None:
+        logger.info("No dataset is available for testing")
+
+    elif isinstance(predict_dataset, dict):
+
+        for dataset_name, d in predict_dataset.items():
+            logger.info("*** Predict: %s ***" % dataset_name)
+            predictions, labels, metrics = trainer.predict(d, metric_key_prefix="predict")
+            predictions = np.argmax(predictions, axis=2)
+
+            trainer.log_metrics("predict", metrics)
+            trainer.save_metrics("predict", metrics)
+
+    else:
+        logger.info("*** Predict ***")
+        predictions, labels, metrics = trainer.predict(predict_dataset, metric_key_prefix="predict")
+        predictions = np.argmax(predictions, axis=2)
+
+        trainer.log_metrics("predict", metrics)
+        trainer.save_metrics("predict", metrics)
+
+if __name__ == '__main__':
+
+    args = get_args()
+
+    _, data_args, training_args, semi_training_args, _ = args
+
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+    log_level = training_args.get_process_log_level()
+    logger.setLevel(log_level)
+    datasets.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.enable_default_handler()
+    transformers.utils.logging.enable_explicit_format()
+
+    # Log on each process the small summary:
+    logger.warning(
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
+        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+    )
+    logger.info(f"Training/evaluation parameters {training_args}")
+
+
+    if not os.path.isdir("checkpoints") or not os.path.exists("checkpoints"):
+        os.mkdir("checkpoints")
+
+    if data_args.task_name.lower() == "superglue":
+        assert data_args.dataset_name.lower() in SUPERGLUE_DATASETS
+        from tasks.superglue.get_trainer import get_trainer
+
+    elif data_args.task_name.lower() == "glue":
+        assert data_args.dataset_name.lower() in GLUE_DATASETS
+        from tasks.glue.get_trainer import get_trainer
+
+    elif data_args.task_name.lower() == "ner":
+        assert data_args.dataset_name.lower() in NER_DATASETS
+        from tasks.ner.get_trainer import get_trainer
+
+    elif data_args.task_name.lower() == "srl":
+        assert data_args.dataset_name.lower() in SRL_DATASETS
+        from tasks.srl.get_trainer import get_trainer
+
+    elif data_args.task_name.lower() == "qa":
+        assert data_args.dataset_name.lower() in QA_DATASETS
+        from tasks.qa.get_trainer import get_trainer
+
+    elif data_args.task_name.lower() == "other_cls":
+        assert data_args.dataset_name.lower() in OTHER_DATASETS
+        from tasks.other_cls.get_trainer import get_trainer
+
+    else:
+        raise NotImplementedError('Task {} is not implemented. Please choose a task from: {}'.format(data_args.task_name, ", ".join(TASKS)))
+
+    set_seed(training_args.seed)
+
+    trainer, predict_dataset = get_trainer(args)
+
+    last_checkpoint = None
+    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
+        last_checkpoint = get_last_checkpoint(training_args.output_dir)
+        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
+            raise ValueError(
+                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+                "Use --overwrite_output_dir to overcome."
+            )
+        elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
+            logger.info(
+                f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
+                "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
+            )
+
+
+    if training_args.do_train:
+        train(trainer, training_args.resume_from_checkpoint, last_checkpoint)
+
+    # if training_args.do_eval:
+    #     evaluate(trainer)
+
+    # if training_args.do_predict:
+    #     predict(trainer, predict_dataset)
+
+   root@2623c8c1b420:/app/UPET#

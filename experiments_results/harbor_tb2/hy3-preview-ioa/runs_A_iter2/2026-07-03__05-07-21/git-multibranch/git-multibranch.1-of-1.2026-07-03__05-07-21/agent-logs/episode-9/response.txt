@@ -1,0 +1,10 @@
+{
+  "analysis": "The push authenticates but then fails with 'bad line length character: Welc'. The first four bytes received are 'Welc' — i.e. the server is emitting a 'Welcome to Ubuntu...' MOTD onto the SSH session's stdout, corrupting the git protocol. This is the classic pam_motd issue: even non-interactive SSH sessions run pam_motd (via /etc/pam.d/sshd), which prints /etc/motd into the git data channel. PrintMotd was disabled but pam_motd is separate. I need to disable pam_motd (and any sshd Banner).",
+  "plan": "1) Inspect /etc/pam.d/sshd for pam_motd lines and /etc/ssh/sshd_config for a Banner. 2) Comment out the pam_motd lines (and any Banner). 3) Restart sshd. 4) Retry the push for 'main'. 5) Then push 'dev' and curl both endpoints.",
+  "commands": [
+    {
+      "keystrokes": "grep -n pam_motd /etc/pam.d/sshd; echo '---'; grep -n -i banner /etc/ssh/sshd_config; echo '---'; head -3 /etc/motd 2>/dev/null\n",
+      "duration": 0.3
+    }
+  ]
+}

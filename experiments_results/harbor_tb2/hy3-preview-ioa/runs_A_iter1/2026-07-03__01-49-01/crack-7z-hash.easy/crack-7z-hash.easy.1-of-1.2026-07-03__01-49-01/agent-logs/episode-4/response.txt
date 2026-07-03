@@ -1,0 +1,18 @@
+{
+  "analysis": "The filesystem reports 0 available (100% full) on the overlay. apt refused because it thinks there's no free space. But the container's own footprint is only ~523M, so the '957G used' is likely host-level. I need to determine whether the container can actually write files. Let me test write capability and look for large files I might clean. The 7z2john.pl needs libcompress-raw-lzma-perl and I'll need 7z to extract.",
+  "plan": "Test if I can write a multi-MB file to /tmp (overlay). If writes work, apt's disk check is conservative and I can proceed by freeing the apt space check. Also inspect /logs and /data for huge files I could safely truncate. Then attempt the install again, possibly bypassing apt's free-space check.",
+  "commands": [
+    {
+      "keystrokes": "fallocate -l 5M /tmp/wtest 2>&1; ls -la /tmp/wtest; rm -f /tmp/wtest\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "du -sh /logs /data 2>/dev/null; ls -la /logs 2>/dev/null\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "df -i /\n",
+      "duration": 0.1
+    }
+  ]
+}

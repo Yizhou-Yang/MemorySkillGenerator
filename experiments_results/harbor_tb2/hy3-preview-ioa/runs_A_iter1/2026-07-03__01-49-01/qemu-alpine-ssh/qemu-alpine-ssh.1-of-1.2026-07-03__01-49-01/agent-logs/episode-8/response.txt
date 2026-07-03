@@ -1,0 +1,24 @@
+The `-no-kvm` flag is gone and the VM is now booting. Let me first check whether the current run (with `init=/bin/sh`) gave us a usable shell, then switch to a clean live boot which will give us the full system and a proper getty on the serial console.
+
+{
+  "analysis": "qemu is now launching (TCG mode). The current run uses `init=/bin/sh` which drops a shell in the initramfs, but that's a limited busybox environment without apk/openssh. I need the full live system. Alpine's live ISO, booted with `console=ttyS0` and no init override, will run the normal init, switch_root into the live system, and (Alpine's default inittab includes a ttyS0 getty) present a root login on the serial console. Let me relaunch without the init override.",
+  "plan": "1) Kill the current vm session. 2) Update run_vm.sh to remove `init=/bin/sh` (keep `console=ttyS0`). 3) Relaunch in tmux. 4) Poll for a login prompt or shell on ttyS0. Then log in as root and proceed to set up networking, openssh, and the root password.",
+  "commands": [
+    {
+      "keystrokes": "tmux kill-session -t vm 2>/dev/null\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /app/run_vm.sh << 'EOF'\n#!/bin/sh\nexec qemu-system-x86_64 \\\n  -m 1024 -smp 2 -accel tcg \\\n  -display none -monitor none -serial stdio \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device e1000,netdev=net0 \\\n  -cdrom /app/alpine.iso \\\n  -kernel /app/boot/vmlinuz \\\n  -initrd /app/boot/initramfs \\\n  -append 'console=ttyS0'\nEOF\nchmod +x /app/run_vm.sh\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "tmux new-session -d -s vm '/app/run_vm.sh'\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 8; tmux capture-pane -pt vm | tail -n 30\n",
+      "duration": 9.0
+    }
+  ]
+}

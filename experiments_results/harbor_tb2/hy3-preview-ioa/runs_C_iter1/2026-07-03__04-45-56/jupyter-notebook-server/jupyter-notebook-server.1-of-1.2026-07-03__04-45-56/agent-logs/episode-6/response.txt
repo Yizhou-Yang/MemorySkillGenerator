@@ -1,0 +1,10 @@
+{
+  "analysis": "SSL cert (mycert.pem) and key (mykey.key) generated in /root/.jupyter/. Now I need to compute the password hash for 'benchmarkpass', write the jupyter_server_config.py explicitly with all required keys, and create the sample notebook.",
+  "plan": "Run a Python script that: (1) computes the argon2 password hash using jupyter_server.auth.passwd, (2) writes /root/.jupyter/jupyter_server_config.py with ip/port/certfile/keyfile/password explicitly, and (3) creates test_notebook.ipynb with a markdown cell and a code cell plotting a sine wave. Then verify the config file exists.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'PY'\nfrom jupyter_server.auth import passwd\nimport json\n\npwd_hash = passwd('benchmarkpass')\nprint('HASH:', pwd_hash)\n\ncfg = '''c.ServerApp.ip = '0.0.0.0'\nc.ServerApp.port = 8888\nc.ServerApp.certfile = '/root/.jupyter/mycert.pem'\nc.ServerApp.keyfile = '/root/.jupyter/mykey.key'\nc.ServerApp.password = {ph!r}\nc.ServerApp.open_browser = False\nc.ServerApp.allow_root = True\n'''.format(ph=pwd_hash)\n\nwith open('/root/.jupyter/jupyter_server_config.py','w') as f:\n    f.write(cfg)\nprint('config written')\nPY\n",
+      "duration": 2.0
+    }
+  ]
+}

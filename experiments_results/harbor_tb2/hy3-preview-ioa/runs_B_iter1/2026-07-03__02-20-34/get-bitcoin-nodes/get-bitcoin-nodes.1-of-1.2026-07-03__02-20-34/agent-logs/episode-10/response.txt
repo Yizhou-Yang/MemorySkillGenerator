@@ -1,0 +1,12 @@
+I've learned enough about bitcoinlib. Let me verify the blockstream.info REST API response shapes since bitcoinlib doesn't reliably return a transaction's block_hash, then finalize the implementation.
+
+{
+  "analysis": "bitcoinlib's Service works for blocks (returns block_hash bytes, height, merkle_root bytes, time, nonce_int) but returns False for invalid hashes/txids and does NOT reliably populate a transaction's block_hash. To get the required schema fields (especially transaction blockhash and scriptPubKey asm), the blockstream.info REST API provides clean, schema-matching JSON. I'll verify blockstream response shapes before writing the service.",
+  "plan": "Test blockstream.info endpoints: /api/block/<genesis>, /api/block/<genesis>/txid, /api/tx/<genesis coinbase>, and /api/blocks/tip/height. Confirm field names (id, height, merkle_root, timestamp, nonce; status.block_hash; vin[].coinbase/sequence; vout[].value/n/scriptpubkey.{asm,hex,type}). Then write bitcoin_service.py.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'PY'\nimport requests\nb='000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f'\nt='4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b'\nr=requests.get('https://blockstream.info/api/block/'+b,timeout=15); print('BLOCK', r.status_code); print(r.json())\nprint('--- txids ---')\nr=requests.get('https://blockstream.info/api/block/'+b+'/txid',timeout=15); print(r.status_code, r.json()[:3])\nprint('--- tx ---')\nr=requests.get('https://blockstream.info/api/tx/'+t,timeout=15); print(r.status_code)\nimport json; d=r.json(); print('txid',d['txid']); print('status',d['status']); print('vin0',d['vin'][0]); print('vout0',d['vout'][0])\nprint('--- tip ---')\nr=requests.get('https://blockstream.info/api/blocks/tip/height',timeout=15); print(r.status_code, r.text)\nPY\n",
+      "duration": 40.0
+    }
+  ]
+}

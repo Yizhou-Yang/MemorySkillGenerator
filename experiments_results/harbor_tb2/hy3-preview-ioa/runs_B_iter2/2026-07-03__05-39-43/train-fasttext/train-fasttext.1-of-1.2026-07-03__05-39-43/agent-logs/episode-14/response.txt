@@ -1,0 +1,14 @@
+{
+  "analysis": "Python's urllib failed with SSL WRONG_VERSION_NUMBER — a strong sign of an HTTP proxy intercepting HTTPS, while `apt-get update` worked fine (apt handles the proxy/CA correctly). Separately, apt refuses to install g++ because the fuse-overlayfs reports Avail=0 via statvfs even though the disk is genuinely writable (we wrote 300MB successfully). I need to (a) understand the proxy so I can fetch anything via Python if needed, and (b) find a way to get a C++ compiler past apt's false space guard.",
+  "plan": "First check for proxy environment variables. Then test whether I can mount a tmpfs over apt's cache directory — a tmpfs reports its own size as available space, which should satisfy apt's disk-space guard and let `apt-get install g++` proceed. If I can get g++, pip can compile fasttext-wheel.",
+  "commands": [
+    {
+      "keystrokes": "env | grep -i proxy; cat /etc/apt/apt.conf.d/* 2>/dev/null | grep -i proxy\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "mkdir -p /mnt/t && mount -t tmpfs -o size=2g tmpfs /mnt/t 2>&1; df -h /mnt/t 2>&1\n",
+      "duration": 1.0
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+New Terminal Output:
+
+root@e7b935aa5229:/app# kill 501 2>/dev/null; sleep 0.5; sed -i 's/6665/6666/' /app/run-qemu.sh; grep serial /app/run-qemu.sh
+  -serial telnet:127.0.0.1:6666,server,nowait \
+root@e7b935aa5229:/app# cat > /app/serial-proxy.py << 'PYEOF'
+> import socket, select, threading
+>
+> QEMU_HOST, QEMU_PORT = "127.0.0.1", 6666
+> LISTEN_PORT = 6665
+>
+> def bridge(client):
+>     try:
+>         up = socket.create_connection((QEMU_HOST, QEMU_PORT), timeout=5)
+>     except Exception:
+>         try: client.close()
+>         except Exception: pass
+>         return
+>     try:
+>         up.sendall(b"\r\n")
+>     except Exception:
+>         pass
+>     client.setblocking(False)
+>     up.setblocking(False)
+>     polled = [client, up]
+>     while True:
+>         try:
+>             r, _, _ = select.select(polled, [], [], 0.5)
+>         except Exception:
+>             break
+>         if not r:
+>             continue
+>         for src, dst in ((client, up), (up, client)):
+>             if src not in r:
+>                 continue
+>             try:
+>                 data = src.recv(4096)
+>             except (BlockingIOError, OSError):
+>                 continue
+>             if not data:
+>                 try: client.close()
+>                 except Exception: pass
+>                 try: up.close()
+>                 except Exception: pass
+>                 return
+>             try:
+>                 dst.sendall(data)
+>             except OSError:
+>                 try: client.close()
+>                 except Exception: pass
+>                 try: up.close()
+>                 except Exception: pass
+>                 return
+>
+> def main():
+>     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+>     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+>     srv.bind(("127.0.0.1", LISTEN_PORT))
+>     srv.listen(1)
+>     while True:
+>         try:
+>             client, _ = srv.accept()
+>         except Exception:
+>             continue
+>         t = threading.Thread(target=bridge, args=(client,), daemon=True)
+>         t.start()
+>
+> if __name__ == "__main__":
+>     main()
+> PYEOF
+root@e7b935aa5229:/app# /app/run-qemu.sh
+qemu pid 733
+root@e7b935aa5229:/app# nohup python3 /app/serial-proxy.py > /app/proxy.log 2>&1 &
+[1] 742
+root@e7b935aa5229:/app# sleep 1; echo '--- qemu log ---'; cat /app/qemu.log; echo '--- proxy log ---'; cat /app/proxy.log; echo '--- port 6666 (qemu) / 6665 (pr
+oxy) ---'; python3 -c "import socket;[print(p, __import__('os').system('')) for p in [6666,6665]]"
+--- qemu log ---
+--- proxy log ---
+nohup: ignoring input
+--- port 6666 (qemu) / 6665 (proxy) ---
+6666 0
+6665 0
+root@e7b935aa5229:/app#

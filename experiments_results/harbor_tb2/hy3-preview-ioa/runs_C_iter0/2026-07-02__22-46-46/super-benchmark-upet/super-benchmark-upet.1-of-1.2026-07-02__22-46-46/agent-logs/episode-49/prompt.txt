@@ -1,0 +1,44 @@
+New Terminal Output:
+
+root@2623c8c1b420:/app/UPET# sed -n '1,40p' /usr/local/lib/python3.10/site-packages/datasets/table.py
+import copy
+import os
+import tempfile
+from functools import wraps
+from itertools import groupby
+from typing import List, Optional, Tuple, TypeVar, Union
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
+
+from . import config
+from .utils.logging import get_logger
+
+
+logger = get_logger(__name__)
+
+
+def inject_arrow_table_documentation(arrow_table_method):
+    def wrapper(method):
+        out = wraps(arrow_table_method)(method)
+        out.__doc__ = out.__doc__.replace("pyarrow.Table", "Table")
+        return out
+
+    return wrapper
+
+
+def _in_memory_arrow_table_from_file(filename: str) -> pa.Table:
+    in_memory_stream = pa.input_stream(filename)
+    opened_stream = pa.ipc.open_stream(in_memory_stream)
+    pa_table = opened_stream.read_all()
+    return pa_table
+
+
+def _in_memory_arrow_table_from_buffer(buffer: pa.Buffer) -> pa.Table:
+    stream = pa.BufferReader(buffer)
+    opened_stream = pa.ipc.open_stream(stream)
+    table = opened_stream.read_all()
+    return table
+
+root@2623c8c1b420:/app/UPET#

@@ -1,0 +1,19 @@
+{
+  "analysis": "The install failed only because apt's disk-space pre-check (df) reports the overlay filesystem as 100% full (Avail 0). But `du` shows only ~180M of actual files; the 957G used is the shared read-only base image. This is likely a fuse-overlayfs reporting artifact. I need to verify whether the writable layer actually has space, and clean/free space if needed before retrying the install.",
+  "plan": "Investigate: check inode usage, confirm the overlay mount, and test whether I can actually write a file to the writable layer. Then look for large files to remove. If the overlay genuinely has no space, I'll use a tmpfs for the apt download cache as a workaround. Let me gather info first.",
+  "commands": [
+    {
+      "keystrokes": "df -i / ; mount | grep -i overlay\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmp/testfile bs=1M count=10 2>&1; echo EXIT=$?; rm -f /tmp/testfile\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "find /var /tmp /root -type f -size +5M 2>/dev/null\n",
+      "duration": 1.0
+    }
+  ],
+  "task_complete": false
+}

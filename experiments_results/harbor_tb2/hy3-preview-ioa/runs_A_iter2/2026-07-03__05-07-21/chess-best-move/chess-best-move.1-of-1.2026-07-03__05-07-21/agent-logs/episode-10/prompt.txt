@@ -1,0 +1,84 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@e4205ab934cc:/app# cat > /tmp/match3.py << 'EOF'
+> from PIL import Image, ImageFont, ImageDraw
+> import numpy as np
+>
+> S=80
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> arr = np.asarray(im).astype(int)
+>
+> # 12 glyphs; code defines type and color (upper=white outline, lower=black solid)
+> glyphs = {
+>   'K':0x2654,'Q':0x2655,'R':0x2656,'B':0x2657,'N':0x2658,'P':0x2659,
+>   'k':0x265A,'q':0x265B,'r':0x265C,'b':0x265D,'n':0x265E,'p':0x265F,
+> }
+> font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 64)
+>
+> def norm_mask(mask):
+>     ys,xs=np.where(mask)
+>     if len(xs)==0: return np.zeros((64,64),bool)
+>     y0,y1,x0,x1=ys.min(),ys.max()+1,xs.min(),xs.max()+1
+>     crop=mask[y0:y1,x0:x1]
+>     h,w=crop.shape
+>     side=max(h,w)
+>     canvas=np.zeros((side,side),bool)
+>     oy=(side-h)//2; ox=(side-w)//2
+>     canvas[oy:oy+h,ox:ox+w]=crop
+>     return np.array(Image.fromarray(canvas).resize((64,64)))
+>
+> templ={}
+> for name,cp in glyphs.items():
+>     img=Image.new('L',(S,S),255)
+>     d=ImageDraw.Draw(img)
+>     d.text((S/2,S/2),chr(cp),font=font,fill=0,anchor='mm')
+>     m=np.asarray(img)<128
+>     templ[name]=norm_mask(m)
+>
+> def iou(a,b):
+>     return (a&b).sum()/max((a|b).sum(),1)
+>
+> for r in range(8):
+>     for c in range(8):
+>         sq=arr[r*S:(r+1)*S, c*S:(c+1)*S]
+>         bg=np.median(sq.reshape(-1,3),axis=0)
+>         d=np.abs(sq-bg).sum(axis=2)
+>         m=d>50
+>         if m.sum()<60: continue
+>         nm=norm_mask(m)
+>         scores=sorted(((iou(nm,tm),name) for name,tm in templ.items()),reverse=True)
+>         top=scores[:3]
+>         sqname=chr(ord('a')+c)+str(8-r)
+>         info=' '.join('%s:%02d'%(n,int(s*100)) for s,n in top)
+>         print(sqname, info, 'ink=%d'%m.sum())
+> EOF
+root@e4205ab934cc:/app# python3 /tmp/match3.py
+a8 p:37 n:35 k:35 ink=900
+c8 b:87 p:64 n:56 ink=577
+d8 q:75 n:53 r:52 ink=810
+f8 r:87 p:60 n:53 ink=874
+b7 p:93 n:65 r:62 ink=848
+f7 p:93 n:65 r:62 ink=848
+g7 p:93 n:65 r:62 ink=844
+a6 p:45 n:39 k:39 ink=874
+c6 n:88 p:67 r:58 ink=859
+e6 p:93 n:65 r:62 ink=848
+d5 n:88 p:67 r:58 ink=859
+e5 P:77 p:50 b:38 ink=479
+f5 k:77 n:56 p:53 ink=1026
+g5 b:87 p:64 n:55 ink=568
+h5 P:80 p:47 b:38 ink=428
+a3 k:24 p:22 b:21 ink=502
+c3 N:49 P:22 n:21 ink=273
+b2 P:77 p:50 b:38 ink=479
+e2 Q:46 q:43 p:31 ink=435
+f2 P:77 p:50 b:38 ink=479
+g2 P:80 p:47 b:38 ink=428
+a1 b:23 p:22 q:20 ink=515
+c1 B:39 b:38 p:37 ink=409
+e1 k:32 q:32 n:29 ink=602
+h1 r:30 q:28 p:26 ink=457
+root@e4205ab934cc:/app#

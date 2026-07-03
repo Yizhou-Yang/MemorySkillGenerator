@@ -1,0 +1,25 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+"find / -name 'secrets.7z' 2>/dev/null\n"
+'which 7z 7za 7zr p7zip\n'
+'which 7z 7za 7zr p7zip 2>/dev/null; echo done\n'
+'command -v 7z; command -v 7za; command -v 7zr; command -v 7z; echo END\n'
+''
+'command -v python3; command -v apt-get; command -v pip3; echo END\n'
+'apt-get install -y p7zip-full 2>&1 | tail -5\n'
+"df -h / /tmp; echo '---'; python3 -m pip --version 2>&1 | head -2\n"
+'apt-get clean; df -h / | tail -1\n'
+'apt-get install -y p7zip-full 2>&1 | tail -4\n'
+'xxd /app/secrets.7z | head -20\n'
+'command -v curl wget; echo END\n'
+"du -sh /app/john /var/cache/apt 2>/dev/null; echo '---'; ls /var/cache/apt/archives/ 2>/dev/null\n"
+'python3 -c "f=open(\'/app/secrets.7z\',\'rb\').read(); print(len(f)); print(f[:32].hex())"\n'
+'ls -la /app/john\n'
+"find /app/john -maxdepth 2 -type f \\( -name '7z*' -o -name 'john*' -o -name '*7za*' \\) 2>/dev/null\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+"cat > /tmp/parse.py << 'EOF'\nimport struct\n\ndef readnum(buf, pos):\n    result = 0; shift = 0\n    while True:\n        b = buf[pos]; pos += 1\n        result |= (b & 0x7f) << shift\n        if not (b & 0x80):\n            break\n        shift += 7\n    return result, pos\n\ndata = open('/app/secrets.7z','rb').read()\nL = len(data)\nst = data[L-20:]\nnho = struct.unpack('<Q', st[0:8])[0]\nnhs = struct.unpack('<I', st[8:12])[0]\nnhc = struct.unpack('<I', st[12:16])[0]\nprint('nho',nho,'nhs',nhs,'nhc',hex(nhc))\nhdr_off = L - 32 - nho\nprint('hdr_off', hdr_off)\nheader = data[hdr_off:hdr_off+nhs]\nprint('header', header.hex())\nprint('header len', len(header))\nprint('packed region:', 32, '..', L-32, 'len', (L-32)-32)\nEOF\npython3 /tmp/parse.py\n"
+['C-d']
+['C-d']

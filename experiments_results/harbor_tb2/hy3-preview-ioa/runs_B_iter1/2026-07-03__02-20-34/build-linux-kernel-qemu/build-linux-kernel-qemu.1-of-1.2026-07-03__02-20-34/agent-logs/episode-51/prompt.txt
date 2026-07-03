@@ -1,0 +1,30 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@278e6bd6a15f:/app# cat > /tmp/probe.py <<'EOF'
+> import urllib.request
+> hdr={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36'}
+> urls=[
+>  'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',
+>  'https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',
+>  'https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',
+>  'https://ftp.plusline.net/pub/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz',
+>  'https://mirrors.ustc.edu.cn/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz',
+> ]
+> for u in urls:
+>     try:
+>         req=urllib.request.Request(u,headers=hdr,method='HEAD')
+>         r=urllib.request.urlopen(req,timeout=30)
+>         print(r.status, u)
+>     except Exception as e:
+>         print('ERR', type(e).__name__, e, u)
+> EOF
+root@278e6bd6a15f:/app# python3 /tmp/probe.py
+ERR HTTPError HTTP Error 404: Not Found https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz
+ERR HTTPError HTTP Error 404: Not Found https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz
+ERR HTTPError HTTP Error 404: Not Found https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz
+ERR HTTPError HTTP Error 404: Not Found https://ftp.plusline.net/pub/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz
+200 https://mirrors.ustc.edu.cn/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz
+root@278e6bd6a15f:/app#

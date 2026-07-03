@@ -1,0 +1,10 @@
+{
+  "analysis": "df reports the overlay filesystem as 100% full (0 available), yet du only shows ~186M of files. This large discrepancy (966G 'used' but only 186M visible) typically means deleted files are still held open by processes (space not freed), or there's a quota/backing-store issue. Before anything else, I should verify if I can actually write files, and look for deleted-but-open files consuming space.",
+  "plan": "First test real write capability with a small dd. Then check lsof for deleted large files. If I find deleted files held open, truncating them may free the backing space. If writing works, the df report may be misleading and I can proceed differently.",
+  "commands": [
+    {
+      "keystrokes": "df -h; echo '--- write test ---'; dd if=/dev/zero of=/tmp/testfile bs=1M count=10 2>&1; ls -la /tmp/testfile; rm -f /tmp/testfile\n",
+      "duration": 2.0
+    }
+  ]
+}

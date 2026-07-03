@@ -1,0 +1,22 @@
+New Terminal Output:
+
+root@25b72636e59b:/app/astropy# pip list 2>/dev/null | grep -iE 'erfa|numpy|pytest|astropy|scipy'
+root@25b72636e59b:/app/astropy# python - <<'EOF'
+> import re
+> _command_re = r"(?i:READ [TS]ERR(\s+[0-9]+)+)"
+> sep = r"\s+"
+> _new_re = rf"NO({sep}NO)+"
+> _decimal_re = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+> _data_re = rf"({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)"
+> _type_re = re.compile(rf"^\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\s*(\!(?P<comment>.*))?\s*$")
+> for line in ['read serr 1 2','READ SERR 1 2','Read Terr 1','READ TERR 3','1 0.5 1 0.5','NO NO NO']:
+>     m=_type_re.match(line.strip())
+>     print(repr(line), '->', None if m is None else [k for k,v in m.groupdict().items() if v is not None])
+> EOF
+'read serr 1 2' -> ['command']
+'READ SERR 1 2' -> ['command']
+'Read Terr 1' -> ['command']
+'READ TERR 3' -> ['command']
+'1 0.5 1 0.5' -> ['data']
+'NO NO NO' -> ['new']
+root@25b72636e59b:/app/astropy#

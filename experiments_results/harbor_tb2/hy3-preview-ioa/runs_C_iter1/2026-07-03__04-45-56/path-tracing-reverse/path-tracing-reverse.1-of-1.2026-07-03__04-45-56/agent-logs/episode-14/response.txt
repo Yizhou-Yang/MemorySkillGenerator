@@ -1,0 +1,21 @@
+Step 1: PPM = P3 ASCII 800x600 maxval 255.
+Step 2: progress bar exact (`\rProgress: %.1f%%`, 100*i/600, i=0..599).
+Step 3: full ray tracer (sphere+plane+sky+shadows) writing image.ppm.
+Step 4: decoded rodata constants (0.001, 1e-4, 0.2, 0.9, 0.4, -1.5, 0.8, 255.99, 100, 600, 599, 799, 8/3, 4/3, 0.5, 0.7, -0.5, -5.0, 1.0).
+Step 5: decoded vector/ray/sphere/plane/sky/shadow math.
+Step 6: decoded main camera-ray loop + color combine (color = 0.2 + 0.8*shade per channel, then *255.99 truncated).
+
+{
+  "analysis": "I have most of the algorithm. The pixel color is (R,G,B) floats stored in an 800x600 buffer, then write_image converts each via (int)(c*255.99) truncation. I still need: (1) the rest of main where trace() is called and how [rsp+0x8/0xc/0x1c/0x18/0x10] shade components are set, (2) the full trace() function to know exactly what it returns, (3) the constant vector at 0x31a0. Then I'll write mystery.c and iterate diffing image.ppm against /tmp/ref.ppm.",
+  "plan": "Step 7: dump main 0x145e-0x1670 (trace call + arg setup), the full trace() 0x2150-0x2630, and rodata bytes at 0x31a0 to recover the camera/origin constant vector. Then reconstruct C and iterate.",
+  "commands": [
+    {
+      "keystrokes": "echo 'STEP 7a: main trace call + arg setup'; objdump -d -M intel --start-address=0x145e --stop-address=0x1670 ./mystery\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "echo 'STEP 7b: rodata 0x31a0..0x31b0'; objdump -s -j .rodata --start-address=0x31a0 --stop-address=0x31b0 ./mystery\n",
+      "duration": 0.3
+    }
+  ]
+}

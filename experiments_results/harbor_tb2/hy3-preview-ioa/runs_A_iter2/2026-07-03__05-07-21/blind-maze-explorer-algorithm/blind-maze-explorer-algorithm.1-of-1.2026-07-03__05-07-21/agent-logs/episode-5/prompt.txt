@@ -1,0 +1,56 @@
+New Terminal Output:
+
+root@5e3475dd7004:/app# cat > /tmp/verify.py << 'PYEOF'
+> import subprocess, os
+>
+> def gt(mid):
+>     r = subprocess.run(['python3','/protected/maze_helper.py', str(mid)],
+>                        capture_output=True, text=True)
+>     return r.stdout
+>
+> def out(mid):
+>     with open(f'/app/output/{mid}.txt') as f:
+>         return f.read()
+>
+> allok = True
+> for mid in range(1,11):
+>     g = gt(mid)
+>     o = out(mid).strip()
+>     if g == o:
+>         print(f'maze {mid}: OK')
+>     else:
+>         allok = False
+>         print(f'maze {mid}: MISMATCH')
+>         gl = g.splitlines()
+>         ol = o.splitlines()
+>         print('  gt lines:', len(gl), 'out lines:', len(ol))
+>         for i in range(max(len(gl), len(ol))):
+>             a = gl[i] if i < len(gl) else '<none>'
+>             b = ol[i] if i < len(ol) else '<none>'
+>             if a != b:
+>                 print(f'  row {i}: gt=[{a}] out=[{b}]')
+> print('ALL OK' if allok else 'SOME FAILED')
+> PYEOF
+root@5e3475dd7004:/app# python3 /tmp/verify.py
+maze 1: MISMATCH
+  gt lines: 4 out lines: 4
+maze 2: MISMATCH
+  gt lines: 8 out lines: 8
+maze 3: MISMATCH
+  gt lines: 15 out lines: 15
+maze 4: MISMATCH
+  gt lines: 20 out lines: 20
+maze 5: MISMATCH
+  gt lines: 4 out lines: 4
+maze 6: MISMATCH
+  gt lines: 6 out lines: 6
+maze 7: MISMATCH
+  gt lines: 8 out lines: 8
+maze 8: MISMATCH
+  gt lines: 20 out lines: 20
+maze 9: MISMATCH
+  gt lines: 10 out lines: 10
+maze 10: MISMATCH
+  gt lines: 4 out lines: 4
+SOME FAILED
+root@5e3475dd7004:/app#

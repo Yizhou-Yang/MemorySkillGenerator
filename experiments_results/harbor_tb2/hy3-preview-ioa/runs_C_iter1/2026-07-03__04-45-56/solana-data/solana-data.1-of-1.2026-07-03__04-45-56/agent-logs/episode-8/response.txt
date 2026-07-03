@@ -1,0 +1,14 @@
+{
+  "analysis": "The transparent egress proxy reaches some hosts but blocks Solana's official RPC hosts (all return 502). However, rpc.ankr.com returned a TLS response (OK) — it's reachable. Ankr provides a public Solana RPC endpoint at https://rpc.ankr.com/solana. I'll verify it works end-to-end with a real JSON-RPC getHealth call.",
+  "plan": "Test a full HTTPS JSON-RPC request to https://rpc.ankr.com/solana using urllib to confirm it returns valid Solana responses. If it works, I'll build the server proxying to Ankr's endpoint. Ankr's endpoint serves mainnet-beta by default. I'll verify getHealth, getSlot, getVersion, getClusterNodes work there.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/t2.py << 'EOF'\nimport urllib.request, json\nurl='https://rpc.ankr.com/solana'\nfor m in ['getHealth','getSlot','getVersion','getClusterNodes']:\n    req=urllib.request.Request(url, data=json.dumps({'jsonrpc':'2.0','id':1,'method':m,'params':[] if m!='getClusterNodes' else []}).encode(), headers={'Content-Type':'application/json'})\n    try:\n        r=urllib.request.urlopen(req, timeout=25)\n        print(m, r.read().decode()[:200])\n    except Exception as e:\n        print(m,'ERR',repr(e)[:120])\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /tmp/t2.py\n",
+      "duration": 30.0
+    }
+  ]
+}

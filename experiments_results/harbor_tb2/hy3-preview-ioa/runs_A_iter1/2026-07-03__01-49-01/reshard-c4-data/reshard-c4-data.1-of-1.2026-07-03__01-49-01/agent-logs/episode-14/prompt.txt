@@ -1,0 +1,96 @@
+New Terminal Output:
+
+root@613463f80ab1:/app# rm -rf /app/c4_reshard /app/c4_reshard_manifest.json
+cat > /app/build_reshard.py << 'PYEOF'
+import os, json, shutil
+SCRIPT_DIR = "/app"
+SRC = os.path.join(SCRIPT_DIR, "c4_sample")
+DST = os.path.join(SCRIPT_DIR, "c4_reshard")
+MAX_FILES = 30
+MAX_SIZE = 15 * 1024 * 1024
+os.makedirs(DST, exist_ok=True)
+files = sorted(f for f in os.listdir(SRC) if os.path.isfile(os.path.join(SRC, f)))
+shards = []
+def new_shard():
+    folder = os.path.join(DST, "shard_%05d" % len(shards))
+    os.makedirs(folder, exist_ok=True)
+    shards.append({"folder": os.path.basename(folder), "files": []})
+    return folder
+new_shard()
+entries = []
+for fn in files:
+    src = os.path.join(SRC, fn)
+    size = os.path.getsize(src)
+    folder = os.path.join(DST, shards[-1]["folder"])
+    if len(shards[-1]["files"]) >= MAX_FILES:
+        folder = new_shard()
+    if size <= MAX_SIZE:
+        shutil.copy2(src, os.path.join(folder, fn))
+        shards[-1]["files"].append(fn)
+        entries.append({"orig": fn, "parts": [os.path.join(shards[-1]["folder"], fn)]})
+    else:
+        nparts = (size + MAX_SIZE - 1) // MAX_SIZE
+        parts = []
+        with open(src, "rb") as inp:
+            for i in range(nparts):
+                if len(shards[-1]["files"]) >= MAX_FILES:
+                    folder = new_shard()
+                partname = "%s.__part_%03d" % (fn, i)
+                with open(os.path.join(folder, partname), "wb") as out:
+                    out.write(inp.read(MAX_SIZE))
+                shards[-1]["files"].append(partname)
+                parts.append(os.path.join(shards[-1]["folder"], partname))
+        entries.append({"orig": fn, "parts": parts})
+manifest = {"max_files_per_folder": MAX_FILES, "max_filesize": MAX_SIZE, "entries": entries}
+with open(os.path.join(SCRIPT_DIR, "c4_reshard_manifest.json"), "w") as f:
+    json.dump(manifest, f)
+print("shards:", len(shards), "files:", len(files))
+PYEOF
+python3 /app/build_reshard.py
+root@613463f80ab1:/app# cat > /app/build_reshard.py << 'PYEOF'
+> import os, json, shutil
+> SCRIPT_DIR = "/app"
+> SRC = os.path.join(SCRIPT_DIR, "c4_sample")
+> DST = os.path.join(SCRIPT_DIR, "c4_reshard")
+> MAX_FILES = 30
+> MAX_SIZE = 15 * 1024 * 1024
+> os.makedirs(DST, exist_ok=True)
+> files = sorted(f for f in os.listdir(SRC) if os.path.isfile(os.path.join(SRC, f)))
+> shards = []
+> def new_shard():
+>     folder = os.path.join(DST, "shard_%05d" % len(shards))
+>     os.makedirs(folder, exist_ok=True)
+>     shards.append({"folder": os.path.basename(folder), "files": []})
+>     return folder
+> new_shard()
+> entries = []
+> for fn in files:
+>     src = os.path.join(SRC, fn)
+>     size = os.path.getsize(src)
+>     folder = os.path.join(DST, shards[-1]["folder"])
+>     if len(shards[-1]["files"]) >= MAX_FILES:
+>         folder = new_shard()
+>     if size <= MAX_SIZE:
+>         shutil.copy2(src, os.path.join(folder, fn))
+>         shards[-1]["files"].append(fn)
+>         entries.append({"orig": fn, "parts": [os.path.join(shards[-1]["folder"], fn)]})
+>     else:
+>         nparts = (size + MAX_SIZE - 1) // MAX_SIZE
+>         parts = []
+>         with open(src, "rb") as inp:
+>             for i in range(nparts):
+>                 if len(shards[-1]["files"]) >= MAX_FILES:
+>                     folder = new_shard()
+>                 partname = "%s.__part_%03d" % (fn, i)
+>                 with open(os.path.join(folder, partname), "wb") as out:
+>                     out.write(inp.read(MAX_SIZE))
+>                 shards[-1]["files"].append(partname)
+>                 parts.append(os.path.join(shards[-1]["folder"], partname))
+>         entries.append({"orig": fn, "parts": parts})
+> manifest = {"max_files_per_folder": MAX_FILES, "max_filesize": MAX_SIZE, "entries": entries}
+> with open(os.path.join(SCRIPT_DIR, "c4_reshard_manifest.json"), "w") as f:
+>     json.dump(manifest, f)
+> print("shards:", len(shards), "files:", len(files))
+> PYEOF
+root@613463f80ab1:/app# python3 /app/build_reshard.py
+

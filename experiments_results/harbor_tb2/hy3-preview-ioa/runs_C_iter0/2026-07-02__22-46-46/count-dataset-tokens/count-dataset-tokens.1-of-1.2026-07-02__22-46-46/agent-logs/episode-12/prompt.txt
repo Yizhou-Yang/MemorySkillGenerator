@@ -1,0 +1,55 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@734323cdc8b8:/app/work# cat > /app/work/run.py << 'EOF'
+> import os
+> from datasets import load_dataset
+> from tokenizers import Tokenizer
+>
+> snap = "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json"
+> tok = Tokenizer.from_file(snap)
+>
+> ds = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train", streaming=True)
+>
+> total = 0
+> science_count = 0
+> batch = []
+> batch_limit = 2000
+>
+> def flush():
+>     global total
+>     if not batch:
+>         return
+>     encs = tok.encode_batch(batch)
+>     for e in encs:
+>         total += len(e.ids)
+>     batch.clear()
+>
+> try:
+>     for ex in ds:
+>         d = ex.get('domain')
+>         if d == 'science':
+>             science_count += 1
+>             r = ex.get('deepseek_reasoning') or ''
+>             s = ex.get('deepseek_solution') or ''
+>             batch.append(r)
+>             batch.append(s)
+>             if len(batch) >= batch_limit:
+>                 flush()
+>                 print('progress science=%d tokens=%d' % (science_count, total), flush=True)
+> finally:
+>     flush()
+>
+> print('SCIENCE_COUNT', science_count, flush=True)
+> print('TOTAL_TOKENS', total, flush=True)
+> with open('/app/answer.txt', 'w') as f:
+>     f.write(str(total))
+>     f.flush()
+> os._exit(0)
+> EOF
+root@734323cdc8b8:/app/work# echo written
+written
+root@734323cdc8b8:/app/work# python3 /app/work/run.py 2>&1 | tail -5
+

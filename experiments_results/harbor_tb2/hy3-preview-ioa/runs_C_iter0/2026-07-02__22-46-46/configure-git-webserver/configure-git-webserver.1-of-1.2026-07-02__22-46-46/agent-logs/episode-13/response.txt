@@ -1,0 +1,11 @@
+{
+  "analysis": "The tmpfs mount was denied (fuse-overlayfs blocks it). The root cause is apt's pre-install free-space check reading statvfs on this overlay, which falsely reports 0 bytes free even though writing files works fine (I proved 50MB wrote OK). Rather than fight apt's space check, I'll bypass it: use `apt-get install --print-uris` to list the exact .deb download URLs (no disk check needed for printing), download them with python3's urllib, then install with `dpkg -i` (which doesn't do the apt space pre-check). I'll drop curl since python3 can handle any HTTP testing.",
+  "plan": "1) Generate .deb URI list for git and openssh-server into a file. 2) Verify the file looks sane (URLs present). 3) Use a python3 one-liner to download all .debs into /tmp/debs. 4) dpkg -i them. I'll start with generating and inspecting the URI list.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /tmp/debs; apt-get install --print-uris -y git openssh-server > /tmp/uris.txt 2>&1; echo \"exit=$?\"; wc -l /tmp/uris.txt; head -5 /tmp/uris.txt\n",
+      "duration": 5.0
+    }
+  ],
+  "task_complete": false
+}

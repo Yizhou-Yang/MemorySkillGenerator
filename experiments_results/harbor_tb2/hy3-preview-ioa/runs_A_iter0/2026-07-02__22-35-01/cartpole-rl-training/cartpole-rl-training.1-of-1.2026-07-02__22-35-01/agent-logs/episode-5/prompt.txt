@@ -1,0 +1,127 @@
+New Terminal Output:
+
+root@71888fc67f93:/app# cat > /app/train.py << 'EOF'
+> import os
+> import random
+> from collections import deque
+>
+nv.reset()
+        ep = 0
+        while True:
+            action = agent.select_action(obs)
+            obs, r, term, trunc, _ = env.step(action)
+            ep += r
+            if term or trunc:
+                break
+        tot += ep
+    return tot / n
+
+
+if __name__ == "__main__":
+    train()
+EOF
+> import numpy as np
+> import torch
+> import torch.nn.functional as F
+> import gymnasium as gym
+>
+> from agent import Agent
+>
+>
+> def train():
+>     env = gym.make("CartPole-v1")
+>     agent = Agent()
+>     device = agent.device
+>
+>     capacity = 20000
+>     batch_size = 128
+>     gamma = 0.99
+>     lr = 1e-3
+>     target_update = 200
+>     num_episodes = 1200
+>     epsilon_start = 1.0
+>     epsilon_end = 0.02
+>     epsilon_decay = 1000
+>
+>     buffer = deque(maxlen=capacity)
+>     optimizer = torch.optim.Adam(agent.policy_net.parameters(), lr=lr)
+>     agent.optimizer = optimizer
+>
+>     steps_done = 0
+>     best_avg = -1
+>
+>     def epsilon_by_frame(f):
+>         return epsilon_end + (epsilon_start - epsilon_end) * np.exp(-f / epsilon_decay)
+>
+>     def optimize():
+>         if len(buffer) < batch_size:
+>             return
+>         batch = random.sample(buffer, batch_size)
+>         states, actions, rewards, nexts, dones = zip(*batch)
+>         states = torch.as_tensor(np.array(states, dtype=np.float32), device=device)
+>         actions = torch.as_tensor(np.array(actions, dtype=np.int64), device=device).unsqueeze(1)
+>         rewards = torch.as_tensor(np.array(rewards, dtype=np.float32), device=device).unsqueeze(1)
+>         nexts = torch.as_tensor(np.array(nexts, dtype=np.float32), device=device)
+>         dones = torch.as_tensor(np.array(dones, dtype=np.float32), device=device).unsqueeze(1)
+>
+>         q_vals = agent.policy_net(states).gather(1, actions)
+>         with torch.no_grad():
+>             next_actions = agent.policy_net(nexts).argmax(1, keepdim=True)
+>             next_q = agent.target_net(nexts).gather(1, next_actions)
+>             target = rewards + gamma * next_q * (1 - dones)
+>         loss = F.smooth_l1_loss(q_vals, target)
+>         optimizer.zero_grad()
+>         loss.backward()
+>         torch.nn.utils.clip_grad_norm_(agent.policy_net.parameters(), 10)
+>         optimizer.step()
+>
+>     for ep in range(num_episodes):
+>         obs, _ = env.reset()
+>         total = 0
+>         eps = epsilon_by_frame(steps_done)
+>         while True:
+>             steps_done += 1
+>             if np.random.rand() < eps:
+>                 action = int(env.action_space.sample())
+>             else:
+>                 action = agent.select_action(obs)
+>             nxt, reward, terminated, truncated, _ = env.step(action)
+>             done = terminated or truncated
+>             buffer.append((obs, action, reward, nxt, done))
+>             obs = nxt
+>             total += reward
+>             optimize()
+>             if done:
+>                 break
+>         if ep % target_update == 0:
+>             agent.target_net.load_state_dict(agent.policy_net.state_dict())
+>
+>         if ep % 25 == 0:
+>             rew = evaluate(agent, env)
+>             print(f"Ep {ep}, eps {eps:.3f}, train {total:.0f}, eval {rew:.1f}")
+>             if rew > best_avg and rew >= 400:
+>                 best_avg = rew
+>                 agent.save("/app/trained_model")
+>     agent.save("/app/trained_model")
+>     env.close()
+>
+>
+> def evaluate(agent, env, n=25):
+>     tot = 0
+>     for _ in range(n):
+>         obs, _ = env.reset()
+>         ep = 0
+>         while True:
+>             action = agent.select_action(obs)
+>             obs, r, term, trunc, _ = env.step(action)
+>             ep += r
+>             if term or trunc:
+>                 break
+>         tot += ep
+>     return tot / n
+>
+>
+> if __name__ == "__main__":
+>     train()
+> EOF
+root@71888fc67f93:/app#

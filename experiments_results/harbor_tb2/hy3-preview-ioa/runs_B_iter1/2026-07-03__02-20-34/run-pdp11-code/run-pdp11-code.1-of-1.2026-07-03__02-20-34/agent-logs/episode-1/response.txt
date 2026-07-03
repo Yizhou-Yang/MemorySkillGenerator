@@ -1,0 +1,18 @@
+{
+  "analysis": "The hexdump shows 16-bit little-endian octal words. The first word is 000407 octal = 0x0107, which is the PDP-11 a.out OMAGIC (0407) magic number. The 8-word (16-byte) header that follows (text=1062, data=30, bss=572, syms=276, ...) plus device addresses like 0o177776 (PDP-11 I/O space) confirm this is a PDP-11 a.out executable. The program appears to do polled console I/O. I need to reconstruct the binary, identify it, and run it (likely via a PDP-11 emulator).",
+  "plan": "1. Reconstruct the binary from data.hex by parsing the octal 16-bit words (little-endian) into bytes. 2. Verify the magic and extract any printable strings (the program's output may be a static string). 3. Check the environment for a PDP-11 emulator (simh/pdp11) and tools. Then decide how to execute it.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/recon.py << 'EOF'\nimport re\nout = bytearray()\nwith open('/app/data.hex') as f:\n    for line in f:\n        toks = line.split()\n        if not toks:\n            continue\n        for w in toks[1:]:\n            v = int(w, 8)\n            out.append(v & 0xFF)\n            out.append((v >> 8) & 0xFF)\nopen('/tmp/data.bin','wb').write(out)\nprint('len', len(out))\nprint('first32', out[:32].hex())\nfor r in re.findall(rb'[\\x20-\\x7e]{4,}', bytes(out)):\n    print(r.decode())\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /tmp/recon.py\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "file /tmp/data.bin; which simh pdp11 2>/dev/null; ls /usr/bin | grep -i pdp\n",
+      "duration": 0.2
+    }
+  ]
+}

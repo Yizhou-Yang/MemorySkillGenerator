@@ -1,0 +1,50 @@
+New Terminal Output:
+
+root@ec9d7e8ea249:/app# cat > fit.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+>
+> # Convert decimal commas -> dots so numpy can read it
+> raw = open('graphene.dat').read().replace(',', '.')
+> from io import StringIO
+> data = np.loadtxt(StringIO(raw))
+> x = data[:, 0]; y = data[:, 1]
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+>
+> def lorentzian(x, x0, gamma, amp, offset):
+>     return offset + amp * gamma**2 / ((x - x0)**2 + gamma**2)
+>
+> def fit_peak(center, half, amp0, off0):
+>     m = (x > center - half) & (x < center + half)
+>     xf, yf = x[m], y[m]
+>     p0 = [center, half * 0.1, amp0, off0]
+>     popt, pcov = curve_fit(lorentzian, xf, yf, p0=p0, maxfev=200000)
+>     return popt
+>
+> # G peak around x=19139
+> mG = (x > 15000) & (x < 24000)
+> g_off0 = np.median(y[mG][y[mG] < np.percentile(y[mG], 40)])
+> g_amp0 = y[mG].max() - g_off0
+> gp = fit_peak(19139, 5000, g_amp0, g_off0)
+>
+> # 2D peak around x=33244
+> mD = (x > 28000) & (x < 40000)
+> d_off0 = np.median(y[mD])
+> d_amp0 = y[mD].max() - d_off0
+> dp = fit_peak(33244, 6000, d_amp0, d_off0)
+>
+> result = {
+>     "G":  {"x0": float(gp[0]), "gamma": float(abs(gp[1])), "amplitude": float(gp[2]), "offset": float(gp[3])},
+>     "2D": {"x0": float(dp[0]), "gamma": float(abs(dp[1])), "amplitude": float(dp[2]), "offset": float(dp[3])},
+> }
+> with open('results.json', 'w') as f:
+>     json.dump(result, f, indent=2)
+> print('G  params:', gp)
+> print('2D params:', dp)
+> EOF
+root@ec9d7e8ea249:/app# python3 fit.py
+G  params: [19198.88235539   382.91665022 72650.22426569 13696.72422763]
+2D params: [34945.64995675 11129.68502743 12871.43420537  7472.78621533]
+root@ec9d7e8ea249:/app#

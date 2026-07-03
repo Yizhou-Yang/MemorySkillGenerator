@@ -1,0 +1,10 @@
+{
+  "analysis": "gcc, cc, and make are now installed and working (gcc 13.3.0, GNU Make 4.3). Now I need to download the SQLite source into /app/sqlite, compile it with gcov instrumentation (--coverage), and make sqlite3 available in PATH. I'll fetch the SQLite autoconf tarball (which includes a configure script) from sqlite.org, since that's the easiest to build with coverage.",
+  "plan": "1) Create /app/sqlite and a python script that fetches the SQLite download page, finds the latest autoconf tarball URL, downloads it, and extracts it into /app/sqlite. 2) Inspect the extracted directory. Then I'll configure with --coverage and build.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /app/sqlite; cat > /tmp/get_sqlite.py <<'PY'\nimport urllib.request, re, os, sys, tarfile\nhdr={'User-Agent':'Mozilla/5.0'}\nhtml=urllib.request.urlopen(urllib.request.Request('https://www.sqlite.org/download.html', headers=hdr), timeout=60).read().decode('utf-8','ignore')\nm=re.findall(r'href=\"([^\"]*sqlite-autoconf-\\d+\\.tar\\.gz)\"', html)\nprint('candidates:', m[:5])\nurl='https://www.sqlite.org/'+m[0]\nprint('using', url)\ndata=urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=120).read()\nopen('/app/sqlite/sqlite.tar.gz','wb').write(data)\nprint('downloaded bytes:', len(data))\nos.chdir('/app/sqlite')\ntarfile.open('sqlite.tar.gz').extractall('.')\nfor d in os.listdir('.'):\n    if os.path.isdir(d): print('extracted dir:', d)\nPY\npython3 /tmp/get_sqlite.py\n",
+      "duration": 15.0
+    }
+  ]
+}

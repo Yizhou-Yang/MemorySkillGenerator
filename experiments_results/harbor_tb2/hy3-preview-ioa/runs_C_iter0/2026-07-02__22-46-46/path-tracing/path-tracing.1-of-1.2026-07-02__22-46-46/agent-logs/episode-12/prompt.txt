@@ -1,0 +1,60 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+- Extra text detected after JSON object
+
+New Terminal Output:
+
+root@e4e667a7dedd:/app# cat > /tmp/an4.py << 'EOF'
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> hdr_end=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[hdr_end:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> # Top region parabola fit per row
+> print('TOP parabola R(x,y)=a+b*(x-400)^2  (a at x=400, b from x=0)')
+> for y in range(0,260,20):
+>     a=get(400,y)[0]
+>     b=(get(0,y)[0]-a)/(400.0*400.0)
+>     print('y=%3d a=%3d b=%+.6f  G_a=%d' % (y,a,b,get(400,y)[1]))
+> # gradient direction histogram in bottom region
+> gx=[0]*(w*h); gy=[0]*(w*h)
+> for y in range(1,h-1):
+>     for x in range(1,w-1):
+>         r,xp=get(x+1,y)[0],get(x-1,y)[0]
+>         dyp=get(x,y+1)[0]-get(x,y-1)[0]
+>         gx[y*w+x]=r-xp; gy[y*w+x]=dyp
+> from collections import Counter
+> c=Counter()
+> for y in range(350,599):
+>     for x in range(1,w-1):
+>         gxx=gx[y*w+x]; gyy=gy[y*w+x]
+>         if abs(gxx)+abs(gyy)<3: continue
+>         ang=(round((3.14159265+math.atan2(gyy,gxx))/(math.pi/9))%18)*10
+>         c[ang]+=1
+> print('gradient angle histogram (bottom):')
+> for k in sorted(c): print(' %3d deg: %d' % (k,c[k]))
+> import math
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an4.py
+TOP parabola R(x,y)=a+b*(x-400)^2  (a at x=400, b from x=0)
+y=  0 a=146 b=+0.000081  G_a=190
+y= 20 a=148 b=+0.000075  G_a=191
+y= 40 a=150 b=+0.000075  G_a=192
+y= 60 a=152 b=+0.000075  G_a=193
+y= 80 a=154 b=+0.000075  G_a=194
+y=100 a=156 b=+0.000075  G_a=196
+y=120 a=159 b=+0.000069  G_a=197
+y=140 a=161 b=+0.000069  G_a=199
+y=160 a=165 b=+0.000056  G_a=201
+y=180 a=168 b=+0.000056  G_a=203
+y=200 a=171 b=+0.000050  G_a=205
+y=220 a=175 b=+0.000037  G_a=207
+y=240 a=179 b=+0.000031  G_a=210
+Traceback (most recent call last):
+  File "/tmp/an4.py", line 27, in <module>
+    ang=(round((3.14159265+math.atan2(gyy,gxx))/(math.pi/9))%18)*10
+                           ^^^^
+NameError: name 'math' is not defined. Did you forget to import 'math'?
+root@e4e667a7dedd:/app#

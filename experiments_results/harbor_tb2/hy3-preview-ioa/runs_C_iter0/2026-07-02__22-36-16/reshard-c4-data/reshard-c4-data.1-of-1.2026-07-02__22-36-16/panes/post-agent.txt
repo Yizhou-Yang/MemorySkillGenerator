@@ -1,0 +1,302 @@
+root@3bded9ad04d7:/app# ls -la
+total 524
+drwxr-xr-x  3 root root   4096 Jul  2 15:34 .
+drwxr-xr-x 19 root root   4096 Jul  2 17:43 ..
+drwxr-xr-x  2 root root 524288 Jul  2 15:33 c4_sample
+root@3bded9ad04d7:/app# find . -maxdepth 2 -type d | head -50
+ls -la c4_sample 2>/dev/null | head
+.
+./c4_sample
+root@3bded9ad04d7:/app# ls -la c4_sample 2>/dev/null | head
+total 818680
+drwxr-xr-x 2 root root 524288 Jul  2 15:33 .
+drwxr-xr-x 3 root root   4096 Jul  2 15:34 ..
+-rw-r--r-- 1 root root  70534 Jul  2 15:29 c4-mini-00000-of-10000.jsonl
+-rw-r--r-- 1 root root  76424 Jul  2 15:29 c4-mini-00001-of-10000.jsonl
+-rw-r--r-- 1 root root  82593 Jul  2 15:29 c4-mini-00002-of-10000.jsonl
+-rw-r--r-- 1 root root  85007 Jul  2 15:29 c4-mini-00003-of-10000.jsonl
+-rw-r--r-- 1 root root  67509 Jul  2 15:29 c4-mini-00004-of-10000.jsonl
+-rw-r--r-- 1 root root  82415 Jul  2 15:29 c4-mini-00005-of-10000.jsonl
+-rw-r--r-- 1 root root  97058 Jul  2 15:29 c4-mini-00006-of-10000.jsonl
+root@3bded9ad04d7:/app# ls -la c4_sample |
+> ls c4_sample | wc -l
+du -sh c4_sample
+9898
+find c4_sample -type f | wc -l
+find c4_sample -type d
+root@3bded9ad04d7:/app# du -sh c4_sample
+800M    c4_sample
+root@3bded9ad04d7:/app# find c4_sample -type f | wc -l
+9898
+root@3bded9ad04d7:/app# find c4_sample -type d
+c4_sample
+root@3bded9ad04d7:/app# find c4_sample -type f | wc -l
+9898
+root@3bded9ad04d7:/app# du -sh c4_sample
+800M    c4_sample
+root@3bded9ad04d7:/app# ls -la c4_sample | tail -3
+stat -c '%s' c4_sample/*.jsonl | sort -n | tail -1
+-rw-r--r-- 1 root root  54540 Jul  2 15:33 c4-mini-09895-of-10000.jsonl
+-rw-r--r-- 1 root root  70250 Jul  2 15:33 c4-mini-09896-of-10000.jsonl
+-rw-r--r-- 1 root root  69648 Jul  2 15:33 c4-mini-09897-of-10000.jsonl
+root@3bded9ad04d7:/app# stat -c '%s' c4_sample/*.jsonl | sort -n | tail -1
+307834
+root@3bded9ad04d7:/app# cat > /app/revert.py << 'PYEOF'
+> #!/usr/bin/env python3
+> '''Revert c4_reshard/ back to the original c4_sample/ flat layout.
+>
+> c4_reshard was produced by reorganizing the files of c4_sample into
+> sub-directories (each holding at most 30 files) for upload. This script
+> moves every file found under c4_reshard/ back into c4_sample/ and removes
+> the now-empty shards, restoring the original flat structure.
+> '''
+> import os
+> import shutil
+> import sys
+>
+> BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+> RESHARD = os.path.join(BASE_DIR, 'c4_reshard')
+> SAMPLE = os.path.join(BASE_DIR, 'c4_sample')
+>
+>
+> def main():
+>     if not os.path.isdir(RESHARD):
+>         print('Nothing to revert: ' + RESHARD + ' does not exist.', file=sys.stderr)
+>         return 1
+>
+>     os.makedirs(SAMPLE, exist_ok=True)
+>
+>     moved = 0
+>     for entry in sorted(os.listdir(RESHARD)):
+>         shard = os.path.join(RESHARD, entry)
+>         if not os.path.isdir(shard):
+>             shutil.move(shard, os.path.join(SAMPLE, entry))
+>             moved += 1
+>             continue
+>         for name in sorted(os.listdir(shard)):
+>             src = os.path.join(shard, name)
+>             if os.path.isfile(src):
+>                 shutil.move(src, os.path.join(SAMPLE, name))
+>                 moved += 1
+>         try:
+>             os.rmdir(shard)
+>         except OSError:
+>             pass
+>
+>     try:
+>         os.rmdir(RESHARD)
+>     except OSError:
+>         pass
+>
+>     print('Reverted ' + str(moved) + ' file(s) from c4_reshard/ back into c4_sample/.')
+>     return 0
+>
+>
+> if __name__ == '__main__':
+>     sys.exit(main())
+> PYEOF
+root@3bded9ad04d7:/app# python3 - << 'PREPEOF'
+> import os, shutil
+> src = 'c4_sample'
+> dst = 'c4_reshard'
+> os.makedirs(dst, exist_ok=True)
+> files = sorted(os.listdir(src))
+> per = 30
+> part = 0
+> count = 0
+> cur = None
+> for f in files:
+>     if cur is None or count == per:
+>         cur = os.path.join(dst, 'part_%06d' % part)
+>         os.makedirs(cur, exist_ok=True)
+>         part += 1
+>         count = 0
+>     shutil.move(os.path.join(src, f), os.path.join(cur, f))
+>     count += 1
+> print('moved', len(files), 'files into', part, 'parts')
+> PREPEOF
+echo '--- prep result above ---'; find c4_reshard -type f | wc -l; ls c4_sample | wc -l
+echo 'max files per dir:'; for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1
+echo 'num shards:'; ls -d c4_reshard/part_* | wc -l
+echo 'max file bytes:'; find c4_reshard -type f -printf '%s\n' | sort -n | tail -1
+ls -la /app/revert.py
+
+find c4_reshard -type f | wc -l
+ls c4_sample | wc -l
+for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1
+ls -d c4_reshard/part_* | wc -l
+find c4_reshard -type f -printf '%s\n' | sort -n | tail -1
+
+echo RESULT_START; find c4_reshard -type f | wc -l; ls c4_sample | wc -l; ls -d c4_reshard/part_* | wc -l; find c4_reshard -type f -printf '%s\n' | sort -n | ta
+il -1; echo RESULT_END
+
+^Cecho HELLO; pwd
+Traceback (most recent call last):
+  File "<stdin>", line 16, in <module>
+  File "/usr/local/lib/python3.13/shutil.py", line 856, in move
+    os.rename(src, real_dst)
+    ~~~~~~~~~^^^^^^^^^^^^^^^
+KeyboardInterrupt
+
+root@3bded9ad04d7:/app# echo HELLO; pwd
+HELLO
+/app
+root@3bded9ad04d7:/app# echo SAMPLE_REMAIN; ls c4_sample | wc -l
+SAMPLE_REMAIN
+6888
+root@3bded9ad04d7:/app# echo PARTS; ls -d c4_reshard/part_* 2>/dev/null | wc -l
+PARTS
+101
+root@3bded9ad04d7:/app# echo COUNTS; for d in c4_reshard/part_*; do echo $(ls "$d" | wc -l); done | tr '\n' ' '; echo
+COUNTS
+30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 3
+0 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 10
+root@3bded9ad04d7:/app# python3 - << 'PREPEOF'
+> import os, shutil
+> src = 'c4_sample'
+> dst = 'c4_reshard'
+> os.makedirs(dst, exist_ok=True)
+> per = 30
+>
+> def part_for(i):
+>     return os.path.join(dst, 'part_%06d' % i)
+>
+> # find highest existing part index
+> idx = -1
+> for e in os.listdir(dst):
+>     if e.startswith('part_'):
+>         try:
+>             n = int(e.split('_')[1])
+>             idx = max(idx, n)
+>         except ValueError:
+>             pass
+> if idx < 0:
+>     idx = 0
+>     os.makedirs(part_for(idx), exist_ok=True)
+>
+> files = sorted(os.listdir(src))
+> moved = 0
+> for f in files:
+>     cur = part_for(idx)
+>     if len(os.listdir(cur)) >= per:
+>         idx += 1
+>         cur = part_for(idx)
+>         os.makedirs(cur, exist_ok=True)
+>     shutil.move(os.path.join(src, f), os.path.join(cur, f))
+>     moved += 1
+> print('continued, moved', moved, 'files; last part idx', idx)
+> PREPEOF
+
+echo VERIFY_TOTAL; find c4_reshard -type f | wc -l
+echo SAMPLE_LEFT; ls c4_sample | wc -l
+echo MAXPER; for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1
+echo NUMPARTS; ls -d c4_reshard/part_* | wc -l
+echo MAXBYTES; find c4_reshard -type f -printf '%s\n' | sort -n | tail -1
+
+echo DONE_TOTAL; find c4_reshard -type f | wc -l; ls c4_sample | wc -l; ls -d c4_reshard/part_* | wc -l; for d in c4_reshard/part_*; do ls "$d" | wc -l; done |
+sort -n | tail -1; find c4_reshard -type f -printf '%s\n' | sort -n | tail -1
+
+
+C-c
+echo READY
+
+C-c
+echo ALIVE_$$
+^CTraceback (most recent call last):
+  File "<stdin>", line 31, in <module>
+  File "/usr/local/lib/python3.13/shutil.py", line 856, in move
+    os.rename(src, real_dst)
+    ~~~~~~~~~^^^^^^^^^^^^^^^
+KeyboardInterrupt
+
+root@3bded9ad04d7:/app# ^C
+root@3bded9ad04d7:/app#
+root@3bded9ad04d7:/app# echo R; ls c4_sample | wc -l; ls -d c4_reshard/part_* 2>/dev/null | wc -l; ls c4_reshard/part_* 2>/dev/null | tail -1 | xargs -r ls | wc
+ -l
+R
+1976
+265
+ls: cannot access 'c4-mini-07921-of-10000.jsonl': No such file or directory
+0
+root@3bded9ad04d7:/app# python3 - << 'PREPEOF'
+> import os, shutil
+> src = 'c4_sample'
+> dst = 'c4_reshard'
+> os.makedirs(dst, exist_ok=True)
+> per = 30
+>
+> def part_for(i):
+>     return os.path.join(dst, 'part_%06d' % i)
+>
+> idx = -1
+> for e in os.listdir(dst):
+>     if e.startswith('part_'):
+>         try:
+>             idx = max(idx, int(e.split('_')[1]))
+>         except ValueError:
+>             pass
+> if idx < 0:
+>     idx = 0
+>     os.makedirs(part_for(idx), exist_ok=True)
+>
+> files = sorted(os.listdir(src))
+> moved = 0
+> for f in files:
+>     cur = part_for(idx)
+>     if len(os.listdir(cur)) >= per:
+>         idx += 1
+>         cur = part_for(idx)
+>         os.makedirs(cur, exist_ok=True)
+>     shutil.move(os.path.join(src, f), os.path.join(cur, f))
+>     moved += 1
+> print('completed, moved', moved, 'files; last part idx', idx)
+> PREPEOF
+
+completed, moved 1976 files; last part idx 329
+root@3bded9ad04d7:/app#
+root@3bded9ad04d7:/app# echo FINAL; ls c4_sample | wc -l; find c4_reshard -type f | wc -l
+FINAL
+0
+9898
+root@3bded9ad04d7:/app# find c4_reshard -type f | wc -l
+9898
+root@3bded9ad04d7:/app# for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | uniq | tail -5
+ls -d c4_reshard/part_* | wc -l
+find c4_reshard -type f -printf '%s\n' | sort -n | tail -1
+28
+30
+root@3bded9ad04d7:/app# ls -d c4_reshard/part_* | wc -l
+330
+root@3bded9ad04d7:/app# find c4_reshard -type f -printf '%s\n' | sort -n | tail -1
+307834
+root@3bded9ad04d7:/app# python3 - << 'PYEOF'
+> import os
+> src = 'c4_sample'
+> dst = 'c4_reshard'
+> os.makedirs(src, exist_ok=True)
+> # 1) restore original flat c4_sample from current c4_reshard parts
+> for d in sorted(os.listdir(dst)):
+>     sub = os.path.join(dst, d)
+>     if os.path.isdir(sub):
+>         for f in sorted(os.listdir(sub)):
+>             os.rename(os.path.join(sub, f), os.path.join(src, f))
+>         os.rmdir(sub)
+> # now src has all files; dst is empty
+> # 2) rebuild c4_reshard as reshaped hard-linked copy
+> files = sorted(os.listdir(src))
+> per = 30
+> idx = 0
+> cur = os.path.join(dst, 'part_%06d' % idx)
+> os.makedirs(cur)
+> for i, f in enumerate(files):
+>     if i % per == 0 and i != 0:
+>         idx += 1
+>         cur = os.path.join(dst, 'part_%06d' % idx)
+>         os.makedirs(cur)
+>     os.link(os.path.join(src, f), os.path.join(cur, f))
+> print('rebuilt: c4_sample has', len(os.listdir(src)), 'files; parts=', idx + 1)
+> PYEOF
+
+rebuilt: c4_sample has 9898 files; parts= 330
+root@3bded9ad04d7:/app#
+root@3bded9ad04d7:/app#

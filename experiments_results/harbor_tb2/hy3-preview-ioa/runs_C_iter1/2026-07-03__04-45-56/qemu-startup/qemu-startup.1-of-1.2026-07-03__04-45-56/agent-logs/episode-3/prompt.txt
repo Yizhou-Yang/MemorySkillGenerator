@@ -1,0 +1,96 @@
+New Terminal Output:
+
+root@7fa4dd3267d3:/app# cat > /tmp/iso.py << 'PYEOF'
+> import sys
+>
+> ISO='/app/alpine.iso'
+> SECTOR=2048
+>
+> def read_at(f,lba,size):
+>     f.seek(lba*SECTOR)
+>     return f.read(size)
+>
+> def parse_record(data,off):
+>     length=data[off]
+>     if length<33: return None
+>     name_len=data[off+32]
+>     name=data[off+33:off+33+name_len].split(b';')[0].decode('latin1')
+>     ext_lba=int.from_bytes(data[off+2:off+6],'little')
+>     size=int.from_bytes(data[off+10:off+14],'little')
+>     is_dir=bool(data[off+25]&2)
+>     return {'name':name,'lba':ext_lba,'size':size,'is_dir':is_dir}
+>
+> def list_dir(f,lba,size):
+>     data=read_at(f,lba,size)
+>     entries=[]; off=0
+>     while off<len(data):
+>         length=data[off]
+>         if length==0:
+>             off=(off//SECTOR+1)*SECTOR
+>             continue
+>         rec=parse_record(data,off)
+>         if rec: entries.append(rec)
+>         off+=length
+>     return entries
+>
+> def root_dir(f):
+>     pvd=read_at(f,16,SECTOR)
+>     return parse_record(pvd,156)
+>
+> def find(f,path):
+>     parts=[p for p in path.split('/') if p]
+>     cur=root_dir(f)
+>     for part in parts:
+>         if not cur['is_dir']:
+>             raise NotADirectoryError(cur['name'])
+>         entries=list_dir(f,cur['lba'],cur['size'])
+>         nxt=None
+>         for e in entries:
+>             if e['name'].lower()==part.lower():
+>                 nxt=e; break
+>         if nxt is None:
+>             raise FileNotFoundError('not found: '+part)
+>         cur=nxt
+>     return cur
+>
+> def main():
+>     f=open(ISO,'rb')
+>     cmd=sys.argv[1]
+>     if cmd=='list':
+>         rec=find(f,sys.argv[2])
+>         for e in list_dir(f,rec['lba'],rec['size']):
+>             print(('D' if e['is_dir'] else 'F'), e['name'], e['lba'], e['size'])
+>     elif cmd=='cat':
+>         rec=find(f,sys.argv[2])
+>         data=read_at(f,rec['lba'],rec['size'])
+>         sys.stdout.buffer.write(data)
+>     elif cmd=='extract':
+>         rec=find(f,sys.argv[2])
+>         data=read_at(f,rec['lba'],rec['size'])
+>         with open(sys.argv[3],'wb') as o:
+>             o.write(data)
+>         print('wrote',sys.argv[3],rec['size'])
+>
+> main()
+> PYEOF
+root@7fa4dd3267d3:/app# python3 /tmp/iso.py list /
+D  20 2048
+D  20 2048
+F .ALPINE_RELEASE 859 30
+D APKS 22 2048
+D BOOT 62 2048
+D EFI 66 2048
+root@7fa4dd3267d3:/app# python3 /tmp/iso.py list /boot
+D  62 2048
+D  20 2048
+F AMD_UCODE.IMG 377338 61440
+F CONFIG_LTS. 377368 261013
+D DTBS_LTS 63 2048
+D GRUB 64 2048
+F INITRAMFS_LTS. 377583 20486092
+F INTEL_UCODE.IMG 475863 7367952
+F MODLOOP_LTS. 387587 180789248
+D SYSLINUX 65 2048
+F SYSTEM.MAP_LTS 480379 5751847
+F VMLINUZ_LTS. 483188 11879168
+root@7fa4dd3267d3:/app#

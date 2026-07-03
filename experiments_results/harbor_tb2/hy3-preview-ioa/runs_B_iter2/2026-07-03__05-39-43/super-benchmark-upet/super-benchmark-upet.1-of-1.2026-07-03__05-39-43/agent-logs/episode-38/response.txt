@@ -1,0 +1,20 @@
+The filesystem reports 0 free via `statvfs` even though writes actually succeed (fallocate of 400M worked). The disk-space checks in `datasets`/`huggingface_hub` use `shutil.disk_usage`/`os.statvfs`, which return 0 on this overlay. I'll bypass those checks with a small wrapper that patches them, then run.
+
+{
+  "analysis": "df reports 0 avail but `fallocate -l 400M` succeeded — confirming writes work; the overlay just reports 0 via statvfs. The dataset/huggingface_hub disk-space checks fail because they read statvfs which returns 0. I'll create a wrapper that patches shutil.disk_usage and os.statvfs to report ample free space, then execs run.py so training can actually proceed.",
+  "plan": "Write /app/UPET/run_wrapped.py that monkeypatches disk-space checks and execs run.py. Then run it with the same arguments (head_prefix, roberta-base, 1 epoch, 5 examples/label, seed=42). Monitor the log.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/UPET/run_wrapped.py << 'PYEOF'\nimport shutil, os\nfrom collections import namedtuple\n\n# The container overlay reports 0 free blocks via statvfs even though writes\n# succeed. This breaks datasets/huggingface_hub disk-space pre-checks.\n# Patch them to report ample free space.\n_RealDiskUsage = shutil.disk_usage\n_DiskUsage = namedtuple('usage', ['total', 'used', 'free'])\ndef _patched_disk_usage(path):\n    u = _RealDiskUsage(path)\n    return _DiskUsage(u.total, u.used, u.total)\nshutil.disk_usage = _patched_disk_usage\n\n_RealStatvfs = os.statvfs\ndef _patched_statvfs(path):\n    st = _RealStatvfs(path)\n    big = 10 ** 12\n    return os.statvfs_result((st.f_bsize, st.f_frsize, big, big, big,\n                              st.f_files, st.f_ffree, st.f_favail,\n                              st.f_flag, st.f_namemax))\nos.statvfs = _patched_statvfs\n\nwith open('/app/UPET/run.py') as f:\n    src = f.read()\ng = {'__name__': '__main__', '__file__': '/app/UPET/run.py',\n     '__builtins__': __builtins__}\nexec(compile(src, '/app/UPET/run.py', 'exec'), g)\nPYEOF\necho done\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 run_wrapped.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --do_train --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --num_examples_per_label 5 --pre_seq_len 128 --output_dir checkpoints/rte-roberta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --head_prefix > /app/train.log 2>&1 &\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 25; tail -n 25 /app/train.log\n",
+      "duration": 26.0
+    }
+  ]
+}

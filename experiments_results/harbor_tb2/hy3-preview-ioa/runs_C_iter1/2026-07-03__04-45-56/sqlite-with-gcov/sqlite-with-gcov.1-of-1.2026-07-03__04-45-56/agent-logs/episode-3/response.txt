@@ -1,0 +1,10 @@
+{
+  "analysis": "apt-get install failed with 'You don't have enough free space in /var/cache/apt/archives/' - but df --total showed 126G free. This means /var/cache/apt/archives (or the root filesystem it sits on) is on a different, likely small, partition. The error is apt's pre-flight check on the archives cache, not necessarily a real global shortage. I need to inspect individual mounts ONCE to understand where the constraint actually is, then act without looping.",
+  "plan": "1. Run `df -h` once (no --total, to see per-mount) to identify which filesystem is full. This is a single, justified diagnostic - not the loop. 2. Based on result, redirect apt's download cache to /app (which has space) using `-o Dir::Cache=/app/aptcache`, and if / (root) is the constraint, reconsider. Most likely I can just point the cache elsewhere since the real overflow is only the cache dir.",
+  "commands": [
+    {
+      "keystrokes": "df -h / /var /app /tmp\n",
+      "duration": 0.2
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "analysis": "The push failed with 'protocol error: bad line length character: spaw'. Root cause: GIT_SSH_COMMAND was set to `expect -f /app/ssh-password.exp`, so git appended the ssh destination args to expect's own args. My script then did `spawn ssh -tt {*}$argv`, passing the expect flags (`-f /app/ssh-password.exp`) as ssh arguments — corrupting the command. Also, a transparent git proxy needs `interact` so stdin/stdout flows through after the password. Fix: use a tiny wrapper script that calls expect with only the ssh args, and use `interact` in the expect script.",
+  "plan": "1) Rewrite /app/ssh-password.exp to spawn ssh with the args and use `interact` after sending the password. 2) Create /app/git-ssh wrapper that execs expect with the passed args. 3) Update test.sh to set GIT_SSH_COMMAND=/app/git-ssh. 4) Re-run the end-to-end test and verify Nginx serves the deployed main and dev content.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/ssh-password.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 120\nspawn ssh -tt {*}$argv\nexpect {\n    -re \"(?i)password:\" { send \"password\\r\"; exp_continue }\n}\ninteract\nEOF\nchmod +x /app/ssh-password.exp\ncat > /app/git-ssh <<'EOF'\n#!/bin/bash\nexec expect -f /app/ssh-password.exp \"$@\"\nEOF\nchmod +x /app/git-ssh\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "sed -i 's#export GIT_SSH_COMMAND=\"expect -f /app/ssh-password.exp\"#export GIT_SSH_COMMAND=\"/app/git-ssh\"#' /app/test.sh; grep GIT_SSH_COMMAND /app/test.sh\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "/app/test.sh\n",
+      "duration": 10.0
+    }
+  ],
+  "task_complete": false
+}

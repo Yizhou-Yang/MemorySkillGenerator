@@ -1,0 +1,20 @@
+All mazes have open cells touching the border+1 ring on all sides (`bbox_ok True`), and the outer border is guaranteed walls. My DFS will probe every 4-neighbor of every open cell; interior cells I don't reach default to `'#'` (wall), which is safe. Let me write the explorer.
+
+{
+  "analysis": "Protocol understood: server prints 4 welcome lines then a '> ' prompt before each command; each command prints a result line. It's a persistent subprocess. I'll drive it with DFS, tracking my own position, recording walls vs open cells, and rendering the grid with the border filled as '#' (guaranteed) and interior defaulting to '#' (so unreachable cells are walls, matching truth). Let me write the explorer script.",
+  "plan": "Create /app/explore.py that spawns the server, does recursive DFS with backtracking (probe each direction; on 'hit wall' record wall, on move recurse, always move back). Build the map from the bounding box of open cells (+1 padding) and write /app/output/<id>.txt. First test on maze 1 and diff with /app/maze_1.txt.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/explore.py <<'EOF'\n#!/usr/bin/env python3\nimport subprocess, sys, os\n\nDIRS = {'N': (-1,0), 'S':(1,0), 'E':(0,1), 'W':(0,-1)}\nREVERSE = {'N':'S','S':'N','E':'W','W':'E'}\nORDER = ['N','E','S','W']\n\ndef explore(maze_id):\n    proc = subprocess.Popen(['python3','/protected/maze_server.py', str(maze_id)],\n                            stdin=subprocess.PIPE, stdout=subprocess.PIPE,\n                            text=True, bufsize=1)\n    def readline():\n        return proc.stdout.readline()\n    for _ in range(4):\n        readline()\n    def send(cmd):\n        proc.stdin.write(cmd + '\\n')\n        proc.stdin.flush()\n        line = readline()\n        resp = line.strip()\n        if resp.startswith('> '):\n            resp = resp[2:]\n        return resp\n    pos = (0,0)\n    visited = {pos}\n    blocked = set()\n    opened = {pos: 'S'}\n    bounds = [0,0,0,0]\n    def update_bounds(p):\n        if p[0] < bounds[0]: bounds[0]=p[0]\n        if p[0] > bounds[1]: bounds[1]=p[0]\n        if p[1] < bounds[2]: bounds[2]=p[1]\n        if p[1] > bounds[3]: bounds[3]=p[1]\n    update_bounds(pos)\n    def dfs(p):\n        for d in ORDER:\n            dr,dc = DIRS[d]\n            n = (p[0]+dr, p[1]+dc)\n            if n in visited or n in blocked:\n                continue\n            resp = send('move '+d)\n            if resp.startswith('hit wall'):\n                blocked.add(n)\n                continue\n            visited.add(n)\n            update_bounds(n)\n            if resp.startswith('reached exit'):\n                opened[n] = 'E'\n            else:\n                opened[n] = ' '\n            dfs(n)\n            send('move '+REVERSE[d])\n    dfs(pos)\n    minr,maxr,minc,maxc = bounds\n    H = maxr+2\n    W = maxc+2\n    grid = [['#']*W for _ in range(H)]\n    for (r,c),ch in opened.items():\n        grid[r][c] = ch\n    os.makedirs('/app/output', exist_ok=True)\n    with open('/app/output/%d.txt' % maze_id,'w') as f:\n        for row in grid:\n            f.write(''.join(row)+'\\n')\n    send('exit')\n    try:\n        proc.stdin.close()\n    except Exception:\n        pass\n    proc.wait()\n    return H, W\n\nif __name__ == '__main__':\n    sys.setrecursionlimit(100000)\n    ids = [int(a) for a in sys.argv[1:]] or list(range(1,11))\n    for mid in ids:\n        H,W = explore(mid)\n        print('maze %d done H=%d W=%d' % (mid,H,W))\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/explore.py 1\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "echo '--- mine ---'; cat /app/output/1.txt; echo '--- ref ---'; cat /app/maze_1.txt; echo; echo '--- diff ---'; diff <(cat /app/output/1.txt) <(cat /app/maze_1.txt) && echo MATCH\n",
+      "duration": 0.2
+    }
+  ]
+}

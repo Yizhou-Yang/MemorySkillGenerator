@@ -1,0 +1,24 @@
+I'm stuck because frotz launched via `su player -c` is in curses mode, which this harness cannot render. I only see my own echoed keystrokes. I need to exit frotz and switch to piping input into frotz as the `player` user (which makes frotz run in non-curses/dumb mode, producing plain-text output the harness CAN display).
+
+{
+  "analysis": "The terminal is blocked by 'su player -c ./frotz zork1.z5'. frotz is in curses mode (it didn't refuse since it's running as 'player', not root), and the harness cannot render curses output — I only ever see my own echoed keystrokes. My repeated 'quit'/'y' may not have cleanly terminated it. Key realization: when stdin is NOT a TTY, frotz runs in 'dumb' (non-curses) mode and writes plain text to stdout, which the harness CAN display. So I should pipe commands into frotz as 'player' rather than running it interactively. First I must exit this interactive frotz.",
+  "plan": "Send a clean 'quit'+'y' to make frotz exit (returning to root shell). Then poll. Once back at a shell, I'll test piping a trivial script into frotz as the 'player' user to confirm it produces readable plain-text output. From there I'll drive the full game via piped input captured to a file.",
+  "commands": [
+    {
+      "keystrokes": "\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "quit\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "y\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "",
+      "duration": 2.0
+    }
+  ]
+}

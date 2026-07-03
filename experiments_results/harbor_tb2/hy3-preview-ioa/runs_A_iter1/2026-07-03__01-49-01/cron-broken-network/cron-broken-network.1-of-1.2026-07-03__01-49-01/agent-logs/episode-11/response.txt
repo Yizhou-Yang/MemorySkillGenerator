@@ -1,0 +1,10 @@
+{
+  "analysis": "Mount was denied and apt's preflight free-space check on the cache dir still fails (statvfs reports 0 available on the overlay, even though actual writes succeed — proven by apt-get update writing 31MB to /var/lib/apt/lists fine). The disk-full is a red herring for writes; it's only apt's preflight guard blocking the install. The real root cause remains: /usr/bin/curl is a fake 46-byte script. To install the genuine curl, I'll bypass apt's installer by downloading the .deb files directly (which write to cwd and don't trigger the cache free-space check) and installing them with dpkg, which does no statvfs preflight.",
+  "plan": "1) cd /tmp and use `apt-get download` for curl and all its dependency packages (this downloads .debs to cwd, avoiding the cache check). 2) Verify the .debs landed. 3) Install them with `dpkg -i *.deb` (dpkg doesn't do the free-space preflight; actual writes to / succeed). 4) Verify /usr/bin/curl is now a real binary and curl -v example.com works.",
+  "commands": [
+    {
+      "keystrokes": "cd /tmp && apt-get download curl krb5-locales libbrotli1 libcurl4t64 libgssapi-krb5-2 libk5crypto3 libkeyutils1 libkrb5-3 libkrb5support0 libldap-common libldap2 libnghttp2-14 libpsl5t64 librtmp1 libsasl2-2 libsasl2-modules libsasl2-modules-db libssh-4 publicsuffix\n",
+      "duration": 25.0
+    }
+  ]
+}

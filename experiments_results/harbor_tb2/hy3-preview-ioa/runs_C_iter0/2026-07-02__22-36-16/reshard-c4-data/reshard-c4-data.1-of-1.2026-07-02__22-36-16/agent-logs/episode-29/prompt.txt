@@ -1,0 +1,30 @@
+New Terminal Output:
+
+root@3bded9ad04d7:/app# python3 - << 'PYEOF'
+> import os
+> src = 'c4_sample'
+> dst = 'c4_reshard'
+> os.makedirs(src, exist_ok=True)
+> # 1) restore original flat c4_sample from current c4_reshard parts
+> for d in sorted(os.listdir(dst)):
+>     sub = os.path.join(dst, d)
+>     if os.path.isdir(sub):
+>         for f in sorted(os.listdir(sub)):
+>             os.rename(os.path.join(sub, f), os.path.join(src, f))
+>         os.rmdir(sub)
+> # now src has all files; dst is empty
+> # 2) rebuild c4_reshard as reshaped hard-linked copy
+> files = sorted(os.listdir(src))
+> per = 30
+> idx = 0
+> cur = os.path.join(dst, 'part_%06d' % idx)
+> os.makedirs(cur)
+> for i, f in enumerate(files):
+>     if i % per == 0 and i != 0:
+>         idx += 1
+>         cur = os.path.join(dst, 'part_%06d' % idx)
+>         os.makedirs(cur)
+>     os.link(os.path.join(src, f), os.path.join(cur, f))
+> print('rebuilt: c4_sample has', len(os.listdir(src)), 'files; parts=', idx + 1)
+> PYEOF
+

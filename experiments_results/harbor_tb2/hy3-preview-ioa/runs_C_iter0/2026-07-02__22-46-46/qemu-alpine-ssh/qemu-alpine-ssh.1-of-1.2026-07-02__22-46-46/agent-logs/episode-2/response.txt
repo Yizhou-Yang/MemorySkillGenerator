@@ -1,0 +1,9 @@
+{
+  "analysis": "Key finding: no /dev/kvm (so TCG software emulation, slower), no ISO extraction tools, and mount -o loop is blocked. But qemu, expect, and python3 are present. The alpine.iso is in /app. Rather than fight extraction, the decisive question is whether the Alpine live ISO enables a serial console (ttyS0) by default — if it does, I can boot with -serial and get an auto-login root shell directly, making configuration trivial. Let me test that empirically.",
+  "plan": "Boot the ISO in the background with a serial port writing to a log file and the monitor on a unix socket (no KVM, so TCG). Wait and inspect /tmp/serial.log. If Alpine outputs boot messages to ttyS0 and presents a login/shell, serial console works and I can automate the rest with expect. If the log is empty, I'll need to enable serial another way.",
+  "commands": [
+    {"keystrokes": "cd /app\n", "duration": 0.1},
+    {"keystrokes": "nohup qemu-system-x86_64 -m 512 -smp 2 -cdrom /app/alpine.iso -netdev user,id=n0,hostfwd=tcp::2222-:22 -device e1000,netdev=n0 -display none -serial file:/tmp/serial.log -monitor unix:/tmp/qmon.sock,server,nowait >/tmp/qemu.out 2>&1 &\n", "duration": 1.0},
+    {"keystrokes": "sleep 8; echo '--- qemu.out ---'; cat /tmp/qemu.out; echo '--- serial.log ---'; cat /tmp/serial.log\n", "duration": 9.0}
+  ]
+}

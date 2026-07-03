@@ -1,0 +1,36 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@13028e079751:/app# cat > /app/conv2.py << 'EOF'
+> import zipfile, struct, io, pickle
+> from types import SimpleNamespace
+>
+> class MyUnpickler(pickle.Unpickler):
+>     def __init__(self, file, zf):
+>         super().__init__(file)
+>         self.zf = zf
+>     def find_class(self, module, name):
+>         if module.startswith('torch'):
+>             return lambda *a, **k: None
+>         return super().find_class(module, name)
+>     def persistent_load(self, pid):
+>         print('PERSISTENT_ID:', repr(pid))
+>         return None
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+> data = zf.read('simple_mnist/data.pkl')
+> try:
+>     MyUnpickler(io.BytesIO(data), zf).load()
+> except Exception as e:
+>     print('done:', e)
+> EOF
+root@13028e079751:/app# python3 /app/conv2.py
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '0', 'cpu', 12544)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '1', 'cpu', 16)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '2', 'cpu', 256)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '3', 'cpu', 16)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '4', 'cpu', 160)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '5', 'cpu', 10)
+root@13028e079751:/app#

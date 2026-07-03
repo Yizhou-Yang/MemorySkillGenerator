@@ -1,0 +1,15 @@
+{
+  "analysis": "Verification succeeded: connecting to 6665 yields the login prompt (getty prints 'login:' at end of boot, and the proxy also sends a CR on connect so the user sees a fresh prompt even if they connect later). The setup is now in its final state: qemu (pid 733) runs in the background with its serial on internal port 6666, and a small proxy (pid 742) listens on 6665, relaying to 6666 and sending a CR to make getty reprint the login prompt. Both background processes are alive and ports are open.",
+  "plan": "Do a final liveness check (qemu pid 733 and proxy pid 742 still running, port 6665 listening) without consuming the connection, then report completion. The user can now run `telnet 127.0.0.1 6665` and log in.",
+  "commands": [
+    {
+      "keystrokes": "for p in /proc/[0-9]*; do c=$(grep -ha qemu-system \"$p/comm\" 2>/dev/null; grep -ha python3 \"$p/comm\" 2>/dev/null); [ -n \"$c\" ] && echo \"alive pid $(basename $p): $c\"; done\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "python3 -c \"import socket;s=socket.socket();s.settimeout(3)\ntry:\n s.connect(('127.0.0.1',6665));s.close();print('6665 READY for telnet 127.0.0.1 6665')\nexcept Exception as e:\n print('CLOSED:',e)\"\n",
+      "duration": 1.0
+    }
+  ],
+  "task_complete": true
+}

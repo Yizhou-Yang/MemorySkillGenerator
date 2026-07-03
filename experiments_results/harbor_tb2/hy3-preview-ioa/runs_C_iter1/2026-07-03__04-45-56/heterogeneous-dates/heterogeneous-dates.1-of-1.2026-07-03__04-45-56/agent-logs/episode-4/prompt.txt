@@ -1,0 +1,42 @@
+New Terminal Output:
+
+root@a5bade65ec58:/app# python3 - <<'PYEOF'
+> import csv, re
+>
+> def norm(s):
+>     s = s.split()[0]
+>     p = re.split(r'[/-]', s)
+>     a, b, c = [int(x) for x in p]
+>     if a > 31:        # first part is year
+>         return (a, b, c)
+>     return (c, a, b)  # month, day, year
+>
+> high = {}
+> with open('/app/daily_temp_sf_high.csv') as f:
+>     r = csv.reader(f); next(r)
+>     for row in r:
+>         if row:
+>             high[norm(row[0])] = float(row[1])
+>
+> low = {}
+> with open('/app/daily_temp_sf_low.csv') as f:
+>     r = csv.reader(f); next(r)
+>     for row in r:
+>         if row:
+>             low[norm(row[0])] = float(row[1])
+>
+> diffs = [high[k] - low[k] for k in high if k in low]
+> print('matched days:', len(diffs))
+> print('high keys:', len(high), 'low keys:', len(low))
+> avg = sum(diffs) / len(diffs)
+> with open('/app/avg_temp.txt', 'w') as f:
+>     f.write(str(avg))
+> print('avg diff:', avg)
+> PYEOF
+matched days: 7
+high keys: 7 low keys: 7
+avg diff: 11.428571428571429
+root@a5bade65ec58:/app# echo EXIT_CODE: $?
+EXIT_CODE: 0
+root@a5bade65ec58:/app# cat /app/avg_temp.txt
+11.428571428571429root@a5bade65ec58:/app#

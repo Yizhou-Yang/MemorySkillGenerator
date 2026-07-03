@@ -1,0 +1,14 @@
+{
+  "analysis": "Confirmed the problem: the home filesystem has only ~26 MB free, and the 78 MB `large_model_file` (pure zeros, not a real model file) is consuming nearly all of it. The download nearly succeeded for some files but failed on disk space. I need to delete that junk file to reclaim space, then re-run the cache. The model's largest files are ~63 MB and total is ~90 MB, so with ~104 MB freed it will fit.",
+  "plan": "1. Verify the decoy file is just zeros and check disk usage. 2. Delete the 78 MB `large_model_file` and clean any partial download cache. 3. Re-run the cache script in the foreground and watch it complete. 4. Verify the model and tokenizer load offline.",
+  "commands": [
+    {
+      "keystrokes": "df -h /root; echo '---'; rm -f ~/.cache/huggingface/hub/large_model_file; rm -rf ~/.cache/huggingface/hub/models--albert--albert-base-v2; df -h /root\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "echo 'freed; re-running cache'; timeout 120 python3 -u /tmp/cache_model.py 2>&1 | tail -n 25\n",
+      "duration": 40.0
+    }
+  ]
+}

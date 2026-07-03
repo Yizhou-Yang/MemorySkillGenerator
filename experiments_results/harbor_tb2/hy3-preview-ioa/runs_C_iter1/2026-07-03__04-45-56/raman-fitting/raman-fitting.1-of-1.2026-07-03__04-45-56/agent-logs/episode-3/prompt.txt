@@ -1,0 +1,39 @@
+New Terminal Output:
+
+root@2739e611cf42:/app# python3 -c "import numpy, scipy, json; print(numpy.__version__, scipy.__version__)"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy, scipy, json; print(numpy.__version__, scipy.__version__)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+root@2739e611cf42:/app# cat > /tmp/explore.py << 'EOF'
+> import numpy as np
+> data = []
+> for line in open('/app/graphene.dat'):
+>     line=line.strip()
+>     if not line: continue
+>     parts = line.split()
+>     if len(parts)<2: continue
+>     x = float(parts[0].replace(',','.'))
+>     y = float(parts[1].replace(',','.'))
+>     data.append((x,y))
+> data = np.array(data)
+> x = data[:,0]; y = data[:,1]
+> print('shapes', x.shape, y.shape)
+> print('x range', x.min(), x.max())
+> print('y range', y.min(), y.max())
+> # find peaks via simple diff
+> from scipy.signal import find_peaks
+> # smooth
+> ys = y
+> pk, props = find_peaks(ys, distance=20, prominence=50)
+> print('num peaks', len(pk))
+> for i in pk[:20]:
+>     print('peak x=%.2f y=%.2f' % (x[i], y[i]))
+> EOF
+root@2739e611cf42:/app# python3 /tmp/explore.py
+Traceback (most recent call last):
+  File "/tmp/explore.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+root@2739e611cf42:/app#

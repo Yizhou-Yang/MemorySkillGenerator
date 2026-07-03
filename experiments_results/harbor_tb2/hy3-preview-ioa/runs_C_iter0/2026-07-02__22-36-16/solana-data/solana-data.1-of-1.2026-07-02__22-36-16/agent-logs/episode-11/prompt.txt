@@ -1,0 +1,51 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@b539af01810d:/app# cat > /tmp/methodtest.py << 'EOF'
+> import urllib.request, json
+> BASE='https://mango.devnet.rpcpool.com'
+> def rpc(method, params=None, timeout=25):
+>     body={'jsonrpc':'2.0','id':1,'method':method,'params':params or []}
+>     req=urllib.request.Request(BASE,data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
+>     r=urllib.request.urlopen(req,timeout=timeout)
+>     return json.loads(r.read().decode())
+>
+> # slot
+> slot=rpc('getSlot')['result']
+> print('slot', slot)
+> # version
+> print('version', rpc('getVersion')['result'])
+> # cluster nodes
+> cn=rpc('getClusterNodes')['result']
+> print('node_count', len(cn))
+> # block
+> b=rpc('getBlock',[slot,{'maxSupportedTransactionVersion':0}])['result']
+> print('block keys', list(b.keys()) if b else None)
+> sig=b['transactions'][0]['transaction']['signatures'][0]
+> print('sig', sig)
+> print('block_time', b.get('blockTime'))
+> # transaction
+> tx=rpc('getTransaction',[sig,{'maxSupportedTransactionVersion':0}])['result']
+> print('tx keys', list(tx.keys()) if tx else None)
+> # account info
+> acc=rpc('getAccountInfo',['11111111111111111111111111111111',{'encoding':'jsonParsed'}])['result']
+> print('acc', acc.get('value') is not None, acc.get('value',{}).get('lamports') if acc.get('value') else None)
+> # program accounts
+> pa=rpc('getProgramAccounts',['Vote111111111111111111111111111111111111111',{'encoding':'jsonParsed','dataSlice':{'offset':0,'length':0},'limit':3}])['result']
+> print('program_accounts count(limit3)', len(pa))
+> print('ALL OK')
+> EOF
+root@b539af01810d:/app# python3 /tmp/methodtest.py
+slot 473517309
+version {'feature-set': 3345198602, 'solana-core': '4.1.0-rc.1'}
+node_count 130
+block keys ['blockHeight', 'blockTime', 'blockhash', 'parentSlot', 'previousBlockhash', 'rewards', 'transactions']
+sig 48iwHQhE6jU8QQwjnegv1ZBoqWBPSSRzALq66kragPbin5UaPvKmar8Ji4hxuSnMncChUnzHsZQQCLaiaXUwWWvf
+block_time 1783015939
+tx keys ['blockTime', 'meta', 'slot', 'transaction', 'transactionIndex', 'version']
+acc True 1
+program_accounts count(limit3) 4354
+ALL OK
+root@b539af01810d:/app#

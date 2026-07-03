@@ -1,0 +1,62 @@
+{
+  "analysis": "All required tools are present: git, nginx, sshd, openssl, ssh-keygen on Ubuntu 26.04. Nothing has been configured yet. I need to: create a 'git' user with password 'password', enable SSH password auth and start sshd, create a bare repo at /git/project, set up nginx with a self-signed cert on port 8443 serving main at / and dev at /dev/, and install a post-receive hook that deploys each branch into the proper web root on push.",
+  "plan": "Batch 1: create the git user and set its password, generate SSH host keys, write an sshd drop-in enabling password auth, start sshd. Create the bare repo and web roots with correct ownership. Generate a self-signed cert, write the nginx vhost for port 8443, write the post-receive hook, then test and start nginx. I'll then verify in a follow-up batch with an actual push test and curl.",
+  "commands": [
+    {
+      "keystrokes": "useradd -m -s /bin/bash git\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "echo 'git:password' | chpasswd\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ssh-keygen -A\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "printf 'PasswordAuthentication yes\\nPubkeyAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-git.conf\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "mkdir -p /run/sshd && /usr/sbin/sshd\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "ps aux | grep -v grep | grep sshd\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "mkdir -p /git && git init --bare /git/project && chown -R git:git /git\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "mkdir -p /var/www/main /var/www/dev && chown -R git:git /var/www/main /var/www/dev\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/git.key -out /etc/nginx/ssl/git.crt -days 365 -subj \"/CN=localhost\"\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "cat > /etc/nginx/conf.d/git.conf <<'EOF'\nserver {\n    listen 8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/git.crt;\n    ssl_certificate_key /etc/nginx/ssl/git.key;\n    root /var/www/main;\n    index index.html;\n    location /dev/ {\n        alias /var/www/dev/;\n    }\n}\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /git/project/hooks/post-receive <<'EOF'\n#!/bin/bash\nGIT_DIR=/git/project\nwhile read oldrev newrev refname; do\n  branch=\"${refname#refs/heads/}\"\n  case \"$branch\" in\n    main)\n      git --git-dir=\"$GIT_DIR\" archive main | tar -x -C /var/www/main\n      ;;\n    dev)\n      git --git-dir=\"$GIT_DIR\" archive dev | tar -x -C /var/www/dev\n      ;;\n  esac\ndone\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "nginx -t\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "nginx\n",
+      "duration": 0.5
+    }
+  ]
+}

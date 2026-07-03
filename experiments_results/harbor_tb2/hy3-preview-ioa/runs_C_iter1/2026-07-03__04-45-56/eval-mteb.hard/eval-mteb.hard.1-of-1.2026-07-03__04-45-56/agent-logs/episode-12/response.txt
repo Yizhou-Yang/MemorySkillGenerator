@@ -1,0 +1,14 @@
+{
+  "analysis": "`stat -f /` reveals the real situation: Total blocks 257,946,856, Free 5,968,276 (~22.7GB actually free), but Available = 0. The fuse-overlayfs reports `f_bavail` (space available to unprivileged users) as 0, while `f_bfree` (total free) is ~22GB. Both huggingface_hub and datasets gate downloads on the `available` value being 0, so they refuse. Writes actually work (WRITE_OK). I need to bypass the disk-space guard. Let me find the exact function/check to monkeypatch.",
+  "plan": "Inspect how huggingface_hub and datasets compute free space so I can patch it. I'll grep the source for the check function and any env override. Then create a sitecustomize.py that monkeypatches the disk-space check to return a large available value, letting the download proceed.",
+  "commands": [
+    {
+      "keystrokes": "grep -rn \"disk_usage\\|statvfs\\|free_disk\\|available\" /usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py | head\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "grep -rn \"def .*disk\\|disk_usage\\|statvfs\\|free_disk\" /usr/local/lib/python3.10/site-packages/datasets/builder.py | head\n",
+      "duration": 2.0
+    }
+  ]
+}

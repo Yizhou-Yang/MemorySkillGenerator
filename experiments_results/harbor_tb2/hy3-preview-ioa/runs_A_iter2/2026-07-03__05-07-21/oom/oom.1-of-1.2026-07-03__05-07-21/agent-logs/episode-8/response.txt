@@ -1,0 +1,10 @@
+{
+  "analysis": "Same root cause: /root/.cache is a 100MB tmpfs and the full repo is ~328MB (it has multiple framework weights: pytorch, tf, flax, etc.), so it can never fit. The decoy file is gone but default cache still can't hold everything. I can't remount the tmpfs (permission denied) and the underlying disk is also full. The fix: download only the files actually needed for offline model+tokenizer use (one set of weights + tokenizer files), which is far under 100MB. First I'll query the HF API to see the exact file list and sizes so I pick the right minimal set.",
+  "plan": "1. Query the HF API to list repo files and sizes. 2. Identify the minimal set: config.json, one weights file (prefer safetensors, else pytorch_model.bin), and tokenizer files (spiece.model, tokenizer_config.json, special_tokens_map.json). 3. Download only those with `hf download --include` into the default cache. 4. Verify offline load with local_files_only=True.",
+  "commands": [
+    {
+      "keystrokes": "curl -s https://huggingface.co/api/models/albert/albert-base-v2/tree/main | python3 -c \"import sys,json; d=json.load(sys.stdin); [print(f['size'], f['path']) for f in d]\"\n",
+      "duration": 3.0
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "analysis": "Extraction succeeded: /tmp/vmlinuz (11.8MB) and /tmp/initramfs (20.5MB) are present, both the LTS variants. Now I need to launch qemu in the background using -kernel/-initrd with console=ttyS0,115200 and a telnet serial server on 127.0.0.1:6665. No /dev/kvm, so accel=tcg. The ISO is passed as -cdrom so the live initramfs can find its media.",
+  "plan": "1) Launch qemu in the background (nohup, redirected to /tmp/qemu.log) with a telnet serial server on port 6665 (server,nowait). 2) Verify the process is running and the port is listening. 3) Then run a readiness script that connects to the telnet port, sends newlines, and blocks until it sees 'login:' confirming the login prompt is reachable.",
+  "commands": [
+    {
+      "keystrokes": "nohup qemu-system-x86_64 -m 1024 -smp 2 -machine pc,accel=tcg -display none -monitor none -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append 'console=ttyS0,115200' -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 -serial telnet:127.0.0.1:6665,server,nowait > /tmp/qemu.log 2>&1 &\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 2; echo '--- qemu.log ---'; cat /tmp/qemu.log; echo '--- ps ---'; ps aux | grep qemu | grep -v grep | head\n",
+      "duration": 3.0
+    }
+  ]
+}

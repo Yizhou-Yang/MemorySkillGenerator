@@ -1,0 +1,68 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+- Extra text detected after JSON object
+
+New Terminal Output:
+
+root@3ea5ff14c777:/tmp# sed -n '1,60p' /app/astropy/astropy/io/ascii/tests/test_qdp.py
+import numpy as np
+import pytest
+
+from astropy.io import ascii
+from astropy.io.ascii.qdp import _get_lines_from_file, _read_table_qdp, _write_table_qdp
+from astropy.table import Column, MaskedColumn, Table
+from astropy.utils.exceptions import AstropyUserWarning
+
+
+def test_get_tables_from_qdp_file(tmp_path):
+    example_qdp = """
+    ! Swift/XRT hardness ratio of trigger: XXXX, name: BUBU X-2
+    ! Columns are as labelled
+    READ TERR 1
+    READ SERR 2
+    ! WT -- hard data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   -0.212439       0.212439
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   0.000000        0.000000
+    NO NO NO NO NO
+    ! WT -- soft data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   0.726155        0.583890
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   2.410935        1.393592
+    NO NO NO NO NO
+    ! WT -- hardness ratio
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   -0.292553       -0.374935
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   0.000000        -nan
+    """
+
+    path = tmp_path / "test.qdp"
+
+    with open(path, "w") as fp:
+        print(example_qdp, file=fp)
+
+    table0 = _read_table_qdp(fp.name, names=["MJD", "Rate"], table_id=0)
+    assert table0.meta["initial_comments"][0].startswith("Swift")
+    assert table0.meta["comments"][0].startswith("WT -- hard data")
+    table2 = _read_table_qdp(fp.name, names=["MJD", "Rate"], table_id=2)
+    assert table2.meta["initial_comments"][0].startswith("Swift")
+    assert table2.meta["comments"][0].startswith("WT -- hardness")
+    assert np.isclose(table2["MJD_nerr"][0], -2.37847222222222e-05)
+
+
+def test_roundtrip(tmp_path):
+    example_qdp = """
+    ! Swift/XRT hardness ratio of trigger: XXXX, name: BUBU X-2
+    ! Columns are as labelled
+    READ TERR 1
+    READ SERR 2
+    ! WT -- hard data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   NO       0.212439
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   0.000000        0.000000
+    NO NO NO NO NO
+    ! WT -- soft data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   0.726155        0.583890
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   2.410935        1.393592
+root@3ea5ff14c777:/tmp#

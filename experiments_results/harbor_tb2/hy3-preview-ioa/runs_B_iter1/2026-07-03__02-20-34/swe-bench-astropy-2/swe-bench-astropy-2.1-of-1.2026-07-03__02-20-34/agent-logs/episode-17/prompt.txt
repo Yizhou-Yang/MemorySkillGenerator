@@ -1,0 +1,40 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@1cba5d34f64e:/app/astropy# cat > /tmp/verify.py << 'EOF'
+> import re
+> src = open('/app/astropy/astropy/io/ascii/qdp.py').read()
+> start = src.index('def _line_type(')
+> end = src.index('def _get_type_from_list_of_lines(')
+> func_src = src[start:end]
+> ns = {'re': re}
+> exec(func_src, ns)
+> _line_type = ns['_line_type']
+>
+> # The issue's example: lowercase command
+> tests = [
+>     ('read serr 1 2', 'command'),
+>     ('READ SERR 1 2', 'command'),
+>     ('read terr 1', 'command'),
+>     ('READ TERR 1 2', 'command'),
+>     ('1 0.5 1 0.5', 'data,4'),
+> ]
+> ok = True
+> for line, expected in tests:
+>     got = _line_type(line)
+>     status = 'OK' if got == expected else 'FAIL'
+>     if got != expected:
+>         ok = False
+>     print(f'{status}: {line!r} -> {got!r} (expected {expected!r})')
+> print('ALL PASS' if ok else 'SOME FAILED')
+> EOF
+root@1cba5d34f64e:/app/astropy# python /tmp/verify.py
+OK: 'read serr 1 2' -> 'command' (expected 'command')
+OK: 'READ SERR 1 2' -> 'command' (expected 'command')
+OK: 'read terr 1' -> 'command' (expected 'command')
+OK: 'READ TERR 1 2' -> 'command' (expected 'command')
+OK: '1 0.5 1 0.5' -> 'data,4' (expected 'data,4')
+ALL PASS
+root@1cba5d34f64e:/app/astropy#

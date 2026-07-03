@@ -1,0 +1,19 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'cat /app/maze_game.sh\n'
+'wc -l /app/maze_1.txt\n'
+'head -c 500 /app/maze_1.txt\n'
+'ls -la /app/tests\n'
+'cat /app/tests/* 2>/dev/null | head -200\n'
+'cat /protected/maze_server.py\n'
+"cat > /app/explore.py << 'PYEOF'\n#!/usr/bin/env python3\nimport sys, subprocess, os\n\nDR = {'N':-1,'S':1,'E':0,'W':0}\nDC = {'N':0,'S':0,'E':1,'W':-1}\nOPP = {'N':'S','S':'N','E':'W','W':'E'}\n\ndef explore(maze_id):\n    proc = subprocess.Popen(['python3','-u','/protected/maze_server.py', str(maze_id)],\n                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)\n    def send(cmd):\n        try:\n            proc.stdin.write(cmd+'\\n')\n            proc.stdin.flush()\n        except Exception:\n            return ''\n        line = proc.stdout.readline()\n        if not line:\n            return ''\n        line = line.strip()\n        if line.startswith('> '):\n            line = line[2:]\n        return line\n    buf = ''\n    while not buf.endswith('> '):\n        ch = proc.stdout.read(1)\n        if not ch:\n            break\n        buf += ch\n    visited = {(0,0)}\n    cell_char = {(0,0):'S'}\n    stack = [{'pos':(0,0),'dirs':list('NSEW'),'entry':None}]\n    while stack:\n        frame = stack[-1]\n        if not frame['dirs']:\n            e = frame['entry']\n            if e is not None:\n                send('move '+OPP[e])\n            stack.pop()\n            continue\n        d = frame['dirs'].pop()\n        r,c = frame['pos']\n        nr,nc = r+DR[d], c+DC[d]\n        if (nr,nc) in visited:\n            continue\n        res = send('move '+d)\n        if res == 'hit wall':\n            continue\n        char = 'E' if res == 'reached exit' else ' '\n        visited.add((nr,nc))\n        cell_char[(nr,nc)] = char\n        stack.append({'pos':(nr,nc),'dirs':list('NSEW'),'entry':d})\n    rs = [p[0] for p in visited]\n    cs = [p[1] for p in visited]\n    rmin,rmax = min(rs),max(rs)\n    cmin,cmax = min(cs),max(cs)\n    H = rmax - rmin + 3\n    W = cmax - cmin + 3\n    grid = [['#']*W for _ in range(H)]\n    for (r,c),ch in cell_char.items():\n        grid[r-rmin+1][c-cmin+1] = ch\n    out = '\\n'.join(''.join(row) for row in grid)\n    try:\n        proc.stdin.write('exit\\n')\n        proc.stdin.flush()\n        proc.terminate()\n    except Exception:\n        pass\n    return out\n\ndef main():\n    outdir = '/app/output'\n    os.makedirs(outdir, exist_ok=True)\n    for mid in range(1,11):\n        m = explore(mid)\n        with open(os.path.join(outdir, str(mid)+'.txt'),'w') as f:\n            f.write(m+'\\n')\n        print('maze '+str(mid)+' done lines='+str(len(m.splitlines())))\n\nif __name__ == '__main__':\n    main()\nPYEOF\n"
+'python3 /app/explore.py\n'
+"cat > /app/validate.py << 'PYEOF'\nimport subprocess, os\nfor mid in range(1,11):\n    p = f'/app/output/{mid}.txt'\n    if not os.path.exists(p):\n        print(mid,'MISSING'); continue\n    agent = open(p).read().strip()\n    alines = [l.rstrip() for l in agent.splitlines() if l.strip()]\n    agent_n = '\\n'.join(alines)\n    gt = subprocess.run(['python3','/protected/maze_helper.py',str(mid)],capture_output=True,text=True).stdout.strip()\n    ok = agent_n == gt\n    print(mid, 'PASS' if ok else 'FAIL', 'agent_lines=%d gt_lines=%d'%(len(alines), len(gt.splitlines())))\n    if not ok:\n        print('---AGENT---'); print(agent_n)\n        print('---GT---'); print(gt)\nPYEOF\n"
+'python3 /app/validate.py\n'
+'ls -la /app/output/\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

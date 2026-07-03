@@ -1,0 +1,44 @@
+Previous response had warnings:
+WARNINGS: - Command 1 should end with newline when followed by another command. Otherwise the two commands will be concatenated together on the same line.
+
+Current Terminal Screen:
+for _ in range(200):
+    opt.zero_grad()
+    loss = ((net(x).sum(1) - y) ** 2).mean()
+    loss.backward()
+    opt.step()
+print('net fwd+bwd 200 batches:', time.time() - t)
+EOF
+python3 /app/bench.py
+
+root@232b31e2226e:/app# cat > /app/bench.py << 'EOF'
+> import time
+> import gymnasium as gym
+> import numpy as np
+> import torch
+> from agent import QNetwork
+>
+> env = gym.make('CartPole-v1')
+> net = QNetwork()
+>
+> t = time.time()
+> s, _ = env.reset()
+> for _ in range(200):
+>     s, r, d, tr, _ = env.step(env.action_space.sample())
+>     if d or tr:
+>         s, _ = env.reset()
+> print('env 200 steps:', time.time() - t)
+>
+> opt = torch.optim.Adam(net.parameters(), lr=1e-3)
+> x = torch.randn(64, 4)
+> y = torch.randn(64)
+> t = time.time()
+> for _ in range(200):
+>     opt.zero_grad()
+>     loss = ((net(x).sum(1) - y) ** 2).mean()
+>     loss.backward()
+>     opt.step()
+> print('net fwd+bwd 200 batches:', time.time() - t)
+> EOF
+root@232b31e2226e:/app# python3 /app/bench.py
+

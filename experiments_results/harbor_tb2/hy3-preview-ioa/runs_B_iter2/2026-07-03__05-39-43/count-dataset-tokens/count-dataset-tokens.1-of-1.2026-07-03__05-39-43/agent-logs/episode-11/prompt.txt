@@ -1,0 +1,21 @@
+New Terminal Output:
+
+root@eac41e6666da:/app# kill %1 2>/dev/null; sleep 1; echo killed
+[1]+  Terminated              nohup python3 /app/count_tokens.py > /app/run.log 2>&1
+killed
+root@eac41e6666da:/app# cat > /app/probe.py <<'EOF'
+> from huggingface_hub import hf_hub_download
+> import pyarrow.parquet as pq
+> from collections import Counter
+> REPO="open-thoughts/OpenThoughts-114k"
+> path=hf_hub_download(repo_id=REPO, filename="metadata/train-00000-of-00012.parquet", repo_type="dataset")
+> t=pq.read_table(path, columns=["domain"])
+> dom=t.column("domain").to_pylist()
+> c=Counter(dom)
+> for k,v in c.most_common():
+>     print(repr(k), v)
+> EOF
+root@eac41e6666da:/app# python3 /app/probe.py 2>&1 | grep -v UserWarning | grep -v 'warnings.warn' | grep -v 'PyTorch' | grep -v 'ignoring input' | grep -v 'una
+uthenticated'
+'math' 9497
+root@eac41e6666da:/app#

@@ -1,0 +1,272 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected after JSON object
+
+New Terminal Output:
+
+root@4fd979705e12:/app# cat > /app/bitcoin_service.py << 'PYEOF'
+in candidates if os.path.exists(c)), None)
+    if not path:
+        return
+    try:
+        with open(path) as fh:
+            data = "[default]\n" + fh.read()
+        cp = configparser.ConfigParser()
+        cp.read_string(data)
+        d = cp["default"]
+        if d.get("rpcconnect"):
+            RPC_HOST = d.get("rpcconnect")
+        if d.get("rpcport"):
+            RPC_PORT = int(d.get("rpcport"))
+        if d.get("rpcuser"):
+            RPC_USER = d.get("rpcuser")
+        if d.get("rpcpassword"):
+            RPC_PASSWORD = d.get("rpcpassword")
+        if d.get("datadir"):
+            DATADIR = os.path.expanduser(d.get("datadir"))
+    except Exception:
+        pass
+
+
+_load_conf()
+
+
+def _get_cookie():
+    candidates = []
+    if DATADIR:
+        candidates.append(os.path.join(DATADIR, ".cookie"))
+    candidates.append(os.path.expanduser("~/.bitcoin/.cookie"))
+    for c in candidates:
+        if os.path.exists(c):
+            try:
+                with open(c) as fh:
+                    content = fh.read().st> #!/usr/bin/env python3
+> """
+> bitcoin_service.py
+>
+> A local Flask service that connects to a Bitcoin Core node over JSON-RPC and
+> exposes blockchain data (blocks, transactions, and network status) through a
+> simple HTTP API.
+>
+> The Bitcoin Core node is reached over the standard RPC interface. The node
+> itself is connected to the Bitcoin peer-to-peer network (default P2P port 8333),
+> so querying the node gives access to the live blockchain.
+>
+ > Configuration (environment variables, with bitcoin.conf overrides):
+>   BITCOIND_RPC_HOST       default 127.0.0.1
+>   BITCOIND_RPC_PORT       default 8332  (Bitcoin Core RPC port)
+>   BITCOIND_RPC_USER       RPC username
+>   BITCOIND_RPC_PASSWORD   RPC password
+>   BITCOIND_RPC_TIMEOUT    RPC request timeout (seconds)
+>
+,> The service listens on localhost:5000.
+> """
+>
+> import os
+> import json
+> import configparser
+>
+> import requests
+> from flask import Flask, jsonify
+>
+> # bitcoinlib is part of the required toolchain; import to confirm availability.
+> try:
+>     import bitcoinlib  # noqa: F401
+> except Exception:
+>     pass
+>
+> # Bitcoin P2P default port (the port on which the node is connected to the network).
+> BITCOIN_P2P_PORT = 8333
+>
+> app = Flask(__name__)
+>
+> # ---------------------------------------------------------------------------
+> # Configuration
+> # ---------------------------------------------------------------------------
+> RPC_HOST = os.environ.get("BITCOIND_RPC_HOST", "127.0.0.1")
+> RPC_PORT = int(os.environ.get("BITCOIND_RPC_PORT", "8332"))
+> RPC_USER = os.environ.get("BITCOIND_RPC_USER", "")
+> RPC_PASSWORD = os.environ.get("BITCOIND_RPC_PASSWORD", "")
+> RPC_TIMEOUT = float(os.environ.get("BITCOIND_RPC_TIMEOUT", "10"))
+> RPC_URL = "http://{0}:{1}".format(RPC_HOST, RPC_PORT)
+> DATADIR = os.path.expanduser("~/.bitcoin")
+>
+>
+> def _load_conf():
+>     global RPC_HOST, RPC_PORT, RPC_USER, RPC_PASSWORD, DATADIR
+>     candidates = [
+>         os.path.expanduser("~/.bitcoin/bitcoin.conf"),
+>         "/etc/bitcoin/bitcoin.conf",
+>         "/etc/bitcoin.conf",
+>         "bitcoin.conf",
+a>     ]
+>     path = next((c for c in candidates if os.path.exists(c)), None)
+>     if not path:
+>         return
+>     try:
+>         with open(path) as fh:
+>             data = "[default]\n" + fh.read()
+ >         cp = configparser.ConfigParser()
+>         cp.read_string(data)
+>         d = cp["default"]
+>         if d.get("rpcconnect"):
+>             RPC_HOST = d.get("rpcconnect")
+">         if d.get("rpcport"):
+,>             RPC_PORT = int(d.get("rpcport"))
+>         if d.get("rpcuser"):
+  >             RPC_USER = d.get("rpcuser")
+>         if d.get("rpcpassword"):
+>             RPC_PASSWORD = d.get("rpcpassword")
+>         if d.get("datadir"):
+>             DATADIR = os.path.expanduser(d.get("datadir"))
+>     except Exception:
+>         pass
+a>
+s>
+> _load_conf()
+>
+ >
+ > def _get_cookie():
+>     candidates = []
+>     if DATADIR:
+>         candidates.append(os.path.join(DATADIR, ".cookie"))
+>     candidates.append(os.path.expanduser("~/.bitcoin/.cookie"))
+>     for c in candidates:
+>         if os.path.exists(c):
+>             try:
+>                 with open(c) as fh:
+>                     content = fh.read().strip()
+>                 if ":" in content:
+>                     user, pw = content.split(":", 1)
+>                     return (user, pw)
+>                 return ("__cookie__", content)
+>             except Exception:
+>                 return None
+>     return None
+>
+>
+> def _rpc_auth():
+>     if RPC_USER:
+>         return (RPC_USER, RPC_PASSWORD)
+>     return _get_cookie()
+>
+>
+> def rpc_call(method, params=None, attempts=2):
+>     """Call a Bitcoin Core JSON-RPC method. Returns (result, error)."""
+>     payload = {
+>         "jsonrpc": "1.0",
+>         "id": "bitcoin_service",
+>         "method": method,
+>         "params": params or [],
+>     }
+>     headers = {"Content-Type": "application/json"}
+>     last_err = "Unknown RPC error"
+>     for _ in range(max(1, attempts)):
+>         try:
+>             resp = requests.post(
+>                 RPC_URL,
+>                 data=json.dumps(payload),
+>                 auth=_rpc_auth(),
+>                 headers=headers,
+>                 timeout=RPC_TIMEOUT,
+>             )
+>             if resp.status_code == 401:
+>                 return None, "Authentication failed: invalid RPC credentials"
+>             resp.raise_for_status()
+>             data = resp.json()
+>             if data.get("error"):
+>                 return None, data["error"].get("message", "RPC error")
+>             return data.get("result"), None
+>         except requests.exceptions.ConnectionError as exc:
+>             last_err = "Not connected to the Bitcoin network ({0})".format(exc)
+>         except requests.exceptions.Timeout as exc:
+>             last_err = "Bitcoin RPC request timed out ({0})".format(exc)
+>         except Exception as exc:  # noqa: BLE001
+>             last_err = "RPC call failed: {0}".format(exc)
+>     return None, last_err
+>
+>
+> def _is_not_found(err):
+>     e = (err or "").lower()
+>     return any(k in e for k in ("not found", "no such", "invalid", "does not exist"))
+>
+>
+> # ---------------------------------------------------------------------------
+> # Endpoints
+> # ---------------------------------------------------------------------------
+> @app.route("/status")
+> def status():
+>     result, err = rpc_call("getblockchaininfo")
+>     if err:
+>         return jsonify({"status": err, "error": err}), 503
+>     return jsonify({
+>         "status": "online",
+>         "chain": result.get("chain"),
+>         "blocks": result.get("blocks"),
+>         "headers": result.get("headers"),
+>     })
+>
+>
+> @app.route("/block/<block_hash>")
+> def get_block(block_hash):
+>     _, err = rpc_call("getblockchaininfo")
+>     if err:
+>         return jsonify({"error": err}), 503
+>
+>     block, berr = rpc_call("getblock", [block_hash, 1])
+>     if berr:
+>         if _is_not_found(berr):
+>             return jsonify({"error": "Block not found: {0}".format(block_hash)}), 404
+>         return jsonify({"error": berr}), 503
+>
+>     return jsonify({
+>         "hash": block.get("hash"),
+>         "height": block.get("height"),
+>         "merkleroot": block.get("merkleroot"),
+>         "time": block.get("time"),
+>         "nonce": block.get("nonce"),
+>         "tx": block.get("tx", []),
+>     })
+>
+>
+> @app.route("/transaction/<txid>")
+> def get_transaction(txid):
+>     _, err = rpc_call("getblockchaininfo")
+>     if err:
+>         return jsonify({"error": err}), 503
+>
+>     tx, terr = rpc_call("getrawtransaction", [txid, 1])
+>     if terr:
+>         if _is_not_found(terr):
+>             return jsonify({"error": "Transaction not found: {0}".format(txid)}), 404
+>         return jsonify({"error": terr}), 503
+>
+>     vin = [{"coinbase": v.get("coinbase"), "sequence": v.get("sequence")}
+>            for v in tx.get("vin", [])]
+>
+>     vout = []
+>     for out in tx.get("vout", []):
+>         spk = out.get("scriptPubKey", {})
+>         vout.append({
+>             "value": out.get("value"),
+>             "n": out.get("n"),
+>             "scriptPubKey": {
+>                 "asm": spk.get("asm"),
+>                 "hex": spk.get("hex"),
+>                 "type": spk.get("type"),
+>             },
+>         })
+>
+>     return jsonify({
+>         "txid": tx.get("txid"),
+>         "blockhash": tx.get("blockhash"),
+>         "vin": vin,
+>         "vout": vout,
+>     })
+>
+>
+> if __name__ == "__main__":
+>     app.run(host="0.0.0.0", port=5000, threaded=True)
+> PYEOF
+root@4fd979705e12:/app# python3 -c "import ast; ast.parse(open('/app/bitcoin_service.py').read()); print('syntax OK')"
+syntax OK
+root@4fd979705e12:/app#

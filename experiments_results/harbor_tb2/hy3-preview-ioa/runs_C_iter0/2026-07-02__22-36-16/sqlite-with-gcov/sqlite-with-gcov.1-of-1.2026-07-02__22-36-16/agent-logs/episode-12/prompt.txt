@@ -1,0 +1,25 @@
+New Terminal Output:
+
+root@4301fc0c9d55:/tmp/debs# cat > /tmp/dl.py << 'EOF'
+> import urllib.request
+> urls = [l.strip() for l in open('/tmp/debs/urls.txt') if l.strip()]
+> ok=fail=0
+> for u in urls:
+>     fn = '/tmp/debs/' + u.rsplit('/',1)[-1].split('?')[0]
+>     req = urllib.request.Request(u, headers={'User-Agent':'Debian APT-HTTP/1.3'})
+>     for attempt in range(3):
+>         try:
+>             with urllib.request.urlopen(req, timeout=30) as r, open(fn,'wb') as f:
+>                 f.write(r.read())
+>             ok+=1; break
+>         except Exception as e:
+>             err=e
+>     else:
+>         print('FAIL', u, err); fail+=1
+> print('OK=%d FAIL=%d'%(ok,fail))
+> EOF
+root@4301fc0c9d55:/tmp/debs# python3 /tmp/dl.py 2>&1 | tail -8
+OK=122 FAIL=0
+root@4301fc0c9d55:/tmp/debs# ls /tmp/debs/*.deb 2>/dev/null | wc -l
+122
+root@4301fc0c9d55:/tmp/debs#

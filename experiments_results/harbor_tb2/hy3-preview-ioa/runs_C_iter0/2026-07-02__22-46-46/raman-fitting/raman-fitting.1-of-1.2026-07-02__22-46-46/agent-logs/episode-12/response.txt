@@ -1,0 +1,12 @@
+```json
+{
+  "analysis": "Window sensitivity shows the G peak is NOT a clean isolated Lorentzian: narrow windows (10000-10900) cause the constant-offset fit to diverge (gamma=17903, offset=-1.2e7), while the wider window (9600-11500) gives a stable, physical result (offset=9131, x0=10431, gamma=347, amp=10578). The narrow-window divergence happens because the local background is steeply rising and a constant offset is a poor model over a narrow range. The wide window (9600-11500) is the stable choice. I should verify with an even wider window that the parameters don't drift, then finalize.",
+  "plan": "Run a final robustness check using a wider window (9000-11900 for G, 17800-20700 for 2D) to confirm x0/gamma/amp/offset are stable. If they agree with the current results within a few percent, the current results.json is good. Then re-write results.json with the final chosen values.",
+  "commands": [
+    {
+      "keystrokes": "cat > final.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\nimport json\nd = np.loadtxt('graphene.dat', delimiter=None,\n   converters={0: lambda s: float(str(s).replace(',','.')), 1: lambda s: float(str(s).replace(',','.'))})\nx=d[:,0]; y=d[:,1]; o=np.argsort(x); x=x[o]; y=y[o]\ndef lor(x,off,x0,g,a): return off + a*g**2/((x-x0)**2+g**2)\ndef fit(w,p0):\n    m=(x>=w[0])&(x<=w[1])\n    p,_=curve_fit(lor,x[m],y[m],p0=p0,maxfev=300000)\n    return p\nfor w in [(9000,11900),(9500,11300)]:\n    p=fit(w,[9000,10431,347,10578]); print('G win',w,'off=%.1f x0=%.1f gamma=%.1f amp=%.1f'%(p[0],p[1],p[2],p[3]))\nfor w in [(17600,20900),(18000,19800)]:\n    p=fit(w,[14000,19222,426,70088]); print('2D win',w,'off=%.1f x0=%.1f gamma=%.1f amp=%.1f'%(p[0],p[1],p[2],p[3]))\n# final write using (9000,11900) and (17600,20900)\nG=fit((9000,11900),[9000,10431,347,10578])\nD=fit((17600,20900),[14000,19222,426,70088])\nres={\"G\":{\"x0\":float(G[1]),\"gamma\":float(abs(G[2])),\"amplitude\":float(G[3]),\"offset\":float(G[0])},\n     \"2D\":{\"x0\":float(D[1]),\"gamma\":float(abs(D[2])),\"amplitude\":float(D[3]),\"offset\":float(D[0])}}\nwith open('results.json','w') as f: json.dump(res,f,indent=2)\nprint('\\nFINAL'); print(json.dumps(res,indent=2))\nEOF\npython3 final.py\n",
+      "duration": 3.0
+    }
+  ]
+}
+```

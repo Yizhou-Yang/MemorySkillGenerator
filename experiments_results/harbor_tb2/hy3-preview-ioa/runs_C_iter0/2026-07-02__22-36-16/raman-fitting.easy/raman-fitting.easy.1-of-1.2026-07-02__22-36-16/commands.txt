@@ -1,0 +1,19 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+"find / -name 'graphene*' 2>/dev/null\n"
+'head -c 500 graphene.dat | xxd | head -40\n'
+'od -A x -t x1z graphene.dat | head -20\n'
+'head -c 400 graphene.dat | cat -A\n'
+"echo '---TAIL---'; tail -c 300 graphene.dat | cat -A\n"
+'wc -l graphene.dat\n'
+'python3 --version; python3 -c "import numpy,scipy; print(\'ok\', numpy.__version__, scipy.__version__)" 2>&1 | head -5\n'
+'python3 -m pip install numpy scipy 2>&1 | tail -5\n'
+"cat > /app/explore.py << 'EOF'\nimport numpy as np\n\ndef load(path):\n    raw = open(path, 'rb').read()\n    txt = raw.decode('latin-1')\n    lines = [ln for ln in txt.replace('\\r','').split('\\n') if ln.strip()]\n    # try to drop any SKIPRAMAN header\n    start = 0\n    while start < len(lines) and (lines[start].startswith('#') or 'SKIPRAMAN' in lines[start]):\n        start += 1\n    xs, ys = [], []\n    for ln in lines[start:]:\n        parts = ln.replace(',', '.').split()\n        if len(parts) >= 2:\n            try:\n                xs.append(float(parts[0])); ys.append(float(parts[1]))\n            except: pass\n    return np.array(xs), np.array(ys)\n\nx, y = load('/app/graphene.dat')\nprint('n=', len(x))\nprint('xmin,xmax=', x.min(), x.max())\nprint('ymin,ymax=', y.min(), y.max())\nprint('first x', x[:5])\nprint('last x', x[-5:])\n# find peaks near target wavenumbers\nfor tgt in (1580, 2700):\n    i = np.argmin(np.abs(x - tgt))\n    print('target', tgt, '-> x=', round(x[i],2), 'y=', round(y[i],2), 'at idx', i)\n# global max\nim = np.argmax(y)\nprint('global max x=', round(x[im],2), 'y=', round(y[im],2))\nEOF\npython3 /app/explore.py\n"
+"cat > /app/peaks.py << 'EOF'\nimport numpy as np\nraw = open('/app/graphene.dat','rb').read().decode('latin-1')\nlines=[l for l in raw.replace('\\r','').split('\\n') if l.strip() and not l.startswith('#') and 'SKIPRAMAN' not in l]\nxs=[]; ys=[]\nfor l in lines:\n    p=l.replace(',','.').split()\n    if len(p)>=2:\n        xs.append(float(p[0])); ys.append(float(p[1]))\nx=np.array(xs); y=np.array(ys)\n# local maxima\nloc=np.where((y[1:-1]>y[:-2])&(y[1:-1]>y[2:]))[0]+1\norder=loc[np.argsort(y[loc])[::-1]]\nprint('Top 20 local maxima:')\nfor i in order[:20]:\n    print(f'  x={x[i]:.2f}  y={y[i]:.2f}  idx={i}')\nprint('\\nWindow 1500-1700:')\nm=(x>1500)&(x<1700)\nif m.any():\n    a=np.where(m)[0]\n    for i in a[::max(1,len(a)//20)]:\n        print(f'  x={x[i]:.2f} y={y[i]:.2f}')\nprint('\\nWindow 2600-2800:')\nm=(x>2600)&(x<2800)\nif m.any():\n    a=np.where(m)[0]\n    for i in a[::max(1,len(a)//20)]:\n        print(f'  x={x[i]:.2f} y={y[i]:.2f}')\nEOF\npython3 /app/peaks.py\n"
+'python3 /app/peaks.py\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

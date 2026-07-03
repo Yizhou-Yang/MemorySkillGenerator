@@ -1,0 +1,10 @@
+{
+  "analysis": "All candidate kernel.org URLs return 404. The 6.9 tarball may have been moved to the archive, or kernel.org's CDN requires a different path. I need to find the real location. Let me do a GET (not HEAD) with a small byte range to see redirects/actual status and content-length, which reveals the true URL.",
+  "plan": "Probe the candidates with a GET Range request (bytes=0-100) to detect redirects and real availability. Also try the Ubuntu launchpad/Debian mirror as a fallback source for the linux 6.9 tarball.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe2.py << 'EOF'\nimport urllib.request\ncands=['https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://ftp.yzu.edu.tw/Linux/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://mirror.bjtu.edu.cn/kernel/linux/kernel/v6.x/linux-6.9.tar.xz']\nhdr={'User-Agent':'Mozilla/5.0','Range':'bytes=0-100'}\nfor u in cands:\n    try:\n        req=urllib.request.Request(u,headers=hdr)\n        r=urllib.request.urlopen(req,timeout=30)\n        print(r.status,r.headers.get('Content-Length'),r.geturl(),'->',r.read(20))\n    except Exception as e:\n        print(getattr(e,'code','?'),u,str(e)[:80])\nEOF\npython3 /tmp/probe2.py\n",
+      "duration": 30.0
+    }
+  ]
+}

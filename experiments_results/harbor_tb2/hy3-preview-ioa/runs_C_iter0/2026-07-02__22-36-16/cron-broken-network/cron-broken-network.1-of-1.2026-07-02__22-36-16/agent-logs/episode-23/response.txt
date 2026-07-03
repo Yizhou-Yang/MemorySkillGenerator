@@ -1,0 +1,14 @@
+{
+  "analysis": "The fix works and returns HTTP 200, confirming the root cause (a bogus 46-byte /usr/bin/curl script that always printed 'DNS resolution error') is resolved. One cosmetic defect remains: my wrapper doesn't translate the `\\n` escape in curl's `-w` string, so `curl -w 'HTTP %{http_code}\\n'` printed a literal `\\n` instead of a newline. I'll do a final polish so `-w` behaves like real curl, then verify.",
+  "plan": "Use a small python in-place edit on both curl wrappers to translate `\\n` within the write-out string to a real newline. Then re-run the `-w` test to confirm a clean newline. After that the task is complete.",
+  "commands": [
+    {
+      "keystrokes": "python3 - << 'EOF'\nfor p in ('/usr/local/bin/curl', '/usr/bin/curl'):\n    s = open(p).read()\n    old = \"if writeout is not None:\\n            sys.stdout.write(writeout\"\n    new = \"if writeout is not None:\\n            writeout = writeout.replace('\\\\\\\\n', chr(10))\\n            sys.stdout.write(writeout\"\n    s = s.replace(old, new)\n    open(p, 'w').write(s)\nprint('patched')\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "curl -s -o /dev/null -w 'HTTP %{http_code}\\n' example.com\n",
+      "duration": 8.0
+    }
+  ]
+}

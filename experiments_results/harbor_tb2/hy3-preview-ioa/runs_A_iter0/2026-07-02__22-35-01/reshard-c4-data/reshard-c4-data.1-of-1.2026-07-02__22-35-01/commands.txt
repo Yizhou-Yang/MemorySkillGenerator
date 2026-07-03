@@ -1,0 +1,40 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'find / -maxdepth 4 -type d -name c4_sample 2>/dev/null\n'
+'pwd; ls -la\n'
+''
+'ls -la /app/c4_sample | head -50\n'
+'ls /app/c4_sample | wc -l\n'
+'du -sh /app/c4_sample; du -ah /app/c4_sample | sort -rh | head -20\n'
+"python3 << 'PYEOF'\nimport os, shutil\nsrc='/app/c4_sample'\ndst='/app/c4_reshard'\nos.makedirs(dst, exist_ok=True)\nfiles=sorted(f for f in os.listdir(src) if os.path.isfile(os.path.join(src,f)))\nper=30\nfor i in range(0,len(files),per):\n    d=os.path.join(dst,'shard_%03d'%(i//per))\n    os.makedirs(d, exist_ok=True)\n    for f in files[i:i+per]:\n        shutil.copy2(os.path.join(src,f), os.path.join(d,f))\nprint('files',len(files),'shards',(len(files)+per-1)//per)\nPYEOF\n"
+'find /app/c4_reshard -type f | wc -l\n'
+'find /app/c4_reshard -mindepth 1 -maxdepth 1 -type d | wc -l\n'
+'for d in /app/c4_reshard/shard_*; do ls -1 "$d" | wc -l; done | sort -n | tail -1\n'
+"find /app/c4_reshard -type f -printf '%s\\n' | sort -n | tail -1\n"
+'C-c'
+'echo READY\n'
+'\n'
+'echo READY\n'
+'find /app/c4_reshard -type f | wc -l\n'
+'find /app/c4_reshard -mindepth 1 -maxdepth 1 -type d | wc -l\n'
+'for d in /app/c4_reshard/shard_*; do ls -1 "$d" | wc -l; done | sort -n | tail -1\n'
+"find /app/c4_reshard -type f -printf '%s\\n' | sort -n | tail -1\n"
+'python3 /tmp/reshape.py\n'
+"cat > /tmp/reshape.py << 'PYEOF'\nimport os, shutil\nsrc = '/app/c4_sample'\ndst = '/app/c4_reshard'\nos.makedirs(dst, exist_ok=True)\nfiles = sorted(f for f in os.listdir(src) if os.path.isfile(os.path.join(src, f)))\nper = 30\nfor i in range(0, len(files), per):\n    d = os.path.join(dst, 'shard_%03d' % (i // per))\n    os.makedirs(d, exist_ok=True)\n    for f in files[i:i+per]:\n        shutil.copy2(os.path.join(src, f), os.path.join(d, f))\nprint('files', len(files), 'shards', (len(files) + per - 1) // per)\nPYEOF\n"
+'python3 /tmp/reshape.py\n'
+''
+'find /app/c4_reshard -type f | wc -l; find /app/c4_reshard -mindepth 1 -maxdepth 1 -type d | wc -l\n'
+'for d in /app/c4_reshard/shard_*; do ls -1 "$d" | wc -l; done | sort -n | uniq -c | tail -5\n'
+"find /app/c4_reshard -type f -printf '%s\\n' | sort -n | tail -1\n"
+''
+'cat > /app/revert.py << \'PYEOF\'\n#!/usr/bin/env python3\n"""Revert the reshaped dataset back to its original flat layout.\n\nThis undoes the reshaping produced when preparing c4_reshard/ for upload.\nIt flattens the per-shard folders (shard_NNN) inside c4_reshard/ back into\nthe original flat directory c4_sample/, preserving the original filenames\nand contents so the result matches what was originally in c4_sample/.\n\nThe script lives in the parent directory of c4_sample/ and derives the\nlocations of c4_sample/ and c4_reshard/ relative to its own location, so it\nworks no matter the current working directory.\n\nRun:  python3 revert.py\n"""\nimport os\nimport shutil\nimport sys\n\n\ndef main():\n    base_dir = os.path.dirname(os.path.abspath(__file__))\n    original_dir = os.path.join(base_dir, \'c4_sample\')\n    reshaped_dir = os.path.join(base_dir, \'c4_reshard\')\n\n    if not os.path.isdir(reshaped_dir):\n        sys.exit(\'ERROR: c4_reshard/ not found at %s\' % reshaped_dir)\n\n    os.makedirs(original_dir, exist_ok=True)\n\n    count = 0\n    for entry in sorted(os.listdir(reshaped_dir)):\n        shard_path = os.path.join(reshaped_dir, entry)\n        if not os.path.isdir(shard_path):\n            # Skip anything that is not a shard folder (e.g. stray files).\n            continue\n        for fname in sorted(os.listdir(shard_path)):\n            src = os.path.join(shard_path, fname)\n            if not os.path.isfile(src):\n                continue\n            dst = os.path.join(original_dir, fname)\n            shutil.copy2(src, dst)\n            count += 1\n\n    print(\'Restored %d files into %s\' % (count, original_dir))\n    # Sanity check: report the number of files expected vs restored.\n    if os.path.isdir(original_dir):\n        restored = sum(\n            1 for _ in os.listdir(original_dir)\n            if os.path.isfile(os.path.join(original_dir, _))\n        )\n        print(\'c4_sample/ now contains %d files.\' % restored)\n\n\nif __name__ == \'__main__\':\n    main()\nPYEOF\n'
+'ls -la /app/revert.py; echo \'---\'; python3 -c "import ast; ast.parse(open(\'/app/revert.py\').read()); print(\'syntax OK\')"\n'
+''
+'cat > /app/revert.py << \'PYEOF\'\n#!/usr/bin/env python3\n"""Revert the reshaped dataset back to its original (flat) layout.\n\nThis undoes the resharding performed when preparing c4_reshard/ for upload.\nIt flattens c4_reshard/ *in place*: every file currently sitting inside the\nper-shard subfolders (shard_NNN) is moved up into the c4_reshard/ root, and\nthe now-empty shard folders are removed. After running, the contents of\nc4_reshard/ match exactly what was originally in c4_sample/ (a flat directory\nof c4-mini-*.jsonl files) -- i.e. it is reverted "back to the original state".\n\nThe script lives in the parent directory of c4_sample/ and derives the\nlocation of c4_reshard/ relative to its own location, so it works regardless\nof the current working directory.\n\nRun:  python3 revert.py\n"""\nimport os\nimport shutil\nimport sys\n\n\ndef main():\n    base_dir = os.path.dirname(os.path.abspath(__file__))\n    reshaped_dir = os.path.join(base_dir, \'c4_reshard\')\n\n    if not os.path.isdir(reshaped_dir):\n        sys.exit(\'ERROR: c4_reshard/ not found at %s\' % reshaped_dir)\n\n    moved = 0\n    removed_shards = 0\n    for entry in sorted(os.listdir(reshaped_dir)):\n        shard_path = os.path.join(reshaped_dir, entry)\n        if not os.path.isdir(shard_path):\n            # Skip anything that is not a shard folder (e.g. stray files).\n            continue\n        for fname in sorted(os.listdir(shard_path)):\n            src = os.path.join(shard_path, fname)\n            if not os.path.isfile(src):\n                continue\n            dst = os.path.join(reshaped_dir, fname)\n            shutil.move(src, dst)\n            moved += 1\n        # Remove the shard folder now that it should be empty.\n        try:\n            os.rmdir(shard_path)\n            removed_shards += 1\n        except OSError:\n            print(\'WARNING: could not remove %s (not empty)\' % shard_path)\n\n    # Report results.\n    top_files = [\n        f for f in os.listdir(reshaped_dir)\n        if os.path.isfile(os.path.join(reshaped_dir, f))\n    ]\n    print(\'Reverted c4_reshard/: moved %d files out of %d shard folders.\'\n          % (moved, removed_shards))\n    print(\'c4_reshard/ is now flat with %d files, matching the original c4_sample/.\'\n          % len(top_files))\n\n    # Optional sanity check against the original c4_sample/ if it is present.\n    original_dir = os.path.join(base_dir, \'c4_sample\')\n    if os.path.isdir(original_dir):\n        orig_files = set(\n            f for f in os.listdir(original_dir)\n            if os.path.isfile(os.path.join(original_dir, f))\n        )\n        if set(top_files) == orig_files:\n            print(\'Verification OK: c4_reshard/ contents match c4_sample/ (%d files).\'\n                  % len(orig_files))\n        else:\n            missing = orig_files - set(top_files)\n            extra = set(top_files) - orig_files\n            print(\'WARNING: mismatch with c4_sample/ -- missing %d, unexpected %d\'\n                  % (len(missing), len(extra)))\n\n\nif __name__ == \'__main__\':\n    main()\nPYEOF\n'
+'python3 -c "import ast; ast.parse(open(\'/app/revert.py\').read()); print(\'syntax OK\')"\n'
+'ls -la /app/revert.py\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

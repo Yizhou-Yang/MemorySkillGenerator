@@ -1,0 +1,20 @@
+The pty driver ran but frotz still refused with "I won't run as root!" — so frotz refuses when the *process* is root, even in a pty. The original interactive run worked because... actually it must've been the tty. Let me make the child process run as a non-root user (player) so frotz won't refuse, while keeping the pty so it's a real terminal.
+
+{
+  "analysis": "The pty driver didn't fix the issue: frotz printed 'I won't run as root!' even in a pty. This means frotz refuses based on the process UID being root, not the tty. The original interactive run apparently worked, but via pty.fork the child is still root. The fix: in the pty child, setuid to the 'player' user (already created) before exec'ing frotz. frotz will then run as non-root in a real pty and accept stdin commands. The parent (root) captures the transcript to a file.",
+  "plan": "Rewrite /app/play.py so the child does setgid/setuid to 'player' before exec'ing frotz. Keep the pty + transcript capture. Then re-run the opening-sequence command file and read the transcript. If frotz runs, I'll see the game output and confirm I reach the Cellar.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/play.py <<'PYEOF'\nimport os, pty, sys, time, select, pwd\n\ndef main():\n    cmds = [c for c in open(sys.argv[1]).read().split('\\n') if c.strip() != '']\n    uid = pwd.getpwnam('player').pw_uid\n    gid = pwd.getpwnam('player').pw_gid\n    pid, fd = pty.fork()\n    if pid == 0:\n        os.setgid(gid)\n        os.setuid(uid)\n        os.environ['TERM'] = 'dumb'\n        os.environ['LINES'] = '40'\n        os.environ['COLUMNS'] = '80'\n        os.execv('/app/frotz/frotz', ['frotz', '/app/frotz/zork1.z5'])\n    out = open('/app/transcript.txt', 'wb')\n    time.sleep(0.8)\n    for c in cmds:\n        os.write(fd, (c + '\\n').encode())\n        time.sleep(0.2)\n    end = time.time() + 4\n    while time.time() < end:\n        r, _, _ = select.select([fd], [], [], 0.3)\n        if r:\n            try:\n                d = os.read(fd, 65536)\n            except OSError:\n                break\n            if not d:\n                break\n            out.write(d)\n            out.flush()\n            end = time.time() + 2\n    out.close()\n    try:\n        os.waitpid(pid, 0)\n    except Exception:\n        pass\n\nmain()\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /app/play.py /app/cmds.txt\n",
+      "duration": 6.0
+    },
+    {
+      "keystrokes": "echo DONE_RC=$?\n",
+      "duration": 0.3
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+New Terminal Output:
+
+root@71888fc67f93:/app# cat > /app/agent.py << 'EOF'
+pe=np.float32)
+        if np.random.rand() < epsilon:
+            return int(np.random.randint(self.n_action))
+        with torch.no_grad():
+            state = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            q = self.policy_net(state)
+            return int(q.argmax(dim=1).item())
+
+    def save(self, directory):
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, "policy_net.pt")
+        torch.save(self.policy_net.state_dict(), path)
+
+    def load(self, directory):
+        path = os.path.join(directory, "policy_net.pt")
+        state = torch.load(path, map_location=self.device)
+        self.policy_net.load_state_dict(state)
+        self.target_net.load_state_dict(state)
+        self.policy_net.eval()
+        self.target_net.eval()
+EOF
+> import os
+> import numpy as np
+> import torch
+> import torch.nn as nn
+> import torch.nn.functional as F
+>
+>
+> class DQN(nn.Module):
+>     def __init__(self, n_state=4, n_hidden=128, n_action=2):
+>         super().__init__()
+>         self.fc1 = nn.Linear(n_state, n_hidden)
+>         self.fc2 = nn.Linear(n_hidden, n_hidden)
+>         self.fc3 = nn.Linear(n_hidden, n_action)
+>
+>     def forward(self, x):
+>         x = F.relu(self.fc1(x))
+>         x = F.relu(self.fc2(x))
+>         return self.fc3(x)
+>
+>
+> class Agent:
+>     def __init__(self):
+>         self.n_state = 4
+>         self.n_action = 2
+>         self.device = torch.device("cpu")
+>         self.policy_net = DQN().to(self.device)
+>         self.target_net = DQN().to(self.device)
+>         self.target_net.load_state_dict(self.policy_net.state_dict())
+>         self.target_net.eval()
+>         self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=1e-3)
+>
+>     def select_action(self, current_observation, epsilon=0.0):
+>         obs = np.asarray(current_observation, dtype=np.float32)
+>         if np.random.rand() < epsilon:
+>             return int(np.random.randint(self.n_action))
+>         with torch.no_grad():
+>             state = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+>             q = self.policy_net(state)
+>             return int(q.argmax(dim=1).item())
+>
+>     def save(self, directory):
+>         os.makedirs(directory, exist_ok=True)
+>         path = os.path.join(directory, "policy_net.pt")
+>         torch.save(self.policy_net.state_dict(), path)
+>
+>     def load(self, directory):
+>         path = os.path.join(directory, "policy_net.pt")
+>         state = torch.load(path, map_location=self.device)
+>         self.policy_net.load_state_dict(state)
+>         self.target_net.load_state_dict(state)
+>         self.policy_net.eval()
+>         self.target_net.eval()
+> EOF
+root@71888fc67f93:/app#

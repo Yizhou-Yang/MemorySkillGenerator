@@ -1,0 +1,18 @@
+{
+  "analysis": "The push still fails with 'bad line length character: Welc'. The source is /etc/update-motd.d/00-header, printed by pam_motd during the SSH session — this corrupts the Git protocol stream on stdout. Switching to git-shell didn't help because PAM prints motd before the shell runs. I must disable motd in both PAM (/etc/pam.d/sshd) and sshd (PrintMotd no), then restart sshd.",
+  "plan": "1) Comment out pam_motd lines in /etc/pam.d/sshd. 2) Add 'PrintMotd no' to my sshd drop-in config. 3) Restart sshd. 4) Re-run the push and time it. 5) Verify HTTPS endpoints.",
+  "commands": [
+    {
+      "keystrokes": "sed -i 's/^session\\s*optional\\s*pam_motd.so/# &/' /etc/pam.d/sshd; grep -n pam_motd /etc/pam.d/sshd\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "printf 'PrintMotd no\\nPrintLastLog no\\n' >> /etc/ssh/sshd_config.d/99-git.conf && pkill -x sshd; sleep 1; /usr/sbin/sshd; sleep 1; pgrep -a sshd\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "cd /tmp/testrepo && time expect /tmp/push.exp\n",
+      "duration": 6.0
+    }
+  ]
+}

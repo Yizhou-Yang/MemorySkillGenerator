@@ -1,0 +1,128 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@68b41fa74434:/app# cat > /tmp/mux.py <<'PYEOF'
+> import socket, threading, time, sys
+>
+> QEMU_ADDR=("127.0.0.1",6666)
+> LISTEN_ADDR=("127.0.0.1",6665)
+> RAWLOG="/tmp/serial.log"
+> MAXHIST=4_000_000
+>
+> history=bytearray()
+> hist_lock=threading.Lock()
+> clients=[]
+> clients_lock=threading.Lock()
+>
+> open(RAWLOG,"w").close()
+>
+> def log(*a):
+>     with open("/tmp/mux.log","a") as f:
+>         f.write(time.strftime("%H:%M:%S ")+" ".join(str(x) for x in a)+"\n")
+>
+> def qemu_connect():
+>     while True:
+>         try:
+>             s=socket.create_connection(QEMU_ADDR,timeout=5)
+>             log("connected to qemu",QEMU_ADDR)
+>             return s
+>         except Exception as e:
+>             log("qemu connect retry:",e); time.sleep(1)
+>
+> def reader(q):
+>     while True:
+>         try:
+>             data=q.recv(65536)
+>         except Exception:
+>             log("qemu recv error, reconnecting")
+>             try: q.close()
+>             except: pass
+>             q=qemu_connect(); continue
+>         if not data:
+>             log("qemu closed, reconnecting")
+>             try: q.close()
+>             except: pass
+>             q=qemu_connect(); continue
+>         with hist_lock:
+>             history.extend(data)
+>             if len(history)>MAXHIST: del history[:-MAXHIST]
+>         try:
+>             with open(RAWLOG,"a") as f: f.write(data.decode("latin1","replace"))
+>         except: pass
+>         with clients_lock:
+>             dead=[]
+>             for c in clients:
+>                 try: c.sendall(data)
+>                 except: dead.append(c)
+>             for c in dead:
+>                 try: c.close()
+>                 except: pass
+>                 clients.remove(c)
+>
+> def client_to_qemu(c,q):
+>     while True:
+>         try: data=c.recv(4096)
+>         except: break
+>         if not data: break
+>         try: q.sendall(data)
+>         except: break
+>     with clients_lock:
+>         if c in clients: clients.remove(c)
+>     try: c.close()
+>     except: pass
+>
+> def serve():
+>     ls=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+>     ls.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+>     ls.bind(LISTEN_ADDR); ls.listen(5)
+>     log("mux listening on",LISTEN_ADDR)
+>     while True:
+>         c,_=ls.accept()
+>         log("client connect")
+>         with hist_lock: h=bytes(history)
+>         try: c.sendall(h)
+>         except:
+>             c.close(); continue
+>         with clients_lock: clients.append(c)
+>         threading.Thread(target=client_to_qemu,args=(c,q),daemon=True).start()
+>
+> def main():
+>     open("/tmp/mux.log","w").close()
+>     q=qemu_connect()
+>     threading.Thread(target=reader,args=(q,),daemon=True).start()
+>     serve()
+>
+> main()
+> PYEOF
+root@68b41fa74434:/app# cat > /tmp/run.sh <<'SH'
+> #!/bin/bash
+> set -e
+> nohup qemu-system-x86_64 \
+>   -m 512 -smp 2 \
+>   -kernel /tmp/vmlinuz-lts \
+>   -initrd /tmp/initramfs-lts \
+>   -append "modules=loop,squashfs,sd-mod,usb-storage console=ttyS0" \
+>   -cdrom /app/alpine.iso \
+>   -net none \
+>   -display none \
+>   -pidfile /tmp/qemu.pid \
+>   -serial tcp:127.0.0.1:6666,server,nowait \
+>   > /tmp/qemu.log 2>&1 &
+> echo "qemu pid $!"
+> nohup python3 /tmp/mux.py > /tmp/mux.stdout 2>&1 &
+> echo "mux pid $!"
+> SH
+root@68b41fa74434:/app# bash /tmp/run.sh
+qemu pid 462
+mux pid 463
+root@68b41fa74434:/app# sleep 2; echo '--- qemu.log ---'; cat /tmp/qemu.log; echo '--- mux.log ---'; cat /tmp/mux.log 2>/dev/null; echo '--- ports ---'; (ss -lt
+np 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E '6665|6666'
+--- qemu.log ---
+--- mux.log ---
+21:55:22 qemu connect retry: [Errno 111] Connection refused
+21:55:23 connected to qemu ('127.0.0.1', 6666)
+21:55:23 mux listening on ('127.0.0.1', 6665)
+--- ports ---
+root@68b41fa74434:/app#

@@ -1,0 +1,416 @@
+root@6eb18b182dac:/app# ls -la /app
+total 96
+drwxr-xr-x  2 root root  4096 Jul  2 15:09 .
+drwxr-xr-x 19 root root  4096 Jul  2 17:04 ..
+-rw-r--r--  1 root root 88805 Jul  2 13:59 graphene.dat
+root@6eb18b182dac:/app# pwd
+/app
+root@6eb18b182dac:/app# head -50 /app/graphene.dat
+47183,554644    19261,547207
+46588,360019    19266,089699
+46008,191298    19077,996963
+45442,488736    19173,287322
+44890,718036    19501,518253
+44352,368927    19506,586203
+43826,959593    19752,431144
+43314,029137    19812,863021
+42813,138290    19678,348151
+42323,866373    19764,871128
+41845,813826    19360,099292
+41378,600916    19413,554878
+40921,863181    19626,191780
+40475,250679    19704,066336
+40038,430487    19495,727898
+39611,084116    19672,573559
+39192,908278    19538,763458
+38783,609488    19344,943112
+38382,908122    19510,307527
+37990,536178    19552,152695
+37606,236678    19568,884582
+37229,764497    19605,714542
+36860,880256    19652,302102
+36499,358232    19518,303269
+36144,980263    19684,212843
+35797,536721    19599,237174
+35456,826102    19666,264313
+35122,653398    19895,771042
+34794,833482    19781,231391
+34473,186962    19931,483503
+34157,541138    20285,381465
+33847,728547    20523,239756
+33543,589022    21041,170567
+33244,969313    21252,731073
+32951,720556    21063,536782
+32663,698124    20547,110114
+32380,763586    20339,907615
+32102,783353    19883,117751
+31829,629489    19630,215111
+31561,176433    19007,346911
+31297,303919    18787,398139
+31037,895750    18572,941601
+30782,840573    18641,459921
+30532,027914    18252,903219
+30285,354669    18084,091054
+30042,717440    17987,028918
+29804,018905    17844,333233
+29569,163975    17541,066496
+29338,060595    17468,865956
+29110,619627    17434,460788
+root@6eb18b182dac:/app# wc -l /app/graphene.dat
+3565 /app/graphene.dat
+root@6eb18b182dac:/app# python3 -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy, scipy; print(numpy.__version__, scipy.__version__)
+    ^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+root@6eb18b182dac:/app# tail -20 /app/graphene.dat
+1653,704408     5869,936650
+1653,440936     5773,130495
+1653,177619     5895,449413
+1652,914454     6214,277617
+1652,651439     6034,852890
+1652,388578     6285,424832
+1652,125866     6004,103504
+1651,863309     6150,102627
+1651,600904     6161,653672
+1651,338647     6193,454093
+1651,076544     6302,950951
+1650,814593     6154,492341
+1650,552790     6150,191176
+1650,291141     6157,269473
+1650,029641     6090,511415
+1649,768294     6062,725860
+1649,507095     6005,066261
+1649,246046     6009,427936
+1648,985151     5911,446799
+1648,724404     5950,923261
+root@6eb18b182dac:/app# pip install numpy scipy 2>&1 | tail -5
+Successfully installed numpy-2.5.0 scipy-1.18.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@6eb18b182dac:/app# cat > /app/explore.py << 'EOF'
+> import numpy as np
+>
+> x=[]; y=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.replace(',','.').split()
+>         if len(line)>=2:
+>             x.append(float(line[0])); y.append(float(line[1]))
+> x=np.array(x); y=np.array(y)
+> print('n', len(x))
+> print('x range', x.min(), x.max())
+> print('y range', y.min(), y.max())
+> # is x monotonic?
+> print('x monotonic decreasing?', np.all(np.diff(x)<0))
+> # find local maxima
+> from scipy.signal import argrelmax
+> dy=np.diff(y)
+> # peaks
+> mx, = argrelmax(y, order=20)
+> for i in mx:
+>     print('peak x=%.1f y=%.1f'%(x[i], y[i]))
+> EOF
+root@6eb18b182dac:/app# python3 /app/explore.py
+n 3565
+x range 1648.724404 47183.554644
+y range 40.090842 79400.095085
+x monotonic decreasing? True
+peak x=33245.0 y=21252.7
+peak x=19139.5 y=79400.1
+peak x=10289.9 y=18805.2
+peak x=6329.4 y=13777.7
+peak x=4603.4 y=3291.2
+peak x=4468.4 y=3033.1
+peak x=4297.1 y=2757.4
+peak x=4083.6 y=2873.8
+peak x=3896.7 y=2277.4
+peak x=3745.1 y=12920.9
+peak x=3389.8 y=1217.0
+peak x=3288.9 y=1090.3
+peak x=3188.0 y=878.7
+peak x=3084.7 y=1300.7
+peak x=3025.0 y=678.3
+peak x=2990.9 y=661.9
+peak x=2950.4 y=708.9
+peak x=2893.0 y=728.9
+peak x=2858.5 y=655.1
+peak x=2796.5 y=579.3
+peak x=2746.4 y=599.7
+peak x=2716.3 y=601.8
+peak x=2654.2 y=579.8
+peak x=2630.0 y=596.5
+peak x=2577.0 y=611.2
+peak x=2539.6 y=660.9
+peak x=2489.6 y=738.4
+peak x=2454.6 y=844.7
+peak x=2434.1 y=842.6
+peak x=2392.0 y=867.6
+peak x=2352.7 y=1107.2
+peak x=2302.2 y=1141.4
+peak x=2233.7 y=1269.6
+peak x=2214.6 y=1353.0
+peak x=2198.6 y=1321.2
+peak x=2176.5 y=1418.6
+peak x=2156.3 y=1498.6
+peak x=2137.3 y=1620.3
+peak x=2111.7 y=1670.4
+peak x=2090.3 y=1859.3
+peak x=2059.8 y=2098.5
+peak x=2036.3 y=2054.3
+peak x=2011.1 y=2308.3
+peak x=2000.1 y=2470.4
+peak x=1987.8 y=2497.9
+peak x=1944.1 y=2754.0
+peak x=1912.6 y=3005.0
+peak x=1900.7 y=3223.0
+peak x=1891.9 y=3255.7
+peak x=1873.0 y=3397.9
+peak x=1848.9 y=3705.4
+peak x=1831.4 y=3886.9
+peak x=1819.9 y=4063.2
+peak x=1806.1 y=4406.5
+peak x=1783.7 y=4504.0
+peak x=1755.0 y=4816.2
+peak x=1738.4 y=5016.0
+peak x=1727.2 y=5331.1
+peak x=1720.7 y=5232.0
+peak x=1695.6 y=5659.8
+peak x=1683.6 y=5942.2
+peak x=1673.4 y=6135.4
+peak x=1666.8 y=6228.4
+peak x=1660.1 y=6474.3
+root@6eb18b182dac:/app# cat > /app/explore2.py << 'EOF'
+> import numpy as np
+> from scipy.signal import find_peaks
+> x=[]; y=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.replace(',','.').split()
+>         if len(line)>=2:
+>             x.append(float(line[0])); y.append(float(line[1]))
+> x=np.array(x); y=np.array(y)
+> print('global max y=%.1f at x=%.1f'%(y.max(), x[y.argmax()]))
+> peaks, props = find_peaks(y, prominence=2000, distance=30)
+> print('num peaks', len(peaks))
+> for p in peaks:
+>     print('x=%.1f y=%.1f prom=%.1f'%(x[p], y[p], props['prominences'][list(peaks).index(p)]))
+> EOF
+root@6eb18b182dac:/app# python3 /app/explore2.py
+global max y=79400.1 at x=19139.5
+num peaks 5
+x=33245.0 y=21252.7 prom=2174.7
+x=19139.5 y=79400.1 prom=67189.5
+x=10289.9 y=18805.2 prom=7256.6
+x=6329.4 y=13777.7 prom=7697.6
+x=3745.1 y=12920.9 prom=11204.0
+root@6eb18b182dac:/app# cat > /app/analyze.py << 'EOF'
+> import numpy as np
+> x=[]; y=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         p=line.replace(',','.').split()
+>         if len(p)>=2:
+>             x.append(float(p[0])); y.append(float(p[1]))
+> x=np.array(x); y=np.array(y)
+> idx=np.argsort(x)
+> xs=x[idx]; ys=y[idx]
+> n=len(xs)
+> print('coarse trace (x ascending):')
+> for i in range(0,n,71):
+>     print('x=%8.1f  y=%8.1f'%(xs[i],ys[i]))
+> EOF
+root@6eb18b182dac:/app# python3 /app/analyze.py
+coarse trace (x ascending):
+x=  1648.7  y=  5950.9
+x=  1667.6  y=  5845.4
+x=  1687.3  y=  5512.9
+x=  1707.9  y=  5304.2
+x=  1729.3  y=  4766.7
+x=  1751.7  y=  4730.6
+x=  1775.2  y=  4157.2
+x=  1799.7  y=  3739.2
+x=  1825.4  y=  3627.1
+x=  1852.4  y=  3278.0
+x=  1880.7  y=  2866.0
+x=  1910.5  y=  2796.7
+x=  1941.8  y=  2479.9
+x=  1974.8  y=  2282.5
+x=  2009.6  y=  1973.1
+x=  2046.4  y=  1920.7
+x=  2085.2  y=  1574.9
+x=  2126.4  y=  1500.7
+x=  2170.2  y=  1332.4
+x=  2216.6  y=   863.6
+x=  2266.1  y=   934.2
+x=  2318.9  y=   777.3
+x=  2375.4  y=   740.8
+x=  2435.9  y=   508.9
+x=  2500.9  y=   386.8
+x=  2570.9  y=   488.6
+x=  2646.4  y=   262.9
+x=  2728.3  y=   504.6
+x=  2817.2  y=   408.6
+x=  2914.2  y=   185.3
+x=  3020.3  y=   391.2
+x=  3137.0  y=   886.2
+x=  3265.8  y=   788.7
+x=  3408.8  y=   961.0
+x=  3568.4  y=  1404.7
+x=  3747.7  y= 12904.7
+x=  3950.6  y=  1996.9
+x=  4181.9  y=  2358.2
+x=  4448.1  y=  2749.8
+x=  4757.8  y=  3459.4
+x=  5122.4  y=  3965.8
+x=  5558.1  y=  4718.6
+x=  6087.7  y=  5382.7
+x=  6745.3  y=  6297.5
+x=  7583.7  y=  7382.6
+x=  8689.0  y=  8550.4
+x= 10212.7  y= 18448.7
+x= 12448.1  y= 12468.5
+x= 16044.8  y= 17319.6
+x= 22790.4  y= 14129.6
+x= 40038.4  y= 19495.7
+root@6eb18b182dac:/app# cat > /app/peaks.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> from scipy.signal import find_peaks
+> x=[]; y=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         p=line.replace(',','.').split()
+>         if len(p)>=2:
+>             x.append(float(p[0])); y.append(float(p[1]))
+> x=np.array(x); y=np.array(y)
+> idx=np.argsort(x); x=x[idx]; y=y[idx]
+> peaks, props = find_peaks(y, prominence=2000, distance=30)
+> cand = x[peaks]
+> print('candidates x:', cand)
+>
+> def lor(x,x0,gamma,amp):
+>     return amp*gamma**2/((x-x0)**2+gamma**2)
+>
+> for cx in cand:
+>     i = np.argmin(np.abs(x-cx))
+>     lo = max(0,i-400); hi = min(len(x),i+400)
+>     xs=x[lo:hi]; ys=y[lo:hi]
+>     # local baseline from outer 20%
+>     nb=max(20,len(xs)//10)
+>     bx=np.concatenate([xs[:nb],xs[-nb:]]); by=np.concatenate([ys[:nb],ys[-nb:]])
+>     b=np.polyfit(bx,by,1)
+>     ys_b = ys - np.polyval(b,xs)
+>     mask = ys_b>0
+>     try:
+>         p0=[xs[np.argmax(ys_b)], 50, ys_b.max()]
+>         popt,_=curve_fit(lor,xs[mask],ys_b[mask],p0=p0,maxfev=10000)
+>         print('x0=%.1f gamma=%.1f amp=%.1f base=%.1f+%.3f*x'%(popt[0],popt[1],popt[2],b[1],b[0]))
+>     except Exception as e:
+>         print('fit fail at',cx,e)
+> EOF
+root@6eb18b182dac:/app# python3 /app/peaks.py
+candidates x: [ 3745.052664  6329.372427 10289.940052 19139.543541 33244.969313]
+x0=3745.1 gamma=22.4 amp=12037.4 base=-4425.1+1.637*x
+x0=10397.4 gamma=346.9 amp=9850.4 base=-2571.9+1.177*x
+x0=19186.7 gamma=447.3 amp=72116.8 base=2396.9+0.464*x
+x0=19190.3 gamma=432.0 amp=72096.3 base=4163.8+0.407*x
+x0=19192.2 gamma=426.0 amp=71973.3 base=5102.3+0.377*x
+root@6eb18b182dac:/app# cat > /app/fit.py << 'EOF'
+> import numpy as np, json
+> from scipy.optimize import curve_fit
+>
+> x=[]; y=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         p=line.replace(',','.').split()
+>         if len(p)>=2:
+>             x.append(float(p[0])); y.append(float(p[1]))
+> x=np.array(x); y=np.array(y)
+> idx=np.argsort(x); x=x[idx]; y=y[idx]
+>
+> def lor(x,x0,gamma,amp,offset):
+>     return offset + amp*gamma**2/((x-x0)**2+gamma**2)
+>
+> def fit_window(xc, dx, p0):
+>     m=(x>xc-dx)&(x<xc+dx)
+>     xs=x[m]; ys=y[m]
+>     popt,pcov=curve_fit(lor,xs,ys,p0=p0,
+>         bounds=([xc-3000,1,0,0],[xc+3000,2000,5e5,1e5]),maxfev=200000)
+>     yfit=lor(xs,*popt)
+>     ss=1-((ys-yfit)**2).sum()/((ys-ys.mean())**2).sum()
+>     return popt, ss
+>
+> p2d,r2d=fit_window(19139,2200,[19139,450,72000,15000])
+> pG,rG=fit_window(10289,1800,[10289,350,10000,10000])
+> print('2D x0=%.2f gamma=%.2f amp=%.2f offset=%.2f  R2=%.5f'%(p2d[0],p2d[1],p2d[2],p2d[3],r2d))
+> print('G  x0=%.2f gamma=%.2f amp=%.2f offset=%.2f  R2=%.5f'%(pG[0],pG[1],pG[2],pG[3],rG))
+>
+> res={"G":{"x0":float(pG[0]),"gamma":float(pG[1]),"amplitude":float(pG[2]),"offset":float(pG[3])},
+>       "2D":{"x0":float(p2d[0]),"gamma":float(p2d[1]),"amplitude":float(p2d[2]),"offset":float(p2d[3])}}
+> with open('/app/results.json','w') as f:
+>     json.dump(res,f,indent=2)
+> print(json.dumps(res,indent=2))
+> EOF
+root@6eb18b182dac:/app# python3 /app/fit.py
+2D x0=19196.76 gamma=405.76 amp=73756.17 offset=11867.78  R2=0.94685
+G  x0=10442.50 gamma=360.88 amp=10764.28 offset=8888.25  R2=0.86642
+{
+  "G": {
+    "x0": 10442.49987371656,
+    "gamma": 360.8834302341361,
+    "amplitude": 10764.282368749859,
+    "offset": 8888.250850901823
+  },
+  "2D": {
+    "x0": 19196.761441033934,
+    "gamma": 405.757775941842,
+    "amplitude": 73756.17211999868,
+    "offset": 11867.783463053976
+  }
+}
+root@6eb18b182dac:/app# cat > /app/diag.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> x=[]; y=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         p=line.replace(',','.').split()
+>         if len(p)>=2:
+>             x.append(float(p[0])); y.append(float(p[1]))
+> x=np.array(x); y=np.array(y)
+> idx=np.argsort(x); x=x[idx]; y=y[idx]
+>
+> def L(x,x0,g,a): return a*g**2/((x-x0)**2+g**2)
+>
+> def fit(cx,dx,model,npar):
+>     m=(x>cx-dx)&(x<cx+dx); xs=x[m]; ys=y[m]
+>     if model=='const':
+>         f=lambda x,x0,g,a,c: c+L(x,x0,g,a)
+>         p0=[cx,300,ys.max()-ys.min(),ys.min()]
+>     else:
+>         f=lambda x,x0,g,a,c,sl: c+sl*x+L(x,x0,g,a)
+>         p0=[cx,300,ys.max()-ys.min(),ys.mean(),0.0]
+>     popt,_=curve_fit(f,xs,ys,p0=p0,maxfev=200000)
+>     yf=f(xs,*popt); r2=1-((ys-yf)**2).sum()/((ys-ys.mean())**2).sum()
+>     return popt,r2
+>
+> for name,cx,dx in [('G',10289,1600),('2D',19139,2200)]:
+>     pc,rc=fit(cx,dx,'const',4)
+>     pl,rl=fit(cx,dx,'lin',5)
+>     print(name,'CONST: x0=%.1f g=%.1f a=%.1f off=%.1f R2=%.4f'%(pc[0],pc[1],pc[2],pc[3],rc))
+>     if len(pl)==5:
+>         off_at_peak=pl[3]+pl[4]*pl[0]
+>         print('     LIN : x0=%.1f g=%.1f a=%.1f off@peak=%.1f slope=%.4f R2=%.4f'%(pl[0],pl[1],pl[2],off_at_peak,pl[4],rl))
+> EOF
+root@6eb18b182dac:/app# python3 /app/diag.py
+G CONST: x0=10440.9 g=365.7 a=10874.1 off=8770.5 R2=0.8926
+     LIN : x0=10401.7 g=319.9 a=10231.9 off@peak=9578.3 slope=1.0661 R2=0.9620
+2D CONST: x0=19196.8 g=405.8 a=73756.1 off=11867.7 R2=0.9469
+     LIN : x0=19215.8 g=414.8 a=75214.4 off@peak=10431.5 slope=-2.7270 R2=0.9708
+root@6eb18b182dac:/app#

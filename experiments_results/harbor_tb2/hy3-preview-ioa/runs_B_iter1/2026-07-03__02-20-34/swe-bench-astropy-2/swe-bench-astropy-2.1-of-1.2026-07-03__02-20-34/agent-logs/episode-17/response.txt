@@ -1,0 +1,22 @@
+The fix is verified working. The core change resolves the issue.
+
+**Summary**
+
+The bug was in `/app/astropy/astropy/io/ascii/qdp.py`: the `_line_type` function used a regex `_command_re = r"READ [TS]ERR(\s+[0-9]+)+"` to detect QDP command lines, which required them to be all uppercase. QDP itself is case-insensitive, so lowercase commands like `read serr 1 2` raised `ValueError: Unrecognized QDP line`.
+
+**The fix** (qdp.py:71):
+```python
+_line_type_re = re.compile(_type_re, re.IGNORECASE)
+```
+
+This makes the line-type detection case-insensitive, matching QDP's actual semantics. The downstream command parsing already used `command[1].lower()`, so no other changes were needed.
+
+**Verification** (ran the actual `_line_type` source extracted from the real file — gcc wasn't available to build astropy's C extensions, but the fix lives entirely in this pure-Python regex function):
+- `read serr 1 2` → `command` ✓ (previously raised ValueError)
+- `READ SERR 1 2` → `command` ✓ (still works)
+- `read terr 1` / `READ TERR 1 2` → `command` ✓
+- `1 0.5 1 0.5` → `data,4` ✓
+
+All cases pass. The example from the issue now correctly classifies `read serr 1 2` as a command line, so `Table.read('test.qdp', format='ascii.qdp')` will read the table with errors instead of crashing.
+
+Note: the change also makes `NO`/missing-value handling and table-separator (`NO NO NO`) lines case-insensitive, which is consistent with QDP's case-insensitive behavior.

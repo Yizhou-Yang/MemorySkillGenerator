@@ -1,0 +1,22 @@
+{
+  "analysis": "TensorFlow 2.8.0 and PyTorch 1.12.0+cpu now import successfully. The remaining issue is transformers 4.18.0 failing because the installed huggingface_hub is too new — it no longer exports HfFolder (removed in newer huggingface_hub releases). I need to pin huggingface_hub to a version compatible with transformers 4.18.0 (circa 0.9.x) and add it to environment.yml for reproducibility.",
+  "plan": "1) Add a pinned huggingface_hub to the pip section of environment.yml. 2) Install a compatible huggingface_hub version (0.9.1) into the datasci env. 3) Re-run test_imports.py and confirm all imports succeed with EXIT=0.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/project/environment.yml <<'EOF'\nname: datasci\nchannels:\n  - conda-forge\ndependencies:\n  - python=3.10\n  - numpy=1.22.0\n  - scipy=1.9.0\n  - pandas=1.4.0\n  - scikit-learn=1.0.2\n  - transformers=4.18.0\n  - pip\n  - pip:\n    - tensorflow-cpu==2.8.0\n    - protobuf<3.20\n    - huggingface_hub==0.9.1\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "conda run -n datasci pip install 'huggingface_hub==0.9.1' > /tmp/hf.out 2>&1; echo \"EXIT=$?\"\n",
+      "duration": 30.0
+    },
+    {
+      "keystrokes": "tail -n 4 /tmp/hf.out\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "conda run -n datasci python /app/project/test_imports.py 2>&1 | tail -n 25; echo \"EXIT=${PIPESTATUS[0]}\"\n",
+      "duration": 30.0
+    }
+  ]
+}

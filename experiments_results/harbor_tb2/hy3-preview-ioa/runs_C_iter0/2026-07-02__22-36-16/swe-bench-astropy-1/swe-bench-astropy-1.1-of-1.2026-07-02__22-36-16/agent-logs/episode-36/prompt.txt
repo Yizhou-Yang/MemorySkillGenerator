@@ -1,0 +1,57 @@
+New Terminal Output:
+
+root@8ab9d4e39045:/app/astropy# sed -n '98,155p' /app/astropy/astropy/modeling/tests/test_separable.py
+def test_cstack():
+    result = _cstack(sh1, scl1)
+    assert_allclose(result, np.array([[1, 0], [0, 1]]))
+
+    result = _cstack(sh1, rot)
+    assert_allclose(result,
+                    np.array([[1, 0, 0],
+                              [0, 1, 1],
+                              [0, 1, 1]])
+                    )
+    result = _cstack(rot, sh1)
+    assert_allclose(result,
+                    np.array([[1, 1, 0],
+                              [1, 1, 0],
+                              [0, 0, 1]])
+                    )
+
+
+def test_arith_oper():
+    # Models as inputs
+    result = _arith_oper(sh1, scl1)
+    assert_allclose(result, np.array([[1]]))
+    result = _arith_oper(rot, rot)
+    assert_allclose(result, np.array([[1, 1], [1, 1]]))
+
+    # ndarray
+    result = _arith_oper(np.array([[1, 2], [3, 4]]), np.array([[1, 2], [3, 4]]))
+    assert_allclose(result, np.array([[1, 1], [1, 1]]))
+
+    # Error
+    with pytest.raises(ModelDefinitionError, match=r"Unsupported operands for arithmetic operator: .*"):
+        _arith_oper(sh1, map1)
+
+
+@pytest.mark.parametrize(('compound_model', 'result'), compound_models.values())
+def test_separable(compound_model, result):
+    assert_allclose(is_separable(compound_model), result[0])
+    assert_allclose(separability_matrix(compound_model), result[1])
+
+
+def test_custom_model_separable():
+    @custom_model
+    def model_a(x):
+        return x
+
+    assert model_a().separable
+
+    @custom_model
+    def model_c(x, y):
+        return x + y
+
+    assert not model_c().separable
+    assert np.all(separability_matrix(model_c()) == [True, True])
+root@8ab9d4e39045:/app/astropy#

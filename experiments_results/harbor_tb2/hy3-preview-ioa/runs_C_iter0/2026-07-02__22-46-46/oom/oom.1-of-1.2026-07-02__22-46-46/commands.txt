@@ -1,0 +1,46 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"python3 --version; pip show transformers huggingface_hub 2>/dev/null | grep -E 'Name|Version'\n"
+"python3 -c 'import transformers, huggingface_hub; print(transformers.__version__, huggingface_hub.__version__)' 2>&1 | head\n"
+''
+'cat > /tmp/cache_model.py << \'EOF\'\nimport os\nfrom huggingface_hub import snapshot_download\nfrom transformers import AutoTokenizer, AutoModel\n\nmodel_id = "albert/albert-base-v2"\n\nprint("== snapshot_download ==")\npath = snapshot_download(repo_id=model_id, repo_type="model")\nprint("cached at:", path)\n\nprint("== tokenizer ==")\ntok = AutoTokenizer.from_pretrained(model_id)\nprint("tokenizer loaded:", type(tok).__name__)\n\nprint("== model ==")\nm = AutoModel.from_pretrained(model_id)\nprint("model loaded:", type(m).__name__)\n\nprint("DONE")\nEOF\n'
+'python3 /tmp/cache_model.py > /tmp/cache_model.log 2>&1 &\n'
+'sleep 8; tail -n 20 /tmp/cache_model.log\n'
+''
+"sleep 15; tail -n 30 /tmp/cache_model.log; echo '---'; jobs\n"
+"ls -la ~/.cache/huggingface/hub/ 2>/dev/null; echo '---'; find ~/.cache/huggingface -type f 2>/dev/null | head\n"
+"sleep 5; cat /tmp/cache_model.log; echo '=== jobs ==='; jobs; echo '=== files ==='; find ~/.cache/huggingface -maxdepth 3 -type d 2>/dev/null; ls -la ~/.cache/huggingface/hub/\n"
+'kill %1 2>/dev/null; sleep 1; jobs\n'
+"file ~/.cache/huggingface/hub/large_model_file; echo '---head---'; head -c 200 ~/.cache/huggingface/hub/large_model_file | strings | head\n"
+'echo \'--- net test ---\'; timeout 10 python3 -u -c "import urllib.request; print(urllib.request.urlopen(\'https://huggingface.co\', timeout=8).status)" 2>&1 | head\n'
+'python3 -c "d=open(\'/root/.cache/huggingface/hub/large_model_file\',\'rb\').read(16); print(d[:8]); print(d)"\n'
+'python3 -u /tmp/cache_model.py > /tmp/cache_model.log 2>&1 &\n'
+"sleep 12; echo '=== log ==='; cat /tmp/cache_model.log; echo '=== cache ==='; find ~/.cache/huggingface -maxdepth 4 2>/dev/null | head -40\n"
+'kill %1 2>/dev/null; sleep 1\n'
+"env | grep -iE 'HF|HUGGING|TRANSFORMERS|HTTP_PROXY|HTTPS_PROXY' ; echo '---'; cat ~/.cache/huggingface/hub/large_model_file 2>/dev/null | wc -c\n"
+'timeout 20 python3 -u -c "import urllib.request; u=\'https://huggingface.co/albert/albert-base-v2/resolve/main/config.json\'; r=urllib.request.urlopen(u,timeout=15); print(\'status\',r.status); print(\'bytes\',len(r.read()))" 2>&1 | head\n'
+'timeout 70 python3 -u /tmp/cache_model.py 2>&1 | tee /tmp/cache_model.log\n'
+''
+''
+"df -h /root; echo '---'; rm -f ~/.cache/huggingface/hub/large_model_file; rm -rf ~/.cache/huggingface/hub/models--albert--albert-base-v2; df -h /root\n"
+"echo 'freed; re-running cache'; timeout 120 python3 -u /tmp/cache_model.py 2>&1 | tail -n 25\n"
+''
+'df -B1 /root | awk \'NR==2{print "avail bytes:", $4}\'\n'
+"find / -xdev -type f -size +5M 2>/dev/null | grep -v '/proc/' | head -40\n"
+''
+''
+'C-c'
+'ls -la ~/.cache/huggingface/hub/; df -B1 /root | awk \'NR==2{print "avail:",$4}\'\n'
+'python3 -c "import shutil; t,u,f=shutil.disk_usage(\'/root\'); print(\'total\',t//1024//1024,\'MB  used\',u//1024//1024,\'MB  free\',f//1024//1024,\'MB\')"\n'
+'du -sh ~/.cache/huggingface 2>/dev/null; du -sh ~/.cache/huggingface/hub/models--albert--albert-base-v2 2>/dev/null\n'
+''
+'rm -rf ~/.cache/huggingface/hub/models--albert--albert-base-v2\n'
+'HF_HUB_DISABLE_XET=1 timeout 150 python3 -u /tmp/cache_model.py 2>&1 | tail -n 25\n'
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+''
+''
+['C-d']
+['C-d']

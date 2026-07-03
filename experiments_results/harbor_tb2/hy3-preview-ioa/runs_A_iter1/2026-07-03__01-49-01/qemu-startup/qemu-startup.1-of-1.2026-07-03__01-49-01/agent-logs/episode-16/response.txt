@@ -1,0 +1,12 @@
+Task complete.
+
+**What was done:**
+- `/app/alpine.iso` is a syslinux-based Alpine live image. I parsed its ISO9660 layout with a small Python script (no extraction tools/mount available in this container) and pulled out the kernel (`vmlinuz-lts`), the microcode + initramfs, and modloop.
+- Booted `qemu-system-x86_64` in the background (TCG mode — no `/dev/kvm`), pointing `-kernel`/`-initrd` at the extracted files, attaching the ISO as `-cdrom` so the initramfs can find `modloop`, with `console=ttyS0` and the serial line redirected to `telnet:127.0.0.1:6665,server,nowait`.
+- A readiness checker connected to the port and observed the full OpenRC boot, ending at the login prompt: `READY: login prompt detected on telnet 6665`.
+
+**Current state:**
+- qemu is running in the background (pid 501).
+- Port `127.0.0.1:6665` is listening and ready (`telnet 127.0.0.1 6665` will show the login prompt).
+
+You can now run `telnet 127.0.0.1 6665` and log in (Alpine live root has no password by default). The VM will keep running until you kill pid 501.

@@ -1,0 +1,14 @@
+{
+  "analysis": "Root cause confirmed: UsePAM was enabled and a PAM session module was failing, causing every ssh command to exit 254 with no output. Setting UsePAM no fixed it — `ssh git@localhost 'echo RC=$?'` now returns RC=0. Now I need to re-run the real SSH push to confirm git transport works and the post-receive hook fires, deploying within the required time.",
+  "plan": "1) Re-run the expect-based SSH push test (MAIN branch with SSHMAIN content) and time it. 2) Verify /var/www/main serves SSHMAIN, proving the hook fired over SSH. 3) Restore the repo to clean MAIN/DEV content via a local push so it ends in a sensible state. 4) Do a final verification of all endpoints, services, and config.",
+  "commands": [
+    {
+      "keystrokes": "time /tmp/push_ssh.exp\n",
+      "duration": 8.0
+    },
+    {
+      "keystrokes": "echo '--- MAIN after SSH push ---'; curl -sk https://localhost:8443/index.html\n",
+      "duration": 1.0
+    }
+  ]
+}

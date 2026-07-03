@@ -1,0 +1,248 @@
+root@3cc5bf4a3cfb:/app# ls -la
+total 16
+drwxr-xr-x  3 root root 4096 Jul  2 15:38 .
+drwxr-xr-x 19 root root 4096 Jul  2 15:40 ..
+drwxr-xr-x  2 root root 4096 Jul  2 15:38 data
+-rw-r--r--  1 root root 3420 Jul  2 13:59 schema.json
+root@3cc5bf4a3cfb:/app# cat schema.json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["metadata", "organization", "statistics"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["version", "timestamp", "generator"],
+      "properties": {
+        "version": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "generator": { "type": "string" }
+      }
+    },
+    "organization": {
+      "type": "object",
+      "required": ["name", "founded", "departments"],
+      "properties": {
+        "name": { "type": "string" },
+        "founded": { "type": "string", "format": "date" },
+        "departments": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "budget", "employees", "projects"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "budget": { "type": "number", "minimum": 0 },
+              "employees": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "object",
+                  "required": ["id", "name", "position", "skills", "years_of_service"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "position": { "type": "string" },
+                    "skills": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": { "type": "string" }
+                    },
+                    "years_of_service": { "type": "integer", "minimum": 0 }
+                  }
+                }
+              },
+              "projects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "status", "members", "deadline"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "status": {
+                      "type": "string",
+                      "enum": ["Planning", "In Progress", "Testing", "Completed", "On Hold"]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "deadline": { "type": "string", "format": "date" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "required": [
+        "averageDepartmentBudget",
+        "totalEmployees",
+        "skillDistribution",
+        "departmentSizes",
+        "projectStatusDistribution",
+        "averageYearsOfService"
+      ],
+      "properties": {
+        "averageDepartmentBudget": { "type": "number" },
+        "totalEmployees": { "type": "integer" },
+        "skillDistribution": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        },
+        "departmentSizes": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        },
+        "projectStatusDistribution": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        },
+        "averageYearsOfService": { "type": "number" }
+      }
+    }
+  }
+}root@3cc5bf4a3cfb:/app# ls -la data
+total 20
+drwxr-xr-x 2 root root 4096 Jul  2 15:38 .
+drwxr-xr-x 3 root root 4096 Jul  2 15:38 ..
+-rw-r--r-- 1 root root  154 Jul  2 13:59 departments.csv
+-rw-r--r-- 1 root root  992 Jul  2 13:59 employees.csv
+-rw-r--r-- 1 root root  440 Jul  2 13:59 projects.csv
+root@3cc5bf4a3cfb:/app# echo '=== departments.csv ==='; cat data/departments.csv; echo; echo '=== projects.csv ==='; cat data/projects.csv; echo; echo '=== empl
+oyees.csv ==='; cat data/employees.csv
+=== departments.csv ===
+id,name,budget
+D001,Engineering,1500000
+D002,Marketing,800000
+D003,Human Resources,400000
+D004,Research & Development,2000000
+D005,Customer Support,600000
+=== projects.csv ===
+name,status,member_ids,deadline,department_id
+Madrid,In Progress,D001-E001;D001-E002;D001-E003,2025-06-30,D001
+Ferrari,Completed,D001-E002;D001-E003,2025-03-15,D001
+RedBull,Planning,D002-E001;D002-E002,2025-09-10,D002
+McLaren,In Progress,D003-E001;D003-E002,2025-07-20,D003
+Mercedes,Testing,D004-E001;D004-E002;D004-E003,2025-05-15,D004
+Hala,In Progress,D004-E002;D004-E003,2025-08-25,D004
+United,On Hold,D005-E001;D005-E002,2025-11-30,D005
+=== employees.csv ===
+id,name,position,skills,years_of_service,department_id
+D001-E001,Cristiano Ronaldo,Manager,Python;Leadership;Project Management,10,D001
+D001-E002,Bernardo Silva,Senior Developer,JavaScript;Python;Cloud Services,7,D001
+D001-E003,Sergio Ramos,Team Lead,Java;C++;DevOps,12,D001
+D002-E001,Kylian Mbappe,Designer,UI/UX Design;Communication;Marketing,5,D002
+D002-E002,Vinicius Junior,Specialist,Content Creation;Marketing;Communication,3,D002
+D003-E001,Antonio Silva,Director,Leadership;Communication;Project Management,8,D003
+D003-E002,Diogo Dalot,Coordinator,SQL;Data Analysis;Communication,4,D003
+D004-E001,Lewis Hamilton,Senior Developer,Python;Machine Learning;Data Analysis,9,D004
+D004-E002,Charles Leclerc,Researcher,Research;Python;Data Analysis,6,D004
+D004-E003,Max Verstappen,Analyst,SQL;Data Analysis;Machine Learning,7,D004
+D005-E001,Jude Bellingham,Team Lead,Customer Service;Leadership;Communication,5,D005
+D005-E002,Luka Modric,Specialist,Customer Service;Communication;Sales,11,D005root@3cc5bf4a3cfb:/app# cat > process.py << 'EOF'
+> import csv, json, os
+> from datetime import datetime, timezone
+>
+> DATA = "data"
+>
+> departments = {}
+> with open(os.path.join(DATA, "departments.csv")) as f:
+>     for row in csv.DictReader(f):
+>         departments[row["id"]] = {
+>             "id": row["id"],
+>             "name": row["name"],
+>             "budget": float(row["budget"]),
+>             "employees": [],
+>             "projects": []
+>         }
+>
+> employees = {}
+> with open(os.path.join(DATA, "employees.csv")) as f:
+>     for row in csv.DictReader(f):
+>         emp = {
+>             "id": row["id"],
+>             "name": row["name"],
+>             "position": row["position"],
+>             "skills": [s.strip() for s in row["skills"].split(";") if s.strip()],
+>             "years_of_service": int(row["years_of_service"])
+>         }
+>         employees[row["id"]] = emp
+>         departments[row["department_id"]]["employees"].append(emp)
+>
+> with open(os.path.join(DATA, "projects.csv")) as f:
+>     for row in csv.DictReader(f):
+>         members = [m.strip() for m in row["member_ids"].split(";") if m.strip()]
+>         proj = {
+>             "name": row["name"],
+>             "status": row["status"],
+>             "members": members,
+>             "deadline": row["deadline"]
+>         }
+>         departments[row["department_id"]]["projects"].append(proj)
+>
+> org_departments = [departments[k] for k in departments]
+>
+> org = {
+>     "name": "Acme Corporation",
+>     "founded": "2000-01-01",
+>     "departments": org_departments
+> }
+>
+> budgets = [d["budget"] for d in org_departments]
+> averageDepartmentBudget = sum(budgets) / len(budgets)
+> totalEmployees = len(employees)
+>
+> skillDistribution = {}
+> for e in employees.values():
+>     for s in e["skills"]:
+>         skillDistribution[s] = skillDistribution.get(s, 0) + 1
+>
+> departmentSizes = {d["name"]: len(d["employees"]) for d in org_departments}
+>
+> projectStatusDistribution = {}
+> for d in org_departments:
+>     for p in d["projects"]:
+>         projectStatusDistribution[p["status"]] = projectStatusDistribution.get(p["status"], 0) + 1
+>
+> total_years = sum(e["years_of_service"] for e in employees.values())
+> averageYearsOfService = total_years / totalEmployees
+>
+> stats = {
+>     "averageDepartmentBudget": averageDepartmentBudget,
+>     "totalEmployees": totalEmployees,
+>     "skillDistribution": skillDistribution,
+>     "departmentSizes": departmentSizes,
+>     "projectStatusDistribution": projectStatusDistribution,
+>     "averageYearsOfService": averageYearsOfService
+> }
+>
+> output = {
+>     "metadata": {
+>         "version": "1.0",
+>         "timestamp": datetime.now(timezone.utc).isoformat(),
+>         "generator": "csv-to-json-processor"
+>     },
+>     "organization": org,
+>     "statistics": stats
+> }
+>
+> with open("organization.json", "w") as f:
+>     json.dump(output, f, indent=2)
+> print("wrote organization.json")
+> EOF
+root@3cc5bf4a3cfb:/app# python3 process.py
+wrote organization.json
+root@3cc5bf4a3cfb:/app# ls -la organization.json
+-rw-r--r-- 1 root root 7052 Jul  2 15:41 organization.json
+root@3cc5bf4a3cfb:/app# python3 -c "import jsonschema; print('jsonschema ok')" 2>&1
+jsonschema ok
+root@3cc5bf4a3cfb:/app# python3 -c "import json,jsonschema; s=json.load(open('schema.json')); d=json.load(open('organization.json')); jsonschema.validate(d,s);
+print('VALID: schema conformance OK')"
+VALID: schema conformance OK
+root@3cc5bf4a3cfb:/app#

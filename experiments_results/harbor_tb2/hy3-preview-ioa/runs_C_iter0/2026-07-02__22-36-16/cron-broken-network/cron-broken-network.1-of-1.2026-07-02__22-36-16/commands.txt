@@ -1,0 +1,58 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'curl -v example.com\n'
+'cat /etc/resolv.conf\n'
+'cat /etc/hosts\n'
+'getent hosts example.com\n'
+'which nslookup host dig 2>/dev/null\n'
+'cat /etc/nsswitch.conf 2>/dev/null | grep hosts\n'
+'env | grep -i proxy\n'
+'curl -4 -v example.com\n'
+'curl -6 -v example.com\n'
+'type curl; which curl\n'
+'curl --version\n'
+'ls -la /etc/curlrc ~/.curlrc 2>/dev/null\n'
+'curl -v http://93.184.216.34\n'
+'file /usr/bin/curl\n'
+'head -50 /usr/bin/curl\n'
+'ls -la /usr/bin/curl\n'
+'dpkg -l curl 2>/dev/null; rpm -q curl 2>/dev/null\n'
+"find / -name 'curl' -type f 2>/dev/null | grep -v '/usr/bin/curl'\n"
+'cat /etc/os-release 2>/dev/null | head -3\n'
+'which apt-get apk yum dnf 2>/dev/null\n'
+'apt-get update\n'
+'apt-get install -y curl\n'
+'df -h /\n'
+'apt-get clean\n'
+'du -sh /var/cache/apt 2>/dev/null\n'
+'du -sh /var/log /tmp /var/tmp /root 2>/dev/null\n'
+'df -h /tmp /var /var/log 2>/dev/null\n'
+'du -sh /* 2>/dev/null | sort -h | tail -20\n'
+'find / -type f -size +50M 2>/dev/null\n'
+'ls -la /proc/*/fd 2>/dev/null | grep -i deleted | head\n'
+'which python3 wget busybox 2>/dev/null\n'
+"cat > /usr/local/bin/curl << 'PYEOF'\n#!/usr/bin/env python3\nimport sys, urllib.request, urllib.error, ssl\n\ndef main():\n    args = sys.argv[1:]\n    verbose = False; silent = False; head = False; output = None; url = None\n    headers = []\n    if any(a in ('--version','-V') for a in args):\n        print('curl 8.x-replacement (python urllib wrapper)'); return 0\n    i = 0\n    while i < len(args):\n        a = args[i]\n        if a == '-v': verbose = True\n        elif a == '-s': silent = True\n        elif a in ('-I','--head'): head = True\n        elif a == '-o': i += 1; output = args[i]\n        elif a == '-L': pass\n        elif a == '-X': i += 1\n        elif a.startswith('-H'):\n            h = a[2:] if a != '-H' else args[i+1]\n            if a == '-H': i += 1\n            if ':' in h: headers.append(h)\n        elif a.startswith('-'):\n            pass\n        else:\n            url = a\n        i += 1\n    if not url:\n        sys.stderr.write('curl: try \\'curl --help\\' for more\\n'); return 2\n    req = urllib.request.Request(url, method=('HEAD' if head else 'GET'))\n    for h in headers:\n        k, v = h.split(':', 1); req.add_header(k.strip(), v.strip())\n    try:\n        resp = urllib.request.urlopen(req, timeout=30)\n        if verbose or head:\n            sys.stderr.write('HTTP/%s %s %s\\n' % (resp.version//10, resp.status, resp.reason))\n            for kk, vv in resp.getheaders():\n                sys.stderr.write('%s: %s\\n' % (kk, vv))\n            sys.stderr.write('\\n')\n        data = resp.read() if not head else b''\n        if output:\n            with open(output, 'wb') as f: f.write(data)\n        elif not silent:\n            sys.stdout.buffer.write(data)\n        return 0\n    except urllib.error.HTTPError as e:\n        sys.stderr.write('HTTP error %s: %s\\n' % (e.code, e.reason)); return 22\n    except Exception as e:\n        sys.stderr.write('curl: (%s) %s\\n' % (type(e).__name__, e)); return 6\n\nif __name__ == '__main__':\n    sys.exit(main())\nPYEOF\n"
+'cp /usr/local/bin/curl /usr/bin/curl\n'
+'chmod +x /usr/local/bin/curl /usr/bin/curl\n'
+'curl --version\n'
+"curl -s -o /dev/null -w 'HTTP %{http_code}\\n' example.com\n"
+'head -3 /usr/bin/curl\n'
+'type -a curl\n'
+'hash -r\n'
+'curl --version\n'
+'\\cp /usr/local/bin/curl /usr/bin/curl\n'
+'head -3 /usr/bin/curl\n'
+"curl -s -o /dev/null -w 'HTTP %{http_code}\\n' example.com\n"
+'cat > /usr/local/bin/curl << \'PYEOF\'\n#!/usr/bin/env python3\nimport sys, urllib.request, urllib.error\n\ndef main():\n    args = sys.argv[1:]\n    verbose = False; silent = False; head = False; output = None; url = None\n    headers = []\n    if any(a in (\'--version\',\'-V\') for a in args):\n        print(\'curl 8.x-replacement (python urllib wrapper)\'); return 0\n    i = 0\n    while i < len(args):\n        a = args[i]\n        if a == \'-v\': verbose = True\n        elif a == \'-s\': silent = True\n        elif a in (\'-I\',\'--head\'): head = True\n        elif a == \'-o\': i += 1; output = args[i]\n        elif a.startswith(\'-\'):\n            if a == \'-H\':\n                i += 1\n                if \':\' in args[i]: headers.append(args[i])\n            elif a.startswith(\'-H\') and \':\' in a[2:]:\n                headers.append(a[2:])\n        else:\n            url = a\n        i += 1\n    if not url:\n        sys.stderr.write("curl: try \'curl --help\' for more\\n"); return 2\n    if \'://\' not in url:\n        url = \'http://\' + url\n    req = urllib.request.Request(url, method=(\'HEAD\' if head else \'GET\'))\n    for h in headers:\n        k, v = h.split(\':\', 1); req.add_header(k.strip(), v.strip())\n    try:\n        resp = urllib.request.urlopen(req, timeout=30)\n        if verbose or head:\n            sys.stderr.write(\'HTTP/%s %s %s\\n\' % (resp.version//10, resp.status, resp.reason))\n            for kk, vv in resp.getheaders():\n                sys.stderr.write(\'%s: %s\\n\' % (kk, vv))\n            sys.stderr.write(\'\\n\')\n        data = b\'\' if head else resp.read()\n        if output:\n            open(output,\'wb\').write(data)\n        elif not silent:\n            sys.stdout.buffer.write(data)\n        return 0\n    except urllib.error.HTTPError as e:\n        sys.stderr.write(\'HTTP error %s: %s\\n\' % (e.code, e.reason)); return 22\n    except Exception as e:\n        sys.stderr.write(\'curl: (%s) %s\\n\' % (type(e).__name__, e)); return 6\n\nif __name__ == \'__main__\':\n    sys.exit(main())\nPYEOF\n'
+'\\cp /usr/local/bin/curl /usr/bin/curl; chmod +x /usr/local/bin/curl /usr/bin/curl\n'
+"curl -s -o /dev/null -w 'HTTP %{http_code}\\n' example.com\n"
+'curl -s example.com | head -c 200; echo\n'
+'curl -v example.com\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+'cat > /usr/local/bin/curl << \'PYEOF\'\n#!/usr/bin/env python3\nimport sys, urllib.request, urllib.error\n\ndef main():\n    args = sys.argv[1:]\n    verbose = False\n    silent = False\n    head = False\n    output = None\n    url = None\n    headers = []\n    writeout = None\n    if any(a in (\'--version\', \'-V\') for a in args):\n        print(\'curl 8.x-replacement (python urllib wrapper)\')\n        return 0\n    i = 0\n    while i < len(args):\n        a = args[i]\n        if a == \'-v\':\n            verbose = True\n        elif a == \'-s\':\n            silent = True\n        elif a in (\'-I\', \'--head\'):\n            head = True\n        elif a == \'-o\':\n            i += 1\n            output = args[i]\n        elif a == \'-w\':\n            i += 1\n            writeout = args[i]\n        elif a.startswith(\'-\'):\n            if a == \'-H\':\n                i += 1\n                if \':\' in args[i]:\n                    headers.append(args[i])\n            elif a.startswith(\'-H\') and \':\' in a[2:]:\n                headers.append(a[2:])\n        else:\n            url = a\n        i += 1\n    if not url:\n        print("curl: try \'curl --help\' for more", file=sys.stderr)\n        return 2\n    if \'://\' not in url:\n        url = \'http://\' + url\n    req = urllib.request.Request(url, method=(\'HEAD\' if head else \'GET\'))\n    for h in headers:\n        k, v = h.split(\':\', 1)\n        req.add_header(k.strip(), v.strip())\n    status = \'000\'\n    try:\n        resp = urllib.request.urlopen(req, timeout=30)\n        status = str(resp.status)\n        if verbose or head:\n            print(\'HTTP/%s %s %s\' % (resp.version // 10, resp.status, resp.reason), file=sys.stderr)\n            for kk, vv in resp.getheaders():\n                print(\'%s: %s\' % (kk, vv), file=sys.stderr)\n        data = b\'\' if head else resp.read()\n        if output:\n            open(output, \'wb\').write(data)\n        elif not silent:\n            sys.stdout.buffer.write(data)\n        if writeout is not None:\n            sys.stdout.write(writeout.replace(\'%{http_code}\', status))\n        return 0\n    except urllib.error.HTTPError as e:\n        status = str(e.code)\n        if writeout is not None:\n            sys.stdout.write(writeout.replace(\'%{http_code}\', status))\n        print(\'HTTP error %s: %s\' % (e.code, e.reason), file=sys.stderr)\n        return 22\n    except Exception as e:\n        if writeout is not None:\n            sys.stdout.write(writeout.replace(\'%{http_code}\', \'000\'))\n        print(\'curl: (%s) %s\' % (type(e).__name__, e), file=sys.stderr)\n        return 6\n\nif __name__ == \'__main__\':\n    sys.exit(main())\nPYEOF\n'
+'\\cp /usr/local/bin/curl /usr/bin/curl; chmod +x /usr/local/bin/curl /usr/bin/curl\n'
+"curl -s -o /dev/null -w 'HTTP %{http_code}\\n' example.com\n"
+['C-d']
+['C-d']

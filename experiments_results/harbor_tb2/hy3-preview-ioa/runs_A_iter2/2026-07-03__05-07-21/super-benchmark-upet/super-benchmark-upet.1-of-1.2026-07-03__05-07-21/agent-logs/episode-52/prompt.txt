@@ -1,0 +1,76 @@
+New Terminal Output:
+.90s/it]
+root@7bcf8a0cf7c8:/app/UPET# cat -n training/trainer_base.py
+     1  import logging
+     2  import os
+     3  from typing import Dict, OrderedDict
+     4
+     5  from transformers import Trainer
+     6
+     7  logger = logging.getLogger(__name__)
+     8
+     9  _default_log_level = logging.INFO
+    10  logger.setLevel(_default_log_level)
+    11
+    12  class BaseTrainer(Trainer):
+    13      def __init__(self, *args, predict_dataset = None, test_key = "accuracy", **kwargs):
+    14          super().__init__(*args, **kwargs)
+    15          self.predict_dataset = predict_dataset
+    16          self.test_key = test_key
+    17          self.best_metrics = OrderedDict({
+    18              "best_epoch": 0,
+    19              f"best_eval_{self.test_key}": 0,
+    20          })
+    21
+    22      def log_best_metrics(self):
+    23          self.log_metrics("best", self.best_metrics)
+    24          self.save_metrics("best", self.best_metrics, combined=False)
+    25
+    26
+    27
+    28      def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+    29          if self.control.should_log:
+    30              logs: Dict[str, float] = {}
+    31
+    32
+    33              tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+    34
+    35              # reset tr_loss to zero
+    36              tr_loss -= tr_loss
+    37
+    38              logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+    39              logs["learning_rate"] = self._get_learning_rate()
+    40
+    41              self._total_loss_scalar += tr_loss_scalar
+    42              self._globalstep_last_logged = self.state.global_step
+    43              self.store_flos()
+    44
+    45              self.log(logs)
+    46
+    47          eval_metrics = None
+    48          if self.control.should_evaluate:
+    49              eval_metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
+    50              self._report_to_hp_search(trial, epoch, eval_metrics)
+    51              print("eval_metrics=", eval_metrics)
+    52              if eval_metrics["eval_"+self.test_key] > self.best_metrics["best_eval_"+self.test_key]:
+    53                  self.best_metrics["best_epoch"] = epoch
+    54                  self.best_metrics["best_eval_"+self.test_key] = eval_metrics["eval_"+self.test_key]
+    55
+    56                  if self.predict_dataset is not None:
+    57                      if isinstance(self.predict_dataset, dict):
+    58                          for dataset_name, dataset in self.predict_dataset.items():
+    59                              _, _, test_metrics = self.predict(dataset, metric_key_prefix="test")
+    60                              self.best_metrics[f"best_test_{dataset_name}_{self.test_key}"] = test_metrics["test_"+self.test_key]
+    61                      else:
+    62                          _, _, test_metrics = self.predict(self.predict_dataset, metric_key_prefix="test")
+    63                          self.best_metrics["best_test_"+self.test_key] = test_metrics["test_"+self.test_key]
+    64
+    65              logger.info(f"***** Epoch {epoch}: Best results *****")
+    66              for key, value in self.best_metrics.items():
+    67                  logger.info(f"{key} = {value}")
+    68              self.log(self.best_metrics)
+    69
+    70          if self.control.should_save:
+    71              self._save_checkpoint(model, trial, metrics=eval_metrics)
+    72              self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+root@7bcf8a0cf7c8:/app/UPET#

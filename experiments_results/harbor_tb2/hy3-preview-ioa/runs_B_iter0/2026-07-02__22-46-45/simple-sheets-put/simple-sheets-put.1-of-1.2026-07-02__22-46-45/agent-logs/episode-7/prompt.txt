@@ -1,0 +1,22 @@
+New Terminal Output:
+
+root@d614a7f600cd:/app# cat > /tmp/test.py << 'EOF'
+> import json, urllib.request, urllib.error
+> BASE='http://api:8000'
+> def req(method,path,body=None):
+>     url=BASE+path
+>     data=json.dumps(body).encode() if body is not None else None
+>     r=urllib.request.Request(url,data=data,method=method,headers={'Content-Type':'application/json'})
+>     try:
+>         with urllib.request.urlopen(r) as resp:
+>             return resp.read().decode()
+>     except urllib.error.HTTPError as e:
+>         return f'ERROR {e.code}: {e.read().decode()}'
+> # single cell test
+> print('single:', req('PUT','/sheets/1/cells/A1',{'value':'Month'}))
+> # batch test
+> updates={'A1':{'value':'Month'},'B1':{'value':'Revenue'},'C1':{'value':'Expenses'},'D1':{'value':'Profit'}}
+> print('batch:', req('PUT','/sheets/1/cells/batch',{'updates':updates}))
+> EOF
+root@d614a7f600cd:/app# python3 /tmp/test.py
+

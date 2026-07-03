@@ -1,0 +1,30 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@f09e09febeb2:/app# python3 - << 'EOF'
+> import re
+> p='/app/train.py'
+> s=open(p).read()
+> s=s.replace('                s, a, r, s2, d = buffer.sample(BATCH_SIZE)\n', '                s_b, a_b, r_b, s2_b, d_b = buffer.sample(BATCH_SIZE)\n')
+> s=s.replace('                s = torch.as_tensor(s, dtype=torch.float32)\n','                s = torch.as_tensor(s_b, dtype=torch.float32)\n')
+> s=s.replace('                a = torch.as_tensor(a, dtype=torch.int64).unsqueeze(1)\n','                a = torch.as_tensor(a_b, dtype=torch.int64).unsqueeze(
+1)\n')
+> s=s.replace('                r = torch.as_tensor(r, dtype=torch.float32).unsqueeze(1)\n','                r = torch.as_tensor(r_b, dtype=torch.float32).unsque
+eze(1)\n')
+> s=s.replace('                s2 = torch.as_tensor(s2, dtype=torch.float32)\n','                s2 = torch.as_tensor(s2_b, dtype=torch.float32)\n')
+> s=s.replace('                done = torch.as_tensor(d, dtype=torch.float32).unsqueeze(1)\n','                done = torch.as_tensor(d_b, dtype=torch.float32).
+unsqueeze(1)\n')
+> open(p,'w').write(s)
+> print('done')
+> EOF
+done
+root@f09e09febeb2:/app# grep -n 'buffer.sample\|_b\|as_tensor' /app/train.py
+100:                s_b, a_b, r_b, s2_b, d_b = buffer.sample(BATCH_SIZE)
+101:                s = torch.as_tensor(s_b, dtype=torch.float32)
+102:                a = torch.as_tensor(a_b, dtype=torch.int64).unsqueeze(1)
+103:                r = torch.as_tensor(r_b, dtype=torch.float32).unsqueeze(1)
+104:                s2 = torch.as_tensor(s2_b, dtype=torch.float32)
+105:                done = torch.as_tensor(d_b, dtype=torch.float32).unsqueeze(1)
+root@f09e09febeb2:/app#

@@ -1,0 +1,49 @@
+New Terminal Output:
+
+root@7e02c0b599f9:/app# grep -n 'copy=False' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+239:            return labels, np.array(probs, copy=False)
+root@7e02c0b599f9:/app# sed -n '220,260p' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+                raise ValueError("predict processes one line at a time (remove '\\n')")
+            entry += "\n"
+            return entry
+
+        if type(text) == list:
+            text = [check(entry) for entry in text]
+            all_labels, all_probs = self.f.multilinePredict(
+                text, k, threshold, on_unicode_error
+            )
+
+            return all_labels, all_probs
+        else:
+            text = check(text)
+            predictions = self.f.predict(text, k, threshold, on_unicode_error)
+            if predictions:
+                probs, labels = zip(*predictions)
+            else:
+                probs, labels = ([], ())
+
+            return labels, np.array(probs, copy=False)
+
+    def get_input_matrix(self):
+        """
+        Get a reference to the full input matrix of a Model. This only
+        works if the model is not quantized.
+        """
+        if self.f.isQuant():
+            raise ValueError("Can't get quantized Matrix")
+        return np.array(self.f.getInputMatrix())
+
+    def get_output_matrix(self):
+        """
+        Get a reference to the full output matrix of a Model. This only
+        works if the model is not quantized.
+        """
+        if self.f.isQuant():
+            raise ValueError("Can't get quantized Matrix")
+        return np.array(self.f.getOutputMatrix())
+
+    def get_words(self, include_freq=False, on_unicode_error="strict"):
+        """
+root@7e02c0b599f9:/app#

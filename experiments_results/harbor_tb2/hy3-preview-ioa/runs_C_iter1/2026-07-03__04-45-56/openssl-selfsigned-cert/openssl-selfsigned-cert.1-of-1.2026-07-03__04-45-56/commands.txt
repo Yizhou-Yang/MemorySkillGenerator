@@ -1,0 +1,15 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'mkdir -p /app/ssl && openssl genrsa -out /app/ssl/server.key 2048\n'
+'chmod 600 /app/ssl/server.key\n'
+'openssl req -new -x509 -key /app/ssl/server.key -out /app/ssl/server.crt -days 365 -subj "/O=DevOps Team/CN=dev-internal.company.local"\n'
+'cat /app/ssl/server.key /app/ssl/server.crt > /app/ssl/server.pem\n'
+'openssl x509 -in /app/ssl/server.crt -noout -subject > /app/ssl/verification.txt\nopenssl x509 -in /app/ssl/server.crt -noout -dates -dateopt iso_8601 >> /app/ssl/verification.txt\nopenssl x509 -in /app/ssl/server.crt -noout -fingerprint -sha256 >> /app/ssl/verification.txt\n'
+'cat > /app/check_cert.py << \'EOF\'\n#!/usr/bin/env python3\nimport os\nimport re\nimport ssl\nimport subprocess\n\nCERT_PATH = "/app/ssl/server.crt"\nKEY_PATH = "/app/ssl/server.key"\n\n\ndef to_ymd(raw):\n    raw = raw.strip()\n    m = re.match(r"(\\d{4})-(\\d{2})-(\\d{2})", raw)\n    if m:\n        return m.group(0)\n    m = re.match(r"(\\d{4})(\\d{2})(\\d{2})", raw)\n    if m:\n        return "%s-%s-%s" % (m.group(1), m.group(2), m.group(3))\n    return raw\n\n\ndef main():\n    if not os.path.exists(CERT_PATH):\n        raise FileNotFoundError("Certificate not found: %s" % CERT_PATH)\n\n    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)\n    ctx.load_cert_chain(CERT_PATH, KEY_PATH)\n\n    subject = subprocess.run(\n        ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject"],\n        capture_output=True, text=True, check=True,\n    ).stdout.strip()\n\n    dates = subprocess.run(\n        ["openssl", "x509", "-in", CERT_PATH, "-noout", "-dates", "-dateopt", "iso_8601"],\n        capture_output=True, text=True, check=True,\n    ).stdout.strip()\n\n    cn = "unknown"\n    body = subject.replace("subject=", "").strip()\n    for part in body.split(","):\n        k, _, v = part.partition("=")\n        if k.strip() == "CN":\n            cn = v.strip()\n\n    expiration = ""\n    for line in dates.splitlines():\n        if line.startswith("notAfter="):\n            expiration = to_ymd(line.split("=", 1)[1])\n\n    print(subject)\n    print(dates)\n    print("Common Name: %s" % cn)\n    print("Expiration date: %s" % expiration)\n\n    print("Certificate verification successful")\n\n\nif __name__ == "__main__":\n    main()\nEOF\n'
+'chmod +x /app/check_cert.py && python3 /app/check_cert.py\n'
+"echo '--- verification.txt ---'; cat /app/ssl/verification.txt; echo '--- files ---'; ls -la /app/ssl\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

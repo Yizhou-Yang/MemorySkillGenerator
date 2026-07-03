@@ -1,0 +1,17 @@
+The port forward works — `nc` got the SSH banner `SSH-2.0-OpenSSH_9.5` on host 2222. Now I'll do a real password login test (no sshpass available, so I'll drive ssh via a pty).
+
+{
+  "analysis": "banner_exit=0 and `nc` returned `SSH-2.0-OpenSSH_9.5`, proving the qemu hostfwd (2222->22) correctly reaches the guest sshd. (The earlier `C-c` got sent as literal text due to a stray newline issue, but it didn't matter.) Now I need to verify an actual password login works with 'password123'. sshpass isn't installed, so I'll write a small pty-based driver to spawn ssh, send the password, and run a command to confirm I'm dropped into a shell.",
+  "plan": "Batch 1: Write a python pty script that runs `ssh -p 2222 ... root@localhost` with password auth only, auto-accepts host keys, sends 'password123' at the password prompt, then runs `id; hostname; echo MARKER_DONE` and checks for success. This verifies end-to-end the exact command the user will run.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/test_ssh.py <<'PY'\nimport pty, os, time, sys, select\ncmd=['ssh','-p','2222','-o','StrictHostKeyChecking=no','-o','UserKnownHostsFile=/dev/null','-o','PreferredAuthentications=password','-o','PubkeyAuthentication=no','root@localhost','id; hostname; echo MARKER_DONE']\npid, fd = pty.fork()\nif pid==0:\n    os.execvp('ssh', cmd)\nbuf=b''\nend=time.time()+30\nsent=False\nwhile time.time()<end:\n    r,_,_=select.select([fd],[],[],0.5)\n    if r:\n        try:\n            d=os.read(fd,4096)\n        except OSError:\n            break\n        if d:\n            buf+=d\n            sys.stdout.buffer.write(d); sys.stdout.buffer.flush()\n            if (not sent) and b'assword:' in buf:\n                os.write(fd,b'password123\\n'); sent=True\n            if b'MARKER_DONE' in buf:\n                break\nprint('\\n=== TEST_DONE sent_password=%s ===' % sent)\nPY\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/test_ssh.py\n",
+      "duration": 20.0
+    }
+  ],
+  "task_complete": false
+}

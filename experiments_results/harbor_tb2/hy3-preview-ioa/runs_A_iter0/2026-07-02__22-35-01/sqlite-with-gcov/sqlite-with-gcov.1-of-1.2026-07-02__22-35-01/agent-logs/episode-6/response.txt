@@ -1,0 +1,18 @@
+{
+  "analysis": "Strange: `df` shows the root filesystem at 100% full (0 available, 959G used of 984G), but `du` inside the container only finds 179M of actual files. This means the space is reported from the host's perspective via fuse-overlayfs, and the overlay's writable capacity appears exhausted. I need to verify whether I can actually write files, and find what's consuming space so I can free it. Let me test writes and look for large/deletable files.",
+  "plan": "Test whether I can write to /tmp and /var. Check df -i for inode exhaustion. Look for large files across the filesystem that could be deleted to free space (e.g., in /logs which is also full, or large caches).",
+  "commands": [
+    {
+      "keystrokes": "df -i /\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "touch /tmp/testwrite && echo WRITE_OK || echo WRITE_FAIL\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmp/bigfile bs=1M count=50 2>&1; ls -la /tmp/bigfile; rm -f /tmp/bigfile\n",
+      "duration": 2
+    }
+  ]
+}

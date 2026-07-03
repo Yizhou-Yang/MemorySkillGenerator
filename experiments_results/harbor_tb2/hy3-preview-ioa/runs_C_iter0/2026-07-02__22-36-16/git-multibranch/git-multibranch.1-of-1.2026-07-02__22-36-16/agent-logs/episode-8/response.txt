@@ -1,0 +1,22 @@
+{
+  "analysis": "Conflict resolved (default site removed, nginx reloaded clean). `expect` is available, which I'll use to automate the SSH password for git pushes. Core setup is complete: bare repo at /git/project, post-receive hook, nginx HTTPS on 8443, sshd with password auth. Now I must verify the full push->deploy->HTTPS flow works end to end.",
+  "plan": "1) Create an expect script to provide the password. 2) Build a local test repo with main and dev branches. 3) Push both branches over SSH using expect, which triggers the post-receive hook. 4) Verify the two HTTPS endpoints return the correct content within ~3 seconds. I'll also time the deploy.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /root/.ssh && printf 'Host localhost\\n\\tStrictHostKeyChecking no\\n\\tUserKnownHostsFile /dev/null\\n' > /root/.ssh/config\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /tmp/push.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 30\nspawn git push origin main dev\nexpect {\n  -re {[Pp]assword:} { send \"password\\r\"; exp_continue }\n  eof\n}\nEOF\nchmod +x /tmp/push.exp\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "rm -rf /tmp/testrepo && mkdir -p /tmp/testrepo && cd /tmp/testrepo && git init -q && git config user.email t@t.com && git config user.name t && echo '<h1>Main Page</h1>' > index.html && git add . && git commit -qm main && git checkout -q -b dev && echo '<h1>Dev Page</h1>' > index.html && git commit -qm dev && git remote add origin ssh://git@localhost/git/project && echo SETUP_DONE\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "time expect /tmp/push.exp\n",
+      "duration": 5.0
+    }
+  ]
+}

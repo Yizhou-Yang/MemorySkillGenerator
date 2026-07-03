@@ -1,0 +1,22 @@
+{
+  "analysis": "Critical clue: even a trivial `ssh git@localhost 'echo TEST123'` returns exit code 254 with NO output, and `ssh -v` shows auth succeeds but the command produces no output and exits 254. This is a session-level failure, not a git problem. The most likely cause in a container is a PAM session module (e.g. pam_systemd) failing during session open, which makes sshd refuse to run the command. I'll confirm via auth.log, then disable PAM in sshd (password auth still works via sshd's built-in crypt check) and retest.",
+  "plan": "1) Check auth.log for the session failure reason. 2) Set `UsePAM no` in sshd_config (this bypasses PAM session modules while PasswordAuthentication remains enabled and uses the OS shadow check). 3) Restart sshd. 4) Test a plain remote command — if it returns RC=0 with output, the session works. Then re-run the real SSH push test.",
+  "commands": [
+    {
+      "keystrokes": "tail -n 25 /var/log/auth.log 2>/dev/null\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "sed -i 's/^#*UsePAM .*/UsePAM no/' /etc/ssh/sshd_config; grep -qi '^UsePAM' /etc/ssh/sshd_config || echo 'UsePAM no' >> /etc/ssh/sshd_config; grep -ni usepam /etc/ssh/sshd_config\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "pkill sshd; sleep 0.5; /usr/sbin/sshd; sleep 0.5; ss -tlnp 2>/dev/null | grep ':22'\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "ssh git@localhost 'echo RC=$?'\n",
+      "duration": 2.0
+    }
+  ]
+}

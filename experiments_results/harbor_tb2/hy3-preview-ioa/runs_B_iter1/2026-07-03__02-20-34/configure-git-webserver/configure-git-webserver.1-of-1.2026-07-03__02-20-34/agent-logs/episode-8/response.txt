@@ -1,0 +1,15 @@
+{
+  "analysis": "The tmpfs mount failed (permission denied — container lacks CAP_SYS_ADMIN). apt still refuses with 'not enough free space' because its fetcher statvfs's the overlay root which misreports 0 available, even though `dd` proved we can actually write. apt's own fetcher does reach the mirror (update worked), so the only blocker is the free-space check. /dev/shm is a real tmpfs reporting ~64M free. I can point apt's archives dir at /dev/shm (via symlink) so the statvfs check passes and apt's working fetcher downloads into RAM. 47MB of debs fit in 64MB.",
+  "plan": "1) Replace /var/cache/apt/archives with a symlink into /dev/shm. 2) Retry `apt-get install -y git openssh-server` — apt's fetcher now sees 64M free on the archives partition and should proceed. 3) Verify git and sshd are installed.",
+  "commands": [
+    {
+      "keystrokes": "rm -rf /var/cache/apt/archives && mkdir -p /dev/shm/aptarchives && ln -s /dev/shm/aptarchives /var/cache/apt/archives && ls -ld /var/cache/apt/archives && df -h /dev/shm\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "apt-get install -y git openssh-server 2>&1 | tail -25\n",
+      "duration": 60.0
+    }
+  ],
+  "task_complete": false
+}

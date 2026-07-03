@@ -1,0 +1,123 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@f969e203af66:/app# python3 -c "from tokenizers import Tokenizer; t=Tokenizer.from_file('/tmp/ot/tokenizer.json'); e=t.encode('Hello world, this is a test.'
+); print('ids',e.ids); print('n',len(e.ids))"
+ids [9707, 1879, 11, 419, 374, 264, 1273, 13]
+n 8
+cat > /tmp/ot/run.py << 'EOF'
+import urllib.request, os
+import pyarrow.parquet as pq
+from tokenizers import Tokenizer
+
+tok = Tokenizer.from_file('/tmp/ot/tokenizer.json')
+
+urls = [
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0001.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0002.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0003.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0004.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0005.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0006.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0007.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0008.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0009.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0010.parquet",
+"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0011.parquet",
+]
+
+total = 0
+science_rows = 0
+for url in urls:
+    fn = '/tmp/ot/' + url.rsplit('/',1)[-1]
+    print('downloading', fn, flush=True)
+    req = urllib.request.Request(url, headers={'User-Agent':'curl/8'})
+    with urllib.request.urlopen(req, timeout=180) as r, open(fn,'wb') as f:
+        while True:
+            chunk = r.read(1<<20)
+            if not chunk: break
+            f.write(chunk)
+    t = pq.read_table(fn)
+    d = t.to_pydict()
+    domain = d['domain']
+    reason = d['deepseek_reasoning']
+    sol = d['deepseek_solution']
+    n = len(domain)
+    texts = []
+    for i in range(n):
+        if (domain[i] or '').strip() == 'science':
+            texts.append((reason[i] or '') + (sol[i] or ''))
+    science_rows += len(texts)
+    for j in range(0, len(texts), 500):
+        encs = tok.encode_batch(texts[j:j+500])
+        for e in encs:
+            total += len(e.ids)
+    del texts
+    os.remove(fn)
+    print('running total', total, 'science_rows', science_rows, flush=True)
+print('FINAL', total)
+with open('/app/answer.txt','w') as f:
+    f.write(str(total))
+EOF
+echo written
+root@f969e203af66:/app# cat > /tmp/ot/run.py << 'EOF'
+> import urllib.request, os
+> import pyarrow.parquet as pq
+> from tokenizers import Tokenizer
+>
+> tok = Tokenizer.from_file('/tmp/ot/tokenizer.json')
+>
+> urls = [
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0001.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0002.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0003.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0004.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0005.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0006.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0007.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0008.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0009.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0010.parquet",
+> "https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0011.parquet",
+> ]
+>
+> total = 0
+> science_rows = 0
+> for url in urls:
+>     fn = '/tmp/ot/' + url.rsplit('/',1)[-1]
+>     print('downloading', fn, flush=True)
+>     req = urllib.request.Request(url, headers={'User-Agent':'curl/8'})
+>     with urllib.request.urlopen(req, timeout=180) as r, open(fn,'wb') as f:
+>         while True:
+>             chunk = r.read(1<<20)
+>             if not chunk: break
+>             f.write(chunk)
+>     t = pq.read_table(fn)
+>     d = t.to_pydict()
+>     domain = d['domain']
+>     reason = d['deepseek_reasoning']
+>     sol = d['deepseek_solution']
+>     n = len(domain)
+>     texts = []
+>     for i in range(n):
+>         if (domain[i] or '').strip() == 'science':
+>             texts.append((reason[i] or '') + (sol[i] or ''))
+>     science_rows += len(texts)
+>     for j in range(0, len(texts), 500):
+>         encs = tok.encode_batch(texts[j:j+500])
+>         for e in encs:
+>             total += len(e.ids)
+>     del texts
+>     os.remove(fn)
+>     print('running total', total, 'science_rows', science_rows, flush=True)
+> print('FINAL', total)
+> with open('/app/answer.txt','w') as f:
+>     f.write(str(total))
+> EOF
+root@f969e203af66:/app# echo written
+written
+root@f969e203af66:/app#

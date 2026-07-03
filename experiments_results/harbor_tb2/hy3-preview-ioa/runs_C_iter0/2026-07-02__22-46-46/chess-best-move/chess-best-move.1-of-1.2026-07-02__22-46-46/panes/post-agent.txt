@@ -1,0 +1,1217 @@
+root@125313326d78:/app# ls -la /app
+total 40
+drwxr-xr-x  2 root root  4096 Jul  2 14:02 .
+drwxr-xr-x 19 root root  4096 Jul  2 16:00 ..
+-rw-r--r--  1 root root 31152 Jul  2 14:02 chess_puzzle.png
+root@125313326d78:/app# file chess_bard.png
+bash: file: command not found
+root@125313326d78:/app# which python3 tesseract
+/usr/bin/python3
+root@125313326d78:/app# python3 -c 'import cv2; print(cv2.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'cv2'
+root@125313326d78:/app# python3 -c 'import PIL; print("PIL", PIL.__version__)'
+PIL 12.3.0
+root@125313326d78:/app# python3 -c 'import numpy; print("numpy", numpy.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'numpy'
+root@125313326d78:/app# python3 -c 'import chess; print("chess ok")'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'chess'
+root@125313326d78:/app# pip list 2>/dev/null | head -50
+pip install numpy python-chess 2>&1 | tail -20
+Package    Version
+---------- -------
+asciinema  2.4.0
+pillow     12.3.0
+pip        24.0
+setuptools 68.1.2
+wheel      0.42.0
+root@125313326d78:/app# pip install numpy python-chess 2>&1 | tail -20
+error: externally-managed-environment
+
+× This environment is externally managed
+╰─> To install Python packages system-wide, try apt install
+    python3-xyz, where xyz is the package you are trying to
+    install.
+
+    If you wish to install a non-Debian-packaged Python package,
+    create a virtual environment using python3 -m venv path/to/venv.
+    Then use path/to/venv/bin/python and path/to/venv/bin/pip. Make
+    sure you have python3-full installed.
+
+    If you wish to install a non-Debian packaged Python application,
+    it may be easiest to use pipx install xyz, which will manage a
+    virtual environment for you. Make sure you have pipx installed.
+
+    See /usr/share/doc/python3.12/README.venv for more information.
+
+note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your
+ Python installation or OS, by passing --break-system-packages.
+hint: See PEP 668 for the detailed specification.
+root@125313326d78:/app# pip install --break-system-packages numpy python-chess 2>&1 | tail -20
+Collecting python-chess
+  Downloading python_chess-1.999-py3-none-any.whl.metadata (776 bytes)
+Collecting chess<2,>=1 (from python-chess)
+  Downloading chess-1.11.2.tar.gz (6.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.1/6.1 MB 7.9 MB/s eta 0:00:00
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Downloading numpy-2.5.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 30.2 MB/s eta 0:00:00
+Downloading python_chess-1.999-py3-none-any.whl (1.4 kB)
+Building wheels for collected packages: chess
+  Building wheel for chess (setup.py): started
+  Building wheel for chess (setup.py): finished with status 'done'
+  Created wheel for chess: filename=chess-1.11.2-py3-none-any.whl size=147776 sha256=e9e8a4aae9f03b920627dc6b8267765fd7edcd73729dcb0f3016b735bedab4b1
+  Stored in directory: /root/.cache/pip/wheels/83/1f/4e/8f4300f7dd554eb8de70ddfed96e94d3d030ace10c5b53d447
+Successfully built chess
+WARNING: Skipping /usr/lib/python3.12/dist-packages/asciinema-2.4.0.dist-info due to invalid metadata entry 'name'
+Installing collected packages: numpy, chess, python-chess
+Successfully installed chess-1.11.2 numpy-2.5.0 python-chess-1.999
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a v
+irtual environment instead: https://pip.pypa.io/warnings/venv
+root@125313326d78:/app# python3 -c 'from PIL import Image; im=Image.open("chess_puzzle.png"); print(im.size, im.mode)'
+(640, 640) RGB
+root@125313326d78:/app# cat > /tmp/explore.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open("chess_puzzle.png").convert("RGB")
+> arr = np.array(im)
+> print("shape", arr.shape)
+> # squares 80px
+> # sample colors of corners and centers
+> for r in range(8):
+>     row=[]
+>     for c in range(8):
+>         sq = arr[r*80:(r+1)*80, c*80:(c+1)*80]
+>         # classify: count dark/light of square bg by corner pixels
+>         corners = sq[[2,2,77,77],[2,77,2,77]]
+>         row.append(tuple(corners[0].tolist()))
+>     print(r, row)
+> EOF
+root@125313326d78:/app# python3 /tmp/explore.py
+shape (640, 640, 3)
+0 [(240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99)]
+1 [(181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181)]
+2 [(240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99)]
+3 [(181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181)]
+4 [(240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99)]
+5 [(181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181)]
+6 [(240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99)]
+7 [(181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181), (181, 136, 99), (240, 217, 181)]
+root@125313326d78:/app# cat > /tmp/explore2.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open("chess_puzzle.png").convert("RGB")
+> arr = np.array(im).astype(int)
+> # build set of colors
+> colors, counts = np.unique(arr.reshape(-1,3), axis=0, return_counts=True)
+> order = np.argsort(-counts)
+> for i in order[:25]:
+>     print(colors[i], counts[i])
+> EOF
+root@125313326d78:/app# python3 /tmp/explore2.py
+[181 136  99] 197040
+[240 217 181] 194189
+[0 0 0] 8147
+[255 255 255] 2488
+[232 210 175] 135
+[224 205 190] 133
+[183 140 104] 131
+[240 218 183] 77
+[249 239 224] 74
+[220 199 182] 62
+[254 253 252] 62
+[225 203 170] 54
+[170 127  93] 51
+[182 138 101] 51
+[249 240 225] 50
+[240 218 182] 50
+[195 158 128] 49
+[112 101  84] 47
+[245 239 234] 46
+[236 214 178] 46
+[253 250 245] 42
+[195 176 147] 40
+[254 252 249] 40
+[229 207 172] 39
+[217 194 175] 38
+root@125313326d78:/app# cat > /tmp/detect.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open("chess_puzzle.png").convert("RGB")
+> arr = np.array(im).astype(int)
+> bg_light = np.array([240,217,181])
+> bg_dark = np.array([181,136,99])
+>
+> def is_bg(p):
+>     return (np.abs(p-bg_light).sum()<40) or (np.abs(p-bg_dark).sum()<40)
+>
+> for r in range(8):
+>     row=''
+>     for c in range(8):
+>         sq = arr[r*80:(r+1)*80, c*80:(c+1)*80]
+>         flat = sq.reshape(-1,3)
+>         # foreground mask
+>         diff = np.minimum(np.abs(flat-bg_light).sum(1), np.abs(flat-bg_dark).sum(1))
+>         fg = diff>40
+>         nf = fg.sum()
+>         if nf < 50:
+>             row+=' . '
+>             continue
+>         fgpix = flat[fg]
+>         wht = (fgpix.min(1)>180).sum()
+>         blk = (fgpix.max(1)<80).sum()
+>         # determine color by majority interior
+>         if wht > blk:
+>             row+=' W '
+>         else:
+>             row+=' B '
+>     print(r, row)
+> EOF
+root@125313326d78:/app# python3 /tmp/detect.py
+0  B  .  B  B  .  B  .  .
+1  .  B  .  .  .  B  B  .
+2  B  .  B  .  B  .  .  .
+3  .  .  .  B  W  B  B  W
+4  .  .  .  .  .  .  .  .
+5  W  .  W  .  .  .  .  .
+6  .  W  .  .  W  W  W  .
+7  W  .  W  .  W  .  .  W
+root@125313326d78:/app# cat > /tmp/render.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open("chess_puzzle.png").convert("RGB")
+> arr = np.array(im).astype(int)
+> bg_light = np.array([240,217,181]); bg_dark = np.array([181,136,99])
+> def fgmask(sq):
+>     flat=sq.reshape(-1,3)
+>     diff=np.minimum(np.abs(flat-bg_light).sum(1),np.abs(flat-bg_dark).sum(1))
+>     return diff>40
+> for r in range(8):
+>     for c in range(8):
+>         sq=arr[r*80:(r+1)*80, c*80:(c+1)*80]
+>         if fgmask(sq).sum()<50: continue
+>         small=sq[10:70:3,10:70:3]
+>         print(f"=== r{r} c{c} ===")
+>         for y in range(small.shape[0]):
+>             line=''
+>             for x in range(small.shape[1]):
+>                 p=small[y,x]
+>                 d=min(np.abs(p-bg_light).sum(),np.abs(p-bg_dark).sum())
+>                 if d<40: line+=' '
+>                 elif p.max()<80: line+='#'
+>                 elif p.min()>180: line+='.'
+>                 else: line+='+'
+>             print(line)
+> EOF
+root@125313326d78:/app# python3 /tmp/render.py > /tmp/render.txt 2>&1
+root@125313326d78:/app# wc -l /tmp/render.txt
+525 /tmp/render.txt
+root@125313326d78:/app# head -120 /tmp/render.txt
+=== r0 c0 ===
+
+
+
+
+
+    ##+ ### ###
+     #########
+     #+     #+
+      #######
+      #######
+      #######
+      #######
+      #######
++     #######
+      #######
+     ########+
+     #       #
+    #         #
+    ++++++++++
+
+=== r0 c2 ===
+
+
+
+
+
+        ###
+        ###
+        ###
+       ##+##
+      +++ +#
+      +++ +#
+       ##+##
+       +###
+       ####+
+       ####
+       #####
+      ######+
+     +#######
+
+
+=== r0 c3 ===
+
+
+
+
+
+      # ##+ #
+     ##  # ##+
+   ## #  #  + #+
+   ## #  # #+ ##
+    # ## # #  +
+    + +# # # #
+     #+# # # #
+     #+# ####+
+     ########
+     #+++++++
+     ########
+     ########
+     #
+
+
+=== r0 c5 ===
+
+
+
+
+
+    ### ### ###
+     #########
+     #+     ##
+      #######
+      #######
+      #######
+      #######
+      #######
+      #######
+      #######
+     ########+
+     #       #
+    #         #
+
+
+=== r1 c1 ===
+
+
+
+
+
+        ###
+        ###
+        ##+
+       #####
+      +#####
+      +#####
+       #####
+      +#####
+     ########+
+    +#########
+    ###########
+    ###########
+    ###########
+
+
+=== r1 c5 ===
+
+
+
+
+
+        ###
+        ###
+        ##+
+       #####
+      +#####
+      +#####
+       #####
+      +#####
+     ########+
+root@125313326d78:/app# sed -n '120,300p' /tmp/render.txt
+     ########+
+    +#########
+    ###########
+    ###########
+    ###########
+
+
+=== r1 c6 ===
+
+
+
+
+
+        ###
+        ###
+        ###
+       #####
+      +#####
+      +#####
+       #####
+      +#####
+     ########+
+    +#########
+    ###########
+    ###########
+    ###########
+
+
+=== r2 c0 ===
+
+
+
+
+
+        ###
+        ###
+        ##+
+       #####
+      +#####
+      +#####
+       #####
+      +#####
++    ########+
+    +#########
+    ###########
+    ###########
+    ###########
+
+
+=== r2 c2 ===
+
+
+
+
+
+        #+
+      # +#
+      ####
+     #####++
+     #+####+
+     ########
+     #######
+    ##########
+    # ##+#####
+    +##+#####+
+      +###### +
+      ####### +
+      ####### #
+
+
+=== r2 c4 ===
+
+
+
+
+
+        ###
+        ###
+        ##+
+       #####
+      +#####
+      +#####
+       #####
+      +#####
+     ########+
+    +#########
+    ###########
+    ###########
+    ###########
+
+
+=== r3 c3 ===
+
+
+
+
+
+        #+
+      # +#
+      ####
+     #####++
+     #+####+
+     ########
+     #######
+    ##########
+    # ##+#####
+    +##+#####+
+      +###### +
+      ####### +
+      ####### #
+
+
+=== r3 c4 ===
+
+
+
+
+
+        ...
+        . .
+        ..
+       .   .
+      +    .
+      ++   .
+       .  +.
+      +.....
+     ..     .+
+    +.       .
+    .         .
+    .         .
+    ...........
+
+
+=== r3 c5 ===
+
+
+
+
+
+        +#+
+         #
+      ++# #++
+    ##+## #++##
+   #+### #+####+
+   ##### #+###+#
+   ##### #+###+#
+   #+### #+### #
+   +# ++ #+++ #
+    +#########+
+     ####### #
+     ####### #
+     #+++++++#
+
+
+=== r3 c6 ===
+
+
+
+
+
+        ###
+        ###
+        ###
+       ## ##
+      +++ +#
+      +## ##
+       ##+##
+       +###
+       ####+
+       ####
+       #####
+      ######+
+     +#######
+
+
+=== r3 c7 ===
+
+
+
+
+
+root@125313326d78:/app# sed -n '300,525p' /tmp/render.txt
+
+        ...
+        . .
+        ...
+       .  ..
+      ..   .
+      ..   .
+       .   .
+      ......
+     ..     ..
+    ..       .
+    .         .
+    .         .
+    ...........
+
+
+=== r5 c0 ===
+
+
+
+
+
+        ...
+        . .
+        ..
+       .   .
+      +    .
+      ++   .
+       .  +.
+      +.....
++    ..     .+
+    +.       .
+    .         .
+    .         .
+    ...........
+
+
+=== r5 c2 ===
+
+
+
+
+
+         +
+         +
+          +
+     .     +
+      .    +
+            .
+
+             .
+    ..  +    .
+      +.
+      .
+
+              .
+
+
+=== r6 c1 ===
+
+
+
+
+
+        ...
+        . .
+        ..
+       .   .
+      +    .
+      ++   .
+       .  +.
+      +.....
+     ..     .+
+    +.       .
+    .         .
+    .         .
+    ...........
+
+
+=== r6 c4 ===
+
+
+
+
+
+      . .   .
+     .   . .
+   .. .  .  . .
+   .  .  . .   .
+    . ..   .  .
+    . ..     .
+     ..      .
+          ....
+     .. . ...
+     .  ...
+     .
+     .
+     .
+
+
+=== r6 c5 ===
+
+
+
+
+
+        ...
+        . .
+        ..
+       .   .
+      +    .
+      ++   .
+       .  +.
+      +.....
+     ..     .+
+    +.       .
+    .         .
+    .         .
+    ...........
+
+
+=== r6 c6 ===
+
+
+
+
+
+        ...
+        . .
+        ...
+       .  ..
+      ..   .
+      ..   .
+       .   .
+      ......
+     ..     ..
+    ..       .
+    .         .
+    .         .
+    ...........
+
+
+=== r7 c0 ===
+
+
+
+
+
+    ..  ... ...
+     ........
+     .
+            .
+      +     .
+      +     .
++     +     .
+      +     .
+      +     .
+      .......
+     .
+     .
+    .         .
+          ++
+          +
+=== r7 c2 ===
+
+
+
+
+
+        . .
+        + .
+        ...
+       .. ..
+      +++ +.
+      +    .
+       ..+..
+       ++ .
+       .   +
+
+       .   .
+      .    ++
+     +.     .
+           +
+
+=== r7 c4 ===
+
+
+
+
+
+         .
+         .
+      + . .++
+    ..+.. . +..
+   .+    .    .+
+   .     .     .
+   .     .     .
+   .     .     .
+   +.    .    .
+     .........+
+     .
+     .
+     .+++++++
+           +
+
+=== r7 c7 ===
+
+
+
+
+
+    ... ... ...
+     .........
+     .       .
+            .
+      .     .
+      .     .
+      .     .
+      .     .
+      .     .
+      .......
+     .       .
+     .       .
+    .         .
+           +
+
+root@125313326d78:/app# cat > /tmp/cluster.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open("chess_puzzle.png").convert("RGB")
+> arr = np.array(im).astype(int)
+> bg_l=np.array([240,217,181]); bg_d=np.array([181,136,99])
+>
+> def fg(sq):
+>     flat=sq.reshape(-1,3).astype(int)
+>     d=np.minimum(np.abs(flat-bg_l).sum(1),np.abs(flat-bg_d).sum(1)).reshape(80,80)
+>     return (d>45).astype(np.uint8)
+>
+> def color_of(r,c):
+>     sq=arr[r*80:(r+1)*80,c*80:(c+1)*80]
+>     flat=sq.reshape(-1,3); d=np.minimum(np.abs(flat-bg_l).sum(1),np.abs(flat-bg_d).sum(1))
+>     f=flat[d>45]
+>     wht=(f.min(1)>180).sum(); blk=(f.max(1)<80).sum()
+>     return 'W' if wht>blk else 'B'
+>
+> occ=[]
+> for r in range(8):
+>     for c in range(8):
+>         sq=arr[r*80:(r+1)*80,c*80:(c+1)*80]
+>         if fg(sq).sum()<50: continue
+>         col=color_of(r,c)
+>         # normalize: crop to bounding box of fg, resize to 40x40
+>         mask=fg(sq)
+>         ys,xs=np.where(mask)
+>         crop=mask[ys.min():ys.max()+1, xs.min():xs.max()+1]
+>         # downscale to 32x32 by sampling
+>         H,W=crop.shape
+>         out=np.zeros((32,32),np.uint8)
+>         for i in range(32):
+>             for j in range(32):
+>                 yy=ys.min()+int((i+0.5)*H/32); xx=xs.min()+int((j+0.5)*W/32)
+>                 out[i,j]=mask[min(yy,79),min(xx,79)]
+>         occ.append((r,c,col,out))
+>
+> # cluster within color
+> for col in ['W','B']:
+>     items=[o for o in occ if o[2]==col]
+>     clusters=[]
+>     for it in items:
+>         placed=False
+>         for cl in clusters:
+>             rep=cl[0][3]
+>             dist=(rep!=it[3]).sum()
+>             if dist<90:
+>                 cl.append(it); placed=True; break
+>         if not placed:
+>             clusters.append([it])
+>     print(f"--- color {col}: {len(clusters)} clusters ---")
+>     for cl in clusters:
+>         members=[(o[0],o[1]) for o in cl]
+>         print("  rep",cl[0][0],cl[0][1],"count",len(cl),"members",members)
+> EOF
+root@125313326d78:/app# python3 /tmp/cluster.py
+--- color W: 9 clusters ---
+  rep 3 4 count 3 members [(3, 4), (6, 1), (6, 5)]
+  rep 3 7 count 2 members [(3, 7), (6, 6)]
+  rep 5 0 count 1 members [(5, 0)]
+  rep 5 2 count 1 members [(5, 2)]
+  rep 6 4 count 1 members [(6, 4)]
+  rep 7 0 count 1 members [(7, 0)]
+  rep 7 2 count 1 members [(7, 2)]
+  rep 7 4 count 1 members [(7, 4)]
+  rep 7 7 count 1 members [(7, 7)]
+--- color B: 8 clusters ---
+  rep 0 0 count 1 members [(0, 0)]
+  rep 0 2 count 2 members [(0, 2), (3, 6)]
+  rep 0 3 count 1 members [(0, 3)]
+  rep 0 5 count 1 members [(0, 5)]
+  rep 1 1 count 4 members [(1, 1), (1, 5), (1, 6), (2, 4)]
+  rep 2 0 count 1 members [(2, 0)]
+  rep 2 2 count 2 members [(2, 2), (3, 3)]
+  rep 3 5 count 1 members [(3, 5)]
+root@125313326d78:/app# cat > /tmp/cluster2.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open("chess_puzzle.png").convert("RGB")
+> arr = np.array(im).astype(int)
+> bg_l=np.array([240,217,181]); bg_d=np.array([181,136,99])
+>
+> def fg(sq):
+>     flat=sq.reshape(-1,3).astype(int)
+>     d=np.minimum(np.abs(flat-bg_l).sum(1),np.abs(flat-bg_d).sum(1)).reshape(80,80)
+>     return (d>45).astype(np.int8)
+>
+> def color_of(r,c):
+>     sq=arr[r*80:(r+1)*80,c*80:(c+1)*80]
+>     f=sq.reshape(-1,3); d=np.minimum(np.abs(f-bg_l).sum(1),np.abs(f-bg_d).sum(1))
+>     fr=f[d>45]
+>     wht=(fr.min(1)>180).sum(); blk=(fr.max(1)<80).sum()
+>     return 'W' if wht>blk else 'B'
+>
+> occ=[]
+> for r in range(8):
+>     for c in range(8):
+>         sq=arr[r*80:(r+1)*80,c*80:(c+1)*80]
+>         m=fg(sq)
+>         if m.sum()<50: continue
+>         ys,xs=np.where(m)
+>         occ.append((r,c,color_of(r,c),m,m.sum(),ys.max()-ys.min()+1,xs.max()-xs.min()+1))
+>
+> for col in ['B','W']:
+>     items=[o for o in occ if o[2]==col]
+>     clusters=[]
+>     for it in items:
+>         best=None;bd=1e9
+>         for ci,cl in enumerate(clusters):
+>             dist=(cl[0][3]!=it[3]).sum()
+>             if dist<bd: bd=dist;best=ci
+>         if best is not None and bd<200:
+>             clusters[best].append(it)
+>         else:
+>             clusters.append([it])
+>     print(f"=== {col}: {len(clusters)} clusters ===")
+>     for cl in clusters:
+>         mem=[(o[0],o[1]) for o in cl]
+>         rep=cl[0]
+>         print(f"  rep({rep[0]},{rep[1]}) cnt={len(cl)} pix={rep[4]} HxW={rep[5]}x{rep[6]} mem={mem}")
+> EOF
+root@125313326d78:/app# python3 /tmp/cluster2.py
+=== B: 6 clusters ===
+  rep(0,0) cnt=2 pix=893 HxW=41x45 mem=[(0, 0), (0, 5)]
+  rep(0,2) cnt=2 pix=579 HxW=41x26 mem=[(0, 2), (3, 6)]
+  rep(0,3) cnt=1 pix=816 HxW=41x38 mem=[(0, 3)]
+  rep(1,1) cnt=5 pix=849 HxW=41x34 mem=[(1, 1), (1, 5), (1, 6), (2, 0), (2, 4)]
+  rep(2,2) cnt=2 pix=861 HxW=41x33 mem=[(2, 2), (3, 3)]
+  rep(3,5) cnt=1 pix=1028 HxW=41x40 mem=[(3, 5)]
+=== W: 6 clusters ===
+  rep(3,4) cnt=6 pix=409 HxW=41x34 mem=[(3, 4), (3, 7), (5, 0), (6, 1), (6, 5), (6, 6)]
+  rep(5,2) cnt=1 pix=205 HxW=39x32 mem=[(5, 2)]
+  rep(6,4) cnt=1 pix=476 HxW=41x38 mem=[(6, 4)]
+  rep(7,0) cnt=2 pix=426 HxW=47x44 mem=[(7, 0), (7, 7)]
+  rep(7,2) cnt=1 pix=357 HxW=47x25 mem=[(7, 2)]
+  rep(7,4) cnt=1 pix=518 HxW=47x40 mem=[(7, 4)]
+root@125313326d78:/app# cat > /tmp/focus.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open("chess_puzzle.png").convert("RGB")
+> arr = np.array(im).astype(int)
+> bg_l=np.array([240,217,181]); bg_d=np.array([181,136,99])
+> def ch(p):
+>     d=min(np.abs(p-bg_l).sum(),np.abs(p-bg_d).sum())
+>     if d<40: return ' '
+>     if p.max()<80: return '#'
+>     if p.min()>180: return '.'
+>     return '+'
+> for (r,c) in [(5,2),(6,4),(7,4),(2,2),(3,5),(0,3)]:
+>     sq=arr[r*80:(r+1)*80, c*80:(c+1)*80]
+>     print(f"===== (r{r},c{c}) =====")
+>     for y in range(8,72,2):
+>         line=''
+>         for x in range(8,72,2):
+>             line+=ch(sq[y,x])
+>         print(line)
+> EOF
+root@125313326d78:/app# python3 /tmp/focus.py
+===== (r5,c2) =====
+
+
+
+
+
+
+
+
+
+          +  +
+         . +
+           +++
+         .      .
+        +        .
+        . .       .
+        ++.        +
+        +          .
+        +          ++
+       ++           .
+              .
+       .      .
+        .+  +.       .
+        + + .        .
+
+                     ++
+         +
+         .
+         .            .
+
+
+
+
+===== (r6,c4) =====
+
+
+
+
+
+
+
+
+             . .
+         . . .    . .
+           .  ..    .
+      .   .   ..  ..  .
+     .    ..  ..  .. .
+     .    ..  ..  .  . .
+       .  ..  ..     ..
+       .  .   .. .   .
+       .. . . .. .. ..
+          . .  .  . ..
+        ..  .  .  ..
+        ..     .. ...
+          .  . .. . .
+         ............
+         .  ......  .
+         .          .
+         ............
+         .          .
+         .          .
+         ............
+
+
+
+
+===== (r7,c4) =====
+
+
+
+
+
+
+
+
+              .
+            +....
+              .
+             .++
+         ....   .....+
+       .. + .. +..++...
+      ..      ..     +..
+      .       ..      +.
+     .        ..       .+
+     .+       ..       .
+     .+       ..       .
+     ..       ..       .
+      .       ..      ..
+       ..+++++..+++++..
+        ..............+
+        +.          .
+        +.          .
+        +.          .
+        +.          .
+        +............
+                 ++
+                 +
+                + +
+
+===== (r2,c2) =====
+
+
+
+
+
+
+
+
+             ##
+         ++  ##
+         +#+ +#
+          #####+
+         +#######
+        +#######+#
+        #+ ######++
+        ###########+
+        ##########+#
+        ###########++
+       +###########+#
+       ##############
+       #++##########++
+       #+### +###### #
+       +#+# ########+#
+           #########+#
+          ###########++
+         +###########++
+         ############ #
+         +###########+#
+
+
+
+
+===== (r3,c5) =====
+
+
+
+
+
+
+
+
+              #+
+            +####
+              #+
+             #+++
+        +####+  #####+
+      +##+++## +##++###
+      ## ###++##++##++##
+     +# ##### ##+#####+#
+     #+###### ##+#####+#+
+     #+###### ##+#####+##
+     #+###### ##+#####+#+
+     ##+##### ##+##### #+
+      #++#### ##+#### ##
+      +##+++++##+++++##
+       +##############+
+        +#          #
+        +########## #
+        +########## #
+        +#+++++++++ #
+        +############
+
+
+
+
+===== (r0,c3) =====
+
+
+
+
+
+
+
+
+             +##
+         ### ###+ ###
+         ###  #+  ###
+      ++ +#   #+  ##  +
+     ###  #+  #+  #+ ###
+     +##  ##  ##  #+ ###
+       #  ##  ## +#  +#
+       #  ##  ## ##  #+
+       +# +#+ ## ## +#
+        # +## ## ## ##
+        ##+## ##+##+#
+        ##+## ####+##
+         ####+#######
+         ############
+         #++++++++++#
+         ############
+         ############
+         ############
+         #++++++++++#
+         ############
+
+
+
+
+root@125313326d78:/app# cat > /tmp/solve.py << 'EOF'
+> import chess
+> fen = "r1bn1r2/1p3pp1/p1q1p3/3qPkbP/8/P1N5/1P2QPP1/R1B1K2R w KQ - 0 1"
+> b = chess.Board(fen)
+> print("status:", b.status())
+> print(b)
+> print("turn white:", b.turn==chess.WHITE)
+> print("legal moves:", b.legal_moves.count())
+> MATE=100000
+> vals={chess.PAWN:100,chess.KNIGHT:320,chess.BISHOP:330,chess.ROOK:500,chess.QUEEN:900,chess.KING:0}
+> def evaluate(bd):
+>     s=0
+>     for pt in vals:
+>         s+=vals[pt]*(len(bd.pieces(pt,chess.WHITE))-len(bd.pieces(pt,chess.BLACK)))
+>     return s
+> def negamax(bd,depth,ply,alpha,beta):
+>     if bd.is_checkmate(): return -(MATE-ply)
+>     if bd.is_stalemate() or bd.is_insufficient_material(): return 0
+>     if depth==0:
+>         sign=1 if bd.turn==chess.WHITE else -1
+>         return sign*evaluate(bd)
+>     best=-10**9
+>     moves=list(bd.legal_moves)
+>     moves.sort(key=lambda m:-( (int(bd.gives_check(m)))*10 + int(bd.is_capture(m))*5 ))
+>     for m in moves:
+>         bd.push(m)
+>         v=-negamax(bd,depth-1,ply+1,-beta,-alpha)
+>         bd.pop()
+>         if v>best: best=v
+>         if best>alpha: alpha=best
+>         if alpha>=beta: break
+>     return best
+> def root(bd,depth):
+>     res=[]
+>     for m in bd.legal_moves:
+>         bd.push(m)
+>         v=-negamax(bd,depth-1,1,-10**9,10**9)
+>         bd.pop()
+>         res.append((v,m))
+>     res.sort(key=lambda x:-x[0])
+>     return res
+> for depth in range(1,8):
+>     res=root(b,depth)
+>     top=res[0][0]
+>     print(f"depth {depth}: best score {top}  move {res[0][1].uci()}")
+>     if top>=MATE-50:
+>         # collect all moves achieving a forced mate at the same minimal distance
+>         mates=[(v,m) for v,m in res if v>=MATE-50]
+>         # minimal distance = highest score among these (closer mate => higher score)
+>         best=max(v for v,m in mates)
+>         winning=[m for v,m in mates if v==best]
+>         print("FORCED MATE, distance plies:", MATE-best)
+>         print("winning moves:", [m.uci() for m in winning])
+>         break
+> EOF
+root@125313326d78:/app# python3 /tmp/solve.py
+status: 0
+r . b n . r . .
+. p . . . p p .
+p . q . p . . .
+. . . q P k b P
+. . . . . . . .
+P . N . . . . .
+. P . . Q P P .
+R . B . K . . R
+turn white: True
+legal moves: 40
+depth 1: best score 99999  move g2g4
+FORCED MATE, distance plies: 1
+winning moves: ['g2g4']
+root@125313326d78:/app# cat > /tmp/verify.py << 'EOF'
+> import chess
+> fen = "r1bn1r2/1p3pp1/p1q1p3/3qPkbP/8/P1N5/1P2QPP1/R1B1K2R w KQ - 0 1"
+> b = chess.Board(fen)
+> m = chess.Move.from_uci("g2g4")
+> print("legal?", m in b.legal_moves)
+> b.push(m)
+> print("is_check:", b.is_check())
+> print("is_checkmate:", b.is_checkmate())
+> print("black legal replies:", [x.uci() for x in b.legal_moves])
+> print(b)
+> EOF
+root@125313326d78:/app# python3 /tmp/verify.py
+legal? True
+is_check: True
+is_checkmate: True
+black legal replies: []
+r . b n . r . .
+. p . . . p p .
+p . q . p . . .
+. . . q P k b P
+. . . . . . P .
+P . N . . . . .
+. P . . Q P . .
+R . B . K . . R
+root@125313326d78:/app# cat > /tmp/final.py << 'EOF'
+> import chess
+> fen = "r1bn1r2/1p3pp1/p1q1p3/3qPkbP/8/P1N5/1P2QPP1/R1B1K2R w KQ - 0 1"
+> b = chess.Board(fen)
+> mates=[]
+> for m in b.legal_moves:
+>     b.push(m)
+>     if b.is_checkmate():
+>         mates.append(m.uci())
+>     b.pop()
+> print("mate-in-1 moves:", mates)
+> with open("/app/move.txt","w") as f:
+>     f.write("\n".join(mates)+"\n")
+> print("written")
+> EOF
+root@125313326d78:/app# python3 /tmp/final.py
+mate-in-1 moves: ['g2g4']
+written
+root@125313326d78:/app# cat /app/move.txt
+g2g4
+root@125313326d78:/app#

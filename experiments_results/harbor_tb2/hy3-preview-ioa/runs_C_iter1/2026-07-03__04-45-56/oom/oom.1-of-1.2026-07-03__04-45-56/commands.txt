@@ -1,0 +1,31 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'df -h\n'
+'echo HOME=$HOME; ls -la ~/.cache 2>/dev/null | head\n'
+'python3 --version; python3 -c "import huggingface_hub; print(\'hub\', huggingface_hub.__version__)" 2>&1 | head\n'
+'du -sh /root/.cache/huggingface 2>/dev/null; ls -la /root/.cache/huggingface/\n'
+'free -h\n'
+'python3 -c "import transformers; print(\'transformers\', transformers.__version__)" 2>&1 | head -1\n'
+'curl -sI --max-time 10 https://huggingface.co/albert/albert-base-v2/resolve/main/config.json | head -3\n'
+"grep -E 'MemTotal|MemAvailable|MemFree' /proc/meminfo\n"
+'rm -rf /root/.cache/huggingface/hub\n'
+'mount -o remount,size=2G /root/.cache 2>&1; echo exit=$?\n'
+'df -h /root/.cache\n'
+'mkdir -p /root/.cache/hfcache && mount -t tmpfs -o size=2G tmpfs /root/.cache/hfcache 2>&1; echo exit=$?\n'
+'df -h /root/.cache/hfcache\n'
+"mount | grep -E 'tmpfs|overlay' | head -20\n"
+"touch /sys/fs/cgroup/testfile 2>&1 && echo 'cgroup Writable' && rm -f /sys/fs/cgroup/testfile || echo 'cgroup NOT writable'\n"
+"touch /root/.cache/testfile 2>&1 && echo '/root/.cache Writable' && rm -f /root/.cache/testfile || echo 'NOT writable'\n"
+'mkdir -p /sys/fs/cgroup/hfcache && df -h /sys/fs/cgroup\n'
+'export HF_HOME=/sys/fs/cgroup/hfcache; echo HF_HOME=$HF_HOME\n'
+'cat > /tmp/cache_model.py << \'EOF\'\nimport os\nfrom huggingface_hub import snapshot_download\nfrom transformers import AutoTokenizer, AutoModel\n\nREPO = "albert/albert-base-v2"\n\n# 1) Pull ALL repo files so the cache is fully offline-capable\ndl = snapshot_download(repo_id=REPO, local_dir=None)\nprint("snapshot_download ->", dl)\n\n# 2) Materialize tokenizer and model into the cache explicitly\nAutoTokenizer.from_pretrained(REPO)\nprint("tokenizer cached")\nAutoModel.from_pretrained(REPO)\nprint("model cached")\nprint("DONE")\nEOF\n'
+'HF_HOME=/sys/fs/cgroup/hfcache python3 /tmp/cache_model.py\n'
+'du -sh /sys/fs/cgroup/hfcache/hub; ls /sys/fs/cgroup/hfcache/hub/models--albert--albert-base-v2/snapshots/*/\n'
+'HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HOME=/sys/fs/cgroup/hfcache python3 -c "from transformers import AutoTokenizer, AutoModel; t=AutoTokenizer.from_pretrained(\'albert/albert-base-v2\'); m=AutoModel.from_pretrained(\'albert/albert-base-v2\'); print(\'OFFLINE LOAD OK\', t.__class__.__name__, m.__class__.__name__)"\n'
+'rmdir /root/.cache/huggingface 2>/dev/null; ln -s /sys/fs/cgroup/hfcache /root/.cache/huggingface; ls -la /root/.cache/\n'
+'HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 -c "from transformers import AutoTokenizer, AutoModel; t=AutoTokenizer.from_pretrained(\'albert/albert-base-v2\'); m=AutoModel.from_pretrained(\'albert/albert-base-v2\'); print(\'DEFAULT-CACHE OFFLINE LOAD OK\', t.__class__.__name__, m.__class__.__name__)"\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

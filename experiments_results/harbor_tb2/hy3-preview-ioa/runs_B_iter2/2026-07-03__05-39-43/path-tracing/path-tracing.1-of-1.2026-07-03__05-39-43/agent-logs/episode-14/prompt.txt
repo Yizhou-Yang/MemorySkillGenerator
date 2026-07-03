@@ -1,0 +1,74 @@
+New Terminal Output:
+
+root@03270641b450:/app# cat > /tmp/extract.py << 'PYEOF'
+> import re, struct
+> txt=open('/tmp/dis.txt').read().splitlines()
+> inst=[]
+> funcmap={}
+> for ln in txt:
+>     mh=re.match(r'^([0-9a-f]+)\s+<([A-Za-z_][\w.]*)>:$', ln)
+>     if mh:
+>         funcmap[int(mh.group(1),16)]=mh.group(2); continue
+>     mi=re.match(r'^\s*([0-9a-f]+):\s*(((?:[0-9a-f]{2}\s+){1,15})(.*))$', ln)
+>     if not mi: continue
+>     addr=int(mi.group(1),16)
+>     nbytes=len(mi.group(3).split())
+>     rest=mi.group(4)
+>     inst.append((addr,nbytes,rest))
+> funcstarts=sorted(funcmap)
+> def fname(a):
+>     f=None
+>     for fa in funcstarts:
+>         if fa<=a: f=funcmap[fa]
+>         else: break
+>     return f
+> ro=open('/app/orig','rb').read()[0x3000:0x32c0]
+> res={}
+> for a,n,r in inst:
+>     m=re.search(r'rip\+0x([0-9a-f]+)', r)
+>     if not m: continue
+>     if not ('movsd' in r or 'movss' in r or 'movups' in r or 'movaps' in r): continue
+>     disp=int(m.group(1),16)
+>     if disp>=0x80000000: disp-=(1<<32)
+>     tgt=a+n+disp
+>     if 0x3000<=tgt<0x32c0:
+>         off=tgt-0x3000
+>         try:
+>             if 'movss' in r:
+>                 d=struct.unpack('<f', ro[off:off+4])[0]; k='f32'
+>             else:
+>                 d=struct.unpack('<d', ro[off:off+8])[0]; k='f64'
+>         except: continue
+>         res.setdefault((fname(a),tgt),[]).append((round(d,6),k))
+> for (fn,tgt),vals in sorted(res.items()):
+>     seen=set(); uniq=[]
+>     for d,k in vals:
+>         if (d,k) not in seen: seen.add((d,k)); uniq.append((d,k))
+>     print('%-18s +%3d: %s'%(fn, tgt-0x3000, uniq[:5]))
+> PYEOF
+root@03270641b450:/app# .venv/bin/python /tmp/extract.py
+main               +643: [(-0.0, 'f32')]
+main               +647: [(0.0, 'f32')]
+main               +683: [(0.0, 'f32')]
+main               +687: [(-0.0, 'f32')]
+main               +691: [(0.0, 'f32')]
+main               +695: [(-0.0, 'f32')]
+main               +699: [(-131074.984375, 'f32')]
+plane_intersect    +607: [(-0.0, 'f32')]
+plane_intersect    +623: [(nan, 'f32')]
+plane_intersect    +639: [(-98295611392.0, 'f32')]
+plane_intersect    +643: [(-0.0, 'f32')]
+sky_color          +643: [(-0.0, 'f32')]
+sky_color          +647: [(0.0, 'f32')]
+sky_color          +651: [(0.0, 'f32')]
+sphere_intersect   +579: [(-0.0, 'f32')]
+sphere_intersect   +591: [(0.0, 'f32')]
+sphere_intersect   +607: [(-0.0, 'f32')]
+trace              +607: [(-0.0, 'f32')]
+trace              +643: [(-0.0, 'f32')]
+trace              +659: [(107376120.0, 'f32')]
+trace              +663: [(2.7200758163159178e+23, 'f32')]
+trace              +667: [(-107375096.0, 'f32')]
+write_image        +671: [(-3.1050361846014606e+231, 'f64')]
+write_image        +679: [(nan, 'f32'), (nan, 'f32'), (nan, 'f32')]
+root@03270641b450:/app#

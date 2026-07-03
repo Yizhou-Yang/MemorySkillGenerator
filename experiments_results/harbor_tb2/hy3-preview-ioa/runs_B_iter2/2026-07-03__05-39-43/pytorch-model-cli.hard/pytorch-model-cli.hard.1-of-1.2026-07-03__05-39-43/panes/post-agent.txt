@@ -1,0 +1,666 @@
+root@bc31447e98c2:/app# ls -la /app
+total 588
+drwxr-xr-x  2 root root   4096 Jul  2 13:59 .
+drwxr-xr-x 19 root root   4096 Jul  2 22:25 ..
+-rw-r--r--  1 root root  79506 Jul  2 13:59 cJSON.c
+-rw-r--r--  1 root root  16393 Jul  2 13:59 cJSON.h
+-rw-r--r--  1 root root    389 Jul  2 13:59 image.png
+-rw-r--r--  1 root root 311873 Jul  2 13:59 lodepng.cpp
+-rw-r--r--  1 root root 107788 Jul  2 13:59 lodepng.h
+-rw-r--r--  1 root root  54714 Jul  2 13:59 model.pth
+-rw-r--r--  1 root root    681 Jul  2 13:59 model.py
+root@bc31447e98c2:/app# ls -la /
+total 60
+drwxr-xr-x  19 root root 4096 Jul  2 22:25 .
+-rwxr-xr-x   1 root root    0 Jul  2 22:25 .dockerenv
+drwxr-xr-x   2 root root 4096 Jul  2 13:59 app
+lrwxrwxrwx   1 root root    7 Jan 13  2025 bin -> usr/bin
+drwxr-xr-x   2 root root 4096 Dec 31  2024 boot
+drwxr-xr-x   5 root root  340 Jul  2 22:25 dev
+drwxr-xr-x  34 root root 4096 Jul  2 22:25 etc
+drwxr-xr-x   2 root root 4096 Dec 31  2024 home
+lrwxrwxrwx   1 root root    7 Jan 13  2025 lib -> usr/lib
+lrwxrwxrwx   1 root root    9 Jan 13  2025 lib64 -> usr/lib64
+drwxr-xr-x   2 root root 4096 Jul  2 22:25 logs
+drwxr-xr-x   2 root root 4096 Jan 13  2025 media
+drwxr-xr-x   2 root root 4096 Jan 13  2025 mnt
+drwxr-xr-x   2 root root 4096 Jan 13  2025 opt
+dr-xr-xr-x 941 root root    0 Jul  2 22:25 proc
+drwx------   4 root root 4096 Jul  2 22:25 root
+drwxr-xr-x   3 root root 4096 Jan 13  2025 run
+lrwxrwxrwx   1 root root    8 Jan 13  2025 sbin -> usr/sbin
+drwxr-xr-x   2 root root 4096 Jan 13  2025 srv
+dr-xr-xr-x  12 root root    0 Jun 17 07:56 sys
+drwxrwxrwt   3 root root 4096 Jul  2 22:25 tmp
+drwxr-xr-x  12 root root 4096 Jan 13  2025 usr
+drwxr-xr-x  11 root root 4096 Jan 13  2025 var
+root@bc31447e98c2:/app# find / -iname '*mnist*' 2>/dev/null | head -50
+root@bc31447e98c2:/app# which g++ gcc python3 cmake make cJSON 2>/dev/null
+/usr/local/bin/python3
+root@bc31447e98c2:/app# cat /app/model.py
+import torch
+import torch.nn as nn
+
+
+class MnistModel(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        num_classes: int,
+    ) -> torch.nn.Module:
+        super().__init__()
+
+        self.input_layer = nn.Linear(input_dim, hidden_dim)
+        self.hidden_layer = nn.Linear(hidden_dim, hidden_dim)
+        self.output_layer = nn.Linear(hidden_dim, num_classes)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        x = self.input_layer(x)
+        x = self.activation(x)
+
+        x = self.hidden_layer(x)
+        x = self.activation(x)
+
+        x = self.output_layer(x)
+        return x
+root@bc31447e98c2:/app# ls /usr/bin | grep -iE 'gcc|g\+\+|cc|clang' ; ls /usr/local/bin | grep -iE 'gcc|g\+\+|cc|clang'
+root@bc31447e98c2:/app# python3 -c 'import torch, numpy; print(torch.__version__, numpy.__version__)' 2>&1 | head
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import torch, numpy; print(torch.__version__, numpy.__version__)
+    ^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'torch'
+root@bc31447e98c2:/app# find / -type f \( -name 'gcc*' -o -name 'g++*' -o -name 'clang*' -o -name 'cc' \) 2>/dev/null | head -20
+/var/lib/dpkg/info/gcc-12-base:amd64.list
+/var/lib/dpkg/info/gcc-12-base:amd64.md5sums
+root@bc31447e98c2:/app# python3 --version; which pip pip3 2>/dev/null; pip3 --version 2>&1 | head -1
+Python 3.13.1
+/usr/local/bin/pip
+/usr/local/bin/pip3
+python3 -c "import urllib.request; print(urllib.request.urlopen('https://pypi.org', timeout=6).status)" 2>&1 | head -3
+pip 24.3.1 from /usr/local/lib/python3.13/site-packages/pip (python 3.13)
+root@bc31447e98c2:/app# python3 -c "import urllib.request; print(urllib.request.urlopen('https://pypi.org', timeout=6).status)" 2>&1 | head -3
+200
+root@bc31447e98c2:/app# apt-get update -y 2>&1 | tail -3
+Get:6 http://deb.debian.org/debian-security bookworm-security/main amd64 Packages [314 kB]
+Fetched 9365 kB in 3s (3420 kB/s)
+Reading package lists...
+root@bc31447e98c2:/app# apt-get install -y g++ 2>&1 | tail -8
+  libwebp7 libx11-6 libx11-data libx265-199 libxau6 libxcb1 libxdmcp6 libxpm4
+  libyuv0 linux-libc-dev manpages manpages-dev rpcsvc-proto
+The following packages will be upgraded:
+  gcc-12-base libc-bin libc6 libgcc-s1 libstdc++6
+5 upgraded, 70 newly installed, 0 to remove and 42 not upgraded.
+Need to get 83.9 MB of archives.
+After this operation, 316 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@bc31447e98c2:/app# df -h
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  967G     0 100% /
+tmpfs            64M     0   64M   0% /dev
+tmpfs            32G     0   32G   0% /sys/fs/cgroup
+shm              64M   24K   64M   1% /dev/shm
+/dev/vdb        984G  967G     0 100% /logs
+overlay         984G  967G     0 100% /etc/hosts
+tmpfs            32G     0   32G   0% /proc/acpi
+tmpfs            32G     0   32G   0% /proc/scsi
+tmpfs            32G     0   32G   0% /sys/firmware
+root@bc31447e98c2:/app# du -sh /var/cache/apt 2>/dev/null; ls /var/cache/apt/archives 2>/dev/null | head
+12K     /var/cache/apt
+lock
+partial
+root@bc31447e98c2:/app# python3 -c "import numpy; print('numpy', numpy.__version__)" 2>&1 | head -1
+Traceback (most recent call last):
+root@bc31447e98c2:/app# python3 - <<'EOF'
+> import struct
+> d=open('/app/image.png','rb').read()
+> print('len',len(d),'sig',d[:8])
+> w,h=struct.unpack('>II',d[16:24])
+> print('dims',w,h,'bitdepth',d[24],'colortype',d[25])
+> EOF
+len 389 sig b'\x89PNG\r\n\x1a\n'
+dims 28 28 bitdepth 8 colortype 0
+root@bc31447e98c2:/app# python3 - <<'EOF'
+> import zipfile, pickletools, io
+> z=zipfile.ZipFile('/app/model.pth')
+> print('NAMES:', z.namelist())
+> data=z.read('archive/data.pkl')
+> pickletools.dis(io.BytesIO(data))
+> EOF
+NAMES: ['simple_mnist/data.pkl', 'simple_mnist/byteorder', 'simple_mnist/data/0', 'simple_mnist/data/1', 'simple_mnist/data/2', 'simple_mnist/data/3', 'simple_m
+nist/data/4', 'simple_mnist/data/5', 'simple_mnist/version', 'simple_mnist/.data/serialization_id']
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1598, in read
+    with self.open(name, "r", pwd) as fp:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1635, in open
+    zinfo = self.getinfo(name)
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1563, in getinfo
+    raise KeyError(
+        'There is no item named %r in the archive' % name)
+KeyError: "There is no item named 'archive/data.pkl' in the archive"
+root@bc31447e98c2:/app# echo hi > /app/_wt 2>&1 && echo APP_WRITABLE && wc -c /app/_wt && rm /app/_wt
+APP_WRITABLE
+3 /app/_wt
+root@bc31447e98c2:/app# df -h /dev/shm; python3 - <<'EOF'
+> import zipfile, pickletools, io
+> z=zipfile.ZipFile('/app/model.pth')
+> for n in z.namelist():
+>     print(n, z.getinfo(n).file_size)
+> print('--- byteorder ---')
+> print(z.read('simple_mnist/byteorder'))
+> print('--- dis data.pkl ---')
+> data=z.read('simple_mnist/data.pkl')
+> pickletools.dis(io.BytesIO(data))
+> EOF
+Filesystem      Size  Used Avail Use% Mounted on
+shm              64M   24K   64M   1% /dev/shm
+simple_mnist/data.pkl 728
+simple_mnist/byteorder 6
+simple_mnist/data/0 50176
+simple_mnist/data/1 64
+simple_mnist/data/2 1024
+simple_mnist/data/3 64
+simple_mnist/data/4 640
+simple_mnist/data/5 40
+simple_mnist/version 2
+simple_mnist/.data/serialization_id 40
+--- byteorder ---
+b'little'
+--- dis data.pkl ---
+    0: \x80 PROTO      2
+    2: c    GLOBAL     'collections OrderedDict'
+   27: q    BINPUT     0
+   29: )    EMPTY_TUPLE
+   30: R    REDUCE
+   31: q    BINPUT     1
+   33: (    MARK
+   34: X        BINUNICODE 'input_layer.weight'
+   57: q        BINPUT     2
+   59: c        GLOBAL     'torch._utils _rebuild_tensor_v2'
+   92: q        BINPUT     3
+   94: (        MARK
+   95: (            MARK
+   96: X                BINUNICODE 'storage'
+  108: q                BINPUT     4
+  110: c                GLOBAL     'torch FloatStorage'
+  130: q                BINPUT     5
+  132: X                BINUNICODE '0'
+  138: q                BINPUT     6
+  140: X                BINUNICODE 'cpu'
+  148: q                BINPUT     7
+  150: M                BININT2    12544
+  153: t                TUPLE      (MARK at 95)
+  154: q            BINPUT     8
+  156: Q            BINPERSID
+  157: K            BININT1    0
+  159: K            BININT1    16
+  161: M            BININT2    784
+  164: \x86         TUPLE2
+  165: q            BINPUT     9
+  167: M            BININT2    784
+  170: K            BININT1    1
+  172: \x86         TUPLE2
+  173: q            BINPUT     10
+  175: \x89         NEWFALSE
+  176: h            BINGET     0
+  178: )            EMPTY_TUPLE
+  179: R            REDUCE
+  180: q            BINPUT     11
+  182: t            TUPLE      (MARK at 94)
+  183: q        BINPUT     12
+  185: R        REDUCE
+  186: q        BINPUT     13
+  188: X        BINUNICODE 'input_layer.bias'
+  209: q        BINPUT     14
+  211: h        BINGET     3
+  213: (        MARK
+  214: (            MARK
+  215: h                BINGET     4
+  217: h                BINGET     5
+  219: X                BINUNICODE '1'
+  225: q                BINPUT     15
+  227: h                BINGET     7
+  229: K                BININT1    16
+  231: t                TUPLE      (MARK at 214)
+  232: q            BINPUT     16
+  234: Q            BINPERSID
+  235: K            BININT1    0
+  237: K            BININT1    16
+  239: \x85         TUPLE1
+  240: q            BINPUT     17
+  242: K            BININT1    1
+  244: \x85         TUPLE1
+  245: q            BINPUT     18
+  247: \x89         NEWFALSE
+  248: h            BINGET     0
+  250: )            EMPTY_TUPLE
+  251: R            REDUCE
+  252: q            BINPUT     19
+  254: t            TUPLE      (MARK at 213)
+  255: q        BINPUT     20
+  257: R        REDUCE
+  258: q        BINPUT     21
+  260: X        BINUNICODE 'hidden_layer.weight'
+  284: q        BINPUT     22
+  286: h        BINGET     3
+  288: (        MARK
+  289: (            MARK
+  290: h                BINGET     4
+  292: h                BINGET     5
+  294: X                BINUNICODE '2'
+  300: q                BINPUT     23
+  302: h                BINGET     7
+  304: M                BININT2    256
+  307: t                TUPLE      (MARK at 289)
+  308: q            BINPUT     24
+  310: Q            BINPERSID
+  311: K            BININT1    0
+  313: K            BININT1    16
+  315: K            BININT1    16
+  317: \x86         TUPLE2
+  318: q            BINPUT     25
+  320: K            BININT1    16
+  322: K            BININT1    1
+  324: \x86         TUPLE2
+  325: q            BINPUT     26
+  327: \x89         NEWFALSE
+  328: h            BINGET     0
+  330: )            EMPTY_TUPLE
+  331: R            REDUCE
+  332: q            BINPUT     27
+  334: t            TUPLE      (MARK at 288)
+  335: q        BINPUT     28
+  337: R        REDUCE
+  338: q        BINPUT     29
+  340: X        BINUNICODE 'hidden_layer.bias'
+  362: q        BINPUT     30
+  364: h        BINGET     3
+  366: (        MARK
+  367: (            MARK
+  368: h                BINGET     4
+  370: h                BINGET     5
+  372: X                BINUNICODE '3'
+  378: q                BINPUT     31
+  380: h                BINGET     7
+  382: K                BININT1    16
+  384: t                TUPLE      (MARK at 367)
+  385: q            BINPUT     32
+  387: Q            BINPERSID
+  388: K            BININT1    0
+  390: K            BININT1    16
+  392: \x85         TUPLE1
+  393: q            BINPUT     33
+  395: K            BININT1    1
+  397: \x85         TUPLE1
+  398: q            BINPUT     34
+  400: \x89         NEWFALSE
+  401: h            BINGET     0
+  403: )            EMPTY_TUPLE
+  404: R            REDUCE
+  405: q            BINPUT     35
+  407: t            TUPLE      (MARK at 366)
+  408: q        BINPUT     36
+  410: R        REDUCE
+  411: q        BINPUT     37
+  413: X        BINUNICODE 'output_layer.weight'
+  437: q        BINPUT     38
+  439: h        BINGET     3
+  441: (        MARK
+  442: (            MARK
+  443: h                BINGET     4
+  445: h                BINGET     5
+  447: X                BINUNICODE '4'
+  453: q                BINPUT     39
+  455: h                BINGET     7
+  457: K                BININT1    160
+  459: t                TUPLE      (MARK at 442)
+  460: q            BINPUT     40
+  462: Q            BINPERSID
+  463: K            BININT1    0
+  465: K            BININT1    10
+  467: K            BININT1    16
+  469: \x86         TUPLE2
+  470: q            BINPUT     41
+  472: K            BININT1    16
+  474: K            BININT1    1
+  476: \x86         TUPLE2
+  477: q            BINPUT     42
+  479: \x89         NEWFALSE
+  480: h            BINGET     0
+  482: )            EMPTY_TUPLE
+  483: R            REDUCE
+  484: q            BINPUT     43
+  486: t            TUPLE      (MARK at 441)
+  487: q        BINPUT     44
+  489: R        REDUCE
+  490: q        BINPUT     45
+  492: X        BINUNICODE 'output_layer.bias'
+  514: q        BINPUT     46
+  516: h        BINGET     3
+  518: (        MARK
+  519: (            MARK
+  520: h                BINGET     4
+  522: h                BINGET     5
+  524: X                BINUNICODE '5'
+  530: q                BINPUT     47
+  532: h                BINGET     7
+  534: K                BININT1    10
+  536: t                TUPLE      (MARK at 519)
+  537: q            BINPUT     48
+  539: Q            BINPERSID
+  540: K            BININT1    0
+  542: K            BININT1    10
+  544: \x85         TUPLE1
+  545: q            BINPUT     49
+  547: K            BININT1    1
+  549: \x85         TUPLE1
+  550: q            BINPUT     50
+  552: \x89         NEWFALSE
+  553: h            BINGET     0
+  555: )            EMPTY_TUPLE
+  556: R            REDUCE
+  557: q            BINPUT     51
+  559: t            TUPLE      (MARK at 518)
+  560: q        BINPUT     52
+  562: R        REDUCE
+  563: q        BINPUT     53
+  565: u        SETITEMS   (MARK at 33)
+  566: }    EMPTY_DICT
+  567: q    BINPUT     54
+  569: X    BINUNICODE '_metadata'
+  583: q    BINPUT     55
+  585: h    BINGET     0
+  587: )    EMPTY_TUPLE
+  588: R    REDUCE
+  589: q    BINPUT     56
+  591: (    MARK
+  592: X        BINUNICODE ''
+  597: q        BINPUT     57
+  599: }        EMPTY_DICT
+  600: q        BINPUT     58
+  602: X        BINUNICODE 'version'
+  614: q        BINPUT     59
+  616: K        BININT1    1
+  618: s        SETITEM
+  619: X        BINUNICODE 'input_layer'
+  635: q        BINPUT     60
+  637: }        EMPTY_DICT
+  638: q        BINPUT     61
+  640: h        BINGET     59
+  642: K        BININT1    1
+  644: s        SETITEM
+  645: X        BINUNICODE 'hidden_layer'
+  662: q        BINPUT     62
+  664: }        EMPTY_DICT
+  665: q        BINPUT     63
+  667: h        BINGET     59
+  669: K        BININT1    1
+  671: s        SETITEM
+  672: X        BINUNICODE 'output_layer'
+  689: q        BINPUT     64
+  691: }        EMPTY_DICT
+  692: q        BINPUT     65
+  694: h        BINGET     59
+  696: K        BININT1    1
+  698: s        SETITEM
+  699: X        BINUNICODE 'activation'
+  714: q        BINPUT     66
+  716: }        EMPTY_DICT
+  717: q        BINPUT     67
+  719: h        BINGET     59
+  721: K        BININT1    1
+  723: s        SETITEM
+  724: u        SETITEMS   (MARK at 591)
+  725: s    SETITEM
+  726: b    BUILD
+  727: .    STOP
+highest protocol among opcodes = 2
+root@bc31447e98c2:/app# cat > /app/extract.py <<'PYEOF'
+> import pickle, struct, zipfile, json, collections, io, zlib
+>
+> PTH='/app/model.pth'
+> z=zipfile.ZipFile(PTH)
+>
+> def rebuild(sb, off, size, stride, rg, bh):
+>     n=1
+>     for s in size: n*=s
+>     fl=struct.unpack('<'+str(n)+'f', sb[off*4:(off+n)*4])
+>     return {'size':list(size),'data':list(fl)}
+>
+> class U(pickle.Unpickler):
+>     def persistent_load(self, pid):
+>         return z.read('simple_mnist/data/'+pid[2])
+>     def find_class(self, mod, name):
+>         if mod=='collections' and name=='OrderedDict': return collections.OrderedDict
+>         if mod=='torch._utils' and name=='_rebuild_tensor_v2': return rebuild
+>         if mod=='torch' and name=='FloatStorage': return object
+>         raise pickle.UnpicklingError('no '+mod+'.'+name)
+>
+> od=U(io.BytesIO(z.read('simple_mnist/data.pkl'))).load()
+>
+> def to2d(d):
+>     r,c=d['size']; fl=d['data']
+>     return [fl[i*c:(i+1)*c] for i in range(r)]
+>
+> W=to2d(od['input_layer.weight']); b=list(od['input_layer.bias']['data'])
+> Wh=to2d(od['hidden_layer.weight']); bh=list(od['hidden_layer.bias']['data'])
+> Wo=to2d(od['output_layer.weight']); bo=list(od['output_layer.bias']['data'])
+>
+> out={'input':{'W':W,'b':b},'hidden':{'W':Wh,'b':bh},'output':{'W':Wo,'b':bo}}
+> json.dump(out, open('/app/weights.json','w'))
+> print('weights.json written')
+>
+> def decode_png(path):
+>     data=open(path,'rb').read()
+>     pos=8; idat=b''; w=h=ct=None
+>     while pos<len(data):
+>         ln=struct.unpack('>I', data[pos:pos+4])[0]
+>         typ=data[pos+4:pos+8].decode('ascii')
+>         cd=data[pos+8:pos+8+ln]
+>         if typ=='IHDR': w,h,bd,ct=struct.unpack('>IIBB', cd[:10])
+>         elif typ=='IDAT': idat+=cd
+>         elif typ=='IEND': break
+>         pos+=12+ln
+>     raw=zlib.decompress(idat)
+>     stride=w; prev=None; img=[]; idx=0
+>     for y in range(h):
+>         ft=raw[idx]; idx+=1
+>         line=bytearray(raw[idx:idx+stride]); idx+=stride
+>         r=bytearray(stride)
+>         for i in range(stride):
+>             x=line[i]
+>             a=r[i-1] if i>=1 else 0
+>             bb=prev[i] if prev is not None else 0
+>             c=prev[i-1] if (prev is not None and i>=1) else 0
+>             if ft==0: v=x
+>             elif ft==1: v=x+a
+>             elif ft==2: v=x+bb
+>             elif ft==3: v=x+((a+bb)//2)
+>             else:
+>                 p=a+bb-c
+>                 pa=abs(p-a); pb=abs(p-bb); pc=abs(p-c)
+>                 if pa<=pb and pa<=pc: pp=a
+>                 elif pb<=pc: pp=bb
+>                 else: pp=c
+>                 v=x+pp
+>             r[i]=v & 255
+>         img.append(r); prev=r
+>     return w,h,[row[i] for row in img for i in range(w)]
+>
+> def predict(W_in,b_in,W_h,b_h,W_o,b_o,pix,mean=None,std=None):
+>     x=[]
+>     for p in pix:
+>         v=p/255.0
+>         if mean is not None: v=(v-mean)/std
+>         x.append(v)
+>     def lay(W,b,inp):
+>         res=[]
+>         for i in range(len(b)):
+>             s=b[i]; Wi=W[i]
+>             for j in range(len(inp)): s+=Wi[j]*inp[j]
+>             res.append(s)
+>         return res
+>     h=lay(W_in,b_in,x); h=[max(0.0,v) for v in h]
+>     h=lay(W_h,b_h,h); h=[max(0.0,v) for v in h]
+>     o=lay(W_o,b_o,h)
+>     return max(range(len(o)), key=lambda i:o[i])
+>
+> w,h,pix=decode_png('/app/image.png')
+> print('image', w, h)
+> chars=' .:-=+*#%@'
+> for y in range(h):
+>     row=''
+>     for xx in range(w):
+>         v=pix[y*w+xx]; row+=chars[min(9, v*10//256)]
+>     print(row)
+> print('pred /255       :', predict(W,b,Wh,bh,Wo,bo,pix))
+> print('pred normalized :', predict(W,b,Wh,bh,Wo,bo,pix,0.1307,0.3081))
+> PYEOF
+root@bc31447e98c2:/app# python3 /app/extract.py
+weights.json written
+image 28 28
+
+
+        .#@%#+=
+        %@@@@@@%*
+       :@+   =#@@#:
+        =#     :#@@:
+                 %@#
+                 :@@=
+                  *@#
+                  -@#
+                  -@#
+                  -@#
+                  =@#
+                  #@#
+       .+##*-.    #@+
+      .%@@@@@@=  .@@:
+     .@@%+::#@@* %@#
+     =@%     -%@@@@-
+     #@+      #@@@@- .
+     #@@=====%@@@@@@#%#
+     .#%@@@@@@*- -%@@@#
+        +++++.     -%@*
+
+
+
+
+
+
+pred /255       : 2
+pred normalized : 2
+root@bc31447e98c2:/app# cat > /app/cli_tool <<'PYEOF'
+> #!/usr/bin/env python3
+> import sys, json, struct, zlib
+>
+> def decode_png(path):
+>     data = open(path, 'rb').read()
+>     pos = 8; idat = b''; w = h = None
+>     while pos < len(data):
+>         ln = struct.unpack('>I', data[pos:pos+4])[0]
+>         typ = data[pos+4:pos+8].decode('ascii')
+>         cd = data[pos+8:pos+8+ln]
+>         if typ == 'IHDR':
+>             w, h, bd, ct = struct.unpack('>IIBB', cd[:10])
+>         elif typ == 'IDAT':
+>             idat += cd
+>         elif typ == 'IEND':
+>             break
+>         pos += 12 + ln
+>     if w is None:
+>         raise SystemExit('invalid PNG')
+>     raw = zlib.decompress(idat)
+>     ch = 1
+>     stride = w * ch
+>     prev = None; pix = []; idx = 0
+>     for y in range(h):
+>         ft = raw[idx]; idx += 1
+>         line = bytearray(raw[idx:idx+stride]); idx += stride
+>         r = bytearray(stride)
+>         for i in range(stride):
+>             x = line[i]
+>             a = r[i-ch] if i >= ch else 0
+>             bv = prev[i] if prev is not None else 0
+>             c = prev[i-ch] if (prev is not None and i >= ch) else 0
+>             if ft == 0: v = x
+>             elif ft == 1: v = x + a
+>             elif ft == 2: v = x + bv
+>             elif ft == 3: v = x + ((a + bv) // 2)
+>             else:
+>                 p = a + bv - c
+>                 pa, pb, pc = abs(p-a), abs(p-bv), abs(p-c)
+>                 if pa <= pb and pa <= pc: pp = a
+>                 elif pb <= pc: pp = bv
+>                 else: pp = c
+>                 v = x + pp
+>             r[i] = v & 255
+>         for i in range(0, stride, ch):
+>             pix.append(r[i])
+>         prev = r
+>     return w, h, pix
+>
+> def layer(W, b, inp):
+>     n = len(b)
+>     m = len(inp)
+>     return [b[i] + sum(W[i][j]*inp[j] for j in range(m)) for i in range(n)]
+>
+> def main():
+>     if len(sys.argv) < 3:
+>         sys.stderr.write('usage: cli_tool weights.json image.png\n'); sys.exit(1)
+>     M = json.load(open(sys.argv[1]))
+>     w, h, pix = decode_png(sys.argv[2])
+>     mean, std = 0.1307, 0.3081
+>     x = [(p/255.0 - mean)/std for p in pix]
+>     h1 = layer(M['input']['W'], M['input']['b'], x)
+>     h1 = [max(0.0, v) for v in h1]
+>     h2 = layer(M['hidden']['W'], M['hidden']['b'], h1)
+>     h2 = [max(0.0, v) for v in h2]
+>     o = layer(M['output']['W'], M['output']['b'], h2)
+>     print(max(range(len(o)), key=lambda i: o[i]))
+>
+> if __name__ == '__main__':
+>     main()
+> PYEOF
+root@bc31447e98c2:/app# chmod +x /app/cli_tool
+root@bc31447e98c2:/app# cd /app && ./cli_tool weights.json image.png
+2
+root@bc31447e98c2:/app# ./cli_tool weights.json image.png > prediction.txt && cat prediction.txt && echo '---' && ls -la
+2
+---
+total 880
+drwxr-xr-x  2 root root   4096 Jul  2 22:34 .
+drwxr-xr-x 19 root root   4096 Jul  2 22:26 ..
+-rw-r--r--  1 root root  79506 Jul  2 13:59 cJSON.c
+-rw-r--r--  1 root root  16393 Jul  2 13:59 cJSON.h
+-rwxr-xr-x  1 root root   2299 Jul  2 22:34 cli_tool
+-rw-r--r--  1 root root   3389 Jul  2 22:33 extract.py
+-rw-r--r--  1 root root    389 Jul  2 13:59 image.png
+-rw-r--r--  1 root root 311873 Jul  2 13:59 lodepng.cpp
+-rw-r--r--  1 root root 107788 Jul  2 13:59 lodepng.h
+-rw-r--r--  1 root root  54714 Jul  2 13:59 model.pth
+-rw-r--r--  1 root root    681 Jul  2 13:59 model.py
+-rw-r--r--  1 root root      2 Jul  2 22:34 prediction.txt
+-rw-r--r--  1 root root 286401 Jul  2 22:33 weights.json
+root@bc31447e98c2:/app# rm -f /app/extract.py
+root@bc31447e98c2:/app# cd /app && ./cli_tool weights.json image.png | cat -A && echo 'prediction.txt:' && cat -A prediction.txt && ls -la
+2$
+prediction.txt:
+2$
+total 876
+drwxr-xr-x  2 root root   4096 Jul  2 22:34 .
+drwxr-xr-x 19 root root   4096 Jul  2 22:26 ..
+-rw-r--r--  1 root root  79506 Jul  2 13:59 cJSON.c
+-rw-r--r--  1 root root  16393 Jul  2 13:59 cJSON.h
+-rwxr-xr-x  1 root root   2299 Jul  2 22:34 cli_tool
+-rw-r--r--  1 root root    389 Jul  2 13:59 image.png
+-rw-r--r--  1 root root 311873 Jul  2 13:59 lodepng.cpp
+-rw-r--r--  1 root root 107788 Jul  2 13:59 lodepng.h
+-rw-r--r--  1 root root  54714 Jul  2 13:59 model.pth
+-rw-r--r--  1 root root    681 Jul  2 13:59 model.py
+-rw-r--r--  1 root root      2 Jul  2 22:34 prediction.txt
+-rw-r--r--  1 root root 286401 Jul  2 22:33 weights.json
+root@bc31447e98c2:/app#

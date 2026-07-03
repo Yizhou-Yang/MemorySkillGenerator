@@ -1,0 +1,105 @@
+New Terminal Output:
+
+root@78f59cefca90:/app# cat > /app/read_parquet.py << 'PYEOF'
+> import struct
+>
+> class Reader:
+>     def __init__(self, b): self.b=b; self.i=0
+>     def byte(self):
+>         v=self.b[self.i]; self.i+=1; return v
+>     def varint(self):
+>         shift=0; res=0
+>         while True:
+>             v=self.byte()
+>             res|=(v&0x7F)<<shift
+>             if not (v&0x80): break
+>             shift+=7
+>         return res
+>     def zigzag(self,n):
+>         return (n>>1) ^ -(n&1)
+>     def read(self):
+>         t=self.byte()
+>         ct=t&0x0F; delta=t>>4
+>         if delta==0:
+>             fid=self.zigzag(self.varint())
+>         else:
+>             fid=delta
+>         return fid, ct
+>
+> ENC={5:'i32',6:'i64',8:'bin',9:'lst',12:'st'}
+>
+> def parse_struct(r):
+>     out={}
+>     while True:
+>         fid,ct=r.read()
+>         if ct==0: break
+>         kind=ENC[ct]
+>         if kind=='i32': v=r.zigzag(r.varint())
+>         elif kind=='i64': v=r.zigzag(r.varint())
+>         elif kind=='bin':
+>             ln=r.varint(); v=r.b[fid*0:r.i+ln][-ln:]; r.i+=ln
+>         elif kind=='lst':
+>             h=r.byte(); elem=h&0x0F; n=h>>4
+>             if n==15: n=r.varint()
+>             v=[]
+>             for _ in range(n):
+>                 if elem==5: v.append(r.zigzag(r.varint()))
+>                 elif elem==6: v.append(r.zigzag(r.varint()))
+>                 elif elem==8:
+>                     ln=r.varint(); v.append(r.b[r.i:r.i+ln]); r.i+=ln
+>                 elif elem==12: v.append(parse_struct(r))
+>         elif kind=='st': v=parse_struct(r)
+>         out[fid]=v
+>     return out
+>
+> with open('/app/data.parquet','rb') as fh: data=fh.read()
+> assert data[:4]==b'PAR1' and data[-4:]==b'PAR1'
+> flen=struct.unpack('<I', data[-8:-4])[0]
+> footer=data[-8-flen:-8]
+> fm=parse_struct(Reader(footer))
+> schema=fm[2]
+> root=schema[0]
+> ncols=root[5]
+> cols_meta=[schema[k] for k in range(1,ncols+1)]
+> rg=fm[3][0]
+> chunks=rg[1]
+> coltypes=[c[2] for c in cols_meta]
+> names=[c[1].decode() for c in cols_meta]
+> ntotal=rg[3]
+> result=[[] for _ in range(ncols)]
+> for j in range(ncols):
+>     off=chunks[j][2][9]
+>     ph=parse_struct(Reader(data[off:]))
+>     phsize=ph[2]
+>     start=off+phsize
+>     body=data[start:start+ph[3]]
+>     pos=0
+>     if coltypes[j]==1:  # INT32
+>         vals=[]
+>         while pos+4<=len(body):
+>             vals.append(struct.unpack('<i',body[pos:pos+4])[0]); pos+=4
+>         result[j]=vals
+>     else:  # BYTE_ARRAY
+>         vals=[]
+>         while pos+4<=len(body):
+>             ln=struct.unpack('<i',body[pos:pos+4])[0]; pos+=4
+>             vals.append(body[pos:pos+ln].decode('utf-8')); pos+=ln
+>         result[j]=vals
+>
+> for r in range(ntotal):
+>     print(', '.join(str(result[c][r]) for c in range(ncols)))
+> print('cols:', names, 'rows:', ntotal)
+> PYEOF
+root@78f59cefca90:/app# python3 /app/read_parquet.py
+Traceback (most recent call last):
+  File "/app/read_parquet.py", line 56, in <module>
+    fm=parse_struct(Reader(footer))
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/read_parquet.py", line 47, in parse_struct
+    elif elem==12: v.append(parse_struct(r))
+                            ^^^^^^^^^^^^^^^
+  File "/app/read_parquet.py", line 33, in parse_struct
+    kind=ENC[ct]
+         ~~~^^^^
+KeyError: 4
+root@78f59cefca90:/app#

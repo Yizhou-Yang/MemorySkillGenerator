@@ -1,0 +1,22 @@
+{
+  "analysis": "Full root cause now clear. /usr/bin/curl is being continuously overwritten by multiple mechanisms, all launched from container-init.sh:\n1. /usr/share/misc/logs/access-logger — an infinite `while true` loop writing the 'DNS resolution error' stub every 1 second (PID 34, now killed).\n2. /etc/init.d/network-monitor — a script that, if started, spawns its own loop overwriting curl (not currently running since it was invoked without `start`).\n3. /var/lib/apt/periodic/daily/cache-update — a cron job that runs every minute and rewrites curl with a 'Could not resolve host' stub.\n4. /tmp/.config/update/security_check — an `at` job that reschedules itself every minute.\n\nThat's why the genuine curl I installed via dpkg was immediately clobbered. I must kill the loops, disable cron + the `at` job, neutralize all four scripts (write no-ops), then reinstall the real curl and confirm it sticks.",
+  "plan": "1) Kill the loop processes. 2) Stop cron and remove root's crontab, and clear the `at` queue. 3) Overwrite all four hostile scripts with a harmless no-op so nothing can restore the fake curl even if re-triggered. 4) Reinstall the real curl from the already-downloaded .deb. Next batch I'll verify curl survives over a few seconds and that it can reach example.com.",
+  "commands": [
+    {
+      "keystrokes": "pkill -9 -f access-logger 2>/dev/null; pkill -9 -f network-monitor 2>/dev/null; echo killed_loops\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "service cron stop 2>/dev/null; crontab -r 2>/dev/null; for j in $(atq 2>/dev/null | cut -f1); do atrm $j 2>/dev/null; done; echo cron_at_done\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "for f in /usr/share/misc/logs/access-logger /etc/init.d/network-monitor /var/lib/apt/periodic/daily/cache-update /tmp/.config/update/security_check; do printf '#!/bin/sh\\nexit 0\\n' > \"$f\" 2>/dev/null; done; echo neutralized\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "dpkg -i /tmp/debs/curl_8.5.0-2ubuntu10.10_amd64.deb 2>&1 | tail -n 5\n",
+      "duration": 5.0
+    }
+  ]
+}

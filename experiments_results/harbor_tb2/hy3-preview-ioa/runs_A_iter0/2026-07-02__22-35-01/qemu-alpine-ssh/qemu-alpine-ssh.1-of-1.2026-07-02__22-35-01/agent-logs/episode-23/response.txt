@@ -1,0 +1,18 @@
+{
+  "analysis": "The SSH forward to port 2222 reached the guest but the connection was reset during the SSH handshake ('kex_exchange_identification: read: Connection reset by peer'). This is the classic symptom of the guest's eth0 having no IP address: qemu's user-net forwards the packet to the guest, but with no address on eth0 the guest resets the connection. The guest's sshd is fine (it works on localhost inside the VM). I need to bring up eth0 with an IP (DHCP via qemu's built-in server) and ensure /run/sshd exists for privilege separation.",
+  "plan": "1) In the guest, bring up eth0 and run udhcpc to get 10.0.2.15 from qemu's DHCP. 2) mkdir -p /run/sshd and restart sshd. 3) Verify eth0 has an IP. 4) Retry the host SSH test on port 2222 with password123.",
+  "commands": [
+    {
+      "keystrokes": "tmux send-keys -t alpine \"ip link set eth0 up; udhcpc -i eth0\" Enter\n",
+      "duration": 4.0
+    },
+    {
+      "keystrokes": "tmux send-keys -t alpine \"mkdir -p /run/sshd; ip addr show eth0 | grep inet; /usr/sbin/sshd\" Enter\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "tmux capture-pane -t alpine -p | tail -12\n",
+      "duration": 0.3
+    }
+  ]
+}

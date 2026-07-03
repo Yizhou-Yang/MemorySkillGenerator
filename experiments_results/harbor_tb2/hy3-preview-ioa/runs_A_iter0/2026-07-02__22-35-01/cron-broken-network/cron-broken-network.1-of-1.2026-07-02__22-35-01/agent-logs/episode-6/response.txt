@@ -1,0 +1,18 @@
+{
+  "analysis": "Root cause confirmed. `/bin/curl` (same file, /bin is typically a symlink to /usr/bin) is a 46-byte fake wrapper script that ignores all arguments and always prints 'DNS resolution error' then exits 11. DNS resolution and networking are actually healthy — `getent hosts example.com` resolved correctly. The real `curl` binary is not installed at all (no curl package in dpkg). The 'Could not resolve host: --version' earlier was the wrapper dumping our flag as a bogus hostname. The fix is to remove the fake wrapper and install the genuine curl package via apt.",
+  "plan": "1) Confirm /bin/curl is the same as /usr/bin/curl. 2) Remove the fake wrapper. 3) Install the real curl with apt-get. 4) Verify curl works against example.com. This restores normal behavior without touching DNS (which is fine).",
+  "commands": [
+    {
+      "keystrokes": "ls -li /bin/curl /usr/bin/curl\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "rm -f /usr/bin/curl /bin/curl\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get update 2>&1 | tail -5\n",
+      "duration": 20.0
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "analysis": "The Python script failed because load_cert_chain was given only the cert file (server.crt) without a key. load_cert_chain requires a matching private key. I'll fix it to load the combined PEM file (server.pem), which contains both cert and key, or pass keyfile separately. I'll use server.pem as the certfile since it contains both.",
+  "plan": "Edit check_cert.py to load /app/ssl/server.pem (which contains the cert and key). Re-run to confirm success output.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/check_cert.py << 'EOF'\n#!/usr/bin/env python3\nimport ssl\nimport subprocess\nimport sys\nfrom datetime import datetime\n\nCERT_PATH = \"/app/ssl/server.crt\"\nKEY_PATH = \"/app/ssl/server.key\"\nPEM_PATH = \"/app/ssl/server.pem\"\n\n\ndef main():\n    # Verify the certificate exists\n    import os\n    for path in (CERT_PATH, KEY_PATH, PEM_PATH):\n        if not os.path.exists(path):\n            raise FileNotFoundError(path)\n\n    # Verify the certificate can be loaded (cert + key)\n    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)\n    context.load_cert_chain(certfile=PEM_PATH)\n\n    # Use openssl to get subject (Common Name) and dates\n    subject = subprocess.check_output(\n        [\"openssl\", \"x509\", \"-in\", CERT_PATH, \"-noout\", \"-subject\"],\n        text=True,\n    ).strip()\n\n    dates = subprocess.check_output(\n        [\"openssl\", \"x509\", \"-in\", CERT_PATH, \"-noout\", \"-dates\"],\n        text=True,\n    ).strip()\n\n    print(\"Certificate subject:\")\n    print(subject)\n\n    # Extract Common Name\n    cn = \"\"\n    for part in subject.replace(\"/\", \" \").split():\n        if part.startswith(\"CN=\"):\n            cn = part[3:]\n    print(\"Common Name:\", cn)\n\n    # Extract expiration date (notAfter)\n    not_after = \"\"\n    for line in dates.splitlines():\n        if line.startswith(\"notAfter=\"):\n            not_after = line.split(\"=\", 1)[1]\n    exp_date = datetime.strptime(not_after, \"%b %d %H:%M:%S %Y %Z\").strftime(\"%Y-%m-%d\")\n    print(\"Expiration date:\", exp_date)\n\n    print(\"Certificate verification successful\")\n\n\nif __name__ == \"__main__\":\n    try:\n        main()\n    except Exception as e:\n        print(\"Certificate verification failed:\", e, file=sys.stderr)\n        sys.exit(1)\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/check_cert.py\n",
+      "duration": 1.0
+    }
+  ]
+}

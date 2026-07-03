@@ -1,0 +1,18 @@
+{
+  "analysis": "df shows the root overlay (fuse-overlayfs) with total 984G, used 967G, but Avail=0 and Use%=100%. Yet I could write a small file to /app. This is likely a real-space reporting issue where the overlay's writable layer is effectively exhausted, causing apt's free-space check to fail. I need to find what consumes ~967G and free some space so build-essential can download/install. Let me investigate big files and directory sizes.",
+  "plan": "1) Use `stat -f /app` for precise block accounting. 2) Find large files on the root device with find -xdev. 3) Check du of suspect directories. This will tell me whether there's something deletable to free space for apt.",
+  "commands": [
+    {
+      "keystrokes": "stat -f /app\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "du -sh /usr /var /root /opt /home 2>/dev/null\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "find / -xdev -type f -size +100M 2>/dev/null | head -40\n",
+      "duration": 5.0
+    }
+  ]
+}

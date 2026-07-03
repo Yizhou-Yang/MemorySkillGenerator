@@ -1,0 +1,33 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'python3 --version; pip --version\n'
+'python3 -c "import datasets, transformers; print(datasets.__version__, transformers.__version__)"\n'
+''
+'python3 -c "import transformers; print(\'transformers\', transformers.__version__)" 2>&1 | head -3\n'
+'python3 -c "import huggingface_hub; print(\'hf_hub\', huggingface_hub.__version__)" 2>&1 | head -3\n'
+'python3 -c "import torch; print(\'torch\', torch.__version__)" 2>&1 | head -3\n'
+'curl -sL --max-time 20 https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/main/README.md | head -120\n'
+'python3 -c "import urllib.request; print(urllib.request.urlopen(\'https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/main/README.md\', timeout=20).read()[:200])" 2>&1 | head -5\n'
+'which wget; pip install --quiet --dry-run urllib3 2>&1 | head -5\n'
+'python3 -c "import urllib.request; open(\'/tmp/readme.md\',\'wb\').write(urllib.request.urlopen(\'https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/main/README.md\', timeout=30).read())"\n'
+"wc -l /tmp/readme.md; echo '-----'; cat /tmp/readme.md\n"
+'pip install pyarrow tokenizers 2>&1 | tail -8\n'
+'python3 -c "import urllib.request,json; d=json.load(urllib.request.urlopen(\'https://datasets-server.huggingface.co/parquet?dataset=open-thoughts/OpenThoughts-114k\', timeout=60)); [print(f[\'config\'], f[\'split\'], f[\'url\'], f.get(\'size\',0)) for f in d[\'parquet_files\'] if f[\'config\']==\'metadata\']"\n'
+'df -h /tmp /app; mkdir -p /tmp/ot\n'
+'python3 -c "import urllib.request; open(\'/tmp/ot/tokenizer.json\',\'wb\').write(urllib.request.urlopen(\'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/main/tokenizer.json\', timeout=60).read()); print(\'downloaded tokenizer\')"\n'
+'python3 -c "import urllib.request; open(\'/tmp/ot/0000.parquet\',\'wb\').write(urllib.request.urlopen(\'https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet\', timeout=120).read()); print(\'downloaded 0000\')"\n'
+'python3 -c "import pyarrow.parquet as pq; t=pq.read_table(\'/tmp/ot/0000.parquet\'); print(t.schema); print(\'---\'); d=t.to_pydict(); print(\'domains sample:\', d[\'domain\'][:10]); print(\'n=\',len(d[\'domain\']))"\n'
+'python3 -c "import pyarrow.parquet as pq; t=pq.read_table(\'/tmp/ot/0000.parquet\'); d=t.to_pydict(); idx=[i for i,dom in enumerate(d[\'domain\']) if dom==\'science\']; print(\'science idx in file0:\', idx[:10], \'count\', len(idx)); i=idx[0]; print(\'REASONING len\', len(d[\'deepseek_reasoning\'][i]) if d[\'deepseek_reasoning\'][i] else 0); print(\'SOLUTION len\', len(d[\'deepseek_solution\'][i]) if d[\'deepseek_solution\'][i] else 0); print(repr(d[\'deepseek_reasoning\'][i][:300]))"\n'
+'python3 -c "from tokenizers import Tokenizer; t=Tokenizer.from_file(\'/tmp/ot/tokenizer.json\'); e=t.encode(\'Hello world, this is a test.\'); print(\'ids\',e.ids); print(\'n\',len(e.ids))"\n'
+'cat > /tmp/ot/run.py << \'EOF\'\nimport urllib.request, os\nimport pyarrow.parquet as pq\nfrom tokenizers import Tokenizer\n\ntok = Tokenizer.from_file(\'/tmp/ot/tokenizer.json\')\n\nurls = [\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0000.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0001.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0002.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0003.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0004.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0005.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0006.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0007.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0008.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0009.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0010.parquet",\n"https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/resolve/refs%2Fconvert%2Fparquet/metadata/train/0011.parquet",\n]\n\ntotal = 0\nscience_rows = 0\nfor url in urls:\n    fn = \'/tmp/ot/\' + url.rsplit(\'/\',1)[-1]\n    print(\'downloading\', fn, flush=True)\n    req = urllib.request.Request(url, headers={\'User-Agent\':\'curl/8\'})\n    with urllib.request.urlopen(req, timeout=180) as r, open(fn,\'wb\') as f:\n        while True:\n            chunk = r.read(1<<20)\n            if not chunk: break\n            f.write(chunk)\n    t = pq.read_table(fn)\n    d = t.to_pydict()\n    domain = d[\'domain\']\n    reason = d[\'deepseek_reasoning\']\n    sol = d[\'deepseek_solution\']\n    n = len(domain)\n    texts = []\n    for i in range(n):\n        if (domain[i] or \'\').strip() == \'science\':\n            texts.append((reason[i] or \'\') + (sol[i] or \'\'))\n    science_rows += len(texts)\n    for j in range(0, len(texts), 500):\n        encs = tok.encode_batch(texts[j:j+500])\n        for e in encs:\n            total += len(e.ids)\n    del texts\n    os.remove(fn)\n    print(\'running total\', total, \'science_rows\', science_rows, flush=True)\nprint(\'FINAL\', total)\nwith open(\'/app/answer.txt\',\'w\') as f:\n    f.write(str(total))\nEOF\necho written\n'
+'cd /tmp/ot && nohup python3 run.py > log.txt 2>&1 &\n'
+'sleep 20; cat log.txt\n'
+'jobs; ls -la /tmp/ot/log.txt; cat /tmp/ot/log.txt\n'
+'sleep 45; cat /tmp/ot/log.txt\n'
+'sleep 50; cat /tmp/ot/log.txt\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+'sleep 55; cat /tmp/ot/log.txt\n'
+['C-d']
+['C-d']

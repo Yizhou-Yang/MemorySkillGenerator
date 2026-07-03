@@ -1,0 +1,10 @@
+{
+  "analysis": "Confirmed it's a PDP-11 a.out (OMAGIC, magic 0407). Header: text=1062B, data=30B, bss=572B, syms=276B, file total 1384 (16-byte header + text + data + symtab = exactly 1384). The symbol/string region shows C library module names (printf.o, ffltpr.o, ecvt.o, fcvt.o, pfloat, pscien, _putchar, _printf...) which strongly suggests this is a C program statically linked with a printf that supports floating point. The first text word 0o170011 (=0xF009) is not a legal PDP-11 instruction, so the entry point is NOT address 0. I need to parse the symbol table to find the real entry (likely a `_start` or `_main` symbol with its address). Then I'll emulate.",
+  "plan": "1. Write a script that parses the a.out header and symbol table (12-byte entries: 8-byte name + 2-byte type + 2-byte value) and prints each symbol's name and value. This reveals the true entry address. 2. Also dump the first text words to plan the emulator. No emulator available in env, so I'll need to write a PDP-11 emulator in Python.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/parse.py << 'EOF'\nimport re\nd=open('/app/data.bin','rb').read()\ndef w(off): return d[off]|(d[off+1]<<8)\nmagic=w(0); ttext=w(2); tdata=w(4); tbss=w(6); tsym=w(8); entry=w(10)\nprint('magic',oct(magic),'ttext',ttext,'tdata',tdata,'tbss',tbss,'tsym',tsym,'entry',entry)\nprint('filelen',len(d),'expected',16+ttext+tdata+tsym)\nsymoff=16+ttext+tdata\ni=0; n=0\nwhile i+12<=tsym:\n    base=symoff+i\n    raw=d[base:base+8]\n    name=raw.split(b'\\x00')[0].decode('latin1')\n    typ=w(base+8); val=w(base+10)\n    if name:\n        print('%2d %-10s type=%05o val=%06o (%s)'%(n,name,typ,val,hex(val)))\n    i+=12; n+=1\nEOF\npython3 /app/parse.py\n",
+      "duration": 0.3
+    }
+  ]
+}

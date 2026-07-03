@@ -1,0 +1,35 @@
+New Terminal Output:
+
+root@f7af256768ff:/app# cat > /tmp/decode.py << 'EOF'
+> import re, struct
+> data = {}
+> with open('/tmp/rodata.txt') as f:
+>     for line in f:
+>         m = re.match(r'\s*([0-9a-f]+)\s+((?:[0-9a-f]{8}\s*)*)', line)
+>         if not m: continue
+>         addr = int(m.group(1),16)
+>         hexs = m.group(2).replace(' ','')
+>         b = bytes.fromhex(hexs)
+>         for i in range(0,len(b),1):
+>             data[addr+i] = b[i]
+> base = 0x3000
+> allb = bytes(data[a] for a in range(base, base+0x200))
+> print('Doubles from 0x3008 (8-byte):')
+> for off in range(8, len(allb)-7, 8):
+>     d = struct.unpack('<d', allb[off:off+8])[0]
+>     print(f'  +{off:#x}: {d!r}')
+> print('Floats from 0x3000 (4-byte):')
+> for off in range(0, len(allb)-3, 4):
+>     fv = struct.unpack('<f', allb[off:off+4])[0]
+>     print(f'  +{off:#x}: {fv!r}')
+> EOF
+root@f7af256768ff:/app# python3 /tmp/decode.py
+Traceback (most recent call last):
+  File "/tmp/decode.py", line 13, in <module>
+    allb = bytes(data[a] for a in range(base, base+0x200))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/decode.py", line 13, in <genexpr>
+    allb = bytes(data[a] for a in range(base, base+0x200))
+                 ~~~~^^^
+KeyError: 12720
+root@f7af256768ff:/app#

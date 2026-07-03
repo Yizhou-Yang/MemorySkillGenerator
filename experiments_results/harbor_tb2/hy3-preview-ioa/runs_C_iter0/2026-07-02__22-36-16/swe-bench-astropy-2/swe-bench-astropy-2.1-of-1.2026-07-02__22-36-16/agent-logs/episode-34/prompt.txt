@@ -1,0 +1,28 @@
+New Terminal Output:
+
+root@aaca0d5219aa:/app/astropy# which gcc cc clang 2>&1; apt-get --version 2>&1 | head -1
+apt 2.6.1 (amd64)
+root@aaca0d5219aa:/app/astropy# python - <<'EOF'
+> import re
+> _command_re = r"READ [TS]ERR(\s+[0-9]+)+"
+> new_re = r"NO(\s+NO)+"
+> decimal_re = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+> data_re = rf"({decimal_re}|NO|[-+]?nan)((\s+)({decimal_re}|NO|[-+]?nan))*)?\s*(\!(.*))?\s*$"
+> type_re = rf"^\s*((?P<command>{_command_re})|(?P<new>{new_re})|(?P<data>{data_re}))\s*$"
+> rt = re.compile(type_re, re.IGNORECASE)
+> for line in ['read serr 1 2', 'READ SERR 1 2', 'Read TErr 3', '1 0.5 1 0.5', 'NO NO NO']:
+>     m = rt.match(line.strip())
+>     print(repr(line), '->', m.groupdict() if m else None)
+> EOF
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+  File "/usr/local/lib/python3.9/re.py", line 252, in compile
+    return _compile(pattern, flags)
+  File "/usr/local/lib/python3.9/re.py", line 304, in _compile
+    p = sre_compile.compile(pattern, flags)
+  File "/usr/local/lib/python3.9/sre_compile.py", line 788, in compile
+    p = sre_parse.parse(p, flags)
+  File "/usr/local/lib/python3.9/sre_parse.py", line 969, in parse
+    raise source.error("unbalanced parenthesis")
+re.error: unbalanced parenthesis at position 205
+root@aaca0d5219aa:/app/astropy#

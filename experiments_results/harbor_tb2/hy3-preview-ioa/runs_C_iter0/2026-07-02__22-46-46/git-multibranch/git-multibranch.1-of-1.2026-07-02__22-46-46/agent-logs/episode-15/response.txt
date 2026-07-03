@@ -1,0 +1,14 @@
+{
+  "analysis": "The git user's PATH is fine and git-receive-pack resolves at /usr/bin. My debug expect script failed to show command output — possibly because there was genuinely no output or the capture was incomplete. I need to determine: (a) does git-receive-pack work locally as the git user, and (b) does an SSH command to the git user produce any output at all (to rule out an SSH output-capture problem vs. a git-receive-pack failure).",
+  "plan": "Run two diagnostics: (1) locally as the git user, invoke git-receive-pack on the bare repo to confirm it works and produces an advertisement. (2) Over SSH via a properly-quoted expect script (Tcl braces so $PATH stays literal), run echo + PATH + git-receive-pack and observe the actual output. This tells me whether the SSH session is delivering command output and whether receive-pack itself is the problem.",
+  "commands": [
+    {
+      "keystrokes": "su git -c 'git-receive-pack /git/project </dev/null; echo RC=$?' < /dev/null | head -5\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "cat > /app/diag.exp <<'OUTER'\n#!/usr/bin/expect -f\nlog_user 1\nset timeout 20\nspawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost {echo START; echo PATH=$PATH; command -v git-receive-pack; git-receive-pack /git/project </dev/null; echo END}\nexpect {\n  -re {(?i)password} { send \"password\\r\"; exp_continue }\n  eof {}\n}\nOUTER\nchmod +x /app/diag.exp; /app/diag.exp\n",
+      "duration": 4.0
+    }
+  ]
+}

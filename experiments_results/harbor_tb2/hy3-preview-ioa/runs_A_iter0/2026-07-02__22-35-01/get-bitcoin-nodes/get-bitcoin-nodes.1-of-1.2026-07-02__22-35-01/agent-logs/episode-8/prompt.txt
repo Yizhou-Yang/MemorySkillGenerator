@@ -1,0 +1,49 @@
+New Terminal Output:
+
+root@0b6040a8cf2f:/app# cat > /tmp/btest5.py << 'EOF'
+> from bitcoinlib.services.services import Service
+> s = Service(network='bitcoin')
+> b = s.getblock('000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f')
+> print('HASH hex', b.block_hash.hex())
+> print('MERKLE hex', b.merkle_root.hex())
+> print('NONCE int', int.from_bytes(b.nonce,'little'))
+> print('time', b.time, 'height', b.height)
+> txs = b.transactions
+> print('num txs', len(txs))
+> tx = txs[0]
+> print('TX ATTRS', [a for a in dir(tx) if not a.startswith('_')])
+> print('txid', getattr(tx,'txid',None))
+> vin = tx.vin
+> print('vin type', type(vin), 'len', len(vin))
+> print('VIN0', vin[0] if vin else None)
+> if vin:
+>     print('VIN0 ATTRS', [a for a in dir(vin[0]) if not a.startswith('_')])
+>     print('coinbase', getattr(vin[0],'coinbase',None), 'seq', getattr(vin[0],'sequence',None))
+> vout = tx.vout
+> print('vout len', len(vout))
+> if vout:
+>     print('VOUT0 ATTRS', [a for a in dir(vout[0]) if not a.startswith('_')])
+>     print('value', vout[0].value, 'n', vout[0].n)
+>     spk=vout[0].script_pubkey
+>     print('SPK hex', getattr(spk,'hex',None), 'asm', getattr(spk,'asm',None), 'type', getattr(spk,'script_type',None))
+> print('errors', s.errors)
+> EOF
+root@0b6040a8cf2f:/app# python3 /tmp/btest5.py
+HASH hex 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f
+MERKLE hex 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b
+NONCE int 497822588
+time 1231006505 height 0
+num txs 1
+TX ATTRS ['add_input', 'add_output', 'as_bytes', 'as_dict', 'as_hex', 'as_json', 'block_hash', 'block_height', 'bumpfee', 'calc_weight_units', 'calculate_fee',
+'change', 'coinbase', 'confirmations', 'date', 'estimate_size', 'fee', 'fee_per_kb', 'flag', 'index', 'info', 'input_total', 'inputs', 'load', 'locktime', 'merg
+e_transaction', 'network', 'output_total', 'outputs', 'parse', 'parse_bytes', 'parse_bytesio', 'parse_hex', 'raw', 'raw_hex', 'rawtx', 'replace_by_fee', 'save',
+ 'set_locktime_blocks', 'set_locktime_relative_blocks', 'set_locktime_relative_time', 'set_locktime_time', 'shuffle', 'shuffle_inputs', 'shuffle_outputs', 'sign
+', 'sign_and_update', 'signature', 'signature_hash', 'signature_segwit', 'size', 'status', 'txhash', 'txid', 'update_inputs', 'update_totals', 'verified', 'veri
+fy', 'version', 'version_int', 'vsize', 'weight_units', 'witness_data', 'witness_type']
+txid 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b
+Traceback (most recent call last):
+  File "/tmp/btest5.py", line 13, in <module>
+    vin = tx.vin
+          ^^^^^^
+AttributeError: 'Transaction' object has no attribute 'vin'
+root@0b6040a8cf2f:/app#

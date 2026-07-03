@@ -1,0 +1,45 @@
+New Terminal Output:
+ics)
+root@9a429f9c7fca:/app/UPET# python3 - <<'PY'
+> p='tasks/superglue/get_trainer.py'
+> s=open(p).read()
+> s=s.replace('from training.trainer_exp import ExponentialTrainer\n','')
+> s=s.replace('from training.self_trainer import SelfTrainer\n','')
+> s=s.replace(
+> """    if semi_training_args.use_semi:
+>         model_args.pre_seq_len = semi_training_args.student_pre_seq_len
+>         student_model = get_model(data_args, model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
+>         trainer = SelfTrainer(""",
+> """    if semi_training_args.use_semi:
+>         from training.self_trainer import SelfTrainer
+>         model_args.pre_seq_len = semi_training_args.student_pre_seq_len
+>         student_model = get_model(data_args, model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
+>         trainer = SelfTrainer(""")
+> open(p,'w').write(s)
+> print('patched')
+> PY
+patched
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 20:58:24 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.
+0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.00 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.90 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.46 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 1.36 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+Downloading readme: 100%|██████████| 19.7k/19.7k [00:00<00:00, 30.1kB/s]
+

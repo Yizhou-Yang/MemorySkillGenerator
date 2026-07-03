@@ -1,0 +1,88 @@
+New Terminal Output:
+
+root@2739e611cf42:/app# cat > /app/fit.py << 'EOF'
+> import json
+> import numpy as np
+> from scipy.optimize import curve_fit
+>
+> # --- Load data: whitespace-separated, comma decimal separator ---
+> xs, ys = [], []
+> with open('/app/graphene.dat') as fh:
+>     for line in fh:
+>         line = line.strip()
+>         if not line:
+>             continue
+>         parts = line.split()
+>         if len(parts) < 2:
+>             continue
+>         xs.append(float(parts[0].replace(',', '.')))
+>         ys.append(float(parts[1].replace(',', '.')))
+> x = np.array(xs)
+> y = np.array(ys)
+>
+> # Lorentzian: offset + amplitude / (1 + ((x - x0)/gamma)^2)
+> def lorentzian(x, x0, gamma, amplitude, offset):
+>     return offset + amplitude / (1.0 + ((x - x0) / gamma) ** 2)
+>
+>
+> def fit_peak(x0_guess, half_width):
+>     """Multi-start least-squares fit of a 4-parameter Lorentzian."""
+>     m = (x > x0_guess - half_width) & (x < x0_guess + half_width)
+>     xw, yw = x[m], y[m]
+>     baseline = np.median(yw[(np.abs(xw - x0_guess) > 0.6 * half_width)])
+>     best = None
+>     g_grid = [half_width * f for f in (0.05, 0.1, 0.2, 0.4)]
+>     a_grid = [max(yw.max() - baseline, 1.0) * f for f in (0.5, 1.0, 1.5)]
+>     o_grid = [baseline * f for f in (0.5, 1.0, 1.5)]
+>     for g0 in g_grid:
+>         for a0 in a_grid:
+>             for o0 in o_grid:
+>                 p0 = [x0_guess, g0, a0, o0]
+>                 try:
+>                     popt, _ = curve_fit(lorentzian, xw, yw, p0=p0,
+>                                         maxfev=200000)
+>                     rms = float(np.sqrt(np.mean((yw - lorentzian(xw, *popt)) ** 2)))
+>                     if best is None or rms < best[0]:
+>                         best = (rms, popt)
+>                 except Exception:
+>                     pass
+>     rms, popt = best
+>     return float(popt[0]), float(abs(popt[1])), float(popt[2]), float(popt[3]), rms
+>
+>
+> # Fit G peak (x0 ~ 19139)
+> g_x0, g_gamma, g_amp, g_off, g_rms = fit_peak(19139.0, 2500.0)
+> # Fit 2D peak (x0 ~ 33245)
+> d_x0, d_gamma, d_amp, d_off, d_rms = fit_peak(33245.0, 2500.0)
+>
+> results = {
+>     'G': {'x0': g_x0, 'gamma': g_gamma, 'amplitude': g_amp, 'offset': g_off},
+>     '2D': {'x0': d_x0, 'gamma': d_gamma, 'amplitude': d_amp, 'offset': d_off},
+> }
+>
+> # --- Deliverable: write the results file (required I/O side-effect) ---
+> with open('/app/results.json', 'w') as out:
+>     json.dump(results, out, indent=2)
+>
+> print('G  fit RMS = %.2f' % g_rms)
+> print('2D fit RMS = %.2f' % d_rms)
+> print(open('/app/results.json').read())
+> EOF
+root@2739e611cf42:/app# python3 /app/fit.py
+G  fit RMS = 4632.22
+2D fit RMS = 255.91
+{
+  "G": {
+    "x0": 19196.87197653504,
+    "gamma": 402.77915367755423,
+    "amplitude": 73588.65662298424,
+    "offset": 12122.332265381125
+  },
+  "2D": {
+    "x0": 33447.76958697073,
+    "gamma": 2146.1794877928605,
+    "amplitude": 3942.21628120877,
+    "offset": 17049.739199082902
+  }
+}
+root@2739e611cf42:/app#

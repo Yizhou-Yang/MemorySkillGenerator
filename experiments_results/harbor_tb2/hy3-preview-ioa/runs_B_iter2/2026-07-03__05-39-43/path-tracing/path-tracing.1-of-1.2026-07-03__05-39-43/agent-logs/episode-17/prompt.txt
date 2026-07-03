@@ -1,0 +1,70 @@
+New Terminal Output:
+
+root@03270641b450:/app# cat > /tmp/extract3.py << 'PYEOF'
+> import re, struct
+> txt=open('/tmp/dis.txt').read().splitlines()
+> funcs={}
+> for l in txt:
+>     m=re.match(r'^([0-9a-f]+)\s+<([A-Za-z_][\w.]*)>:$', l)
+>     if m: funcs[int(m.group(1),16)]=m.group(2)
+> order=sorted(funcs)
+> def fname(a):
+>     f=None
+>     for fa in order:
+>         if fa<=a: f=funcs[fa]
+>     return f
+> binf=open('/app/orig','rb').read()
+> res={}
+> for l in txt:
+>     mi=re.match(r'^\s*([0-9a-f]+):\s', l)
+>     if not mi: continue
+>     a=int(mi.group(1),16)
+>     if 'movss' in l: kind='f32'
+>     elif any(k in l for k in ('movsd','movups','movaps','movupd','movapd')): kind='f64'
+>     else: continue
+>     m=re.search(r'#\s*([0-9a-f]+)\b', l)
+>     if not m: continue
+>     tgt=int(m.group(1),16)
+>     try:
+>         d=struct.unpack('<f', binf[tgt:tgt+4])[0] if kind=='f32' else struct.unpack('<d', binf[tgt:tgt+8])[0]
+>     except: continue
+>     res.setdefault(fname(a),[]).append((tgt,round(d,6),kind))
+> for fn in sorted(res):
+>     print('=== %s ==='%fn)
+>     seen=set()
+>     for t,d,k in res[fn]:
+>         if (t,d) not in seen:
+>             seen.add((t,d)); print('  +%d  %r  %s'%(t-0x3000,d,k))
+> PYEOF
+root@03270641b450:/app# .venv/bin/python /tmp/extract3.py
+=== main ===
+  +684  2.0  f32
+  +644  1.0  f32
+  +648  0.5  f32
+  +688  -5.0  f32
+  +692  -0.5  f32
+  +696  -1.0  f32
+  +700  100.0  f32
+=== plane_intersect ===
+  +624  nan  f32
+  +640  0.0001  f32
+  +608  0.001  f32
+  +644  1.0  f32
+=== sky_color ===
+  +644  1.0  f32
+  +648  0.5  f32
+  +652  0.7  f32
+=== sphere_intersect ===
+  +580  4.0  f32
+  +592  -0.0  f32
+  +608  0.001  f32
+=== trace ===
+  +608  0.001  f32
+  +660  0.2  f32
+  +644  1.0  f32
+  +664  0.9  f32
+  +668  0.4  f32
+=== write_image ===
+  +672  1.0  f64
+  +680  255.990005  f32
+root@03270641b450:/app#

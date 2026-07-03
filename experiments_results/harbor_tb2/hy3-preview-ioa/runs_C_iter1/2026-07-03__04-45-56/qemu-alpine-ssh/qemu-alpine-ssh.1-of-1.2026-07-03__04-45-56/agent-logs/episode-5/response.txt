@@ -1,0 +1,15 @@
+{
+  "analysis": "The live Alpine 3.19 ISO boots a serial getty on /dev/ttyS0 and presents a 'localhost login:' prompt — confirming serial automation will work without extracting the kernel. Now I'll drive the configuration over the telnet serial in small verified batches. First I need a reusable driver and a recon batch to learn the environment: hostname, network interfaces, whether sshd/apk are present, and the apk repos.",
+  "plan": "Batch 1: Create a Python driver (run_batch.py) that logs in as root over the telnet serial and runs a list of commands, printing each command's output delimited by markers. Pipe a small recon command list into it to discover: hostname, network interfaces, apk repositories, and whether sshd/openssh exist. Then I'll plan the install/network steps from the output.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/run_batch.py <<'PY'\nimport telnetlib, time, sys\n\ndef expect(tn, pat, timeout=40):\n    end=time.time()+timeout\n    buf=b''\n    while time.time()<end:\n        try:\n            d=tn.read_very_eager()\n        except Exception:\n            d=b''\n        if d:\n            buf+=d\n            if pat in buf:\n                return buf\n        time.sleep(0.05)\n    return buf\n\ntn=telnetlib.Telnet('127.0.0.1',4545,timeout=30)\ntime.sleep(0.5)\ntn.read_very_eager()\ntn.write(b'root\\n')\nbuf=expect(tn,b'localhost:~#',timeout=25)\nsys.stdout.buffer.write(b'---LOGIN---\\n'+buf)\nsys.stdout.buffer.flush()\n\nfor line in sys.stdin:\n    cmd=line.rstrip('\\n').encode()\n    if not cmd.strip():\n        continue\n    tn.write(cmd+b'\\n')\n    time.sleep(0.3)\n    out=expect(tn,b'localhost:~#',timeout=45)\n    sys.stdout.buffer.write(b'\\n===CMD: '+cmd+b'===\\n')\n    sys.stdout.buffer.write(out)\n    sys.stdout.buffer.flush()\n\ntn.write(b'exit\\n')\nPY\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "printf '%s\\n' 'hostname' 'cat /etc/apk/repositories' 'which sshd ssh apk' 'ls /usr/sbin/sshd 2>&1' 'ip -o link' 'cat /etc/os-release | head -3' | python3 /app/run_batch.py\n",
+      "duration": 20.0
+    }
+  ],
+  "task_complete": false
+}

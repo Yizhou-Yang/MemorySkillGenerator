@@ -1,0 +1,58 @@
+New Terminal Output:
+
+root@e4205ab934cc:/app# cat > /tmp/dbg.py << 'EOF'
+> from PIL import Image, ImageFont, ImageDraw
+> import numpy as np
+>
+> S=80
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> arr = np.asarray(im).astype(int)
+> glyph={'k':0x265A,'q':0x265B,'r':0x265C,'b':0x265D,'n':0x265E,'p':0x265F}
+> font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',60)
+> def norm(mask):
+>     ys,xs=np.where(mask)
+>     if len(xs)==0:return np.zeros((64,64),bool)
+>     y0,y1,x0,x1=ys.min(),ys.max()+1,xs.min(),xs.max()+1
+>     cr=mask[y0:y1,x0:x1];h,w=cr.shape;side=max(h,w)
+>     cv=np.zeros((side,side),bool);cv[(side-h)//2:(side-h)//2+h,(side-w)//2:(side-w)//2+w]=cr
+>     return np.array(Image.fromarray(cv).resize((64,64)))
+> def fill(mask):
+>     h,w=mask.shape;ni=~mask;vis=np.zeros_like(mask);st=[]
+>     for x in range(w):
+>         for y in(0,h-1):
+>             if ni[y,x] and not vis[y,x]:vis[y,x]=1;st.append((y,x))
+>     for y in range(h):
+>         for x in(0,w-1):
+>             if ni[y,x] and not vis[y,x]:vis[y,x]=1;st.append((y,x))
+>     while st:
+>         y,x=st.pop()
+>         for dy,dx in((1,0),(-1,0),(0,1),(0,-1)):
+>             ny,nx=y+dy,x+dx
+>             if 0<=ny<h and 0<=nx<w and ni[ny,nx] and not vis[ny,nx]:vis[ny,nx]=1;st.append((ny,nx))
+>     return mask|(ni&~vis)
+> templ={n:norm(np.asarray(Image.new('L',(S,S),255).copy()) if False else np.asarray((lambda i,d: (d.text((S/2,S/2),chr(cp),font=font,fill=0,anchor='mm'), np.as
+array(i)<128)[1])(Image.new('L',(S,S),255),ImageDraw.Draw(Image.new('L',(S,S),255))))[1]) for n,cp in glyph.items()}
+> def iou(a,b):return (a&b).sum()/max((a|b).sum(),1)
+> def show(r,c):
+>     sq=arr[r*S:(r+1)*S,c*S:(c+1)*S]
+>     bg=np.median(sq.reshape(-1,3),axis=0)
+>     d=np.abs(sq-bg).sum(axis=2);m=d>50
+>     lum=sq[m].mean() if m.sum()>0 else 0
+>     sil=fill(m);ns=norm(sil)
+>     sc=sorted(((iou(ns,t),n) for n,t in templ.items()),reverse=True)[:3]
+>     print(chr(ord('a')+c)+str(8-r),'ink',m.sum(),'lum%.0f'%lum,'->',['%s:%d'%(n,int(s*100)) for s,n in sc])
+> for r,c in [(0,0),(2,0),(5,0),(7,0),(7,4),(7,2),(7,7),(3,4)]:
+>     show(r,c)
+> EOF
+root@e4205ab934cc:/app# python3 /tmp/dbg.py
+Traceback (most recent call last):
+  File "/tmp/dbg.py", line 30, in <module>
+    templ={n:norm(np.asarray(Image.new('L',(S,S),255).copy()) if False else np.asarray((lambda i,d: (d.text((S/2,S/2),chr(cp),font=font,fill=0,anchor='mm'), np.
+asarray(i)<128)[1])(Image.new('L',(S,S),255),ImageDraw.Draw(Image.new('L',(S,S),255))))[1]) for n,cp in glyph.items()}
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/dbg.py", line 10, in norm
+    ys,xs=np.where(mask)
+    ^^^^^
+ValueError: not enough values to unpack (expected 2, got 1)
+root@e4205ab934cc:/app#

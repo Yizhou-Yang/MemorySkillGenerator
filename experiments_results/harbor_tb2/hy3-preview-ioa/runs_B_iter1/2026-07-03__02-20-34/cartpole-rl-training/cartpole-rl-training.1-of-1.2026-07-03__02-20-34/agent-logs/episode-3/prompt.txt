@@ -1,0 +1,183 @@
+New Terminal Output:
+
+root@f09e09febeb2:/app# cat > /app/agent.py << 'EOF'
+> import os
+> import torch
+> import torch.nn as nn
+>
+>
+> class DQN(nn.Module):
+>     def __init__(self, state_dim=4, action_dim=2, hidden=64):
+>         super().__init__()
+>         self.net = nn.Sequential(
+>             nn.Linear(state_dim, hidden),
+>             nn.ReLU(),
+>             nn.Linear(hidden, hidden),
+>             nn.ReLU(),
+>             nn.Linear(hidden, action_dim),
+>         )
+>
+>     def forward(self, x):
+>         return self.net(x)
+>
+>
+> class Agent:
+>     def __init__(self, state_dim=4, action_dim=2, hidden=64):
+>         self.state_dim = state_dim
+>         self.action_dim = action_dim
+>         self.hidden = hidden
+>         self.device = torch.device("cpu")
+>         self.policy_net = DQN(state_dim, action_dim, hidden)
+>
+>     def select_action(self, current_observation):
+>         obs = torch.as_tensor(current_observation, dtype=torch.float32).unsqueeze(0)
+>         with torch.no_grad():
+>             q = self.policy_net(obs)
+>             action = int(q.argmax(1).item())
+>         return action
+>
+>     def save(self, directory):
+>         os.makedirs(directory, exist_ok=True)
+>         path = os.path.join(directory, "model.pt")
+>         torch.save(self.policy_net.state_dict(), path)
+>
+>     def load(self, directory):
+>         path = os.path.join(directory, "model.pt")
+>         self.policy_net.load_state_dict(torch.load(path, map_location=self.device))
+>         self.policy_net.eval()
+> EOF
+root@f09e09febeb2:/app# cat > /app/train.py << 'EOF'
+> import os
+> import random
+> import numpy as np
+> import torch
+> import torch.nn as nn
+> import torch.optim as optim
+> import gymnasium as gym
+>
+> from agent import Agent, DQN
+>
+> SEED = 0
+> random.seed(SEED)
+> np.random.seed(SEED)
+> torch.manual_seed(SEED)
+>
+> ENV_NAME = "CartPole-v1"
+> device = torch.device("cpu")
+>
+> BATCH_SIZE = 128
+> GAMMA = 0.99
+> LR = 1e-3
+> BUFFER_SIZE = 20000
+> EPS_START = 1.0
+> EPS_END = 0.05
+> EPS_DECAY = 800
+> TARGET_UPDATE = 10
+> NUM_EPISODES = 1000
+> SAVE_DIR = "/app/trained_model"
+>
+>
+> class ReplayBuffer:
+>     def __init__(self, capacity):
+>         self.capacity = capacity
+>         self.buffer = []
+>         self.pos = 0
+>
+>     def push(self, s, a, r, s2, d):
+>         if len(self.buffer) < self.capacity:
+>             self.buffer.append(None)
+>         self.buffer[self.pos] = (s, a, r, s2, d)
+>         self.pos = (self.pos + 1) % self.capacity
+>
+>     def sample(self, n):
+>         idx = np.random.choice(len(self.buffer), n, replace=False)
+>         s = np.array([self.buffer[i][0] for i in idx])
+>         a = np.array([self.buffer[i][1] for i in idx])
+>         r = np.array([self.buffer[i][2] for i in idx])
+>         s2 = np.array([self.buffer[i][3] for i in idx])
+>         d = np.array([self.buffer[i][4] for i in idx])
+>         return s, a, r, s2, d
+>
+>     def __len__(self):
+>         return len(self.buffer)
+>
+>
+> def evaluate(agent, env, episodes=20):
+>     rs = []
+>     for _ in range(episodes):
+>         o, _ = env.reset()
+>         d = False
+>         t = 0
+>         while not d:
+>             a = agent.select_action(o)
+>             o, r, term, trunc, _ = env.step(a)
+>             t += r
+>             d = term or trunc
+>         rs.append(t)
+>     return sum(rs) / len(rs)
+>
+>
+> def main():
+>     env = gym.make(ENV_NAME)
+>     agent = Agent()
+>     target = DQN().to(device)
+>     target.load_state_dict(agent.policy_net.state_dict())
+>     target.eval()
+>     optimizer = optim.Adam(agent.policy_net.parameters(), lr=LR)
+>     buffer = ReplayBuffer(BUFFER_SIZE)
+>
+>     steps_done = 0
+>     best_score = -1
+>
+>     for ep in range(NUM_EPISODES):
+>         o, _ = env.reset()
+>         d = False
+>         total = 0
+>         while not d:
+>             eps = EPS_END + (EPS_START - EPS_END) * np.exp(-steps_done / EPS_DECAY)
+>             steps_done += 1
+>             if np.random.rand() < eps:
+>                 a = env.action_space.sample()
+>             else:
+>                 a = agent.select_action(o)
+>             o2, r, term, trunc, _ = env.step(a)
+>             d = term or trunc
+>             buffer.push(o, a, r, o2, d)
+>             o = o2
+>             total += r
+>             if len(buffer) >= BATCH_SIZE:
+>                 s, a, r, s2, d = buffer.sample(BATCH_SIZE)
+>                 s = torch.as_tensor(s, dtype=torch.float32)
+>                 a = torch.as_tensor(a, dtype=torch.int64).unsqueeze(1)
+>                 r = torch.as_tensor(r, dtype=torch.float32).unsqueeze(1)
+>                 s2 = torch.as_tensor(s2, dtype=torch.float32)
+>                 d = torch.as_tensor(d, dtype=torch.float32).unsqueeze(1)
+>                 q = agent.policy_net(s).gather(1, a)
+>                 with torch.no_grad():
+>                     nq = target(s2).max(1)[0].unsqueeze(1)
+>                     target_q = r + GAMMA * nq * (1 - d)
+>                 loss = nn.functional.smooth_l1_loss(q, target_q)
+>                 optimizer.zero_grad()
+>                 loss.backward()
+>                 optimizer.step()
+>         if ep % TARGET_UPDATE == 0:
+>             target.load_state_dict(agent.policy_net.state_dict())
+>         if ep % 25 == 0 or ep == NUM_EPISODES - 1:
+>             score = evaluate(agent, env, 20)
+>             print(f"Episode {ep}, score {score:.1f}, eps {eps:.3f}")
+>             if score > best_score:
+>                 best_score = score
+>                 agent.save(SAVE_DIR)
+>                 print(f"  -> saved best ({best_score:.1f})")
+>             if score >= 490 and ep >= 200:
+>                 print("Early stop: good enough")
+>                 break
+>     env.close()
+>     print(f"Best score: {best_score:.1f}")
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@f09e09febeb2:/app# cd /app && python3 -c "import torch, gymnasium, numpy; print(torch.__version__, gymnasium.__version__, numpy.__version__)"
+

@@ -1,0 +1,18 @@
+Step 1: PPM = P3 ASCII 800x600 maxval 255.
+Step 2: progress bar exact (`\rProgress: %.1f%%`, 100*i/600, i=0..599).
+Step 3: full ray tracer (sphere+plane+sky+shadows) writing image.ppm.
+Step 4: decoded rodata constants.
+Step 5: decoded vector/ray/sphere/plane/sky/shadow math.
+Step 6: decoded main camera-ray loop + color combine.
+Step 7: ray origins use constant vector (0,-0.5,-5.0,1.0); camera forward = normalize(1,1,-1).
+
+{
+  "analysis": "Camera origin uses constant vector at 0x31a0 = (0, -0.5, -5.0). Camera forward = normalize(1,1,-1). I now need the shading core trace() to know exactly how color is computed, plus the remainder of main (0x166c-0x1838) for the final color clamp/store. I'll dump trace() in two chunks and the rest of main.",
+  "plan": "Step 8: dump trace() (0x2150-0x2420 and 0x2420-0x2630) and main remainder (0x166c-0x1838) to fully reconstruct shading. Then write mystery.c and iterate by diffing image.ppm against /tmp/ref.ppm.",
+  "commands": [
+    {
+      "keystrokes": "echo 'STEP 8a: trace part1'; objdump -d -M intel --start-address=0x2150 --stop-address=0x2420 ./mystery\n",
+      "duration": 0.3
+    }
+  ]
+}

@@ -1,0 +1,310 @@
+New Terminal Output:
+
+root@65d9686eb19b:/app# cat > /app/server.py <<'PYEOF'
+> #!/usr/bin/env python3
+> import json
+> import os
+r> import time
+-Ty> import urllib.request
+> import urllib.error
+d> from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+> from urllib.parse import urlparse, parse_qs
+>
+n> DEFAULT_RPCS = [
+
+>     "https://api.mainnet-beta.solana.com",
+>     "https://api.devnet.solana.com",
+2>     "https://api.testnet.solana.com",
+>     "https://solana-mainnet.public.blastapi.io",
+>     "https://ssc-dao.genesysgo.net",
+>     "https://rpc.ankr.com/solana",
+>     "https://mainnet.helius-rpc.com",
+> ]
+>
+> NETWORK_BY_URL = {
+>     "devnet": "devnet",
+>     "testnet": "testnet",
+>     "mainnet": "mainnet-beta",
+> }
+>
+s>
+e> class RPCError(Exception):
+ >     pass
+t>
+s>
+> _rpc_cache = {"url": None}
+>
+p>
+l> def candidate_urls():
+>     env = os.environ.get("SOLANA_RPC", "").strip()
+>     if env:
+:>         yield env
+t>     for u in DEFAULT_RPCS:
+>         yield u
+>
+>
+=> def _network_for(url):
+ >     low = url.lower()
+>     for key, val in NETWORK_BY_URL.items():
+>         if key in low:
+>             return val
+>     return "mainnet-beta"
+>
+=>
+=> def _post(url, payload):
+>     data = json.dumps(payload).encode()
+>     req = urllib.request.Request(
+>         url, data=data, headers={"Content-Type": "application/json"}
+>     )
+>     with urllib.request.urlopen(req, timeout=8) as resp:
+>         return json.loads(resp.read().decode())
+>
+r>
+> def rpc_call(method, params=None, max_retry=1):
+>     params = params if params is not None else []
+>     last_err = None
+>     urls = list(candidate_urls())
+ >     preferred = _rpc_cache.get("url")
+(>     if preferred and preferred in urls:
+>         urls.remove(preferred)
+>         urls.insert(0, preferred)
+>     for url in urls:
+>         for attempt in range(max_retry):
+>             try:
+>                 res = _post(
+>                     url,
+p>                     {"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+>                 )
+>                 if "error" in res and res.get("error") is not None:
+ v>                     raise RPCError(json.dumps(res["error"]))
+>                 _rpc_cache["url"] = url
+>                 return res.get("result")
+>             except RPCError:
+c>                 raise
+>             except Exception as e:
+>                 last_err = e
+>                 time.sleep(0.2)
+>                 continue
+>     raise RPCError("%s: %s" % (method, last_err or "no endpoint reachable"))
+>
+ >
+> def get_block(slot):
+ ">     return rpc_call(
+>         "getBlock",
+o>         [int(slot), {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+>     )
+>
+>
+:> def get_tx(sig):
+>     return rpc_call(
+>         "getTransaction",
+E>         [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+>     )
+>
+>
+o> def extract_token_transfers(tx):
+>     out = []
+>     if not isinstance(tx, dict):
+>         return out
+>     msg = (tx.get("transaction") or {}).get("message", {}) or {}
+>     ix_lists = [msg.get("instructions", [])]
+>     for inner in tx.get("meta", {}).get("innerInstructions", []) or []:
+>         ix_lists.append(inner.get("instructions", []) or [])
+>     for ixs in ix_lists:
+>         for ix in ixs or []:
+>             if not isinstance(ix, dict):
+>                 continue
+>             if ix.get("program") != "spl-token":
+>                 continue
+>             parsed = ix.get("parsed")
+>             if not isinstance(parsed, dict):
+>                 continue
+>             typ = parsed.get("type")
+>             if typ not in ("transfer", "transferChecked"):
+>                 continue
+>             info = parsed.get("info", {}) or {}
+>             src = info.get("source")
+>             mint = info.get("mint")
+>             amt = info.get("amount") or (info.get("tokenAmount") or {}).get("amount")
+>             try:
+>                 amt_v = int(amt)
+>             except (TypeError, ValueError):
+tx>                 amt_v = amt
+>             out.append({"account": src, "mint": mint, "amount": amt_v})
+>     return out
+>
+>
+> def account_summary(acc):
+>     return {
+>         "executable": bool(acc.get("executable")),
+>         "lamports": acc.get("lamports"),
+>         "owner": acc.get("owner"),
+>         "rent_epoch": acc.get("rentEpoch"),
+>     }
+err(>
+{>
+> class Handler(BaseHTTPRequestHandler):
+>     def _send(self, code, obj):
+>         body = json.dumps(obj).encode()
+>         self.send_response(code)
+>         self.send_header("Content-Type", "application/json")
+>         self.send_header("Content-Length", str(len(body)))
+>         self.end_headers()
+>         self.wfile.write(body)
+>
+>     def _send_ok(self, obj):
+>         self._send(200, obj)
+>
+q>     def _send_err(self, obj):
+>         self._send(200, obj)
+>
+>     def _send_404(self, obj):
+>         self._send(404, obj)
+>
+
+>     def log_message(self, *args):
+>         pass
+>
+>     def do_GET(self):
+>         try:
+>             self.hand
+[... output limited to 10000 bytes; 70 interior bytes omitted ...]
+ list(candidate_urls()).__next__()
+>         except Exception:
+>             url = "https://api.mainnet-beta.solana.com"
+>         network = _network_for(url)
+>         try:
+P>             slot = rpc_call("getSlot", [])
+>         except Exception as e:
+>             return self._send_err({"error": str(e)})
+e>         version = "unknown"
+>         try:
+>             v = rpc_call("getVersion", [])
+>             version = v.get("solana-core", "unknown") if isinstance(v, dict) else "unknown"
+>         except Exception:
+>             pass
+>         node_count = 0
+>         try:
+>             nodes = rpc_call("getClusterNodes", [])
+>             node_count = len(nodes) if isinstance(nodes, list) else 0
+>         except Exception:
+>             pass
+>         self._send_ok({
+>             "status": "online",
+>             "network": network,
+>             "current_slot": slot,
+>             "node_count": node_count,
+>             "version": version,
+>         })
+>
+>     def route_block(self, slot):
+>         try:
+>             blk = get_block(slot)
+>         except Exception as e:
+>             return self._send_err({"error": str(e)})
+>         if blk is None:
+>             return self._send_404({"error": "block not found for slot %s" % slot})
+>         self._send_ok({
+>             "blockhash": blk.get("blockhash"),
+>             "parent_slot": blk.get("parentSlot"),
+>             "previous_blockhash": blk.get("previousBlockhash"),
+>             "block_height": blk.get("blockHeight"),
+>             "block_time": blk.get("blockTime"),
+>         })
+>
+>     def route_transaction(self, sig):
+>         try:
+>             tx = get_tx(sig)
+>         except Exception as e:
+>             return self._send_err({"error": str(e)})
+>         if tx is None:
+>             return self._send_404({"error": "transaction not found: %s" % sig})
+>         meta = tx.get("meta") or {}
+>         self._send_ok({
+>             "signature": sig,
+>             "slot": tx.get("slot"),
+>             "block_time": tx.get("blockTime") if tx.get("blockTime") is not None else meta.get("blockTime"),
+>             "success": (meta.get("err") is None) if isinstance(meta, dict) else None,
+>             "fee": meta.get("fee"),
+>             "token_transfers": extract_token_transfers(tx),
+>         })
+>
+>     def route_account(self, address):
+>         try:
+>             res = rpc_call("getAccountInfo", [address, {"encoding": "jsonParsed"}])
+>         except Exception as e:
+>             return self._send_err({"error": str(e)})
+>         info = (res or {}).get("value")
+>         if info is None:
+>             return self._send_err({"error": "account not found: %s" % address})
+>         self._send_ok({
+>             "address": address,
+>             "executable": bool(info.get("executable")),
+>             "lamports": info.get("lamports"),
+>             "owner": info.get("owner"),
+>             "rent_epoch": info.get("rentEpoch"),
+>         })
+>
+>     def route_program(self, program_id, parsed):
+>         qs = parse_qs(parsed.query)
+>         try:
+>             limit = int(qs.get("limit", ["10"])[0])
+>         except Exception:
+>             limit = 10
+>         try:
+>             offset = int(qs.get("offset", ["0"])[0])
+>         except Exception:
+>             offset = 0
+>         if limit < 0:
+>             limit = 10
+>         if offset < 0:
+>             offset = 0
+>         try:
+>             all_accts = rpc_call(
+>                 "getProgramAccounts",
+>                 [
+>                     program_id,
+>                     {
+>                         "encoding": "base64",
+>                         "dataSlice": {"offset": 0, "length": 0},
+>                         "limit": 100000,
+>                     },
+>                 ],
+>             ) or []
+>         except Exception as e:
+>             return self._send_err({"error": str(e)})
+>         total = len(all_accts)
+>         page = all_accts[offset : offset + limit]
+>         accounts = []
+>         for a in page:
+>             acc = a.get("account", {}) or {}
+>             accounts.append({
+>                 "pubkey": a.get("pubkey"),
+>                 "account": account_summary(acc),
+>             })
+>         self._send_ok({
+>             "program_id": program_id,
+>             "total_accounts": total,
+>             "limit": limit,
+>             "offset": offset,
+>             "accounts": accounts,
+>         })
+>
+>
+> def main():
+>     port = int(os.environ.get("PORT", "5000"))
+>     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+>     print("serving on 0.0.0.0:%d" % port, flush=True)
+>     server.serve_forever()
+>
+>
+> if __name__ == "__main__":
+>     main()
+> PYEOF
+root@65d9686eb19b:/app# kill %1 2>/dev/null; sleep 1; nohup python3 /app/server.py > /app/server.log 2>&1 &
+[1]+  Terminated              nohup python3 /app/server.py > /app/server.log 2>&1
+[1] 472
+root@65d9686eb19b:/app# sleep 1; cat /app/server.log
+nohup: ignoring input
+serving on 0.0.0.0:5000
+root@65d9686eb19b:/app#

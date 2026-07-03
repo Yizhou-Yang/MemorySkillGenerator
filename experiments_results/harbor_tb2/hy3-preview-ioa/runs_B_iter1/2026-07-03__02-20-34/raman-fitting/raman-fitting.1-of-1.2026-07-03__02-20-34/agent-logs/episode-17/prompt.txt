@@ -1,0 +1,54 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@be7c189382c3:/app# cat > fit2.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+>
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+>
+> def lor(x,x0,gamma,amp,offset):
+>     return offset + amp/(1.0+((x-x0)/gamma)**2)
+>
+> def fit_band(xmin,xmax,center,label):
+>     m=(x>=xmin)&(x<=xmax)
+>     xb=x[m]; yb=y[m]
+>     offset0=float(np.median(yb))
+>     i=int(np.argmin(np.abs(xb-center)))
+>     x00=xb[i]; amp0=max(yb[i]-offset0,1.0); gamma0=300.0
+>     bnds=([center-2000,20,0,offset0-10000],[center+2000,3000,1e6,offset0+10000])
+>     try:
+>         popt,pcov=curve_fit(lor,xb,yb,p0=[x00,gamma0,amp0,offset0],bounds=bnds,maxfev=200000)
+>     except Exception as e:
+>         print(label,'FAILED',e); return None
+>     resid=yb-lor(xb,*popt)
+>     r2=1-np.sum(resid**2)/np.sum((yb-yb.mean())**2)
+>     print(f'{label}: x0={popt[0]:.2f} gamma={popt[1]:.2f} amp={popt[2]:.2f} offset={popt[3]:.2f} R2={r2:.4f}  (n={len(xb)})')
+>     return popt
+>
+> print('G peak:')
+> g=fit_band(15450,17050,16245,'G')
+> print('2D candidate A (~27019):')
+> fit_band(25800,28200,27019,'2D_A')
+> print('2D candidate B (~33245):')
+> fit_band(32000,34500,33245,'2D_B')
+> EOF
+root@be7c189382c3:/app# python3 fit2.py
+G peak:
+G: x0=16211.10 gamma=146.42 amp=1985.52 offset=16340.54 R2=0.7462  (n=24)
+2D candidate A (~27019):
+2D_A: x0=28879.05 gamma=3000.00 amp=2474.71 offset=14519.03 R2=0.8739  (n=12)
+2D candidate B (~33245):
+2D_B: x0=33251.23 gamma=837.79 amp=1950.00 offset=19301.36 R2=0.9811  (n=9)
+root@be7c189382c3:/app#

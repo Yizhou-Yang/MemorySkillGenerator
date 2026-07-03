@@ -1,0 +1,10 @@
+{
+  "analysis": "Important nuance: helius-rpc.com responds 200 to getHealth but returns 401 'missing api key' for getSlot/getVersion/getSlotLeader, so it requires an API key for real data. The proxy (gz-aio-igatec1-tkeprod-outforward-15) blocks solana.com domains (502) but allows ankr (403, needs key), alchemy (429), and helius. I need a reachable Solana RPC that serves real data WITHOUT an API key. Let me probe a broader list of community/free RPCs on non-solana.com domains.",
+  "plan": "Probe many free community Solana RPC endpoints (no API key) to find one that returns real JSON-RPC results for getSlot/getAccountInfo. Once found, build the server against it. I'll test getHealth and getSlot on each candidate.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe3.py << 'EOF'\nimport requests\nhosts = [\n  'https://solana.gemnodes.io',\n  'https://rpc.shyft.to',\n  'https://try-rpc.mainnet.rpcslib.io',\n  'https://fruitchain-rpc.saulgoodman.cloud',\n  'https://solana-mainnet.rpc.sendnodes.dev',\n  'https://mainnet.solana-rpc.com',\n  'https://public-api.solana.dev',\n  'https://solana-mainnet.phantom.app',\n  'https://solana-mainnet.rpc.dwellir.com',\n  'https://solana.api.rpcpool.com',\n  'https://api.testnet.solana.com',\n  'https://mainnet.koii-node.com',\n]\nfor h in hosts:\n    try:\n        r = requests.post(h, json={'jsonrpc':'2.0','id':1,'method':'getSlot','params':[]}, timeout=15)\n        print(h, r.status_code, r.text[:90])\n    except Exception as e:\n        print(h, 'ERR', str(e)[:80])\nEOF\npython3 /tmp/probe3.py\n",
+      "duration": 60.0
+    }
+  ]
+}

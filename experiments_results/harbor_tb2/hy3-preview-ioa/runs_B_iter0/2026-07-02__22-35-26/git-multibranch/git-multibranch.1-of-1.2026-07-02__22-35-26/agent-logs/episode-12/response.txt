@@ -1,0 +1,19 @@
+{
+  "analysis": "I disabled PrintMotd and PrintLastLog, and confirmed pam_motd lines were already commented out. The 'Welc...' corruption is the MOTD sshd was sending into the git protocol stream; PrintMotd no should eliminate it. Let me also check for any `Banner` directive and clear /etc/motd as a belt-and-suspenders measure, then re-run the end-to-end push test, capturing output to a file for a clean result.",
+  "plan": "1) Check sshd_config for a Banner; remove it and clear /etc/motd if present. 2) Restart sshd. 3) Run the test script with output redirected to /tmp/out.txt and cat it to verify PUSH_EXIT and that both HTTPS endpoints serve MAIN/DEV.",
+  "commands": [
+    {
+      "keystrokes": "grep -nE '^Banner' /etc/ssh/sshd_config; : > /etc/motd; pkill -x sshd; sleep 1; /usr/sbin/sshd; (echo > /dev/tcp/localhost/22) && echo PORT22_OK\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "bash /tmp/test.sh > /tmp/out.txt 2>&1; echo RC=$?\n",
+      "duration": 4.0
+    },
+    {
+      "keystrokes": "echo '===== OUT ====='; cat /tmp/out.txt\n",
+      "duration": 0.3
+    }
+  ],
+  "task_complete": false
+}

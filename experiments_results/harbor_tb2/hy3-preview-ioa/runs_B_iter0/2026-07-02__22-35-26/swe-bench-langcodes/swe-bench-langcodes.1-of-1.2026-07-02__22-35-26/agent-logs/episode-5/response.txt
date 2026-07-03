@@ -1,0 +1,15 @@
+The fix works correctly. Test output confirms:
+- `id(Language.get("en")) == id(Language.get("en"))` → `True` (cached)
+- `hash(...)` equal for cached → `True`
+- `id` after unpickling → `False` (correct different object)
+- `hash` after unpickling → **`True`** (now fixed — previously was `False`)
+- `hash` equal → `True`
+
+The fix changes `Language.__hash__` from `hash(id(self))` to `hash(self._str_tag)`, making it consistent with `__eq__` (which compares `_str_tag`). This ensures equal `Language` objects always produce the same hash, regardless of object identity or pickling.
+
+{
+  "analysis": "The fix is verified. The __hash__ method now returns hash(self._str_tag). The pickle test confirms that after unpickling, hash equality holds (True), which was the reported bug. The cleanup of test_file was done.",
+  "plan": "Task is complete. No further commands needed.",
+  "commands": [],
+  "task_complete": true
+}

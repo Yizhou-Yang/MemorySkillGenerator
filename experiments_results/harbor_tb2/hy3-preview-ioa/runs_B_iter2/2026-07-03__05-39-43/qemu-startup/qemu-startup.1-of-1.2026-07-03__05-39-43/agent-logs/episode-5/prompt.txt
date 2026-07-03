@@ -1,0 +1,33 @@
+New Terminal Output:
+
+root@104b66a35d61:/app# ls /proc/239 2>&1 | head -1; echo '---'; ls -l /proc/239/exe 2>&1
+arch_status
+---
+lrwxrwxrwx 1 root root 0 Jul  2 22:21 /proc/239/exe -> /usr/bin/qemu-system-x86_64
+root@104b66a35d61:/app# cat > /tmp/wait_ready.py <<'PYEOF'
+> import socket, time, sys
+> port=6665; deadline=time.time()+180; last=''
+> while time.time()<deadline:
+>     try:
+>         s=socket.create_connection(('127.0.0.1',port),timeout=5)
+>         s.settimeout(2.0)
+>         buf=b''; t0=time.time()
+>         while time.time()-t0<90:
+>             try:
+>                 d=s.recv(4096)
+>                 if not d: break
+>                 buf+=d
+>                 if b'login:' in buf.lower() or b'welcome' in buf.lower():
+>                     print('LOGIN_PROMPT_READY'); sys.stdout.flush(); s.close(); sys.exit(0)
+>             except socket.timeout:
+>                 try: s.sendall(b'\n')
+>                 except: break
+>         print('LAST:',buf[-200:].decode('latin1','replace'))
+>         s.close(); sys.exit(0)
+>     except Exception as e:
+>         time.sleep(2)
+> print('TIMEOUT_NO_CONNECT')
+> sys.exit(1)
+> PYEOF
+root@104b66a35d61:/app# python3 /tmp/wait_ready.py
+

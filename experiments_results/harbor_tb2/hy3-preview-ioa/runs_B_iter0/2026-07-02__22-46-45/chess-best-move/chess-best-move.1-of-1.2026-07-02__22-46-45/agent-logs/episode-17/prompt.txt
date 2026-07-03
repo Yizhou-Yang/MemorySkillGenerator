@@ -1,0 +1,85 @@
+New Terminal Output:
+
+root@20c7c101c1fc:/app# cat > /tmp/match.py << 'EOF'
+> from PIL import Image, ImageFont, ImageDraw
+> import numpy as np
+>
+> FONT='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+> font=ImageFont.truetype(FONT, 60)
+>
+> # glyph code points: white pieces U+2654..2659, black U+265A..265F
+> white_sym={0x2654:'K',0x2655:'Q',0x2656:'R',0x2657:'B',0x2658:'N',0x2659:'P'}
+> black_sym={0x265A:'k',0x265B:'q',0x265C:'r',0x265D:'b',0x265E:'n',0x265F:'p'}
+>
+> def glyph_mask(cp):
+>     img=Image.new('L',(100,100),255)
+>     d=ImageDraw.Draw(img)
+>     d.text((50,50),chr(cp),font=font,fill=0,anchor='mm')
+>     a=np.array(img)
+>     mask=a<128
+>     return mask
+>
+> def norm(mask, S=64):
+>     ys,xs=np.where(mask)
+>     if len(xs)==0: return None
+>     crop=mask[ys.min():ys.max()+1, xs.min():xs.max()+1]
+>     im=Image.fromarray((crop*255).astype('uint8')).resize((S,S))
+>     return (np.array(im)>128)
+>
+> refs={}
+> for cp,name in {**white_sym,**black_sym}.items():
+>     refs[name]=norm(glyph_mask(cp))
+>
+> def best(mask, candidates):
+>     n=norm(mask)
+>     if n is None: return None,1.0
+>     best=None;bs=1.0
+>     for name in candidates:
+>         r=refs[name]
+>         diff=np.logical_xor(n,r).mean()
+>         if diff<bs: bs=diff;best=name
+>     return best,bs
+>
+> im=Image.open('/app/chess_puzzle.png').convert('RGB')
+> a=np.array(im).astype(int)
+> files='abcdefgh'
+> occ=[]
+> for r in range(8):
+>     for c in range(8):
+>         sq=a[r*80:(r+1)*80,c*80:(c+1)*80]
+>         d=np.sqrt(((sq-np.array([0,0,0]))**2).sum(2))<60
+>         w=np.sqrt(((sq-np.array([255,255,255]))**2).sum(2))<60
+>         dd=d.sum();ww=w.sum()
+>         if dd>40 or ww>40:
+>             occ.append((r,c,dd,ww))
+>
+> results={}
+> for (r,c,dd,ww) in sorted(occ):
+>     if dd>=ww:
+>         name,sc=best(d, list(black_sym.values()))
+>     else:
+>         # invert: mask of white ink
+>         name,sc=best(w, list(white_sym.values()))
+>     sqname=files[c]+str(8-r)
+>     results[sqname]=name
+>     print(f'{sqname}: {name}  score={sc:.3f} ({"black" if dd>=ww else "white"})')
+>
+> # build FEN ranks 8..1
+> rows=[]
+> for r in range(8):
+>     row=''
+>     empty=0
+>     for c in range(8):
+>         s=files[c]+str(8-r)
+>         if s in results:
+>             if empty: row+=str(empty);empty=0
+>             row+=results[s]
+>         else:
+>             empty+=1
+>     if empty: row+=str(empty)
+>     rows.append(row)
+> fen='/'.join(rows)+' w - - 0 1'
+> print('FEN:', fen)
+> EOF
+root@20c7c101c1fc:/app# python3 /tmp/match.py
+

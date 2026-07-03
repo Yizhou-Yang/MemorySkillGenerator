@@ -1,0 +1,17 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+'cat maze_game.sh\n'
+'ls -la tests/\n'
+'cat tests/*\n'
+'cat /protected/maze_server.py\n'
+"printf 'move N\\nmove E\\nmove S\\nmove W\\n' | python3 /protected/maze_server.py\n"
+'cat > /tmp/explore.py << \'PYEOF\'\nimport subprocess, sys\nsys.setrecursionlimit(1000000)\nSERVER = "/protected/maze_server.py"\n\ndef main():\n    proc = subprocess.Popen(["python3","-u",SERVER], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)\n    for _ in range(4):\n        proc.stdout.readline()\n    def send(cmd):\n        proc.stdin.write(cmd+"\\n")\n        proc.stdin.flush()\n        line = proc.stdout.readline().strip()\n        if line.startswith("> "):\n            line = line[2:]\n        elif line.startswith(">"):\n            line = line[1:]\n        return line\n    dr = {\'N\':(-1,0),\'S\':(1,0),\'E\':(0,1),\'W\':(0,-1)}\n    opp = {\'N\':\'S\',\'S\':\'N\',\'E\':\'W\',\'W\':\'E\'}\n    open_cells = {(0,0)}\n    known = {(0,0):\'open\'}\n    visited = set()\n    exit_cell=[None]\n    cur=[0,0]\n    def do_move(d):\n        res = send("move "+d)\n        if res in ("moved","reached exit"):\n            cur[0]+=dr[d][0]; cur[1]+=dr[d][1]\n            if res=="reached exit" and exit_cell[0] is None:\n                exit_cell[0]=(cur[0],cur[1])\n            return True\n        return False\n    def dfs(r,c):\n        if (r,c) in visited:\n            return\n        visited.add((r,c))\n        open_cells.add((r,c))\n        known[(r,c)]=\'open\'\n        for d in [\'N\',\'E\',\'S\',\'W\']:\n            nr,nc = r+dr[d][0], c+dr[d][1]\n            if (nr,nc) in known:\n                continue\n            if do_move(d):\n                dfs(nr,nc)\n                do_move(opp[d])\n            else:\n                known[(nr,nc)]=\'wall\'\n    dfs(0,0)\n    proc.stdin.write("exit\\n"); proc.stdin.flush()\n    try:\n        proc.wait(timeout=5)\n    except Exception:\n        proc.kill()\n    rmin=min(p[0] for p in known); rmax=max(p[0] for p in known)\n    cmin=min(p[1] for p in known); cmax=max(p[1] for p in known)\n    H=rmax-rmin+1; W=cmax-cmin+1\n    grid=[[\'#\']*W for _ in range(H)]\n    for (r,c) in open_cells:\n        grid[r-rmin][c-cmin]=\' \'\n    sr,sc= -rmin, -cmin\n    grid[sr][sc]=\'S\'\n    if exit_cell[0] is not None:\n        er,ec=exit_cell[0][0]-rmin, exit_cell[0][1]-cmin\n        grid[er][ec]=\'E\'\n    with open("/app/maze_map.txt","w") as f:\n        for row in grid:\n            f.write("".join(row)+"\\n")\n    print("done open=%d known=%d size=%dx%d exit=%s" % (len(open_cells),len(known),H,W,exit_cell[0]))\n\nmain()\nPYEOF\n'
+'python3 /tmp/explore.py\n'
+'python3 -c "a=open(\'/app/maze_map.txt\').read().strip(); b=open(\'/protected/ground_truth_map.txt\').read().strip(); al=[l.rstrip() for l in a.splitlines() if l.strip()]; bl=[l.rstrip() for l in b.splitlines() if l.strip()]; print(\'AGENT:\'); print(chr(10).join(al)); print(\'--- TRUTH:\'); print(chr(10).join(bl)); print(\'MATCH\' if al==bl else \'MISMATCH\')"\n'
+"ls -la /app/maze_map.txt && echo 'FILE OK'\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

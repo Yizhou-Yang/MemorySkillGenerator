@@ -1,0 +1,56 @@
+New Terminal Output:
+
+root@e4e667a7dedd:/app# cat > /tmp/an7.py << 'EOF'
+> import math
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> he=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[he:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> def feats(u,v):
+>     return [1.0,v,v*v,v*v*v,u,u*u,u*u*u,u*v,u*v*v,u*u*v]
+> def fit(plane,y0,y1):
+>     M=[[0.0]*10 for _ in range(10)]; bb=[0.0]*10
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             f=feats(x-400,y); val=plane(x,y)
+>             for i in range(10):
+>                 bb[i]+=f[i]*val
+>                 for j in range(10): M[i][j]+=f[i]*f[j]
+>     A=[r[:] for r in M]; b=bb[:]
+>     for p in range(10):
+>         m=p
+>         for r in range(p+1,10):
+>             if abs(A[r][p])>abs(A[m][p]): m=r
+>         A[p],A[m]=A[m],A[p]; b[p],b[m]=b[m],b[p]
+>         pv=A[p][p]
+>         for c in range(p,10): A[p][c]/=pv
+>         b[p]/=pv
+>         for r in range(10):
+>             if r!=p:
+>                 f=A[r][p]
+>                 for c in range(p,10): A[r][c]-=f*A[p][c]
+>                 b[r]-=f*b[p]
+>     return b
+> def rms(c,plane,y0,y1):
+>     e=0.0;n=0
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             f=feats(x-400,y); p=sum(c[i]*f[i] for i in range(10)); d=p-plane(x,y); e+=d*d;n+=1
+>     return math.sqrt(e/n)
+> cR=fit(lambda x,y:get(x,y)[0],0,265); cG=fit(lambda x,y:get(x,y)[1],0,265)
+> print('clean R coef',[round(v,5) for v in cR],'RMS',round(rms(cR,lambda x,y:get(x,y)[0],0,265),3))
+> print('clean G coef',[round(v,5) for v in cG],'RMS',round(rms(cG,lambda x,y:get(x,y)[1],0,265),3))
+> print('sphere y=330 profile:')
+> for x in range(335,466,5):
+>     print(x, get(x,330))
+> print('floor boundary x (R>100 -> light) per y:')
+> for y in range(420,590,20):
+>     vals=[1 if get(x,y)[0]>100 else 0 for x in range(w)]
+>     edges=[x for x in range(1,w) if vals[x]!=vals[x-1]]
+>     print('y',y,'n_edges',len(edges),'first25',edges[:25])
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an7.py
+

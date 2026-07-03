@@ -1,0 +1,14 @@
+{
+  "analysis": "Got 8 URIs including systemd-sysv (needed to satisfy apt's resolver), flex, bison, m4, bc, zlib1g-dev, libzstd-dev, libelf-dev. I'll download them with python and install the build-relevant ones with dpkg — and also systemd-sysv to fix the broken state. Then re-run `make defconfig`.",
+  "plan": "1) Download the 8 debs with a python script pointing at uris2.txt into /app/debs2. 2) Install all with dpkg -i. 3) Re-run `make defconfig`.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'EOF'\nimport urllib.request, os\nout='/app/debs2'; os.makedirs(out, exist_ok=True)\nurls=[]\nfor line in open('/app/uris2.txt'):\n    line=line.strip()\n    if not line.startswith(\"'\"): continue\n    url=line[1:line.index(\"'\",1)]; fn=line.split()[1]\n    urls.append((url,fn))\nhdr={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36','Accept':'*/*'}\nok=0\nfor url,fn in urls:\n    dest=os.path.join(out,fn)\n    if os.path.exists(dest) and os.path.getsize(dest)>0:\n        ok+=1; continue\n    try:\n        req=urllib.request.Request(url,headers=hdr)\n        with urllib.request.urlopen(req,timeout=120) as r, open(dest,'wb') as f:\n            f.write(r.read())\n        ok+=1\n    except Exception as e:\n        print('FAIL',fn,e)\nprint('done',ok,'of',len(urls))\nEOF\n",
+      "duration": 20.0
+    },
+    {
+      "keystrokes": "dpkg -i /app/debs2/*.deb 2>&1 | tail -8; echo DPKG_EXIT=${PIPESTATUS[0]}\n",
+      "duration": 15.0
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+Interesting — `cdn.kernel.org` returns 404 specifically for `/pub/linux/kernel/*` paths (even `linux-6.9.tar.sign` and a non-existent `README` both 404), while the homepage `/` returns 200. So the proxy is filtering kernel.org tarball paths. GitHub is reachable (homepage 200) but codeload is rate-limited (429). Let me check the 429 retry header and test the Debian archive as a fallback, then decide.
+
+{
+  "analysis": "The proxy blocks cdn.kernel.org/pub/linux/kernel/* paths with a blanket 404 (even for signatures and nonexistent files), while the homepage works. GitHub homepage is reachable (200) but codeload tarball download is rate-limited (429). I need an alternative reliable source. Let me check the codeload retry-after header and test the Debian archive which may not be filtered.",
+  "plan": "1) Inspect codeload 429 headers for Retry-After. 2) Test deb.debian.org for a linux-source package. Based on results, choose between: retrying codeload, installing git and doing a shallow clone of the v6.9 tag (github.com reachable), or using the Debian source package.",
+  "commands": [
+    {
+      "keystrokes": "cd /app && python3 - <<'EOF'\nimport urllib.request\n# codeload retry-after\nreq=urllib.request.Request('https://codeload.github.com/torvalds/linux/tar.gz/refs/tags/v6.9', headers={'User-Agent':'Mozilla/5.0'})\ntry:\n    urllib.request.urlopen(req, timeout=12)\nexcept urllib.error.HTTPError as e:\n    print('codeload', e.code, 'Retry-After=', e.headers.get('Retry-After'), 'X-RateLimit-Reset=', e.headers.get('X-RateLimit-Reset'))\nexcept Exception as e:\n    print('codeload err', e)\n# debian archive\nfor u in ['http://deb.debian.org/debian/pool/main/l/linux/','https://deb.debian.org/debian/pool/main/l/linux/']:\n    req=urllib.request.Request(u, headers={'User-Agent':'Mozilla/5.0'})\n    try:\n        r=urllib.request.urlopen(req, timeout=12)\n        print('debian OK', r.status, u)\n    except urllib.error.HTTPError as e:\n        print('debian HTTP', e.code, u)\n    except Exception as e:\n        print('debian ERR', type(e).__name__, str(e)[:50], u)\nEOF\n",
+      "duration": 30.0
+    }
+  ]
+}

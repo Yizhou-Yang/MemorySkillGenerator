@@ -1,0 +1,12 @@
+The data's two most prominent peaks are at x≈19139 (dominant) and x≈36860. Let me verify which features are genuine Lorentzian peaks before fitting, by fitting a Lorentzian to each candidate and checking fit quality.
+
+{
+  "analysis": "The two highest peaks in the data are at x≈19139 (intensity ~79400) and x≈36860 (intensity ~19881). The hint G~1580 < 2D~2700 maps to G being the lower-x peak and 2D the higher-x peak, so G≈19139 and 2D≈36860. But there are other bumps (3745, 6329, 10289). I should confirm which two are genuine single-Lorentzian peaks by fitting each candidate and checking R², to pick the correct 'G' and '2D'.",
+  "plan": "Run a diagnostic that fits a Lorentzian to a window around each candidate peak (from find_peaks) and reports R². The two highest-R² candidates that look like clean Lorentzians are the real G and 2D peaks. Then I'll write the final fit script accordingly, guaranteeing both are fitted and written to results.json.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/diag2.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\nfrom scipy.signal import find_peaks\n\ndata = np.loadtxt('/app/graphene_converted.dat')\nx = data[:,0]; y = data[:,1]\norder = np.argsort(x); x=x[order]; y=y[order]\nk=51; kernel=np.ones(k)/k\nys=np.convolve(y,kernel,mode='same'); ys[:k//2]=y[:k//2]; ys[-k//2:]=y[-k//2:]\npeaks,_=find_peaks(ys, prominence=0.02*ys.max(), distance=20)\nprint('candidate peaks:', [round(x[p],1) for p in peaks])\n\ndef lor(x,x0,g,a,o):\n    return o + a*(g*g)/((x-x0)**2+g*g)\n\ndef r2(xw,yw,p0):\n    try:\n        popt,_=curve_fit(lor,xw,yw,p0=p0,maxfev=200000)\n        yp=lor(xw,*popt)\n        ss=((yw-yp)**2).sum(); tot=((yw-yw.mean())**2).sum()\n        return 1-ss/tot, popt\n    except Exception as e:\n        return -1, None\n\nfor p in peaks:\n    px=x[p]; base=np.min(ys); amp0=max(ys[p]-base,1)\n    lo,hi=px-6000,px+6000\n    m=(x>=lo)&(x<=hi)\n    r,po=r2(x[m],y[m],[px,400,amp0,base])\n    print(f'x={px:9.1f} y={ys[p]:9.1f} R2={r:.4f}  fit(x0={po[0]:.0f},g={po[1]:.0f},a={po[2]:.0f},o={po[3]:.0f})')\nEOF\npython3 /app/diag2.py\n",
+      "duration": 3.0
+    }
+  ]
+}

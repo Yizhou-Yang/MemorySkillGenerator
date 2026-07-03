@@ -1,0 +1,799 @@
+asciinema rec --stdin /logs/agent.cast
+root@4f04dba2557a:/app# asciinema rec --stdin /logs/agent.cast
+asciinema: recording asciicast to /logs/agent.cast
+asciinema: press <ctrl-d> or type "exit" when you're done
+root@4f04dba2557a:/app# clear
+root@4f04dba2557a:/app# ls -la /app /tmp 2>/dev/null
+/app:
+total 980176
+drwxr-xr-x  2 root root       4096 Jul  2 15:14 .
+drwxr-xr-x 23 root root       4096 Jul  2 16:10 ..
+-rw-r--r--  1 root root     197120 Jul  2 15:14 alpine-disk.qcow2
+-rw-r--r--  1 root root 1003487232 Dec  7  2023 alpine.iso
+
+/tmp:
+total 16
+drwxrwxrwt  3 root root 4096 Jul  2 16:10 .
+drwxr-xr-x 23 root root 4096 Jul  2 16:10 ..
+-rwxr-xr-x  1 root root  923 Jul  2 12:45 get-asciinema-timestamp.sh
+drwx------  2 root root 4096 Jul  2 16:10 tmux-0
+root@4f04dba2557a:/app# find / -name 'alpine*.iso' 2>/dev/null
+which qemu-system-x86_64 qemu-system-i386 expect sshpass ssh 2>/dev/null
+uname -a; cat /etc/os-release 2>/dev/null | head
+/app/alpine.iso
+root@4f04dba2557a:/app# which qemu-system-x86_64 qemu-system-i386 expect sshpass ssh 2>/dev/null
+/usr/bin/qemu-system-x86_64
+/usr/bin/qemu-system-i386
+/usr/bin/expect
+/usr/bin/ssh
+root@4f04dba2557a:/app# uname -a; cat /etc/os-release 2>/dev/null | head
+Linux 4f04dba2557a 5.4.241-1-tlinux4-0017.14 #1 SMP Thu Oct 24 18:51:12 CST 2024 x86_64 GNU/Linux
+PRETTY_NAME="Debian GNU/Linux 11 (bullseye)"
+NAME="Debian GNU/Linux"
+VERSION_ID="11"
+VERSION="11 (bullseye)"
+VERSION_CODENAME=bullseye
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+root@4f04dba2557a:/app# which socat nc ncat python3 qemu-img mkisofs genisoimage 7z isoinfo 2>/dev/null
+/bin/nc
+/usr/bin/python3
+/usr/bin/qemu-img
+root@4f04dba2557a:/app# mkdir -p /mnt/iso; mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1 && echo MOUNTED || echo MOUNT_FAILED
+mount: /mnt/iso: mount failed: Operation not permitted.
+MOUNT_FAILED
+root@4f04dba2557a:/app# ls -la /mnt/iso/boot 2>/dev/null
+root@4f04dba2557a:/app# ls -l /dev/kvm 2>&1; echo '---'; qemu-system-x86_64 --version 2>&1 | head -1
+ls: cannot access '/dev/kvm': No such file or directory
+---
+python3 -c "import socket; s=socket.socket(); s.settimeout(5); print('net_connect=',s.connect_ex(('dl-cdn.alpinelinux.org',80)))" 2>&1
+QEMU emulator version 5.2.0 (Debian 1:5.2+dfsg-11+deb11u5)
+root@4f04dba2557a:/app# python3 -c "import socket; s=socket.socket(); s.settimeout(5); print('net_connect=',s.connect_ex(('dl-cdn.alpinelinux.org',80)))" 2>&1
+net_connect= 0
+root@4f04dba2557a:/app# nohup qemu-system-x86_64 -m 512 -smp 2 -boot d -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2,if=virtio -netdev
+user,id=net0,hostfwd=tcp::2222-:22 -device virtio-net-pci,netdev=net0 -display none -serial tcp:127.0.0.1:4555,server,nowait > /tmp/qemu.log 2>&1 &
+[1] 285
+root@4f04dba2557a:/app# sleep 2; cat /tmp/qemu.log; echo '---'; ss -ltnp 2>/dev/null | grep 4555 || netstat -ltnp 2>/dev/null | grep 4555
+nohup: ignoring input
+---
+root@4f04dba2557a:/app# ps aux | grep qemu | grep -v grep
+bash: ps: command not found
+root@4f04dba2557a:/app# cat > /tmp/cap.py <<'EOF'
+> import socket, time, sys
+> host,port='127.0.0.1',4555
+> buf=b''
+> s=socket.create_connection((host,port),timeout=5)
+> s.settimeout(2)
+> time.sleep(1)
+> try:
+>     s.sendall(b'\n')
+> except: pass
+> end=time.time()+30
+> while time.time()<end:
+>     try:
+>         d=s.recv(4096)
+>         if not d: break
+>         buf+=d
+>     except socket.timeout:
+>         pass
+>     except Exception as e:
+>         break
+> sys.stdout.write(buf.decode(errors='replace'))
+> EOF
+root@4f04dba2557a:/app# python3 /tmp/cap.py
+root@4f04dba2557a:/app# cat /proc/285/comm 2>/dev/null; echo '---'; pip3 --version 2>/dev/null || python3 -m pip --version 2>/dev/null || echo NOPIP
+qemu-system-x86
+---
+kill 285 2>/dev/null; sleep 1; cat /proc/285/comm 2>/dev/null && echo STILLRUNS || echo KILLED
+NOPIP
+root@4f04dba2557a:/app# kill 285 2>/dev/null; sleep 1; cat /proc/285/comm 2>/dev/null && echo STILLRUNS || echo KILLED
+[1]+  Done                    nohup qemu-system-x86_64 -m 512 -smp 2 -boot d -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2,if=virtio -n
+etdev user,id=net0,hostfwd=tcp::2222-:22 -device virtio-net-pci,netdev=net0 -display none -serial tcp:127.0.0.1:4555,server,nowait > /tmp/qemu.log 2>&1
+KILLED
+root@4f04dba2557a:/app# cat > /tmp/iso_extract.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'
+> SEC=2048
+>
+> def read_sector(f, lba, count=1):
+>     f.seek(lba*SEC)
+>     return f.read(count*SEC)
+>
+> def parse_dir(data):
+>     recs=[]; i=0; n=len(data)
+>     while i < n:
+>         rec_len=data[i]
+>         if rec_len==0 or rec_len<34 or i+rec_len>n: break
+>         lba=struct.unpack('<I', data[i+2:i+6])[0]
+>         size=struct.unpack('<I', data[i+10:i+14])[0]
+>         flags=data[i+25]
+>         name_len=data[i+32]
+>         name=data[i+33:i+33+name_len]
+>         if name==b'\x00': nm='.'
+>         elif name==b'\x01': nm='..'
+>         else:
+>             s=name.split(b';')[0]
+>             nm=s.decode('latin1')
+>         recs.append((nm,(flags&2)!=0,lba,size)); i+=rec_len
+>     return recs
+>
+> f=open(ISO,'rb')
+> pvd=read_sector(f,16)
+> assert pvd[1:6]==b'CD001' and pvd[0]==1, 'no PVD'
+> root=pvd[156:190]
+> lba=struct.unpack('<I', root[2:6])[0]
+> size=struct.unpack('<I', root[10:14])[0]
+> files={}
+> def walk(lba,size,prefix):
+>     data=read_sector(f,lba,(size+SEC-1)//SEC)
+>     for nm,isdir,clba,csz in parse_dir(data):
+>         if nm in ('.','..'): continue
+>         p=prefix+'/'+nm
+>         files[p]=(clba,csz)
+>         if isdir: walk(clba,csz,p)
+> walk(lba,size,'')
+> for p,(clba,csz) in files.items():
+>     up=p.upper()
+>     if 'VMLINUZ' in up and 'INITRAMFS' not in up:
+>         print('EXTRACT vmlinuz', p, clba, csz)
+>         d=read_sector(f,clba,(csz+SEC-1)//SEC)[:csz]
+>         open('/tmp/vmlinuz','wb').write(d)
+>     if 'INITRAMFS' in up:
+>         print('EXTRACT initramfs', p, clba, csz)
+>         d=read_sector(f,clba,(csz+SEC-1)//SEC)[:csz]
+>         open('/tmp/initramfs','wb').write(d)
+> print('done, total files', len(files))
+> EOF
+root@4f04dba2557a:/app# python3 /tmp/iso_extract.py
+EXTRACT initramfs /BOOT/INITRAMFS_LTS. 377583 20486092
+EXTRACT vmlinuz /BOOT/VMLINUZ_LTS. 483188 11879168
+done, total files 40
+root@4f04dba2557a:/app# ls -la /tmp/vmlinuz /tmp/initramfs
+-rw-r--r-- 1 root root 20486092 Jul  2 16:15 /tmp/initramfs
+-rw-r--r-- 1 root root 11879168 Jul  2 16:15 /tmp/vmlinuz
+root@4f04dba2557a:/app# nohup qemu-system-x86_64 -m 1024 -smp 2 -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append "console=ttyS0,115200 modules=loop,squashfs,
+sd-mod,usb-storage" -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2,if=virtio -netdev user,id=net0,hostfwd=tcp::2222-:22 -device virtio-n
+et-pci,netdev=net0 -display none -serial tcp:127.0.0.1:4555,server,nowait > /tmp/qemu.log 2>&1 &
+[1] 445
+root@4f04dba2557a:/app# sleep 1; cat /tmp/qemu.log
+nohup: ignoring input
+root@4f04dba2557a:/app# python3 /tmp/cap.py
+[    0.339980] LSM: initializing lsm=capability,landlock,yama
+[    0.350786] landlock: Up and running.
+[    0.350976] Yama: becoming mindful.
+[    0.358511] Mount-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.358511] Mountpoint-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.485177] smpboot: CPU0: AMD QEMU Virtual CPU version 2.5+ (family: 0x6, model: 0x6, stepping: 0x3)
+[    0.505562] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1.
+[    0.507960] RCU Tasks Rude: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1.
+[    0.510052] RCU Tasks Trace: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1.
+[    0.510839] Performance Events: PMU not available due to virtualization, using software events only.
+[    0.512941] signal: max sigframe size: 1440
+[    0.515530] rcu: Hierarchical SRCU implementation.
+[    0.515726] rcu:     Max phase no-delay instances is 1000.
+[    0.530051] NMI watchdog: Perf NMI watchdog permanently disabled
+[    0.537167] smp: Bringing up secondary CPUs ...
+[    0.546191] smpboot: x86: Booting SMP configuration:
+[    0.546489] .... node  #0, CPUs:      #1
+[    0.000000] calibrate_delay_direct() dropping min bogoMips estimate 1 = 7118228
+[    0.000000] calibrate_delay_direct() dropping min bogoMips estimate 4 = 8934267
+[    0.669558] smp: Brought up 1 node, 2 CPUs
+[    0.669901] smpboot: Max logical packages: 2
+[    0.670156] ----------------
+[    0.670279] | NMI testsuite:
+[    0.670359] --------------------
+[    0.670448]   remote IPI:  ok  |
+[    0.672557]    local IPI:  ok  |
+[    0.672893] --------------------
+[    0.672982] Good, all   2 testcases passed! |
+[    0.674958] ---------------------------------
+[    0.675516] smpboot: Total of 2 processors activated (11997.91 BogoMIPS)
+[    0.715761] devtmpfs: initialized
+[    0.723245] x86/mm: Memory block size: 128MB
+[    0.741601] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 6370867519511994 ns
+[    0.743981] futex hash table entries: 512 (order: 3, 32768 bytes, linear)
+[    0.752309] pinctrl core: initialized pinctrl subsystem
+[    0.786973] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.795216] audit: initializing netlink subsys (disabled)
+[    0.806037] audit: type=2000 audit(1783008976.846:1): state=initialized audit_enabled=0 res=1
+[    0.831050] thermal_sys: Registered thermal governor 'fair_share'
+[    0.831196] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.831962] thermal_sys: Registered thermal governor 'step_wise'
+[    0.832212] thermal_sys: Registered thermal governor 'user_space'
+[    0.842108] cpuidle: using governor ladder
+[    0.842616] cpuidle: using governor menu
+[    0.848505] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.851844] PCI: Using configuration type 1 for base access
+[    0.853593] mtrr: your CPUs had inconsistent fixed MTRR settings
+[    0.853913] mtrr: your CPUs had inconsistent variable MTRR settings
+[    0.855230] mtrr: your CPUs had inconsistent MTRRdefType settings
+[    0.855372] mtrr: probably your BIOS does not setup all CPUs.
+[    0.855531] mtrr: corrected configuration.
+[    0.860696] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.945500] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.945843] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.988730] ACPI: Added _OSI(Module Device)
+[    0.989044] ACPI: Added _OSI(Processor Device)
+[    0.989153] ACPI: Added _OSI(3.0 _SCP Extensions)
+[    0.989259] ACPI: Added _OSI(Processor Aggregator Device)
+[    1.016351] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    1.044903] ACPI: _OSC evaluation for CPUs failed, trying _PDC
+[    1.051814] ACPI: Interpreter enabled
+[    1.053622] ACPI: PM: (supports S0 S3 S4 S5)
+[    1.053884] ACPI: Using IOAPIC for interrupt routing
+[    1.055177] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    1.055314] PCI: Using E820 reservations for host bridge windows
+[    1.064600] ACPI: Enabled 2 GPEs in block 00 to 0F
+[    1.136840] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    1.139462] acpi PNP0A03:00: _OSC: OS supports [ASPM ClockPM Segments MSI HPX-Type3]
+[    1.139964] acpi PNP0A03:00: _OSC: not requesting OS control; OS requires [ExtendedConfig ASPM ClockPM MSI]
+[    1.141844] acpi PNP0A03:00: fail to add MMCONFIG information, can't access extended configuration space under this bridge
+[    1.169775] acpiphp: Slot [3] registered
+[    1.172155] acpiphp: Slot [4] registered
+[    1.172422] acpiphp: Slot [5] registered
+[    1.172641] acpiphp: Slot [6] registered
+[    1.172840] acpiphp: Slot [7] registered
+[    1.173044] acpiphp: Slot [8] registered
+[    1.173231] acpiphp: Slot [9] registered
+[    1.173433] acpiphp: Slot [10] registered
+[    1.173623] acpiphp: Slot [11] registered
+[    1.173899] acpiphp: Slot [12] registered
+[    1.174146] acpiphp: Slot [13] registered
+[    1.174386] acpiphp: Slot [14] registered
+[    1.174591] acpiphp: Slot [15] registered
+[    1.175744] acpiphp: Slot [16] registered
+[    1.176006] acpiphp: Slot [17] registered
+[    1.176215] acpiphp: Slot [18] registered
+[    1.176408] acpiphp: Slot [19] registered
+[    1.176672] acpiphp: Slot [20] registered
+[    1.176869] acpiphp: Slot [21] registered
+[    1.177080] acpiphp: Slot [22] registered
+[    1.177305] acpiphp: Slot [23] registered
+[    1.177511] acpiphp: Slot [24] registered
+[    1.177694] acpiphp: Slot [25] registered
+[    1.177886] acpiphp: Slot [26] registered
+[    1.182554] acpiphp: Slot [27] registered
+[    1.186327] acpiphp: Slot [28] registered
+[    1.192416] acpiphp: Slot [29] registered
+[    1.198529] acpiphp: Slot [30] registered
+[    1.200210] acpiphp: Slot [31] registered
+[    1.200210] PCI host bridge to bus 0000:00
+[    1.205596] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    1.209218] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    1.209572] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    1.210240] pci_bus 0000:00: root bus resource [mem 0x40000000-0xfebfffff window]
+[    1.211888] pci_bus 0000:00: root bus resource [mem 0x100000000-0x17fffffff window]
+[    1.212900] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    1.216113] pci 0000:00:00.0: [8086:1237] type 00 class 0x060000
+[    1.225693] pci 0000:00:01.0: [8086:7000] type 00 class 0x060100
+[    1.227461] pci 0000:00:01.1: [8086:7010] type 00 class 0x010180
+[    1.233002] pci 0000:00:01.1: reg 0x20: [io  0xc0a0-0xc0af]
+[    1.235422] pci 0000:00:01.1: legacy IDE quirk: reg 0x10: [io  0x01f0-0x01f7]
+[    1.248779] pci 0000:00:01.1: legacy IDE quirk: reg 0x14: [io  0x03f6]
+[    1.255546] pci 0000:00:01.1: legacy IDE quirk: reg 0x18: [io  0x0170-0x0177]
+[    1.265409] pci 0000:00:01.1: legacy IDE quirk: reg 0x1c: [io  0x0376]
+[    1.272080] pci 0000:00:01.3: [8086:7113] type 00 class 0x068000
+[    1.276414] pci 0000:00:01.3: quirk: [io  0x0600-0x063f] claimed by PIIX4 ACPI
+[    1.279540] pci 0000:00:01.3: quirk: [io  0x0700-0x070f] claimed by PIIX4 SMB
+[    1.280950] pci 0000:00:02.0: [1234:1111] type 00 class 0x030000
+[    1.282543] pci 0000:00:02.0: reg 0x10: [mem 0xfd000000-0xfdffffff pref]
+[    1.286892] pci 0000:00:02.0: reg 0x18: [mem 0xfebd0000-0xfebd0fff]
+[    1.301844] pci 0000:00:02.0: reg 0x30: [mem 0xfebc0000-0xfebcffff pref]
+[    1.302897] pci 0000:00:02.0: Video device with shadowed ROM at [mem 0x000c0000-0x000dffff]
+[    1.305177] pci 0000:00:03.0: [1af4:1000] type 00 class 0x020000
+[    1.305177] pci 0000:00:03.0: reg 0x10: [io  0xc080-0xc09f]
+[    1.305177] pci 0000:00:03.0: reg 0x14: [mem 0xfebd1000-0xfebd1fff]
+[    1.324035] pci 0000:00:03.0: reg 0x20: [mem 0xfe000000-0xfe003fff 64bit pref]
+[    1.326474] pci 0000:00:03.0: reg 0x30: [mem 0xfeb80000-0xfebbffff pref]
+[    1.329553] pci 0000:00:04.0: [1af4:1001] type 00 class 0x010000
+[    1.331941] pci 0000:00:04.0: reg 0x10: [io  0xc000-0xc07f]
+[    1.333769] pci 0000:00:04.0: reg 0x14: [mem 0xfebd2000-0xfebd2fff]
+[    1.339799] pci 0000:00:04.0: reg 0x20: [mem 0xfe004000-0xfe007fff 64bit pref]
+[    1.345177] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    1.345177] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    1.345177] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    1.345177] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    1.345177] ACPI: PCI: Interrupt link LNKS configured for IRQ 9
+[    1.345934] iommu: Default domain type: Translated
+[    1.346237] iommu: DMA domain TLB invalidation policy: lazy mode
+[    1.354555] pps_core: LinuxPPS API ver. 1 registered
+[    1.354882] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    1.355348] PTP clock support registered
+[    1.356559] EDAC MC: Ver: 3.0.0
+[    1.374129] PCI: Using ACPI for IRQ routing
+[    1.385074] pci 0000:00:02.0: vgaarb: setting as boot VGA device
+[    1.385177] pci 0000:00:02.0: vgaarb: bridge control possible
+[    1.385177] pci 0000:00:02.0: vgaarb: VGA device added: decodes=io+mem,owns=io+mem,locks=none
+[    1.388646] vgaarb: loaded
+[    1.395287] hpet: 3 channels of 0 reserved for per-cpu timers
+[    1.396017] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    1.396287] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    1.409172] clocksource: Switched to clocksource hpet
+[    1.489666] VFS: Disk quotas dquot_6.6.0
+[    1.491082] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    1.496284] pnp: PnP ACPI init
+[    1.509915] pnp: PnP ACPI: found 6 devices
+[    1.560119] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    1.564753] NET: Registered PF_INET protocol family
+[    1.572711] IP idents hash table entries: 16384 (order: 5, 131072 bytes, linear)
+[    1.616798] tcp_listen_portaddr_hash hash table entries: 512 (order: 1, 8192 bytes, linear)
+[    1.617655] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    1.618111] TCP established hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    1.620241] TCP bind hash table entries: 8192 (order: 6, 262144 bytes, linear)
+[    1.621822] TCP: Hash tables configured (established 8192 bind 8192)
+[    1.625120] UDP hash table entries: 512 (order: 2, 16384 bytes, linear)
+[    1.626111] UDP-Lite hash table entries: 512 (order: 2, 16384 bytes, linear)
+[    1.629648] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    1.630556] NET: Registered PF_XDP protocol family
+[    1.631984] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    1.632822] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    1.633094] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    1.633346] pci_bus 0000:00: resource 7 [mem 0x40000000-0xfebfffff window]
+[    1.633507] pci_bus 0000:00: resource 8 [mem 0x100000000-0x17fffffff window]
+[    1.634700] pci 0000:00:01.0: PIIX3: Enabling Passive Release
+[    1.635023] pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+[    1.635562] PCI: CLS 0 bytes, default 64
+[    1.655968] Trying to unpack rootfs image as initramfs...
+[    1.666445] Initialise system trusted keyrings
+[    1.681075] workingset: timestamp_bits=40 max_order=18 bucket_order=0
+[    1.688097] zbud: loaded
+[    1.862071] Key type asymmetric registered
+[    1.862561] Asymmetric key parser 'x509' registered
+[    1.864121] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 246)
+[    1.885699] io scheduler mq-deadline registered
+[    1.886106] io scheduler kyber registered
+[    1.887081] io scheduler bfq registered
+[    1.928777] shpchp: Standard Hot Plug PCI Controller Driver version: 0.4
+[    1.935139] ERST DBG: ERST support is disabled.
+[    1.953588] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    1.979018] 00:04: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    2.151198] brd: module loaded
+[    2.156965] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    2.165568] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    2.166222] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    2.170849] rtc_cmos 00:05: RTC can wake from S4
+[    2.184508] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input0
+[    2.208243] rtc_cmos 00:05: registered as rtc0
+[    2.212757] rtc_cmos 00:05: setting system clock to 2026-07-02T16:16:19 UTC (1783008979)
+[    2.222995] rtc_cmos 00:05: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    2.224532] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    2.231277] gre: GRE over IPv4 demultiplexor driver
+[    2.338397] can: controller area network core
+[    2.339524] NET: Registered PF_CAN protocol family
+[    2.340817] Key type dns_resolver registered
+[    2.347991] IPI shorthand broadcast: enabled
+[    2.456511] registered taskstats version 1
+[    2.462693] Loading compiled-in X.509 certificates
+[    4.361842] Freeing initrd memory: 20008K
+[    5.060176] Loaded X.509 cert 'alpinelinux.org: Alpine Linux kernel key: d76a695f66ad9cd28f5c22a8508f36e91f521f7a'
+[    5.083816] Key type .fscrypt registered
+[    5.084126] Key type fscrypt-provisioning registered
+[    5.103852] Unstable clock detected, switching default tracing clock to "global"
+[    5.103852] If you want to keep using the local clock, then add:
+[    5.103852]   "trace_clock=local"
+[    5.103852] on the kernel command line
+[    5.105317] clk: Disabling unused clocks
+[    5.247357] Freeing unused kernel image (initmem) memory: 3404K
+[    5.248198] Write protecting the kernel read-only data: 24576k
+[    5.252745] Freeing unused kernel image (rodata/data gap) memory: 1168K
+[    5.253682] Run /init as init process
+[    6.060176] Alpine Init 3.9.0-r0
+Alpine Init 3.9.0-r0
+[    6.074423] Loading boot drivers...
+ * Loading boot drivers: [    6.363188] loop: module loaded
+[    6.422422] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    6.546602] SCSI subsystem initialized
+[    7.132811] ACPI: bus type USB registered
+[    7.134738] usbcore: registered new interface driver usbfs
+[    7.140717] usbcore: registered new interface driver hub
+[    7.162105] usbcore: registered new device driver usb
+[    7.208040] usbcore: registered new interface driver usb-storage
+[    7.484580] ACPI: bus type drm_connector registered
+[    7.701548] Loading boot drivers: ok.
+ok.
+[    7.845110] Mounting boot media...
+ * Mounting boot media: [    9.813495] ACPI: \_SB_.LNKC: Enabled at IRQ 11
+[   10.269630] ACPI: \_SB_.LNKD: Enabled at IRQ 10
+[   10.556296] scsi host0: ata_piix
+[   10.568549] scsi host1: ata_piix
+[   10.571069] ata1: PATA max MWDMA2 cmd 0x1f0 ctl 0x3f6 bmdma 0xc0a0 irq 14
+[   10.571787] ata2: PATA max MWDMA2 cmd 0x170 ctl 0x376 bmdma 0xc0a8 irq 15
+[   10.751370] ata2: found unknown device (class 0)
+[   10.759329] ata2.00: ATAPI: QEMU DVD-ROM, 2.5+, max UDMA/100
+[   10.837512] scsi 1:0:0:0: CD-ROM            QEMU     QEMU DVD-ROM     2.5+ PQ: 0 ANSI: 5
+[   11.452578] virtio_blk virtio1: 2/0/0 default/read/poll queues
+[   11.458098] virtio_blk virtio1: [vda] 67108864 512-byte logical blocks (34.4 GB/32.0 GiB)
+[   11.527899] sr 1:0:0:0: [sr0] scsi3-mmc drive: 4x/4x cd/rw xa/form2 tray
+[   11.528567] cdrom: Uniform CD-ROM driver Revision: 3.20
+[   16.767187] block sr0: the capability attribute has been deprecated.
+[   19.141353] Mounting boot media: ok.
+ok.
+[   21.425138] Installing packages to root filesystem...
+ * Installing packages to root filesystem: (1/27) Installing alpine-baselayout-data (3.4.3-r2)
+(2/27) Installing musl (1.2.4_git20230717-r4)
+(3/27) Installing busybox (1.36.1-r15)
+Executing busybox-1.36.1-r15.post-install
+(4/27) Installing busybox-binsh (1.36.1-r15)
+(5/27) Installing alpine-baselayout (3.4.3-r2)
+Executing alpine-baselayout-3.4.3-r2.pre-install
+Executing alpine-baselayout-3.4.3-r2.post-install
+(6/27) Installing ifupdown-ng (0.12.1-r3)
+(7/27) Installing ifupdown-ng-openrc (0.12.1-r3)
+(8/27) Installing libcap2 (2.69-r1)
+(9/27) Installing openrc (0.52.1-r0)
+Executing openrc-0.52.1-r0.post-install
+(10/27) Installing mdev-conf (4.6-r0)
+(11/27) Installing busybox-mdev-openrc (1.36.1-r15)
+(12/27) Installing alpine-conf (3.17.0-r0)
+(13/27) Installing alpine-keys (2.4-r1)
+(14/27) Installing alpine-release (3.19.0-r0)
+(15/27) Installing ca-certificates-bundle (20230506-r0)
+(16/27) Installing libcrypto3 (3.1.4-r2)
+(17/27) Installing libssl3 (3.1.4-r2)
+(18/27) Installing ssl_client (1.36.1-r15)
+(19/27) Installing zlib (1.3-r2)
+(20/27) Installing apk-tools (2.14.0-r5)
+(21/27) Installing busybox-openrc (1.36.1-r15)
+(22/27) Installing busybox-suid (1.36.1-r15)
+(23/27) Installing scanelf (1.3.7-r2)
+(24/27) Installing musl-utils (1.2.4_git20230717-r4)
+(25/27) Installing libc-utils (0.7.2-r5)
+(26/27) Installing alpine-base (3.19.0-r0)
+(27/27) Installing openssl (3.1.4-r2)
+Executing busybox-1.36.1-r15.trigger
+OK: 10 MiB in 27 packages
+[   26.296374] Installing packages to root filesystem: ok.
+ok.
+
+
+   OpenRC 0.52.1 is starting up Linux 6.6.4-1-lts (x86_64)
+
+ * /proc is already mounted
+ * Mounting /run ... [ ok ]
+ * /run/openrc: creating directory
+ * /run/lock: creating directory
+ * /run/lock: correcting owner
+root@4f04dba2557a:/app# cat > /tmp/cap2.py <<'EOF'
+> import socket, time, sys
+> host,port='127.0.0.1',4555
+> buf=b''
+> s=socket.create_connection((host,port),timeout=5)
+> s.settimeout(2)
+> for _ in range(5):
+>     s.sendall(b'\n')
+>     time.sleep(0.5)
+> end=time.time()+25
+> while time.time()<end:
+>     try:
+>         d=s.recv(4096)
+>         if not d: break
+>         buf+=d
+>     except socket.timeout:
+>         pass
+>     except Exception:
+>         break
+> out=buf.decode(errors='replace')
+> sys.stdout.write(out)
+> open('/tmp/bootout.txt','w').write(out)
+> EOF
+root@4f04dba2557a:/app# python3 /tmp/cap2.py
+
+
+
+
+
+ * Caching service dependencies ... [ ok ]
+ * Remounting devtmpfs on /dev ... [ ok ]
+root@4f04dba2557a:/app# cat > /tmp/cap3.py <<'EOF'
+> import socket, time, sys
+> host,port='127.0.0.1',4555
+> buf=b''
+> s=socket.create_connection((host,port),timeout=5)
+> s.settimeout(2)
+> end=time.time()+40
+> while time.time()<end:
+>     try:
+>         d=s.recv(4096)
+>         if not d:
+>             time.sleep(0.3); continue
+>         buf+=d
+>     except socket.timeout:
+>         s.sendall(b'\n')
+>     except Exception:
+>         break
+> out=buf.decode(errors='replace')
+> sys.stdout.write(out)
+> open('/tmp/bootout.txt','w').write(out)
+> EOF
+root@4f04dba2557a:/app# python3 /tmp/cap3.py
+ * Verifying modloop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ [ ok ]
+ * Mounting security filesystem ... root@4f04dba2557a:/app# cat > /tmp/cap4.py <<'EOF'
+> import socket, time, sys
+> host,port='127.0.0.1',4555
+> buf=b''
+> s=socket.create_connection((host,port),timeout=5)
+> s.settimeout(2)
+> end=time.time()+60
+> last=time.time()
+> while time.time()<end:
+>     try:
+>         d=s.recv(4096)
+>         if not d:
+>             time.sleep(0.3); continue
+>         buf+=d
+>     except socket.timeout:
+>         if time.time()-last>3:
+>             s.sendall(b'\n'); last=time.time()
+>     except Exception:
+>         break
+> out=buf.decode(errors='replace')
+> sys.stdout.write(out)
+> open('/tmp/bootout.txt','w').write(out)
+> EOF
+root@4f04dba2557a:/app# python3 /tmp/cap4.py
+ [ ok ]
+ * Loading modules ... [ ok ]
+ * Setting system clock using the hardware clock [UTC] ... [ ok ]
+ * Checking local filesystems  ... [ ok ]
+ * Remounting filesystems ... [ ok ]
+ * Mounting local filesystems ... [ ok ]
+ * Configuring kernel parameters ... [ ok ]
+ * Migrating /var/lock to /run/lock ... [ ok ]
+ * Creating user login records ... [ ok ]
+ * Cleaning /tmp directory ... [ ok ]
+ * Setting hostname ... [ ok ]
+ * Starting busybox syslog ... [ ok ]
+ * Starting firstboot ... [ ok ]
+
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login:
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login: root@4f04dba2557a:/app# cat > /tmp/setup.py <<'EOF'
+> import socket, time, sys
+>
+> def main():
+>     s = socket.create_connection(('127.0.0.1',4555), timeout=10)
+>     s.settimeout(2)
+>     buf = b''
+>     pos = 0
+>     def read_until(token, timeout=40):
+>         nonlocal buf, pos
+>         end = time.time()+timeout
+>         while time.time() < end:
+>             if token in buf[pos:]:
+>                 idx = buf.index(token, pos)
+>                 pos = idx + len(token)
+>                 return True
+>             try:
+>                 d = s.recv(4096)
+>                 if not d:
+>                     time.sleep(0.1); continue
+>                 buf += d
+>             except socket.timeout:
+>                 pass
+>             except Exception:
+>                 return False
+>         return False
+>     def send(line):
+>         s.sendall(line.encode())
+>     def run(cmd, timeout=40):
+>         send(cmd + '\n')
+>         ok = read_until(b'RDY>', timeout=timeout)
+>         seg = buf[:pos].decode(errors='replace')
+>         # strip the echoed command up to RDY>
+>         return seg
+>
+>     print('== wait login ==', read_until(b'login:', 30))
+>     send('root\n')
+>     print('== wait shell ==', read_until(b'#', 20))
+>     send("export PS1='RDY> '\n")
+>     print('== wait ps1 ==', read_until(b'RDY>', 15))
+>
+>     cmds = [
+>         "echo 'root:password123' | chpasswd",
+>         "ip link show eth0",
+>         "udhcpc -i eth0 -n -q -t 8 -A 2",
+>         "ip -4 addr show eth0",
+>         "ip route",
+>         "printf 'https://dl-cdn.alpinelinux.org/alpine/v3.19/main\nhttps://dl-cdn.alpinelinux.org/alpine/v3.19/community\n' > /etc/apk/repositories",
+>         "apk update",
+>         "apk add openssh",
+>         "ssh-keygen -A",
+>         "sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config",
+>         "sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config",
+>         "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config",
+>         "/usr/sbin/sshd",
+>         "netstat -ltn 2>/dev/null | grep ':22' || ss -ltn 2>/dev/null | grep ':22'",
+>     ]
+>     for c in cmds:
+>         out = run(c, timeout=60)
+>         print('### CMD:', c)
+>         print(out)
+>     send('echo SETUP_COMPLETE\n')
+>     read_until(b'RDY>', 10)
+>     print('=== FINAL BUF TAIL ===')
+>     print(buf[-1500:].decode(errors='replace'))
+>
+> main()
+> EOF
+root@4f04dba2557a:/app# echo written
+written
+root@4f04dba2557a:/app# python3 /tmp/setup.py
+== wait login == False
+== wait shell == True
+== wait ps1 == True
+### CMD: echo 'root:password123' | chpasswd
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# export PS1='RDY> '
+RDY>
+^[[40;14R### CMD: ip link show eth0
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# export PS1='RDY> '
+RDY> echo 'root:password123' | chpasswd
+chpasswd: password for 'root' changed
+RDY>
+^[[40;14R### CMD: udhcpc -i eth0 -n -q -t 8 -A 2
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# export PS1='RDY> '
+RDY> echo 'root:password123' | chpasswd
+chpasswd: password for 'root' changed
+RDY> ip link show eth0
+2: eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+^[[40;14RRDY>
+### CMD: ip -4 addr show eth0
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# export PS1='RDY> '
+RDY> echo 'root:password123' | chpasswd
+chpasswd: password for 'root' changed
+RDY> ip link show eth0
+2: eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+RDY>
+^[[40;14R### CMD: ip route
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# export PS1='RDY> '
+RDY> echo 'root:password123' | chpasswd
+chpasswd: password for 'root' changed
+RDY> ip link show eth0
+2: eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+RDY>
+^[[40;14R### CMD: printf 'https://dl-cdn.alpinelinux.org/alpine/v3.19/main
+https://dl-cdn.alpinelinux.org/alpine/v3.19/community
+' > /etc/apk/repositories
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# export PS1='RDY> '
+RDY> echo 'root:password123' | chpasswd
+chpasswd: password for 'root' changed
+RDY> ip link show eth0
+2: eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+RDY>
+^[[40;14R

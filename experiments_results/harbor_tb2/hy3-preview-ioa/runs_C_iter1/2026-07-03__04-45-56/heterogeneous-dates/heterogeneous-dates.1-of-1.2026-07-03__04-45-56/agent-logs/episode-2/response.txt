@@ -1,0 +1,18 @@
+{
+  "analysis": "Both files have a header row. High file uses ISO dates (YYYY-MM-DD). Low file uses mixed formats (MM/DD/YYYY HH:MM:SS and MM-DD-YYYY HH:MM:SS). I'll match dates by their calendar day, compute high-low per day, average them, and write to avg_temp.txt. I'll use a Python script with an explicit exit-code assertion per the earlier-avoided pitfall.",
+  "plan": "Write a Python script via heredoc that normalizes dates to (year,month,day) tuples, builds dicts for high/low, computes the per-day difference, averages, and writes the number to /app/avg_temp.txt. Then echo EXIT_CODE to confirm completion, and cat the result file to verify.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'PYEOF'\nimport csv, re\n\ndef norm(s):\n    s = s.split()[0]\n    m, d, y = [int(x) for x in re.split(r'[/-]', s)]\n    return (y, m, d)\n\nhigh = {}\nwith open('/app/daily_temp_sf_high.csv') as f:\n    r = csv.reader(f)\n    next(r)\n    for row in r:\n        if not row:\n            continue\n        high[norm(row[0])] = float(row[1])\n\nlow = {}\nwith open('/app/daily_temp_sf_low.csv') as f:\n    r = csv.reader(f)\n    next(r)\n    for row in r:\n        if not row:\n            continue\n        low[norm(row[0])] = float(row[1])\n\ndiffs = [high[k] - low[k] for k in high if k in low]\navg = sum(diffs) / len(diffs)\nwith open('/app/avg_temp.txt', 'w') as f:\n    f.write(str(avg))\nprint('matched days:', len(diffs))\nprint('avg diff:', avg)\nPYEOF\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "echo EXIT_CODE: $?\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cat /app/avg_temp.txt\n",
+      "duration": 0.1
+    }
+  ]
+}

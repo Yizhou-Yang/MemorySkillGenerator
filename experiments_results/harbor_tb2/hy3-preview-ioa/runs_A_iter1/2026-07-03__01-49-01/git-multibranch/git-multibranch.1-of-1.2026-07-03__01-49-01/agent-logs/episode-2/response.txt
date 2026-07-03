@@ -1,0 +1,12 @@
+{
+  "analysis": "sshd is running and accepting password auth as the git user. Now I need to: create the bare repo /git/project, create deployment directories, write a post-receive hook that deploys main->/srv/www and dev->/srv/www/dev, generate a self-signed cert, configure nginx for HTTPS on 8443, and start nginx. Then test by pushing.",
+  "plan": "Create SSL dir and deployment dirs, generate a self-signed cert, init the bare repo, write the post-receive hook, fix ownership, write the nginx HTTPS config, and start nginx. I'll then test the whole flow.",
+  "commands": [
+    {"keystrokes": "mkdir -p /etc/nginx/ssl /srv/www/dev\n", "duration": 0.1},
+    {"keystrokes": "openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/server.key -out /etc/nginx/ssl/server.crt -days 365 -subj \"/CN=localhost\"\n", "duration": 1.0},
+    {"keystrokes": "git init --bare /git/project >/dev/null && chown -R git:git /git/project && chmod -R u+rwx /git/project\n", "duration": 0.5},
+    {"keystrokes": "cat > /git/project/hooks/post-receive <<'EOF'\n#!/bin/bash\nset -e\nwhile read oldrev newrev refname; do\n  branch=\"${refname#refs/heads/}\"\n  case \"$branch\" in\n    main) dest=/srv/www ;;\n    dev)  dest=/srv/www/dev ;;\n    *) continue ;;\n  esac\n  mkdir -p \"$dest\"\n  git archive \"$newrev\" | tar -x -C \"$dest\"\n  find \"$dest\" -type f -exec chmod 644 {} \\;\n  find \"$dest\" -type d -exec chmod 755 {} \\;\ndone\nEOF\n", "duration": 0.2},
+    {"keystrokes": "chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive\n", "duration": 0.1},
+    {"keystrokes": "chown -R git:git /srv/www\n", "duration": 0.1}
+  ]
+}

@@ -1,0 +1,35 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@482da5a9598d:/app/filesystem_spec# python - <<'EOF'
+> import asyncio
+> import fsspec
+> from fsspec.asyn import AsyncFileSystem
+>
+> calls = []
+>
+> class DummyAsync(AsyncFileSystem):
+>     protocol = "dummyasync"
+>     async def open_async(self, path, mode="rb", **kwargs):
+>         calls.append((path, mode, kwargs))
+>         return "OPENED"
+>
+> fsspec.register_implementation("dummyasync", DummyAsync, clobber=True)
+>
+> async def test():
+>     fs = DummyAsync()
+>     dirfs = fsspec.filesystem("dir", path="/my/base", fs=fs)
+>     res = await dirfs.open_async("hello", "wb", some_kw="x")
+>     print("result:", res)
+>     print("calls:", calls)
+>     assert calls == [("/my/base/hello", "wb", {"some_kw": "x"})], calls
+>     print("DELEGATION OK")
+>
+> asyncio.run(test())
+> EOF
+result: OPENED
+calls: [('/my/base/hello', 'wb', {'some_kw': 'x'})]
+DELEGATION OK
+root@482da5a9598d:/app/filesystem_spec#

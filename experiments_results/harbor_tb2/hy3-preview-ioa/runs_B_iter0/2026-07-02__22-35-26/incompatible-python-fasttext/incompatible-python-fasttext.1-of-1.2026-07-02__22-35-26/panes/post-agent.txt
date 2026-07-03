@@ -1,0 +1,168 @@
+root@c40974207eed:/app# which python python3; python --version; python3 --version
+/usr/local/bin/python
+/usr/local/bin/python3
+Python 3.13.1
+Python 3.13.1
+root@c40974207eed:/app# python -c 'import fasttext; print(fasttext.__file__)'
+/usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+root@c40974207eed:/app# ls -la /usr/local/lib/python3.13/site-packages/fasttext/
+total 44
+drwxr-xr-x  5 root root  4096 Jul  2 14:51 .
+drwxr-xr-x 14 root root  4096 Jul  2 14:51 ..
+-rw-r--r--  1 root root 19636 Jul  2 14:51 FastText.py
+-rw-r--r--  1 root root   659 Jul  2 14:51 __init__.py
+drwxr-xr-x  2 root root  4096 Jul  2 14:51 __pycache__
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 tests
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 util
+root@c40974207eed:/app# python -c 'import fasttext, fasttext.FastText as ft; print(ft.__file__)'
+/usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@c40974207eed:/app# cat /usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+# Copyright (c) 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from .FastText import train_supervised
+from .FastText import train_unsupervised
+from .FastText import load_model
+from .FastText import tokenize
+from .FastText import EOS
+from .FastText import BOW
+from .FastText import EOW
+
+from .FastText import cbow
+from .FastText import skipgram
+from .FastText import supervised
+root@c40974207eed:/app# grep -n '_fasttext' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@c40974207eed:/app# sed -n '1,80p' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+# Copyright (c) 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+import fasttext_pybind as fasttext
+import numpy as np
+import multiprocessing
+from itertools import chain
+
+loss_name = fasttext.loss_name
+model_name = fasttext.model_name
+EOS = "</s>"
+BOW = "<"
+EOW = ">"
+
+displayed_errors = {}
+
+
+class _Meter:
+    def __init__(self, fasttext_model, meter):
+        self.f = fasttext_model
+        self.m = meter
+
+    def score_vs_true(self, label):
+        """Return scores and the gold of each sample for a specific label"""
+        label_id = self.f.get_label_id(label)
+        pair_list = self.m.scoreVsTrue(label_id)
+
+        if pair_list:
+            y_scores, y_true = zip(*pair_list)
+        else:
+            y_scores, y_true = ([], ())
+
+        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+
+    def precision_recall_curve(self, label=None):
+        """Return precision/recall curve"""
+        if label:
+            label_id = self.f.get_label_id(label)
+            pair_list = self.m.precisionRecallCurveLabel(label_id)
+        else:
+            pair_list = self.m.precisionRecallCurve()
+
+        if pair_list:
+            precision, recall = zip(*pair_list)
+        else:
+            precision, recall = ([], ())
+
+        return np.array(precision, copy=False), np.array(recall, copy=False)
+
+    def precision_at_recall(self, recall, label=None):
+        """Return precision for a given recall"""
+        if label:
+            label_id = self.f.get_label_id(label)
+            precision = self.m.precisionAtRecallLabel(label_id, recall)
+        else:
+            precision = self.m.precisionAtRecall(recall)
+
+        return precision
+
+    def recall_at_precision(self, precision, label=None):
+        """Return recall for a given precision"""
+        if label:
+            label_id = self.f.get_label_id(label)
+            recall = self.m.recallAtPrecisionLabel(label_id, precision)
+        else:
+            recall = self.m.recallAtPrecision(precision)
+
+        return recall
+
+
+class _FastText:
+    """
+root@c40974207eed:/app# python -c 'import fasttext_pybind'
+root@c40974207eed:/app# python -c 'import fasttext; fasttext.train_supervised'
+root@c40974207eed:/app# printf '__label__greet hi there\n__label__bye see you\n' > /tmp/ft_train.txt
+root@c40974207eed:/app# python -c "import fasttext; m=fasttext.train_supervised('/tmp/ft_train.txt', epoch=2); print(m.predict('hi'))"
+Read 0M words
+Number of words:  5
+Number of labels: 2
+Progress: 100.0% words/sec/thread:     147 lr:  0.000000 avg.loss:  0.693599 ETA:   0h 0m 0s
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; m=fasttext.train_supervised('/tmp/ft_train.txt', epoch=2); print(m.predict('hi'))
+                                                                                      ~~~~~~~~~^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 239, in predict
+    return labels, np.array(probs, copy=False)
+                   ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+ValueError: Unable to avoid copy while creating an array as requested.
+If using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).
+For more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.
+root@c40974207eed:/app# python -c 'import numpy; print(numpy.__version__)'
+2.5.0
+root@c40974207eed:/app# grep -n 'copy=False' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+239:            return labels, np.array(probs, copy=False)
+root@c40974207eed:/app# cp /usr/local/lib/python3.13/site-packages/fasttext/FastText.py /tmp/FastText.py.bak
+root@c40974207eed:/app# sed -i -E 's/np\.array\(([^,]*), copy=False\)/np.asarray(\1)/g' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@c40974207eed:/app# grep -n 'np.asarray\|copy=False' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.asarray(y_scores), np.asarray(y_true)
+56:        return np.asarray(precision), np.asarray(recall)
+239:            return labels, np.asarray(probs)
+root@c40974207eed:/app# python -c "import fasttext; m=fasttext.train_supervised('/tmp/ft_train.txt', epoch=2); print(m.predict('hi'))"
+Read 0M words
+Number of words:  5
+Number of labels: 2
+Progress: 100.0% words/sec/thread:      32 lr:  0.000000 avg.loss:      -nan ETA:   0h 0m 0s
+(('__label__greet',), array([0.50025082]))
+root@c40974207eed:/app# python -c "import fasttext; print('tokenize:', fasttext.tokenize('hello world')); m=fasttext.train_supervised('/tmp/ft_train.txt', epoch
+=5); print('predict:', m.predict('see you'))"
+tokenize: ['hello', 'world']
+Read 0M words
+Number of words:  5
+Number of labels: 2
+Progress: 100.0% words/sec/thread:      66 lr:  0.000000 avg.loss:      -nan ETA:   0h 0m 0s
+predict: (('__label__bye',), array([0.50023127]))
+root@c40974207eed:/app#

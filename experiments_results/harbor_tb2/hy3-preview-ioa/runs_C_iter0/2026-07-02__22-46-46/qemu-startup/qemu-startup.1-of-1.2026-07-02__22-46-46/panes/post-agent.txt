@@ -1,0 +1,586 @@
+root@fb781a110bd4:/app# asciinema rec --stdin /logs/agent.cast
+asciinema: recording asciicast to /logs/agent.cast
+asciinema: press <ctrl-d> or type "exit" when you're done
+root@fb781a110bd4:/app# clear
+root@fb781a110bd4:/app# uname -a; echo '---'; which qemu-system-x86_64 qemu-system-i386; qemu-system-x86_64 --version 2>/dev/null
+Linux fb781a110bd4 5.4.241-1-tlinux4-0017.14 #1 SMP Thu Oct 24 18:51:12 CST 2024 x86_64 GNU/Linux
+---
+/usr/bin/qemu-system-x86_64
+/usr/bin/qemu-system-i386
+echo '--- find iso'; find / -iname 'alpine*.iso' 2>/dev/null; ls -la /app 2>/dev/null; ls -la /tmp 2>/dev/null
+echo '--- tools'; which python3 nc socat 7z isoinfo mount xorriso 2>/dev/null
+QEMU emulator version 5.2.0 (Debian 1:5.2+dfsg-11+deb11u5)
+Copyright (c) 2003-2020 Fabrice Bellard and the QEMU Project developers
+root@fb781a110bd4:/app# echo '--- find iso'; find / -iname 'alpine*.iso' 2>/dev/null; ls -la /app 2>/dev/null; ls -la /tmp 2>/dev/null
+--- find iso
+/app/alpine.iso
+total 980176
+drwxr-xr-x  2 root root       4096 Jul  2 15:14 .
+drwxr-xr-x 23 root root       4096 Jul  2 15:42 ..
+-rw-r--r--  1 root root     197120 Jul  2 15:14 alpine-disk.qcow2
+-rw-r--r--  1 root root 1003487232 Dec  7  2023 alpine.iso
+total 16
+drwxrwxrwt  3 root root 4096 Jul  2 15:42 .
+drwxr-xr-x 23 root root 4096 Jul  2 15:42 ..
+-rwxr-xr-x  1 root root  923 Jul  2 12:45 get-asciinema-timestamp.sh
+drwx------  2 root root 4096 Jul  2 15:42 tmux-0
+root@fb781a110bd4:/app# echo '--- tools'; which python3 nc socat 7z isoinfo mount xorriso 2>/dev/null
+--- tools
+/usr/bin/python3
+/bin/nc
+/bin/mount
+root@fb781a110bd4:/app# mkdir -p /mnt/iso /app/run
+root@fb781a110bd4:/app# mount -o loop,ro -t iso9660 /app/alpine.iso /mnt/iso 2>&1; echo exit=$?
+mount: /mnt/iso: mount failed: Operation not permitted.
+exit=1
+root@fb781a110bd4:/app# ls -la /mnt/iso/boot 2>/dev/null; echo '---'; ls /mnt/iso/boot 2>/dev/null
+---
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/extract.py
+> import struct, sys, os
+> ISO = '/app/alpine.iso'
+> OUT = '/app/run'
+> def read_sectors(f, lba, count):
+>     f.seek(lba*2048)
+>     return f.read(2048*count)
+> def parse_entry(rec):
+>     length = rec[0]
+>     if length == 0:
+>         return None
+>     ext_lba = struct.unpack_from('<I', rec, 2)[0]
+>     data_len = struct.unpack_from('<I', rec, 10)[0]
+>     flags = rec[25]
+>     name_len = rec[length-1]
+>     name = rec[length:length+name_len]
+>     is_dir = bool(flags & 0x02)
+>     nm = name.split(b';')[0]
+>     return (ext_lba, data_len, is_dir, nm)
+> def list_dir(f, lba, length):
+>     buf = read_sectors(f, lba, (length+2047)//2048)
+>     entries = []
+>     off = 0
+>     while off < len(buf):
+>         reclen = buf[off]
+>         if reclen == 0:
+>             break
+>         rec = buf[off:off+reclen]
+>         e = parse_entry(rec)
+>         if e:
+>             entries.append(e)
+>         off += reclen
+>     return entries
+> def main():
+>     f = open(ISO, 'rb')
+>     lba = 16
+>     pvd = None
+>     while True:
+>         vd = read_sectors(f, lba, 1)
+>         if vd[1:6] != b'CD001':
+>             break
+>         if vd[0] == 1:
+>             pvd = vd
+>             break
+>         if vd[0] == 255:
+>             break
+>         lba += 1
+>     if pvd is None:
+>         print('PVD not found'); sys.exit(1)
+>     root_e = parse_entry(pvd[156:156+34])
+>     print('root entries:')
+>     for e in list_dir(f, root_e[0], root_e[1]):
+>         print('  ', e[3], 'dir' if e[2] else 'file')
+>     def find(parent_e, want):
+>         for e in list_dir(f, parent_e[0], parent_e[1]):
+>             if e[3].decode('latin1').lower() == want:
+>                 return e
+>         return None
+>     boot = find(root_e, 'boot')
+>     if not boot:
+>         print('boot not found'); sys.exit(1)
+>     wanted = {}
+>     for e in list_dir(f, boot[0], boot[1]):
+>         nm = e[3].decode('latin1').lower()
+>         print('  boot/', e[3])
+>         if nm.startswith('vmlinuz') and 'lts' in nm:
+>             wanted.setdefault('vmlinuz-lts', e)
+>         if nm.startswith('initramfs') and 'lts' in nm:
+>             wanted.setdefault('initramfs-lts', e)
+>     os.makedirs(OUT, exist_ok=True)
+>     for key, e in wanted.items():
+>         f.seek(e[0]*2048)
+>         data = f.read(e[1])
+>         open(os.path.join(OUT, key), 'wb').write(data)
+>         print('wrote', key, e[1], 'bytes')
+>     if 'vmlinuz-lts' not in wanted or 'initramfs-lts' not in wanted:
+>         print('MISSING; got', list(wanted.keys())); sys.exit(1)
+> main()
+> PYEOF
+root@fb781a110bd4:/app# python3 /app/run/extract.py
+root entries:
+   b'' dir
+   b'' dir
+   b'' file
+   b'' dir
+   b'' dir
+   b'' dir
+boot not found
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/extract.py
+> import struct, sys, os
+> ISO = '/app/alpine.iso'
+> OUT = '/app/run'
+> def read_sectors(f, lba, count):
+>     f.seek(lba*2048)
+>     return f.read(2048*count)
+> def parse_entry(rec):
+>     length = rec[0]
+>     if length == 0:
+>         return None
+>     ext_lba = struct.unpack_from('<I', rec, 2)[0]
+>     data_len = struct.unpack_from('<I', rec, 10)[0]
+>     flags = rec[25]
+>     name_len = rec[32]
+>     name = rec[33:33+name_len]
+>     is_dir = bool(flags & 0x02)
+>     nm = name.split(b';')[0]
+>     return (ext_lba, data_len, is_dir, nm)
+> def list_dir(f, lba, length):
+>     buf = read_sectors(f, lba, (length+2047)//2048)
+>     entries = []
+>     off = 0
+>     while off < len(buf):
+>         reclen = buf[off]
+>         if reclen == 0:
+>             break
+>         rec = buf[off:off+reclen]
+>         e = parse_entry(rec)
+>         if e:
+>             entries.append(e)
+>         off += reclen
+>     return entries
+> def main():
+>     f = open(ISO, 'rb')
+>     lba = 16
+>     pvd = None
+>     while True:
+>         vd = read_sectors(f, lba, 1)
+>         if vd[1:6] != b'CD001':
+>             break
+>         if vd[0] == 1:
+>             pvd = vd; break
+>         if vd[0] == 255:
+>             break
+>         lba += 1
+>     if pvd is None:
+>         print('PVD not found'); sys.exit(1)
+>     root_e = parse_entry(pvd[156:156+34])
+>     print('root entries:')
+>     for e in list_dir(f, root_e[0], root_e[1]):
+>         print('  ', e[3], 'dir' if e[2] else 'file')
+>     def find(parent_e, want):
+>         for e in list_dir(f, parent_e[0], parent_e[1]):
+>             if e[3].decode('latin1').lower() == want:
+>                 return e
+>         return None
+>     boot = find(root_e, 'boot')
+>     if not boot:
+>         print('boot not found'); sys.exit(1)
+>     wanted = {}
+>     for e in list_dir(f, boot[0], boot[1]):
+>         nm = e[3].decode('latin1').lower()
+>         print('  boot/', e[3])
+>         if nm.startswith('vmlinuz') and 'lts' in nm:
+>             wanted.setdefault('vmlinuz-lts', e)
+>         if nm.startswith('initramfs') and 'lts' in nm:
+>             wanted.setdefault('initramfs-lts', e)
+>     os.makedirs(OUT, exist_ok=True)
+>     for key, e in wanted.items():
+>         f.seek(e[0]*2048)
+>         data = f.read(e[1])
+>         open(os.path.join(OUT, key), 'wb').write(data)
+>         print('wrote', key, e[1], 'bytes')
+>     if 'vmlinuz-lts' not in wanted or 'initramfs-lts' not in wanted:
+>         print('MISSING; got', list(wanted.keys())); sys.exit(1)
+> main()
+> PYEOF
+root@fb781a110bd4:/app# python3 /app/run/extract.py
+root entries:
+   b'\x00' dir
+   b'\x01' dir
+   b'.ALPINE_RELEASE' file
+   b'APKS' dir
+   b'BOOT' dir
+   b'EFI' dir
+  boot/ b'\x00'
+  boot/ b'\x01'
+  boot/ b'AMD_UCODE.IMG'
+  boot/ b'CONFIG_LTS.'
+  boot/ b'DTBS_LTS'
+  boot/ b'GRUB'
+  boot/ b'INITRAMFS_LTS.'
+  boot/ b'INTEL_UCODE.IMG'
+  boot/ b'MODLOOP_LTS.'
+  boot/ b'SYSLINUX'
+  boot/ b'SYSTEM.MAP_LTS'
+  boot/ b'VMLINUZ_LTS.'
+wrote initramfs-lts 20486092 bytes
+wrote vmlinuz-lts 11879168 bytes
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/walk.py
+> import struct
+> ISO='/app/alpine.iso'
+> def read_sectors(f,lba,c):
+>     f.seek(lba*2048); return f.read(2048*c)
+> def parse_entry(rec):
+>     length=rec[0]
+>     if length==0: return None
+>     ext_lba=struct.unpack_from('<I',rec,2)[0]
+>     data_len=struct.unpack_from('<I',rec,10)[0]
+>     flags=rec[25]
+>     name_len=rec[32]
+>     name=rec[33:33+name_len]
+>     nm=name.split(b';')[0]
+>     return (ext_lba,data_len,bool(flags&2),nm)
+> def list_dir(f,lba,length):
+>     buf=read_sectors(f,lba,(length+2047)//2048)
+>     out=[]; off=0
+>     while off<len(buf):
+>         rl=buf[off]
+>         if rl==0: break
+>         e=parse_entry(buf[off:off+rl])
+>         if e: out.append(e)
+>         off+=rl
+>     return out
+> f=open(ISO,'rb')
+> lba=16; pvd=None
+> while True:
+>     vd=read_sectors(f,lba,1)
+>     if vd[1:6]!=b'CD001': break
+>     if vd[0]==1: pvd=vd; break
+>     if vd[0]==255: break
+>     lba+=1
+> root=parse_entry(pvd[156:156+34])
+> def walk(e,path):
+>     for x in list_dir(f,e[0],e[1]):
+>         nm=x[3].decode('latin1')
+>         if nm in ('\x00','\x01'): continue
+>         full=path+'/'+nm
+>         if x[2]:
+>             walk(x,full)
+>         else:
+>             if nm.lower().endswith('.cfg'):
+>                 f.seek(x[0]*2048); data=f.read(x[1])
+>                 print('======== '+full+' ========')
+>                 print(data.decode('latin1','replace'))
+>                 print('------------------------------------')
+> walk(root,'')
+> PYEOF
+root@fb781a110bd4:/app# python3 /app/run/walk.py
+======== /BOOT/GRUB/GRUB.CFG ========
+set timeout=1
+
+menuentry "Linux lts" {
+linux   /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage quiet
+initrd  /boot/intel-ucode.img /boot/amd-ucode.img /boot/initramfs-lts
+}
+
+------------------------------------
+======== /BOOT/SYSLINUX/SYSLINUX.CFG ========
+TIMEOUT 10
+PROMPT 1
+DEFAULT lts
+
+LABEL lts
+MENU LABEL Linux lts
+KERNEL /boot/vmlinuz-lts
+INITRD /boot/intel-ucode.img,/boot/amd-ucode.img,/boot/initramfs-lts
+FDTDIR /boot/dtbs-lts
+APPEND modules=loop,squashfs,sd-mod,usb-storage quiet
+
+------------------------------------
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/grab.py
+> import struct, os
+> ISO='/app/alpine.iso'; OUT='/app/run'
+> def rs(f,lba,c):
+>     f.seek(lba*2048); return f.read(2048*c)
+> def pe(rec):
+>     if rec[0]==0: return None
+>     ext=struct.unpack_from('<I',rec,2)[0]; dl=struct.unpack_from('<I',rec,10)[0]
+>     fl=rec[25]; nl=rec[32]; nm=rec[33:33+nl].split(b';')[0]
+>     return (ext,dl,bool(fl&2),nm)
+> def ld(f,lba,lg):
+>     buf=rs(f,lba,(lg+2047)//2048); out=[]; off=0
+>     while off<len(buf):
+>         rl=buf[off]
+>         if rl==0: break
+>         e=pe(buf[off:off+rl])
+>         if e: out.append(e)
+>         off+=rl
+>     return out
+> f=open(ISO,'rb')
+> lba=16; pvd=None
+> while True:
+>     vd=rs(f,lba,1)
+>     if vd[1:6]!=b'CD001': break
+>     if vd[0]==1: pvd=vd; break
+>     if vd[0]==255: break
+>     lba+=1
+> root=pe(pvd[156:156+34])
+> boot=None
+> for e in ld(f,root[0],root[1]):
+>     if e[3].decode('latin1').upper()=='BOOT': boot=e; break
+> for nm in ['INTEL_UCODE.IMG','AMD_UCODE.IMG']:
+>     found=False
+>     for e in ld(f,boot[0],boot[1]):
+>         if e[3].decode('latin1').upper()==nm:
+>             f.seek(e[0]*2048); data=f.read(e[1])
+>             open(os.path.join(OUT,nm.lower()),'wb').write(data)
+>             print('wrote',nm.lower(),e[1]); found=True; break
+>     if not found: print('WARN missing',nm)
+> PYEOF
+root@fb781a110bd4:/app# python3 /app/run/grab.py
+cat << 'PYEOF' > /app/run/relay.py
+import socket, threading, time, os
+QHOST='127.0.0.1'; QPORT=4545; LPORT=6665
+READY='/app/run/ready'
+BUF=bytearray()
+buf_lock=threading.Lock()
+state={'client':None}
+state_lock=threading.Lock()
+qc=None
+def escape_iac(d): return d.replace(b'\xff', b'\xff\xff')
+def connect_qemu():
+    while True:
+        try:
+            s=socket.create_connection((QHOST,QPORT),timeout=5); s.settimeout(0.5); return s
+        except Exception:
+            time.sleep(0.3)
+def qemu_loop():
+    global qc
+    while True:
+        if qc is None:
+            try: qc=connect_qemu(); print('relay: connected to qemu serial', flush=True)
+            except Exception: time.sleep(0.3); continue
+        try: data=qc.recv(65536)
+        except socket.timeout: continue
+        except Exception: qc=None; continue
+        if not data: qc=None; continue
+        with buf_lock:
+            BUF.extend(data); buf=bytes(BUF)
+        with state_lock: c=state['client']
+        if c is not None:
+            try: c.sendall(escape_iac(data))
+            except Exception:
+                with state_lock: state['client']=None
+        if not os.path.exists(READY) and b'login:' in buf.lower():
+            try: open(READY,'w').write('ready\n')
+            except Exception: pass
+            print('relay: READY login prompt seen', flush=True)
+def client_loop(conn):
+    with state_lock: state['client']=conn
+    with buf_lock: hist=bytes(BUF)
+    try: conn.sendall(escape_iac(hist))
+    except Exception: pass
+    iac=False; iac_cmd=None; sub=False
+    while True:
+        try: chunk=conn.recv(4096)
+        except Exception: break
+        if not chunk: break
+        out=bytearray()
+        for b in chunk:
+            if sub:
+                if b==240: sub=False
+                continue
+            if iac:
+                if iac_cmd is None:
+                    iac_cmd=b
+                    if b==250: sub=True; iac=False
+                    elif b in (240,241,242,243,244): iac=False
+                else:
+                    opt=b
+                    try:
+                        if iac_cmd in (251,252): conn.sendall(bytes([255,253,opt]))
+                        elif iac_cmd in (253,254): conn.sendall(bytes([255,251,opt]))
+                    except Exception: pass
+                    iac=False; iac_cmd=None
+                continue
+            if b==255: iac=True; iac_cmd=None; continue
+            out.append(b)
+        if out and qc is not None:
+            try: qc.sendall(bytes(out))
+            except Exception: pass
+    with state_lock:
+        if state['client'] is conn: state['client']=None
+    try: conn.close()
+    except Exception: pass
+def main():
+    threading.Thread(target=qemu_loop, daemon=True).start()
+    ls=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR,1)
+    ls.bind((QHOST,LPORT)); ls.listen(1)
+    print('relay: listening on %d' % LPORT, flush=True)
+    while True:
+        conn,_=ls.accept()
+        threading.Thread(target=client_loop, args=(conn,), daemon=True).start()
+main()
+PYEOF
+cat << 'EOF' > /app/run/launch.sh
+#!/bin/bash
+cd /app/run
+rm -f /app/run/ready
+nohup python3 /app/run/relay.py > /app/run/relay.log 2>&1 &
+echo "relay pid $!"
+sleep 1
+KVM=''
+[ -e /dev/kvm ] && KVM='-enable-kvm'
+nohup qemu-system-x86_64 $KVM -m 512 -no-reboot \
+  -display none -vga none -monitor none \
+  -kernel /app/run/vmlinuz-lts \
+  -initrd /app/run/intel-ucode.img,/app/run/amd-ucode.img,/app/run/initramfs-lts \
+  -append "modules=loop,squashfs,sd-mod,usb-storage console=ttyS0" \
+  -cdrom /app/alpine.iso \
+  -serial tcp:127.0.0.1:4545,server \
+  > /app/run/qemu.log 2>&1 &
+echo "qemu pid $!"
+EOF
+ls -la /app/run
+wrote intel_ucode.img 7367952
+wrote amd_ucode.img 61440
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/relay.py
+> import socket, threading, time, os
+> QHOST='127.0.0.1'; QPORT=4545; LPORT=6665
+> READY='/app/run/ready'
+> BUF=bytearray()
+> buf_lock=threading.Lock()
+> state={'client':None}
+> state_lock=threading.Lock()
+> qc=None
+> def escape_iac(d): return d.replace(b'\xff', b'\xff\xff')
+> def connect_qemu():
+>     while True:
+>         try:
+>             s=socket.create_connection((QHOST,QPORT),timeout=5); s.settimeout(0.5); return s
+>         except Exception:
+>             time.sleep(0.3)
+> def qemu_loop():
+>     global qc
+>     while True:
+>         if qc is None:
+>             try: qc=connect_qemu(); print('relay: connected to qemu serial', flush=True)
+>             except Exception: time.sleep(0.3); continue
+>         try: data=qc.recv(65536)
+>         except socket.timeout: continue
+>         except Exception: qc=None; continue
+>         if not data: qc=None; continue
+>         with buf_lock:
+>             BUF.extend(data); buf=bytes(BUF)
+>         with state_lock: c=state['client']
+>         if c is not None:
+>             try: c.sendall(escape_iac(data))
+>             except Exception:
+>                 with state_lock: state['client']=None
+>         if not os.path.exists(READY) and b'login:' in buf.lower():
+>             try: open(READY,'w').write('ready\n')
+>             except Exception: pass
+>             print('relay: READY login prompt seen', flush=True)
+> def client_loop(conn):
+>     with state_lock: state['client']=conn
+>     with buf_lock: hist=bytes(BUF)
+>     try: conn.sendall(escape_iac(hist))
+>     except Exception: pass
+>     iac=False; iac_cmd=None; sub=False
+>     while True:
+>         try: chunk=conn.recv(4096)
+>         except Exception: break
+>         if not chunk: break
+>         out=bytearray()
+>         for b in chunk:
+>             if sub:
+>                 if b==240: sub=False
+>                 continue
+>             if iac:
+>                 if iac_cmd is None:
+>                     iac_cmd=b
+>                     if b==250: sub=True; iac=False
+>                     elif b in (240,241,242,243,244): iac=False
+>                 else:
+>                     opt=b
+>                     try:
+>                         if iac_cmd in (251,252): conn.sendall(bytes([255,253,opt]))
+>                         elif iac_cmd in (253,254): conn.sendall(bytes([255,251,opt]))
+>                     except Exception: pass
+>                     iac=False; iac_cmd=None
+>                 continue
+>             if b==255: iac=True; iac_cmd=None; continue
+>             out.append(b)
+>         if out and qc is not None:
+>             try: qc.sendall(bytes(out))
+>             except Exception: pass
+>     with state_lock:
+>         if state['client'] is conn: state['client']=None
+>     try: conn.close()
+>     except Exception: pass
+> def main():
+>     threading.Thread(target=qemu_loop, daemon=True).start()
+>     ls=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+>     ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR,1)
+>     ls.bind((QHOST,LPORT)); ls.listen(1)
+>     print('relay: listening on %d' % LPORT, flush=True)
+>     while True:
+>         conn,_=ls.accept()
+>         threading.Thread(target=client_loop, args=(conn,), daemon=True).start()
+> main()
+> PYEOF
+root@fb781a110bd4:/app# cat << 'EOF' > /app/run/launch.sh
+> #!/bin/bash
+> cd /app/run
+> rm -f /app/run/ready
+> nohup python3 /app/run/relay.py > /app/run/relay.log 2>&1 &
+> echo "relay pid $!"
+> sleep 1
+> KVM=''
+> [ -e /dev/kvm ] && KVM='-enable-kvm'
+> nohup qemu-system-x86_64 $KVM -m 512 -no-reboot \
+>   -display none -vga none -monitor none \
+>   -kernel /app/run/vmlinuz-lts \
+>   -initrd /app/run/intel-ucode.img,/app/run/amd-ucode.img,/app/run/initramfs-lts \
+>   -append "modules=loop,squashfs,sd-mod,usb-storage console=ttyS0" \
+>   -cdrom /app/alpine.iso \
+>   -serial tcp:127.0.0.1:4545,server \
+>   > /app/run/qemu.log 2>&1 &
+> echo "qemu pid $!"
+> EOF
+root@fb781a110bd4:/app# ls -la /app/run
+total 38896
+drwxr-xr-x 2 root root     4096 Jul  2 15:50 .
+drwxr-xr-x 3 root root     4096 Jul  2 15:44 ..
+-rw-r--r-- 1 root root    61440 Jul  2 15:50 amd_ucode.img
+-rw-r--r-- 1 root root     2356 Jul  2 15:46 extract.py
+-rw-r--r-- 1 root root     1213 Jul  2 15:50 grab.py
+-rw-r--r-- 1 root root 20486092 Jul  2 15:46 initramfs-lts
+-rw-r--r-- 1 root root  7367952 Jul  2 15:50 intel_ucode.img
+-rw-r--r-- 1 root root      567 Jul  2 15:50 launch.sh
+-rw-r--r-- 1 root root     3044 Jul  2 15:50 relay.py
+-rw-r--r-- 1 root root 11879168 Jul  2 15:46 vmlinuz-lts
+-rw-r--r-- 1 root root     1372 Jul  2 15:47 walk.py
+root@fb781a110bd4:/app# bash /app/run/launch.sh
+relay pid 429
+qemu pid 431
+root@fb781a110bd4:/app# echo '--- relay.log'; cat /app/run/relay.log; echo '--- qemu.log'; cat /app/run/qemu.log
+--- relay.log
+relay: listening on 6665
+--- qemu.log
+root@fb781a110bd4:/app# ps aux | grep -E 'qemu|relay' | grep -v grep; echo '---'; (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E '6665|4545'
+bash: ps: command not found
+---
+root@fb781a110bd4:/app# sleep 15; echo '--- relay.log'; cat /app/run/relay.log; echo '--- ready?'; ls -la /app/run/ready 2>/dev/null && echo READY_FILE_EXISTS
+--- relay.log
+relay: listening on 6665
+relay: connected to qemu serial
+--- ready?
+root@fb781a110bd4:/app# ls -la /proc/*/exe 2>/dev/null | grep -i qemu; echo '--- procs'; for p in /proc/[0-9]*; do c=$(tr '\0' ' ' < $p/cmdline 2>/dev/null); ca
+se "$c" in *qemu*|*relay.py*) echo "$p: $c";; esac; done
+--- procs
+echo '=== dump serial buffer (4s) ==='; timeout 4 nc 127.0.0.1 6665 | head -200
+/proc/429: python3 /app/run/relay.py
+root@fb781a110bd4:/app# echo '=== dump serial buffer (4s) ==='; timeout 4 nc 127.0.0.1 6665 | head -200
+=== dump serial buffer (4s) ===
+Terminated
+root@fb781a110bd4:/app#

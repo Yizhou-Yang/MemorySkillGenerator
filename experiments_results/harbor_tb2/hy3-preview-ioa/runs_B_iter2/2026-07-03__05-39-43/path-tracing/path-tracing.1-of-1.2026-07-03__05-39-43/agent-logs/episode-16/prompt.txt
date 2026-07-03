@@ -1,0 +1,59 @@
+New Terminal Output:
+
+root@03270641b450:/app# cat > /tmp/extract2.py << 'PYEOF'
+> import re, struct
+> txt=open('/tmp/dis.txt').read().splitlines()
+> funcs={}
+> inst_addr=[]
+> for l in txt:
+>     m=re.match(r'^([0-9a-f]+)\s+<([A-Za-z_][\w.]*)>:$', l)
+>     if m:
+>         funcs[int(m.group(1),16)]=m.group(2); continue
+>     mi=re.match(r'^\s*([0-9a-f]+):\s', l)
+>     if mi:
+>         inst_addr.append(int(mi.group(1),16))
+> order=sorted(funcs)
+> def fname(a):
+>     f=None
+>     for fa in order:
+>         if fa<=a: f=funcs[fa]
+>     return f
+> binf=open('/app/orig','rb').read()
+> res={}
+> for l in txt:
+>     mi=re.match(r'^\s*([0-9a-f]+):\s', l)
+>     if not mi: continue
+>     a=int(mi.group(1),16)
+>     m=re.search(r'movss.*\[rip\+0x[0-9a-f]+\].*#\s*([0-9a-f]+)', l)
+>     if m:
+>         tgt=int(m.group(1),16); kind='f32'
+>     else:
+>         m=re.search(r'movs[dsd]|movup[sd]|movap[sd].*\[rip\+0x[0-9a-f]+\].*#\s*([0-9a-f]+)', l)
+>         if not m:
+>             m=re.search(r'\[rip\+0x[0-9a-f]+\].*#\s*([0-9a-f]+)', l)
+>             if not m: continue
+>             kind='f64'
+>         else:
+>             kind='f64'
+>         tgt=int(m.group(1),16)
+>     try:
+>         if kind=='f32':
+>             d=struct.unpack('<f', binf[tgt:tgt+4])[0]
+>         else:
+>             d=struct.unpack('<d', binf[tgt:tgt+8])[0]
+>     except: continue
+>     res.setdefault(fname(a),[]).append((hex(tgt),round(d,6),kind))
+> for fn in sorted(res):
+>     print('=== %s ==='%fn)
+>     seen=set();
+>     for t,d,k in res[fn]:
+>         if (t,d) not in seen:
+>             seen.add((t,d)); print('  ',t,d,k)
+> PYEOF
+root@03270641b450:/app# .venv/bin/python /tmp/extract2.py
+Traceback (most recent call last):
+  File "/tmp/extract2.py", line 35, in <module>
+    tgt=int(m.group(1),16)
+        ^^^^^^^^^^^^^^^^^^
+TypeError: int() can't convert non-string with explicit base
+root@03270641b450:/app#

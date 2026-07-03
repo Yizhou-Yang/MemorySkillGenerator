@@ -1,0 +1,86 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'cd /app && ls -la\n'
+'python3 --version; git --version; pip --version\n'
+"nvidia-smi 2>/dev/null | head -5 || echo 'no GPU'\n"
+'cat /app/requirements.txt\n'
+'which nvidia-smi; echo done\n'
+''
+'cd /app && git clone https://github.com/wjn1996/UPET.git 2>&1 | tail -20\n'
+'cd /app/UPET && git checkout 4701c3c62441077cc44a6553bf6ae909d99b8351 2>&1 | tail -5\n'
+'ls -la\n'
+''
+'cat README.md\n'
+'ls -la run_script run_script_fewshot run_script_semi\n'
+"cat run_script_fewshot/*rte* 2>/dev/null; echo '---'; ls run_script_fewshot\n"
+'cat run.py\n'
+'cat arguments.py\n'
+'cat run_script_semi/run_rte_roberta.sh\n'
+"grep -rn -i 'uncertain' --include=*.py . | head -30\n"
+'ls model training tasks/superglue\n'
+"grep -rn -i 'dropout\\|uncertain\\|mc_drop\\|use_pe' model/ training/ tasks/superglue/ 2>/dev/null | head -40\n"
+'python3 -c "import torch,transformers,datasets; print(\'torch\',torch.__version__,\'tf\',transformers.__version__,\'ds\',datasets.__version__)" 2>&1 | tail -5\n'
+'grep -n "prefix" arguments.py | head -20\n'
+'curl -sI https://huggingface.co 2>&1 | head -3; echo EXIT=$?\n'
+''
+''
+''
+"echo '=== run_script/run_rte_roberta.sh ==='; cat run_script/run_rte_roberta.sh\n"
+"echo '=== run_script/run_rte_bert.sh ==='; cat run_script/run_rte_bert.sh\n"
+"echo '=== repo requirements ==='; cat requirements.txt\n"
+"pip list 2>/dev/null | grep -i -E 'transformers|torch|datasets|seqeval|sentencepiece'\n"
+"grep -n 'prefix\\|ptuning\\|use_pe\\|head_pt' tasks/superglue/get_trainer.py | head -40\n"
+"grep -n 'prefix\\|ptuning\\|use_pe\\|head_pt\\|def get_trainer' tasks/superglue/dataset.py | head -40\n"
+''
+''
+'pip install datasets seqeval 2>&1 | tail -15\n'
+''
+'python3 run.py --help 2>&1 | head -120\n'
+''
+''
+''
+''
+'C-c'
+"cat > run_ours.sh <<'EOF'\nexport TASK_NAME=superglue\nexport DATASET_NAME=rte\npython3 run.py \\\n  --model_name_or_path roberta-base \\\n  --task_name $TASK_NAME \\\n  --dataset_name $DATASET_NAME \\\n  --do_train \\\n  --do_eval \\\n  --max_seq_length 128 \\\n  --per_device_train_batch_size 32 \\\n  --learning_rate 5e-3 \\\n  --num_train_epochs 1 \\\n  --pre_seq_len 128 \\\n  --output_dir checkpoints/rte-roberta/ \\\n  --overwrite_output_dir \\\n  --hidden_dropout_prob 0.1 \\\n  --seed 42 \\\n  --save_strategy no \\\n  --evaluation_strategy epoch \\\n  --head_prefix \\\n  --use_pe \\\n  --num_examples_per_label 5\nEOF\n"
+'nohup bash run_ours.sh > train.log 2>&1 &\n'
+'sleep 3; tail -20 train.log\n'
+"kill %1 2>/dev/null; pkill -f 'python3 run.py' 2>/dev/null; sleep 1; echo killed\n"
+'grep -rn "load_metric\\|from datasets\\|import datasets" --include=*.py .\n'
+''
+"sed -n '1,80p' tasks/superglue/get_trainer.py\n"
+"grep -n 'Trainer\\|import\\|get_trainer' tasks/superglue/get_trainer.py | head -40\n"
+"sed -n '210,260p' tasks/superglue/dataset.py\n"
+"grep -n 'compute_metrics\\|self.metric\\|def compute\\|load_metric' tasks/superglue/dataset.py\n"
+"sed -n '1,60p' metrics/super_glue/super_glue.py\n"
+"sed -n '1,120p' model/utils.py\n"
+"pip install 'datasets==1.18.3' 2>&1 | tail -15\n"
+''
+'nohup bash run_ours.sh > train.log 2>&1 &\n'
+'sleep 5; tail -30 train.log\n'
+'sleep 15; tail -40 train.log\n'
+"ps aux | grep -E 'python3 run.py|run_ours' | grep -v grep\n"
+"wc -l train.log; echo '---'; cat train.log\n"
+"pip install 'pyarrow==10.0.1' 2>&1 | tail -8\n"
+''
+'nohup bash run_ours.sh > train.log 2>&1 &\n'
+'sleep 20; tail -40 train.log\n'
+"ps aux | grep 'python3 run.py' | grep -v grep | head\n"
+"sleep 25; echo '=== log ==='; cat train.log\n"
+"pip install 'accelerate>=0.21.0' 2>&1 | tail -8\n"
+'nohup bash run_ours.sh > train.log 2>&1 &\n'
+'sleep 25; tail -40 train.log\n'
+"sed -n '1,40p' training/trainer_exp.py\n"
+"grep -n 'ShardedDDPOption' training/trainer_exp.py\n"
+"pip install 'transformers==4.11.3' 2>&1 | tail -15\n"
+''
+''
+"pip install 'transformers==4.20.0' 2>&1 | tail -15\n"
+''
+''
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+''
+['C-d']
+['C-d']

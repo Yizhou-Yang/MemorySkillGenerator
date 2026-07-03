@@ -1,0 +1,25 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"which qemu-system-x86_64 qemu-system-i386; echo '---'; ls -la /app; echo '---'; ls -la /tmp\n"
+"find / -iname 'alpine*.iso' 2>/dev/null; echo '---'; which expect nc telnet socat python3\n"
+''
+''
+''
+'mkdir -p /mnt/iso && mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1; echo EXIT=$?\n'
+"ls -la /mnt/iso 2>/dev/null; echo '---'; ls -la /mnt/iso/boot 2>/dev/null\n"
+"cat > /app/relay.py << 'PYEOF'\n#!/usr/bin/env python3\nimport socket, select, time\n\nQEMU_SOCK = '/tmp/alp.sock'\nHOST, PORT = '127.0.0.1', 6665\n\ndef strip_iac(data):\n    out = bytearray()\n    i = 0\n    n = len(data)\n    while i < n:\n        b = data[i]\n        if b == 255:\n            if i+1 >= n:\n                break\n            cmd = data[i+1]\n            if cmd == 255:\n                out.append(255); i += 2; continue\n            if cmd in (251,252,253,254):\n                i += 3 if i+2 < n else 2\n                continue\n            if cmd == 250:\n                j = i+2\n                while j < n and data[j] != 240:\n                    j += 1\n                i = j+1 if j < n else n\n                continue\n            i += 2\n            continue\n        out.append(b)\n        i += 1\n    return bytes(out)\n\ndef serve_client(csock):\n    qsock = None\n    while True:\n        try:\n            qsock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n            qsock.connect(QEMU_SOCK)\n            break\n        except OSError:\n            time.sleep(0.2)\n    try:\n        qsock.sendall(bytes([13,10]))\n    except OSError:\n        pass\n    poller = select.poll()\n    poller.register(csock, select.POLLIN)\n    poller.register(qsock, select.POLLIN)\n    fds = {csock.fileno(): csock, qsock.fileno(): qsock}\n    try:\n        while True:\n            for fd, ev in poller.poll(1000):\n                if ev & (select.POLLERR | select.POLLHUP | select.POLLNVAL):\n                    return\n                src = fds[fd]\n                try:\n                    data = src.recv(4096)\n                except OSError:\n                    return\n                if not data:\n                    return\n                if src is csock:\n                    fwd = strip_iac(data)\n                    if fwd:\n                        try: qsock.sendall(fwd)\n                        except OSError: return\n                else:\n                    try: csock.sendall(data)\n                    except OSError: return\n    finally:\n        try: csock.close()\n        except OSError: pass\n        try: qsock.close()\n        except OSError: pass\n\ndef main():\n    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n    s.bind((HOST, PORT))\n    s.listen(5)\n    while True:\n        try:\n            csock, _ = s.accept()\n        except OSError:\n            continue\n        try:\n            serve_client(csock)\n        except Exception:\n            pass\n\nif __name__ == '__main__':\n    main()\nPYEOF\n"
+"cat > /app/probe.py << 'PYEOF'\n#!/usr/bin/env python3\nimport socket, sys, time\n\nHOST, PORT = '127.0.0.1', 6665\ndeadline = time.time() + 300\nwhile time.time() < deadline:\n    try:\n        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n        s.settimeout(12)\n        s.connect((HOST, PORT))\n        s.sendall(bytes([13,10]))\n        buf = b''\n        end = time.time() + 20\n        while time.time() < end:\n            try:\n                d = s.recv(4096)\n            except socket.timeout:\n                break\n            if not d:\n                break\n            buf += d\n            if b'login:' in buf.lower():\n                print('READY')\n                s.close()\n                sys.exit(0)\n        s.close()\n    except OSError:\n        pass\n    time.sleep(2)\nprint('TIMEOUT')\nsys.exit(1)\nPYEOF\n"
+'nohup qemu-system-x86_64 -machine accel=kvm:tcg -m 1024 -smp 2 -boot d -cdrom /app/alpine.iso -drive if=virtio,format=qcow2,file=/app/alpine-disk.qcow2 -net none -display none -serial unix:/tmp/alp.sock,server,nowait > /tmp/qemu.log 2>&1 &\n'
+'nohup python3 /app/relay.py > /tmp/relay.log 2>&1 &\n'
+"sleep 1; ls -l /tmp/alp.sock; echo '--- qemu.log ---'; tail -n 20 /tmp/qemu.log; echo '--- relay.log ---'; tail -n 5 /tmp/relay.log\n"
+'python3 /app/probe.py\n'
+''
+''
+''
+''
+"jobs; ps aux | grep -E 'qemu|relay.py' | grep -v grep\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

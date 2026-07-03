@@ -1,0 +1,10 @@
+{
+  "analysis": "PID 1719 is alive and VmRSS keeps climbing (1087→1104→1112MB), which indicates real computation rather than a hang. The dataset is cached and mteb already wrote model_meta.json into the correct path; STS12.json just doesn't exist yet because encoding (CPU-bound) is still in progress. To be certain it's genuinely advancing (not looping), I'll measure CPU time via /proc/1719/stat, which would not advance if it were blocked/hung.",
+  "plan": "Sample cumulative CPU time (utime+stime from /proc/1719/stat) twice with a short gap to confirm it's increasing. Then continue waiting and polling for STS12.json to be written under results/BAAI__bge-small-en-v1.5/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/.",
+  "commands": [
+    {
+      "keystrokes": "awk '{print \"cpu_ticks_now=\"$14+$15}' /proc/1719/stat 2>/dev/null; sleep 8; awk '{print \"cpu_ticks_after=\"$14+$15}' /proc/1719/stat 2>/dev/null\n",
+      "duration": 10.0
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "analysis": "numpy/scipy work. The data has x decreasing from 47183 to 1648. There's a dominant peak at x=19139 (y=79400) which is almost certainly the G peak. I need to identify the 2D peak too. The 2D peak in graphene is usually the second-strongest. Let me find the top peaks by height and prominence to locate G and 2D clearly.",
+  "plan": "Run a script to list the strongest peaks by max height and by prominence, so I can distinguish G and 2D. Then I'll fit each with a Lorentzian model.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/explore2.py << 'EOF'\nimport numpy as np\nfrom scipy.signal import find_peaks\ndata=[]\nfor line in open('/app/graphene.dat'):\n    line=line.strip()\n    if not line: continue\n    p=line.split()\n    if len(p)<2: continue\n    data.append((float(p[0].replace(',','.')), float(p[1].replace(',','.'))))\ndata=np.array(data)\nx=data[:,0]; y=data[:,1]\npk,props=find_peaks(y, distance=10, prominence=200)\norder=np.argsort(props['prominences'])[::-1]\nprint('Top peaks by prominence:')\nfor i in order[:8]:\n    print('  x=%.2f y=%.2f prom=%.2f'%(x[i],y[i],props['prominences'][i]))\nprint('Top peaks by height:')\nidx=np.argsort(y)[::-1][:8]\nfor i in idx:\n    print('  x=%.2f y=%.2f'%(x[i],y[i]))\nEOF\npython3 /tmp/explore2.py\n",
+      "duration": 3.0
+    }
+  ]
+}

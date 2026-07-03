@@ -1,0 +1,78 @@
+New Terminal Output:
+
+root@3703335ad520:/app/astropy# grep -rn 'dep_util' /app/astropy --include=*.py | grep -i 'import\|dep_util'
+cat > /usr/local/lib/python3.9/site-packages/setuptools/dep_util.py << 'EOF'
+"""Shim providing distutils.dep_util for older packages (setuptools>=72 removed it)."""
+import os
+
+def newer(source, target):
+    if not os.path.exists(target):
+        return True
+    if os.path.isfile(source) and os.path.isfile(target):
+        return os.stat(source).st_mtime > os.stat(target).st_mtime
+    return False
+
+def newer_pairwise(sources, targets):
+    if len(sources) != len(targets):
+        raise ValueError("'sources' and 'targets' must be same length")
+    return any(newer(s, t) for s, t in zip(sources, targets))
+
+def newer_group(sources, target, missing='error'):
+    if not os.path.exists(target):
+        return True
+    for source in sources:
+        if not os.path.exists(source):
+            if missing == 'error':
+                raise OSError("file '%s' does not exist" % os.path.abspath(source))
+            elif missing == 'ignore':
+                continue
+            elif missing == 'newer':
+                return True
+        if os.path.isfile(source) and os.path.isfile(target):
+            if os.stat(source).st_mtime > os.stat(target).st_mtime:
+                return True
+    return False
+
+def ignore(source, target):
+    return False
+EOF
+python -c "from setuptools.dep_util import newer_group; print('shim ok')"
+/app/astropy/astropy/wcs/setup_package.py:13:from setuptools.dep_util import newer_group
+root@3703335ad520:/app/astropy# cat > /usr/local/lib/python3.9/site-packages/setuptools/dep_util.py << 'EOF'
+> """Shim providing distutils.dep_util for older packages (setuptools>=72 removed it)."""
+> import os
+>
+> def newer(source, target):
+>     if not os.path.exists(target):
+>         return True
+>     if os.path.isfile(source) and os.path.isfile(target):
+>         return os.stat(source).st_mtime > os.stat(target).st_mtime
+>     return False
+>
+> def newer_pairwise(sources, targets):
+>     if len(sources) != len(targets):
+>         raise ValueError("'sources' and 'targets' must be same length")
+>     return any(newer(s, t) for s, t in zip(sources, targets))
+>
+> def newer_group(sources, target, missing='error'):
+>     if not os.path.exists(target):
+>         return True
+>     for source in sources:
+>         if not os.path.exists(source):
+>             if missing == 'error':
+>                 raise OSError("file '%s' does not exist" % os.path.abspath(source))
+>             elif missing == 'ignore':
+>                 continue
+>             elif missing == 'newer':
+>                 return True
+>         if os.path.isfile(source) and os.path.isfile(target):
+>             if os.stat(source).st_mtime > os.stat(target).st_mtime:
+>                 return True
+>     return False
+>
+> def ignore(source, target):
+>     return False
+> EOF
+root@3703335ad520:/app/astropy# python -c "from setuptools.dep_util import newer_group; print('shim ok')"
+shim ok
+root@3703335ad520:/app/astropy#

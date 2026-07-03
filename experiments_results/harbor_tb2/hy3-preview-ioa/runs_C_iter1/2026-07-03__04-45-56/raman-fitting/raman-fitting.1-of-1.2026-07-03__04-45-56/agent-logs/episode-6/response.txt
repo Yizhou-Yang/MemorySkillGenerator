@@ -1,0 +1,10 @@
+{
+  "analysis": "Numpy/scipy work. The dominant peak (height ~79000) is a cluster near x=19139 - this is the G peak. The 2D peak is the next most prominent feature but I need to locate it precisely. The prominence-based peaks at high x (46008, 42813, etc.) look like baseline artifacts. I need a coarse view of the whole spectrum to locate the two main peaks clearly.",
+  "plan": "Print a coarse (binned) view of the spectrum to see the overall structure and identify the G and 2D peaks. Then I'll fit both regions with Lorentzians.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/explore3.py << 'EOF'\nimport numpy as np\ndata=[]\nfor line in open('/app/graphene.dat'):\n    line=line.strip()\n    if not line: continue\n    p=line.split()\n    if len(p)<2: continue\n    data.append((float(p[0].replace(',','.')), float(p[1].replace(',','.'))))\ndata=np.array(data)\nx=data[:,0]; y=data[:,1]\n# coarse bins by x\nedges=np.linspace(x.min(), x.max(), 61)\nfor i in range(len(edges)-1):\n    m=(x>=edges[i])&(x<edges[i+1])\n    if m.sum()==0: continue\n    print('x[%7.0f,%7.0f] maxy=%8.0f at x=%7.1f'%(edges[i],edges[i+1],y[m].max(),x[m][np.argmax(y[m])]))\nEOF\npython3 /tmp/explore3.py\n",
+      "duration": 3.0
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+root@6699f51e7751:/app# mkdir -p /app/ssl
+root@6699f51e7751:/app# openssl genrsa -out /app/ssl/server.key 2048
+root@6699f51e7751:/app# chmod 600 /app/ssl/server.key
+root@6699f51e7751:/app# openssl req -x509 -new -key /app/ssl/server.key -days 365 -out /app/ssl/server.crt -subj "/O=DevOps Team/CN=dev-internal.company.local"
+root@6699f51e7751:/app# cat /app/ssl/server.key /app/ssl/server.crt > /app/ssl/server.pem
+root@6699f51e7751:/app# ls -la /app/ssl/
+total 20
+drwxr-xr-x 2 root root 4096 Jul  2 19:08 .
+drwxr-xr-x 3 root root 4096 Jul  2 19:08 ..
+-rw-r--r-- 1 root root 1220 Jul  2 19:08 server.crt
+-rw------- 1 root root 1700 Jul  2 19:08 server.key
+-rw-r--r-- 1 root root 2920 Jul  2 19:08 server.pem
+root@6699f51e7751:/app# openssl x509 -in /app/ssl/server.crt -noout -subject -dates
+subject=O = DevOps Team, CN = dev-internal.company.local
+notBefore=Jul  2 19:08:41 2026 GMT
+notAfter=Jul  2 19:08:41 2027 GMT
+root@6699f51e7751:/app# openssl x509 -in /app/ssl/server.crt -noout -fingerprint -sha256
+sha256 Fingerprint=FD:8B:34:0C:60:2F:90:C4:7A:24:AF:99:2C:A9:93:1C:89:78:99:4F:2B:E5:4E:E0:6D:5B:A1:52:A4:FF:BB:A5
+root@6699f51e7751:/app# SUBJ=$(openssl x509 -in /app/ssl/server.crt -noout -subject); NB=$(openssl x509 -in /app/ssl/server.crt -noout -startdate | cut -d= -f2)
+; NA=$(openssl x509 -in /app/ssl/server.crt -noout -enddate | cut -d= -f2); FP=$(openssl x509 -in /app/ssl/server.crt -noout -fingerprint -sha256 | cut -d= -f2)
+; NBD=$(date -u -d "$NB" +%Y-%m-%d); NAD=$(date -u -d "$NA" +%Y-%m-%d); printf 'Subject: %s\nNot Before: %s (%s)\nNot After: %s (%s)\nSHA-256 Fingerprint: %s\n'
+ "$SUBJ" "$NB" "$NBD" "$NA" "$NAD" "$FP" > /app/ssl/verification.txt
+cat /app/ssl/verification.txt
+root@6699f51e7751:/app# cat /app/ssl/verification.txt
+Subject: subject=O = DevOps Team, CN = dev-internal.company.local
+Not Before: Jul  2 19:08:41 2026 GMT (2026-07-02)
+Not After: Jul  2 19:08:41 2027 GMT (2027-07-02)
+SHA-256 Fingerprint: FD:8B:34:0C:60:2F:90:C4:7A:24:AF:99:2C:A9:93:1C:89:78:99:4F:2B:E5:4E:E0:6D:5B:A1:52:A4:FF:BB:A5
+root@6699f51e7751:/app# SUBJ=$(openssl x509 -in /app/ssl/server.crt -noout -subject | sed 's/^subject=//'); NB=$(openssl x509 -in /app/ssl/server.crt -noout -st
+artdate | cut -d= -f2); NA=$(openssl x509 -in /app/ssl/server.crt -noout -enddate | cut -d= -f2); FP=$(openssl x509 -in /app/ssl/server.crt -noout -fingerprint
+-sha256 | cut -d= -f2); NBD=$(date -u -d "$NB" +%Y-%m-%d); NAD=$(date -u -d "$NA" +%Y-%m-%d); printf 'Subject: %s\nNot Before: %s (%s)\nNot After: %s (%s)\nSHA-
+256 Fingerprint: %s\n' "$SUBJ" "$NB" "$NBD" "$NA" "$NAD" "$FP" > /app/ssl/verification.txt
+root@6699f51e7751:/app# cat > /app/check_cert.py << 'EOF'
+> #!/usr/bin/env python3
+> import ssl
+> import subprocess
+> import sys
+>
+> CERT_PATH = "/app/ssl/server.crt"
+>
+>
+> def main():
+>     # Verify the certificate file exists and can be loaded
+>     try:
+>         with open(CERT_PATH, "rb") as f:
+>             cert_data = f.read()
+>     except FileNotFoundError:
+>         print(f"Error: certificate file not found at {CERT_PATH}")
+>         sys.exit(1)
+>
+>     # Use openssl to parse the certificate (loads/validates it)
+>     result = subprocess.run(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout",
+>          "-subject", "-enddate"],
+>         capture_output=True, text=True,
+>     )
+>     if result.returncode != 0:
+>         print("Error: failed to load certificate")
+>         print(result.stderr)
+>         sys.exit(1)
+>
+>     subject = ""
+>     enddate = ""
+>     for line in result.stdout.splitlines():
+>         if line.startswith("subject="):
+>             subject = line[len("subject="):].strip()
+>         elif line.startswith("notAfter="):
+>             enddate = line[len("notAfter="):].strip()
+>
+>     # Extract Common Name from the subject
+>     common_name = ""
+>     for part in subject.split(","):
+>         part = part.strip()
+>         if part.startswith("CN ="):
+>             common_name = part.split("=", 1)[1].strip()
+>         elif part.startswith("CN="):
+>             common_name = part.split("=", 1)[1].strip()
+>
+>     # Convert expiration to YYYY-MM-DD
+>     exp_result = subprocess.run(
+>         ["date", "-u", "-d", enddate, "+%Y-%m-%d"],
+>         capture_output=True, text=True,
+>     )
+>     expiration = exp_result.stdout.strip() if exp_result.returncode == 0 else enddate
+>
+>     print(f"Common Name: {common_name}")
+>     print(f"Expiration Date: {expiration}")
+>     print("Certificate verification successful")
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@6699f51e7751:/app# python3 /app/check_cert.py
+Common Name: dev-internal.company.local
+Expiration Date: 2027-07-02
+Certificate verification successful
+root@6699f51e7751:/app# ls -la /app/ssl/ && echo '---' && cat /app/ssl/verification.txt
+total 24
+drwxr-xr-x 2 root root 4096 Jul  2 19:08 .
+drwxr-xr-x 3 root root 4096 Jul  2 19:09 ..
+-rw-r--r-- 1 root root 1220 Jul  2 19:08 server.crt
+-rw------- 1 root root 1700 Jul  2 19:08 server.key
+-rw-r--r-- 1 root root 2920 Jul  2 19:08 server.pem
+-rw-r--r-- 1 root root  274 Jul  2 19:09 verification.txt
+---
+Subject: O = DevOps Team, CN = dev-internal.company.local
+Not Before: Jul  2 19:08:41 2026 GMT (2026-07-02)
+Not After: Jul  2 19:08:41 2027 GMT (2027-07-02)
+SHA-256 Fingerprint: FD:8B:34:0C:60:2F:90:C4:7A:24:AF:99:2C:A9:93:1C:89:78:99:4F:2B:E5:4E:E0:6D:5B:A1:52:A4:FF:BB:A5
+root@6699f51e7751:/app#

@@ -1,0 +1,18 @@
+{
+  "analysis": "numpy and python-chess are now installed. The image is 640x640 RGB = 8x8 grid of 80x80 squares. I have PIL for image reading but no chess engine yet. My plan: (1) read the board position from the image via pixel analysis, and (2) get Stockfish to find best moves. First I'll build a script to detect which squares are occupied and cluster piece glyphs so I can identify each piece type by reading a compact ASCII silhouette. I'll also try to install Stockfish in the background.",
+  "plan": "Write an analysis script that: splits the board into 80x80 squares, detects occupancy, determines piece color (white/black) relative to the square background, extracts each piece glyph, and clusters glyphs by shape (within each color). Then print an ASCII silhouette per cluster so I can identify piece types. Simultaneously start installing Stockfish in the background. Then run the script to see the board.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/analyze.py << 'EOF'\nimport numpy as np\nfrom PIL import Image\n\nSQ=80\nimg=Image.open('/app/chess_puzzle.png').convert('RGB')\ngray=np.asarray(img).astype(np.float64).mean(axis=2)\n\ndef sq_img(r,c):\n    return gray[r*SQ:(r+1)*SQ, c*SQ:(c+1)*SQ]\n\nocc=[[False]*8 for _ in range(8)]\ncol=[['']*8 for _ in range(8)]\nfeats={}\nfor r in range(8):\n    for c in range(8):\n        s=sq_img(r,c)\n        corner=np.median(np.concatenate([\n            s[4:12,4:12].ravel(),s[4:12,68:76].ravel(),\n            s[68:76,4:12].ravel(),s[68:76,68:76].ravel()]))\n        diff=np.abs(s-corner)\n        mask=diff>30\n        if mask.sum()>150:\n            occ[r][c]=True\n            pv=s[mask]\n            col[r][c]='W' if pv.mean()>corner else 'B'\n            ys,xs=np.where(mask)\n            y0,y1,x0,x1=ys.min(),ys.max()+1,xs.min(),xs.max()+1\n            cr=(mask[y0:y1,x0:x1]*255).astype(np.uint8)\n            cr=Image.fromarray(cr).resize((32,32))\n            feats[(r,c)]=np.asarray(cr).astype(np.float64)/255.0\n\nclusters=[]\ndef d(f,g):\n    return np.abs(f-g).sum()\nfor (r,c),f in feats.items():\n    cc=col[r][c]\n    best=None;bd=1e9\n    for cl in clusters:\n        if cl['c']!=cc: continue\n        dd=d(f,cl['f'])\n        if dd<bd: bd=dd;best=cl\n    if best is not None and bd<90:\n        best['m'].append((r,c))\n    else:\n        clusters.append({'c':cc,'f':f,'m':[(r,c)],'rep':(r,c)})\n\nprint('OCCUPANCY')\nfor r in range(8):\n    print(''.join('X' if occ[r][c] else '.' for c in range(8)))\nprint('COLOR W/B , . empty')\nfor r in range(8):\n    print(' '.join(col[r][c] or '.' for c in range(8)))\nprint('num clusters',len(clusters))\n\ndef show(f):\n    for y in range(32):\n        print(''.join('#' if f[y,x]>0.5 else ' ' for x in range(32)))\n\nfor i,cl in enumerate(clusters):\n    mem=[(8-m[0],chr(97+m[1])) for m in cl['m']]\n    print('=== cluster %d color=%s n=%d members=%s'%(i,cl['c'],len(cl['m']),mem))\n    show(cl['f'])\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "apt-get update >/dev/null 2>&1; apt-get install -y stockfish >/tmp/apt.log 2>&1 &\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /app/analyze.py\n",
+      "duration": 3.0
+    }
+  ]
+}

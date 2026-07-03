@@ -1,0 +1,14 @@
+{
+  "analysis": "Confirmed: /sys/fs/cgroup/hfcache is a writable 32G tmpfs — far more than the 2-3x (~270MB) headroom needed for albert-base-v2 (~90MB). HF_HOME now points there. Now I just need to actually populate the offline cache with the model and tokenizer.",
+  "plan": "Write and run a Python script that: (1) uses huggingface_hub.snapshot_download to pull the full albert-base-v2 repo (config, model weights, tokenizer files), and (2) uses transformers AutoTokenizer.from_pretrained + AutoModel.from_pretrained to ensure the tokenizer and model are fully resolved/cached for offline use. This guarantees both model and tokenizer are cached. I'll give it a generous duration since weights (~90MB) download over network.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/cache_model.py << 'EOF'\nimport os\nfrom huggingface_hub import snapshot_download\nfrom transformers import AutoTokenizer, AutoModel\n\nREPO = \"albert/albert-base-v2\"\n\n# 1) Pull ALL repo files so the cache is fully offline-capable\ndl = snapshot_download(repo_id=REPO, local_dir=None)\nprint(\"snapshot_download ->\", dl)\n\n# 2) Materialize tokenizer and model into the cache explicitly\nAutoTokenizer.from_pretrained(REPO)\nprint(\"tokenizer cached\")\nAutoModel.from_pretrained(REPO)\nprint(\"model cached\")\nprint(\"DONE\")\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "HF_HOME=/sys/fs/cgroup/hfcache python3 /tmp/cache_model.py\n",
+      "duration": 30.0
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+New Terminal Output:
+
+root@7fa4dd3267d3:/app# cat > /app/run-alpine.sh << 'EOF'
+> #!/bin/bash
+> exec qemu-system-x86_64 \
+>   -m 1024 \
+>   -smp 2 \
+>   -kernel /tmp/vmlinuz-lts \
+>   -initrd /tmp/intel-ucode.img,/tmp/amd-ucode.img,/tmp/initramfs-lts \
+>   -append "console=ttyS0,115200 modules=loop,squashfs,sd-mod,usb-storage quiet" \
+>   -cdrom /app/alpine.iso \
+>   -serial telnet:127.0.0.1:6665,server,nowait \
+>   -display none \
+>   -daemonize
+> EOF
+root@7fa4dd3267d3:/app# bash /app/run-alpine.sh && echo LAUNCHED
+qemu: error reading initrd /tmp/intel-ucode.img,/tmp/amd-ucode.img,/tmp/initramfs-lts: Failed to open file “/tmp/intel-ucode.img,/tmp/amd-ucode.img,/tmp/initram
+fs-lts”: open() failed: No such file or directory
+root@7fa4dd3267d3:/app# sleep 2; (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep 6665; ps aux | grep qemu | grep -v grep
+

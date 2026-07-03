@@ -1,0 +1,35 @@
+New Terminal Output:
+
+root@8ab9d4e39045:/app/astropy# cat > /tmp/verify.py << 'EOF'
+> import sys, types
+> import numpy as np
+> import importlib.util
+> astropy = types.ModuleType('astropy')
+> am = types.ModuleType('astropy.modeling')
+> sys.modules['astropy']=astropy; sys.modules['astropy.modeling']=am
+> class Model:
+>     def __init__(self,n_i,n_o,sep=True): self.n_inputs=n_i; self.n_outputs=n_o; self.separable=sep
+> class MDE(Exception): pass
+> core=types.ModuleType('astropy.modeling.core'); core.Model=Model; core.ModelDefinitionError=MDE; core.CompoundModel=Model
+> sys.modules['astropy.modeling.core']=core
+> class Mapping(Model):
+>     def __init__(self,m): self.mapping=m; self.n_inputs=max(m)+1; self.n_outputs=len(m); self.separable=True
+> mm=types.ModuleType('astropy.modeling.mappings'); mm.Mapping=Mapping
+> sys.modules['astropy.modeling.mappings']=mm
+> spec=importlib.util.spec_from_file_location('astropy.modeling.separable','/app/astropy/astropy/modeling/separable.py')
+> s=importlib.util.module_from_spec(spec); sys.modules['astropy.modeling.separable']=s; spec.loader.exec_module(s)
+> left=np.array([[1,1],[1,1]])   # Pix2Sky_TAN separability (non-separable)
+> right=np.array([[1,0],[0,1]])  # cm separability
+> res=s._cstack(left,right)
+> print(res)
+> exp=np.array([[1,1,0,0],[1,1,0,0],[0,0,1,0],[0,0,0,1]])
+> assert np.array_equal(res,exp), 'MISMATCH'
+> print('CORRECT: nested compound separability matrix is correct')
+> EOF
+root@8ab9d4e39045:/app/astropy# python /tmp/verify.py
+[[1. 1. 0. 0.]
+ [1. 1. 0. 0.]
+ [0. 0. 1. 0.]
+ [0. 0. 0. 1.]]
+CORRECT: nested compound separability matrix is correct
+root@8ab9d4e39045:/app/astropy#

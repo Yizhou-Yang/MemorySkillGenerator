@@ -1,0 +1,90 @@
+New Terminal Output:
+
+root@1620c23709f7:/app/astropy# cat > /tmp/verify_sep.py <<'EOF'
+> import sys, types, importlib.util
+> import numpy as np
+>
+> # --- stub modules needed by separable.py ---
+> core = types.ModuleType('core')
+> class Model:
+>     n_inputs = 0
+>     n_outputs = 0
+>     separable = True
+>     def _calculate_separability_matrix(self):
+>         return NotImplemented
+> class CompoundModel(Model):
+>     pass
+> class ModelDefinitionError(Exception):
+>     pass
+> core.Model = Model
+> core.CompoundModel = CompoundModel
+> core.ModelDefinitionError = ModelDefinitionError
+> sys.modules['core'] = core
+>
+> mappings = types.ModuleType('mappings')
+> class Mapping:
+>     def __init__(self, mapping, n_inputs=None):
+>         self.mapping = mapping
+>         self.n_outputs = len(mapping)
+>         self.n_inputs = (max(mapping) + 1) if n_inputs is None else n_inputs
+>         self.separable = True
+> mappings.Mapping = Mapping
+> sys.modules['mappings'] = mappings
+>
+> # --- load the REAL patched separable.py ---
+> spec = importlib.util.spec_from_file_location('sep', 'astropy/modeling/separable.py')
+> sep = importlib.util.module_from_spec(spec)
+> spec.loader.exec_module(sep)
+>
+> # --- build mock models ---
+> class M(sep.Model):
+>     def __init__(self, ni, no, separable=True):
+>         self.n_inputs = ni
+>         self.n_outputs = no
+>         self.separable = separable
+>     def _calculate_separability_matrix(self):
+>         return NotImplemented
+>
+> class C(sep.CompoundModel):
+>     def __init__(self, left, right, op):
+>         self.left = left
+>         self.right = right
+>         self.op = op
+>     def _calculate_separability_matrix(self):
+>         return NotImplemented
+>
+> def sm(m):
+>     mat = sep._separable(m)
+>     return np.where(mat != 0, True, False)
+>
+> lin1 = M(1, 1, True)
+> lin2 = M(1, 1, True)
+> cm = C(lin1, lin2, '&')
+> tan = M(2, 2, False)          # non-separable, like Pix2Sky_TAN
+> top = C(tan, cm, '&')
+>
+> print('cm (lin1 & lin2):')
+> print(sm(cm))
+> print('tan & lin1 & lin2:')
+> print(sm(C(C(tan, lin1, '&'), lin2, '&')))
+> print('tan & cm:')
+> print(sm(top))
+>
+> expected = np.array([
+>     [ True,  True, False, False],
+>     [ True,  True, False, False],
+>     [False, False,  True, False],
+>     [False, False, False,  True]])
+> assert np.array_equal(sm(top), expected), 'FIX DID NOT WORK'
+> print('\nPASS: nested CompoundModel separability matrix is correct.')
+> EOF
+root@1620c23709f7:/app/astropy# python3 /tmp/verify_sep.py
+Traceback (most recent call last):
+  File "/tmp/verify_sep.py", line 34, in <module>
+    spec.loader.exec_module(sep)
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "astropy/modeling/separable.py", line 20, in <module>
+    from .core import Model, ModelDefinitionError, CompoundModel
+ImportError: attempted relative import with no known parent package
+root@1620c23709f7:/app/astropy#

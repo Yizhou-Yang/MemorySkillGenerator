@@ -1,0 +1,24 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"find /app/astropy -name 'qdp.py' -path '*ascii*'\n"
+'cat -n /app/astropy/astropy/io/ascii/qdp.py\n'
+"sed -n '135,300p' /app/astropy/astropy/io/ascii/qdp.py\n"
+"sed -n '300,400p' /app/astropy/astropy/io/ascii/qdp.py\n"
+'python3 - <<\'EOF\'\npath = \'/app/astropy/astropy/io/ascii/qdp.py\'\ns = open(path).read()\nassert \'    _line_type_re = re.compile(_type_re)\\n\' in s\ns = s.replace(\'    _line_type_re = re.compile(_type_re)\\n\', \'    _line_type_re = re.compile(_type_re, re.IGNORECASE)\\n\')\nassert \'                if v == "NO":\\n\' in s\ns = s.replace(\'                if v == "NO":\\n\', \'                if v.upper() == "NO":\\n\')\nopen(path,\'w\').write(s)\nprint(\'patched\')\nEOF\n'
+"printf 'read serr 1 2\\n1 0.5 1 0.5\\n' > /tmp/test.qdp\n"
+'cd /app/astropy && python3 -c "from astropy.table import Table; t = Table.read(\'/tmp/test.qdp\', format=\'ascii.qdp\'); print(t); print(t.colnames)" 2>&1\n'
+'pip install packaging 2>&1 | tail -3\n'
+'cd /app/astropy && python3 -c "from astropy.table import Table; t = Table.read(\'/tmp/test.qdp\', format=\'ascii.qdp\'); print(t); print(t.colnames)" 2>&1\n'
+'pip install pyerfa 2>&1 | tail -3\n'
+'cd /app/astropy && python setup.py build_ext --inplace 2>&1 | tail -15\n'
+"pip install 'setuptools<66' extension_helpers 2>&1 | tail -3\n"
+'cd /app/astropy && python setup.py build_ext --inplace 2>&1 | tail -15\n'
+'cd /app/astropy && python3 -c "from astropy.table import Table; t = Table.read(\'/tmp/test.qdp\', format=\'ascii.qdp\'); print(t); print(t.colnames)" 2>&1\n'
+'cd /tmp && python3 - <<\'EOF\'\nimport re\n\ndef line_type(line, delimiter=None):\n    _decimal_re = r"[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?"\n    _command_re = r"READ [TS]ERR(\\s+[0-9]+)+"\n    sep = delimiter\n    if delimiter is None:\n        sep = r"\\s+"\n    _new_re = rf"NO({sep}NO)+"\n    _data_re = rf"({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)"\n    _type_re = rf"^\\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\\s*(\\!(?P<comment>.*))?\\s*$"\n    _line_type_re = re.compile(_type_re, re.IGNORECASE)\n    line = line.strip()\n    if not line:\n        return "comment"\n    match = _line_type_re.match(line)\n    if match is None:\n        raise ValueError(f"Unrecognized QDP line: {line}")\n    for type_, val in match.groupdict().items():\n        if val is None:\n            continue\n        if type_ == "data":\n            return f"data,{len(val.split(sep=delimiter))}"\n        else:\n            return type_\n\nfor l in ["read serr 1 2", "READ SERR 1 2", "Read tErr 1 2", "no NO nO", "1 0.5 1 0.5"]:\n    print(repr(l), \'->\', line_type(l))\nprint("OK: lowercase command accepted as \'command\' (no ValueError)")\nEOF\n'
+'cd /app/astropy && grep -n \'re.IGNORECASE\\|v.upper() == "NO"\' astropy/io/ascii/qdp.py\n'
+'apt-get install -y gcc 2>&1 | tail -3\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

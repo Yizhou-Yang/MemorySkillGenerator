@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: despite df reporting 0 available on / (fuse-overlayfs), actual writes succeed (I wrote 500MB to /tmp with no error). So there IS real disk space; fuse-overlayfs statfs just reports 0, which makes apt refuse with 'not enough free space in /var/cache/apt/archives'. The fix is to point apt's cache (the path apt runs statvfs on) to a location whose statfs reports real space — e.g., the real backing disk /data or a tmpfs. I need to check what's available.",
+  "plan": "Check /data (the overlay upperdir backing, likely the real disk with space) and available RAM. If /data has space, I'll set apt's Dir::Cache to a directory there so apt's free-space check passes. Then apt will download and install (dpkg writes to / which physically works).",
+  "commands": [
+    {
+      "keystrokes": "df -h /data 2>&1; echo '---'; ls -ld /data 2>&1; echo '---'; free -h\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "mount | grep -E 'tmpfs' | head -3; echo '==='; dd if=/dev/zero of=/data/testfile bs=1M count=100 2>&1; echo \"exit=$?\"; rm -f /data/testfile\n",
+      "duration": 2.0
+    }
+  ]
+}

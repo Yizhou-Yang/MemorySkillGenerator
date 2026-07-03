@@ -1,0 +1,10 @@
+{
+  "analysis": "New data: direct port-80 to solana returns '502 Server UnReachable' (proxy-agent gz-aio-igatec1...) and the gateway :8080 is an nginx web server that doesn't allow CONNECT (405). Direct TLS to solana:443 yields WRONG_VERSION_NUMBER because the transparent forward proxy intercepts and returns a plaintext HTTP error. Meanwhile pypi.org TLS works fine, so the transparent proxy selectively fails to reach solana upstream. The proxy appears to do proper CONNECT tunneling for pypi but returns 'Server UnReachable' for solana. I need to find a Solana RPC endpoint that is actually reachable through this egress. Let me probe several public RPC endpoints.",
+  "plan": "Test HTTPS connectivity (via requests) to multiple Solana RPC endpoints to discover any that return 200. If one works, I'll point the server at it. I'll also test the gateway :8080 as a potential explicit proxy for HTTPS CONNECT to solana. Candidates: mainnet-beta, testnet, ankr, and the standard devnet URL via the :8080 proxy.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe4.py << 'PYEOF'\nimport requests\nurls = [\n  'https://api.devnet.solana.com',\n  'https://api.testnet.solana.com',\n  'https://api.mainnet-beta.solana.com',\n  'https://rpc.ankr.com/solana',\n  'https://solana-mainnet.rpc.extrnode.com',\n  'https://solana.getblock.io/mainnet/?api_key=',\n  'https://endpoints.omniatech.io/v1/sol/mainnet/public',\n]\nfor u in urls:\n    try:\n        r = requests.post(u, json={'jsonrpc':'2.0','id':1,'method':'getHealth','params':[]}, timeout=12)\n        print(u, '->', r.status_code, r.text[:120].replace(chr(10),' '))\n    except Exception as e:\n        print(u, '-> ERR', repr(e)[:120])\nPYEOF\npython3 /tmp/probe4.py\n",
+      "duration": 100.0
+    }
+  ]
+}

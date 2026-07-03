@@ -1,0 +1,1067 @@
+root@08346bd18573:/app# cat /etc/os-release | head -5; which git nginx sshd openssl; echo '---'; ls /etc/nginx 2>/dev/null
+PRETTY_NAME="Ubuntu 26.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+VERSION="26.04 LTS (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+/usr/bin/git
+/usr/sbin/nginx
+/usr/sbin/sshd
+/usr/bin/openssl
+---
+conf.d        fastcgi_params  koi-win     modules-available  nginx.conf    scgi_params      sites-enabled  uwsgi_params
+fastcgi.conf  koi-utf         mime.types  modules-enabled    proxy_params  sites-available  snippets       win-utf
+root@08346bd18573:/app# useradd -m -s /bin/bash git 2>/dev/null || echo git_exists
+echo 'git:password' | chpasswd
+mkdir -p /git/project && git init --bare -q /git/project && chown -R git:git /git/project
+root@08346bd18573:/app# echo 'git:password' | chpasswd
+cat > /git/project/hooks/post-receive <<'EOF'
+#!/bin/bash
+while read oldrev newrev refname
+do
+    branch=$(echo "$refname" | sed 's|refs/heads/||')
+    case "$branch" in
+        main)
+            mkdir -p /var/www/html
+            git --git-dir=/git/project archive main | tar -x -C /var/www/html
+            ;;
+        dev)
+            mkdir -p /var/www/html/dev
+            git --git-dir=/git/project archive dev | tar -x -C /var/www/html/dev
+            ;;
+    esac
+done
+EOF
+chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive
+root@08346bd18573:/app# mkdir -p /git/project && git init --bare -q /git/project && chown -R git:git /git/project
+mkdir -p /var/www/html/dev && chown -R git:git /var/www/html
+mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -days 365 -subj "/CN=localhost"
+ 2>/dev/null && echo CERT_OK
+cat > /etc/nginx/conf.d/gitdeploy.conf <<'EOF'
+server {
+    listen 8443 ssl;
+    server_name localhost;
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+    root /var/www/html;
+    index index.html;
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+EOF
+printf 'PasswordAuthentication yes\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/99-git.conf
+root@08346bd18573:/app# cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> while read oldrev newrev refname
+> do
+>     branch=$(echo "$refname" | sed 's|refs/heads/||')
+>     case "$branch" in
+>         main)
+>             mkdir -p /var/www/html
+>             git --git-dir=/git/project archive main | tar -x -C /var/www/html
+>             ;;
+>         dev)
+>             mkdir -p /var/www/html/dev
+>             git --git-dir=/git/project archive dev | tar -x -C /var/www/html/dev
+>             ;;
+>     esac
+> done
+> EOF
+root@08346bd18573:/app# chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive
+root@08346bd18573:/app# mkdir -p /var/www/html/dev && chown -R git:git /var/www/html
+root@08346bd18573:/app# mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -days 3
+65 -subj "/CN=localhost" 2>/dev/null && echo CERT_OK
+CERT_OK
+root@08346bd18573:/app# cat > /etc/nginx/conf.d/gitdeploy.conf <<'EOF'
+> server {
+>     listen 8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/cert.pem;
+>     ssl_certificate_key /etc/nginx/ssl/key.pem;
+>     root /var/www/html;
+>     index index.html;
+>     location / {
+>         try_files $uri $uri/ =404;
+>     }
+> }
+> EOF
+root@08346bd18573:/app# printf 'PasswordAuthentication yes\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/99-git.conf
+root@08346bd18573:/app# ls -l /etc/nginx/ssl/ ; nginx -t
+total 8
+-rw-r--r-- 1 root root 1115 Jul  2 16:27 cert.pem
+-rw------- 1 root root 1704 Jul  2 16:27 key.pem
+mkdir -p /var/run/sshd && ssh-keygen -A >/dev/null 2>&1; /usr/sbin/sshd; sleep 1; ss -ltnp 2>/dev/null | grep -E ':22|:8443' ; echo '---'; pgrep -a sshd; pgrep
+-a nginx
+2026/07/02 16:27:35 [warn] 251#251: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@08346bd18573:/app# mkdir -p /var/run/sshd && ssh-keygen -A >/dev/null 2>&1; /usr/sbin/sshd; sleep 1; ss -ltnp 2>/dev/null | grep -E ':22|:8443' ; echo '---
+'; pgrep -a sshd; pgrep -a nginx
+---
+255 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+root@08346bd18573:/app# nginx
+2026/07/02 16:27:59 [warn] 314#314: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+root@08346bd18573:/app# pgrep -a nginx; ss -ltnp 2>/dev/null | grep -E ':22|:8443'
+315 nginx: master process nginx
+316 nginx: worker process
+317 nginx: worker process
+318 nginx: worker process
+319 nginx: worker process
+320 nginx: worker process
+321 nginx: worker process
+322 nginx: worker process
+323 nginx: worker process
+324 nginx: worker process
+325 nginx: worker process
+326 nginx: worker process
+327 nginx: worker process
+328 nginx: worker process
+329 nginx: worker process
+330 nginx: worker process
+331 nginx: worker process
+332 nginx: worker process
+333 nginx: worker process
+334 nginx: worker process
+335 nginx: worker process
+336 nginx: worker process
+337 nginx: worker process
+338 nginx: worker process
+339 nginx: worker process
+340 nginx: worker process
+341 nginx: worker process
+342 nginx: worker process
+343 nginx: worker process
+344 nginx: worker process
+345 nginx: worker process
+346 nginx: worker process
+347 nginx: worker process
+root@08346bd18573:/app# grep -rn 'listen' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null
+/etc/nginx/conf.d/gitdeploy.conf:2:    listen 8443 ssl;
+root@08346bd18573:/app# which sshpass; grep -n 'include' /etc/nginx/nginx.conf
+6:include /etc/nginx/modules-enabled/*.conf;
+27:	include /etc/nginx/mime.types;
+60:	include /etc/nginx/conf.d/*.conf;
+61:	include /etc/nginx/sites-enabled/*;
+root@08346bd18573:/app# grep -n 'listen\|server_name' /etc/nginx/sites-enabled/default 2>/dev/null
+2:    listen 8443 ssl;
+3:    server_name localhost;
+root@08346bd18573:/app# apt-get install -y sshpass >/dev/null 2>&1; which sshpass
+root@08346bd18573:/app# rm -f /etc/nginx/sites-enabled/default && nginx -t && nginx -s reload
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+2026/07/02 16:29:10 [notice] 459#459: signal process started
+root@08346bd18573:/app# which expect; python3 -c 'import pexpect; print("pexpect ok")' 2>/dev/null
+/usr/bin/expect
+root@08346bd18573:/app# mkdir -p /root/.ssh && printf 'Host localhost\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile /dev/null\n' > /root/.ssh/config
+root@08346bd18573:/app# cat > /tmp/push.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 30
+> spawn git push origin main dev
+> expect {
+>   -re {[Pp]assword:} { send "password\r"; exp_continue }
+>   eof
+> }
+> EOF
+root@08346bd18573:/app# chmod +x /tmp/push.exp
+root@08346bd18573:/app# rm -rf /tmp/testrepo && mkdir -p /tmp/testrepo && cd /tmp/testrepo && git init -q && git config user.email t@t.com && git config user.na
+me t && echo '<h1>Main Page</h1>' > index.html && git add . && git commit -qm main && git checkout -q -b dev && echo '<h1>Dev Page</h1>' > index.html && git com
+mit -qm dev && git remote add origin ssh://git@localhost/git/project && echo SETUP_DONE
+time expect /tmp/push.exp
+On branch dev
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   index.html
+
+no changes added to commit (use "git add" and/or "git commit -a")
+root@08346bd18573:/tmp/testrepo# time expect /tmp/push.exp
+spawn git push origin main dev
+error: src refspec main does not match any
+error: failed to push some refs to 'origin'
+
+real	0m0.428s
+user	0m0.004s
+sys	0m0.005s
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && git branch
+* dev
+  master
+root@08346bd18573:/tmp/testrepo# git branch -m $(git rev-parse --abbrev-ref HEAD) main && git branch && git checkout -q main && git status -s
+* main
+  master
+ M index.html
+root@08346bd18573:/tmp/testrepo# time expect /tmp/push.exp
+spawn git push origin main dev
+error: src refspec dev does not match any
+error: failed to push some refs to 'origin'
+
+real	0m0.030s
+user	0m0.003s
+sys	0m0.004s
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && git branch -m master main && git checkout -q main && echo '<h1>Main Page</h1>' > index.html && git add . &&
+ git commit -qm 'main page' && git branch -D dev 2>/dev/null; git checkout -q -b dev && echo '<h1>Dev Page</h1>' > index.html && git add . && git commit -qm 'de
+v page' && git checkout -q main && git branch
+fatal: a branch named 'main' already exists
+  dev
+* main
+  master
+root@08346bd18573:/tmp/testrepo# time expect /tmp/push.exp
+spawn git push origin main dev
+fatal: 'origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+
+real	0m0.050s
+user	0m0.001s
+sys	0m0.005s
+root@08346bd18573:/tmp/testrepo# cd /tmp && rm -rf /tmp/testrepo && mkdir /tmp/testrepo && cd /tmp/testrepo && git init -q -b main && git config user.email t@t.
+com && git config user.name t && echo '<h1>Main Page</h1>' > index.html && git add . && git commit -qm 'main page' && git checkout -q -b dev && echo '<h1>Dev Pa
+ge</h1>' > index.html && git add . && git commit -qm 'dev page' && git checkout -q main && git remote add origin ssh://git@localhost/git/project && git remote -
+v && git branch
+origin	ssh://git@localhost/git/project (fetch)
+origin	ssh://git@localhost/git/project (push)
+  dev
+* main
+root@08346bd18573:/tmp/testrepo# time expect /tmp/push.exp
+spawn git push origin main dev
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: protocol error: bad line length character: Welc
+
+real	0m2.488s
+user	0m0.003s
+sys	0m0.004s
+root@08346bd18573:/tmp/testrepo# grep -rln 'Welcome' /etc/profile /etc/bash.bashrc /etc/update-motd.d/* /home/git/.bashrc /home/git/.profile /etc/motd 2>/dev/nu
+ll; which git-shell
+/etc/update-motd.d/00-header
+/usr/bin/git-shell
+root@08346bd18573:/tmp/testrepo# usermod -s /usr/bin/git-shell git && getent passwd git
+git:x:1001:1001::/home/git:/usr/bin/git-shell
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && time expect /tmp/push.exp
+spawn git push origin main dev
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: protocol error: bad line length character: Welc
+
+real	0m0.581s
+user	0m0.004s
+sys	0m0.004s
+root@08346bd18573:/tmp/testrepo# sed -i 's/^session\s*optional\s*pam_motd.so/# &/' /etc/pam.d/sshd; grep -n pam_motd /etc/pam.d/sshd
+33:# session    optional     pam_motd.so  motd=/run/motd.dynamic
+34:# session    optional     pam_motd.so noupdate
+root@08346bd18573:/tmp/testrepo# printf 'PrintMotd no\nPrintLastLog no\n' >> /etc/ssh/sshd_config.d/99-git.conf && pkill -x sshd; sleep 1; /usr/sbin/sshd; sleep
+ 1; pgrep -a sshd
+cd /tmp/testrepo && time expect /tmp/push.exp
+842 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && time expect /tmp/push.exp
+spawn git push origin main dev
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+
+real	0m0.424s
+user	0m0.006s
+sys	0m0.003s
+root@08346bd18573:/tmp/testrepo# cat > /tmp/dbg.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 20
+> spawn ssh git@localhost git-receive-pack /git/project
+> expect {
+>   -re {[Pp]assword:} { send "password\r"; exp_continue }
+>   eof
+> }
+> EOF
+root@08346bd18573:/tmp/testrepo# chmod +x /tmp/dbg.exp; expect /tmp/dbg.exp
+spawn ssh git@localhost git-receive-pack /git/project
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+root@08346bd18573:/tmp/testrepo# usermod -s /bin/bash git && getent passwd git
+git:x:1001:1001::/home/git:/bin/bash
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && time expect /tmp/push.exp
+spawn git push origin main dev
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+
+real	0m0.404s
+user	0m0.005s
+sys	0m0.003s
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && GIT_TRACE=1 GIT_SSH_COMMAND='ssh -v' git push origin main 2>&1 | head -40
+16:32:30.278402 git.c:502               trace: built-in: git push origin main
+16:32:30.282407 run-command.c:673       trace: run_command: unset GIT_PREFIX; 'ssh -v' git@localhost 'git-receive-pack '\''/git/project'\'''
+16:32:30.282439 run-command.c:765       trace: start_command: /bin/sh -c 'ssh -v "$@"' 'ssh -v' git@localhost 'git-receive-pack '\''/git/project'\'''
+debug1: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2, OpenSSL 3.5.5 27 Jan 2026
+debug1: Reading configuration data /root/.ssh/config
+debug1: /root/.ssh/config line 1: Applying options for localhost
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: Reading configuration data /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+debug1: /etc/ssh/ssh_config line 21: Applying options for *
+debug1: Connecting to localhost [::1] port 22.
+debug1: Connection established.
+debug1: no pubkey loaded from /root/.ssh/id_rsa
+debug1: identity file /root/.ssh/id_rsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_rsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa
+debug1: identity file /root/.ssh/id_ecdsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: identity file /root/.ssh/id_ecdsa_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: no pubkey loaded from /root/.ssh/id_ed25519
+debug1: identity file /root/.ssh/id_ed25519 type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519
+debug1: no pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: identity file /root/.ssh/id_ed25519_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: Local version string SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: Remote protocol version 2.0, remote software version OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: compat_banner: match: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2 pat OpenSSH* compat 0x04000000
+debug1: Authenticating to localhost:22 as 'git'
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts: No such file or directory
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts2: No such file or directory
+debug1: SSH2_MSG_KEXINIT sent
+debug1: SSH2_MSG_KEXINIT received
+debug1: kex: algorithm: mlkem768x25519-sha256
+debug1: kex: host key algorithm: ssh-ed25519
+debug1: kex: server->client cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: kex: client->server cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: expecting SSH2_MSG_KEX_ECDH_REPLY
+debug1: SSH2_MSG_KEX_ECDH_REPLY received
+git@localhost's password:
+
+root@08346bd18573:/tmp/testrepo# sudo -u git git-receive-pack /git/project < /dev/null 2>&1 | head -5; echo '---exit---'
+bash: sudo: command not found
+---exit---
+root@08346bd18573:/tmp/testrepo# cat > /tmp/rcv.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 15
+> spawn ssh git@localhost git-receive-pack /git/project
+> expect -re {[Pp]assword:} { send "password\r" }
+> sleep 1
+> send "\x04"
+> expect eof
+> EOF
+root@08346bd18573:/tmp/testrepo# chmod +x /tmp/rcv.exp; expect /tmp/rcv.exp
+spawn ssh git@localhost git-receive-pack /git/project
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+root@08346bd18573:/tmp/testrepo# getent passwd git
+git:x:1001:1001::/home/git:/bin/bash
+root@08346bd18573:/tmp/testrepo# cat > /tmp/echo.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 15
+> spawn ssh git@localhost {echo MARKER; which git-receive-pack; id; git-receive-pack /git/project </dev/null}
+> expect -re {[Pp]assword:} { send "password\r" }
+> expect eof
+> EOF
+root@08346bd18573:/tmp/testrepo# chmod +x /tmp/echo.exp; expect /tmp/echo.exp
+spawn ssh git@localhost echo MARKER; which git-receive-pack; id; git-receive-pack /git/project </dev/null
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+root@08346bd18573:/tmp/testrepo# su git -c 'git-receive-pack /git/project </dev/null' 2>&1 | head -3; echo EXIT=$?
+00b70000000000000000000000000000000000000000 capabilities^{}report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 a
+gent=git/2.53.0-Linux
+0000fatal: the remote end hung up unexpectedly
+EXIT=0
+root@08346bd18573:/tmp/testrepo# sshd -T 2>/dev/null | grep -iE 'passwordauthentication|usepam|permitrootlogin'; ls -ld /home/git /git /git/project
+usepam yes
+permitrootlogin prohibit-password
+passwordauthentication yes
+drwxr-xr-x 3 root root 4096 Jul  2 16:27 /git
+drwxr-xr-x 6 git  git  4096 Jul  2 16:27 /git/project
+drwxr-x--- 3 git  git  4096 Jul  2 16:30 /home/git
+root@08346bd18573:/tmp/testrepo# cat > /tmp/diag.exp <<'EOF'
+> #!/usr/bin/expect -f
+> log_file -noappend /tmp/ssh.log
+> set timeout 20
+> spawn ssh -v git@localhost "echo PONG; id; which git-receive-pack; ls /git/project/hooks"
+> expect {
+>   -re {[Pp]assword:} { send "password\r"; exp_continue }
+>   eof
+> }
+> EOF
+root@08346bd18573:/tmp/testrepo# chmod +x /tmp/diag.exp; expect /tmp/diag.exp; echo '=== LOG ==='; cat /tmp/ssh.log
+spawn ssh -v git@localhost echo PONG; id; which git-receive-pack; ls /git/project/hooks
+debug1: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2, OpenSSL 3.5.5 27 Jan 2026
+debug1: Reading configuration data /root/.ssh/config
+debug1: /root/.ssh/config line 1: Applying options for localhost
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: Reading configuration data /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+debug1: /etc/ssh/ssh_config line 21: Applying options for *
+debug1: Connecting to localhost [::1] port 22.
+debug1: Connection established.
+debug1: no pubkey loaded from /root/.ssh/id_rsa
+debug1: identity file /root/.ssh/id_rsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_rsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa
+debug1: identity file /root/.ssh/id_ecdsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: identity file /root/.ssh/id_ecdsa_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: no pubkey loaded from /root/.ssh/id_ed25519
+debug1: identity file /root/.ssh/id_ed25519 type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519
+debug1: no pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: identity file /root/.ssh/id_ed25519_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: Local version string SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: Remote protocol version 2.0, remote software version OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: compat_banner: match: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2 pat OpenSSH* compat 0x04000000
+debug1: Authenticating to localhost:22 as 'git'
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts: No such file or directory
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts2: No such file or directory
+debug1: SSH2_MSG_KEXINIT sent
+debug1: SSH2_MSG_KEXINIT received
+debug1: kex: algorithm: mlkem768x25519-sha256
+debug1: kex: host key algorithm: ssh-ed25519
+debug1: kex: server->client cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: kex: client->server cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: expecting SSH2_MSG_KEX_ECDH_REPLY
+debug1: SSH2_MSG_KEX_ECDH_REPLY received
+debug1: Server host key: ssh-ed25519 SHA256:j5tzBMOdrEHqevtKPQgmkNDGrcqy0CFDDjtpcit40cc
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts: No such file or directory
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts2: No such file or directory
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+debug1: ssh_packet_send2_wrapped: resetting send seqnr 3
+debug1: rekey out after 134217728 blocks
+debug1: SSH2_MSG_NEWKEYS sent
+debug1: Sending SSH2_MSG_EXT_INFO
+debug1: expecting SSH2_MSG_NEWKEYS
+debug1: ssh_packet_read_poll2: resetting read seqnr 3
+debug1: SSH2_MSG_NEWKEYS received
+debug1: rekey in after 134217728 blocks
+debug1: SSH2_MSG_EXT_INFO received
+debug1: kex_ext_info_client_parse: server-sig-algs=<ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-
+sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256>
+debug1: kex_ext_info_check_ver: publickey-hostbound@openssh.com=<0>
+debug1: kex_ext_info_check_ver: ping@openssh.com=<0>
+debug1: SSH2_MSG_SERVICE_ACCEPT received
+debug1: SSH2_MSG_EXT_INFO received
+debug1: kex_ext_info_client_parse: server-sig-algs=<ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-
+sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256>
+debug1: Authentications that can continue: publickey,password
+debug1: Next authentication method: publickey
+debug1: Will attempt key: /root/.ssh/id_rsa
+debug1: Will attempt key: /root/.ssh/id_ecdsa
+debug1: Will attempt key: /root/.ssh/id_ecdsa_sk
+debug1: Will attempt key: /root/.ssh/id_ed25519
+debug1: Will attempt key: /root/.ssh/id_ed25519_sk
+debug1: Trying private key: /root/.ssh/id_rsa
+debug1: Trying private key: /root/.ssh/id_ecdsa
+debug1: Trying private key: /root/.ssh/id_ecdsa_sk
+debug1: Trying private key: /root/.ssh/id_ed25519
+debug1: Trying private key: /root/.ssh/id_ed25519_sk
+debug1: Next authentication method: password
+git@localhost's password:
+Authenticated to localhost ([::1]:22) using "password".
+debug1: channel 0: new session [client-session] (inactive timeout: 0)
+debug1: Requesting no-more-sessions@openssh.com
+debug1: Entering interactive session.
+debug1: pledge: network
+debug1: client_input_global_request: rtype hostkeys-00@openssh.com want_reply 0
+debug1: Sending environment.
+debug1: channel 0: setting env COLORTERM = "truecolor"
+debug1: channel 0: setting env LC_CTYPE = "C.UTF-8"
+debug1: Sending command: echo PONG; id; which git-receive-pack; ls /git/project/hooks
+debug1: pledge: fork
+debug1: client_input_channel_req: channel 0 rtype exit-status reply 0
+debug1: client_input_channel_req: channel 0 rtype eow@openssh.com reply 0
+debug1: channel 0: free: client-session, nchannels 1
+Transferred: sent 3348, received 3668 bytes, in 0.1 seconds
+Bytes per second: sent 37167.1, received 40719.5
+debug1: Exit status 254
+=== LOG ===
+spawn ssh -v git@localhost echo PONG; id; which git-receive-pack; ls /git/project/hooks
+debug1: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2, OpenSSL 3.5.5 27 Jan 2026
+debug1: Reading configuration data /root/.ssh/config
+debug1: /root/.ssh/config line 1: Applying options for localhost
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: Reading configuration data /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+debug1: /etc/ssh/ssh_config line 21: Applying options for *
+debug1: Connecting to localhost [::1] port 22.
+debug1: Connection established.
+debug1: no pubkey loaded from /root/.ssh/id_rsa
+debug1: identity file /root/.ssh/id_rsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_rsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa
+debug1: identity file /root/.ssh/id_ecdsa type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa
+debug1: no pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: identity file /root/.ssh/id_ecdsa_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ecdsa_sk
+debug1: no pubkey loaded from /root/.ssh/id_ed25519
+debug1: identity file /root/.ssh/id_ed25519 type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519
+debug1: no pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: identity file /root/.ssh/id_ed25519_sk type -1
+debug1: no identity pubkey loaded from /root/.ssh/id_ed25519_sk
+debug1: Local version string SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: Remote protocol version 2.0, remote software version OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: compat_banner: match: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2 pat OpenSSH* compat 0x04000000
+debug1: Authenticating to localhost:22 as 'git'
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts: No such file or directory
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts2: No such file or directory
+debug1: SSH2_MSG_KEXINIT sent
+debug1: SSH2_MSG_KEXINIT received
+debug1: kex: algorithm: mlkem768x25519-sha256
+debug1: kex: host key algorithm: ssh-ed25519
+debug1: kex: server->client cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: kex: client->server cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none
+debug1: expecting SSH2_MSG_KEX_ECDH_REPLY
+debug1: SSH2_MSG_KEX_ECDH_REPLY received
+debug1: Server host key: ssh-ed25519 SHA256:j5tzBMOdrEHqevtKPQgmkNDGrcqy0CFDDjtpcit40cc
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts: No such file or directory
+debug1: load_hostkeys: fopen /etc/ssh/ssh_known_hosts2: No such file or directory
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+debug1: ssh_packet_send2_wrapped: resetting send seqnr 3
+debug1: rekey out after 134217728 blocks
+debug1: SSH2_MSG_NEWKEYS sent
+debug1: Sending SSH2_MSG_EXT_INFO
+debug1: expecting SSH2_MSG_NEWKEYS
+debug1: ssh_packet_read_poll2: resetting read seqnr 3
+debug1: SSH2_MSG_NEWKEYS received
+debug1: rekey in after 134217728 blocks
+debug1: SSH2_MSG_EXT_INFO received
+debug1: kex_ext_info_client_parse: server-sig-algs=<ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-
+sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256>
+debug1: kex_ext_info_check_ver: publickey-hostbound@openssh.com=<0>
+debug1: kex_ext_info_check_ver: ping@openssh.com=<0>
+debug1: SSH2_MSG_SERVICE_ACCEPT received
+debug1: SSH2_MSG_EXT_INFO received
+debug1: kex_ext_info_client_parse: server-sig-algs=<ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-
+sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256>
+debug1: Authentications that can continue: publickey,password
+debug1: Next authentication method: publickey
+debug1: Will attempt key: /root/.ssh/id_rsa
+debug1: Will attempt key: /root/.ssh/id_ecdsa
+debug1: Will attempt key: /root/.ssh/id_ecdsa_sk
+debug1: Will attempt key: /root/.ssh/id_ed25519
+debug1: Will attempt key: /root/.ssh/id_ed25519_sk
+debug1: Trying private key: /root/.ssh/id_rsa
+debug1: Trying private key: /root/.ssh/id_ecdsa
+debug1: Trying private key: /root/.ssh/id_ecdsa_sk
+debug1: Trying private key: /root/.ssh/id_ed25519
+debug1: Trying private key: /root/.ssh/id_ed25519_sk
+debug1: Next authentication method: password
+git@localhost's password:
+Authenticated to localhost ([::1]:22) using "password".
+debug1: channel 0: new session [client-session] (inactive timeout: 0)
+debug1: Requesting no-more-sessions@openssh.com
+debug1: Entering interactive session.
+debug1: pledge: network
+debug1: client_input_global_request: rtype hostkeys-00@openssh.com want_reply 0
+debug1: Sending environment.
+debug1: channel 0: setting env COLORTERM = "truecolor"
+debug1: channel 0: setting env LC_CTYPE = "C.UTF-8"
+debug1: Sending command: echo PONG; id; which git-receive-pack; ls /git/project/hooks
+debug1: pledge: fork
+debug1: client_input_channel_req: channel 0 rtype exit-status reply 0
+debug1: client_input_channel_req: channel 0 rtype eow@openssh.com reply 0
+debug1: channel 0: free: client-session, nchannels 1
+Transferred: sent 3348, received 3668 bytes, in 0.1 seconds
+Bytes per second: sent 37167.1, received 40719.5
+debug1: Exit status 254
+root@08346bd18573:/tmp/testrepo# pkill -f 'sshd -ddd' 2>/dev/null; /usr/sbin/sshd -ddd -p 2222 2>/tmp/sshd.log & sleep 1; echo STARTED
+[1] 1171
+STARTED
+root@08346bd18573:/tmp/testrepo# cat > /tmp/d2.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 20
+> spawn ssh -p 2222 git@localhost "echo HELLO_WORLD"
+> expect {
+>   -re {[Pp]assword:} { send "password\r"; exp_continue }
+>   eof
+> }
+> EOF
+root@08346bd18573:/tmp/testrepo# chmod +x /tmp/d2.exp; expect /tmp/d2.exp; echo '=== SERVER LOG ==='; cat /tmp/sshd.log
+spawn ssh -p 2222 git@localhost echo HELLO_WORLD
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+git@localhost's password:
+debug3: PAM session not opened, exiting
+=== SERVER LOG ===
+debug1: sshd version OpenSSH_10.2, OpenSSL 3.5.5 27 Jan 2026
+debug3: Running on Linux 5.4.241-1-tlinux4-0017.14 #1 SMP Thu Oct 24 18:51:12 CST 2024 x86_64
+debug3: Started with: /usr/sbin/sshd -ddd -p 2222
+debug2: load_server_config: filename /etc/ssh/sshd_config
+debug2: load_server_config: done config len = 4308
+debug2: parse_server_config_depth: config /etc/ssh/sshd_config len 4308
+debug2: /etc/ssh/sshd_config line 24: new include /etc/ssh/sshd_config.d/*.conf
+debug2: /etc/ssh/sshd_config line 24: including /etc/ssh/sshd_config.d/99-git.conf
+debug2: load_server_config: filename /etc/ssh/sshd_config.d/99-git.conf
+debug2: load_server_config: done config len = 82
+debug2: parse_server_config_depth: config /etc/ssh/sshd_config.d/99-git.conf len 82
+debug3: /etc/ssh/sshd_config.d/99-git.conf:1 setting PasswordAuthentication yes
+debug3: /etc/ssh/sshd_config.d/99-git.conf:2 setting PubkeyAuthentication yes
+debug3: /etc/ssh/sshd_config.d/99-git.conf:3 setting PrintMotd no
+debug3: /etc/ssh/sshd_config.d/99-git.conf:4 setting PrintLastLog no
+debug3: /etc/ssh/sshd_config:85 setting KbdInteractiveAuthentication no
+debug3: /etc/ssh/sshd_config:108 setting UsePAM yes
+debug3: /etc/ssh/sshd_config:113 setting X11Forwarding yes
+debug3: /etc/ssh/sshd_config:117 setting PrintMotd no
+debug3: /etc/ssh/sshd_config:135 setting AcceptEnv LANG LC_* COLORTERM NO_COLOR
+debug3: /etc/ssh/sshd_config:138 setting Subsystem sftp	/usr/lib/openssh/sftp-server
+debug1: private host key #0: ssh-rsa SHA256:97qQnHf7borHGA4sw365wDRtcfmTT7vzlXu5+41n9zs
+debug1: private host key #1: ecdsa-sha2-nistp256 SHA256:n0ARu+S3lOucnq9TPqummDFV0pDw1obj60j+rb58FRY
+debug1: private host key #2: ssh-ed25519 SHA256:j5tzBMOdrEHqevtKPQgmkNDGrcqy0CFDDjtpcit40cc
+debug3: pack_config: d config len 4308
+debug3: pack_config: done
+debug1: rexec_argv[1]='-ddd'
+debug1: rexec_argv[2]='-p'
+debug1: rexec_argv[3]='2222'
+debug3: using /usr/lib/openssh/sshd-session for re-exec
+debug3: oom_adjust_setup
+debug1: Set /proc/self/oom_score_adj from 0 to -1000
+debug2: fd 6 setting O_NONBLOCK
+debug1: Bind to port 2222 on 0.0.0.0.
+Server listening on 0.0.0.0 port 2222.
+debug2: fd 7 setting O_NONBLOCK
+debug3: sock_set_v6only: set socket 7 IPV6_V6ONLY
+debug1: Bind to port 2222 on ::.
+Server listening on :: port 2222.
+debug3: fd 8 is not O_NONBLOCK
+debug1: Server will not fork when running in debugging mode.
+debug1: rexec start in 8 out 8 newsock 8 config_s 9/10
+debug3: send_rexec_state: entering fd = 9 config len 4486
+debug3: recv_rexec_state: entering fd = 4
+debug3: ssh_msg_recv entering
+debug3: ssh_msg_recv entering
+debug3: send_rexec_state: done
+debug2: parse_hostkeys: privkey 0: ssh-rsa
+debug2: parse_hostkeys: pubkey 0: ssh-rsa
+debug2: parse_hostkeys: privkey 1: ecdsa-sha2-nistp256
+debug2: parse_hostkeys: pubkey 1: ecdsa-sha2-nistp256
+debug2: parse_hostkeys: privkey 2: ssh-ed25519
+debug2: parse_hostkeys: pubkey 2: ssh-ed25519
+debug3: recv_rexec_state: done
+debug2: parse_server_config_depth: config rexec len 4308
+debug2: parse_server_config_depth: config /etc/ssh/sshd_config.d/99-git.conf len 82
+debug3: /etc/ssh/sshd_config.d/99-git.conf:1 setting PasswordAuthentication yes
+debug3: /etc/ssh/sshd_config.d/99-git.conf:2 setting PubkeyAuthentication yes
+debug3: /etc/ssh/sshd_config.d/99-git.conf:3 setting PrintMotd no
+debug3: /etc/ssh/sshd_config.d/99-git.conf:4 setting PrintLastLog no
+debug3: rexec:85 setting KbdInteractiveAuthentication no
+debug3: rexec:108 setting UsePAM yes
+debug3: rexec:113 setting X11Forwarding yes
+debug3: rexec:117 setting PrintMotd no
+debug3: rexec:135 setting AcceptEnv LANG LC_* COLORTERM NO_COLOR
+debug3: rexec:138 setting Subsystem sftp	/usr/lib/openssh/sftp-server
+debug1: sshd-session version OpenSSH_10.2, OpenSSL 3.5.5 27 Jan 2026
+debug1: network sockets: 6, 6
+debug2: fd 6 setting TCP_NODELAY
+debug3: set_sock_tos: set socket 6 IPV6_TCLASS 0xb8
+debug3: server_process_channel_timeouts: setting 0 timeouts
+debug3: channel_clear_timeouts: clearing
+Connection from ::1 port 36964 on ::1 port 2222 rdomain ""
+debug1: Local version string SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: Remote protocol version 2.0, remote software version OpenSSH_10.2p1 Ubuntu-2ubuntu3.2
+debug1: compat_banner: match: OpenSSH_10.2p1 Ubuntu-2ubuntu3.2 pat OpenSSH* compat 0x04000000
+debug2: fd 6 setting O_NONBLOCK
+debug2: Network child is on pid 1187
+debug3: preauth child monitor started
+debug1: network sockets: 5, 5 [preauth]
+debug3: recv_privsep_state: begin [preauth]
+debug3: mm_get_state: entering [preauth]
+debug3: mm_request_send: entering, type 51 [preauth]
+debug3: mm_get_state: waiting for MONITOR_ANS_STATE [preauth]
+debug3: mm_request_receive_expect: entering, type 52 [preauth]
+debug3: mm_request_receive: entering [preauth]
+debug3: mm_request_receive: entering
+debug3: monitor_read: checking request 51
+debug1: mm_answer_state: config len 4308
+debug3: mm_request_send: entering, type 52
+debug3: mm_answer_state: done
+debug2: monitor_read: 51 used once, disabling now
+debug3: mm_get_state: done [preauth]
+debug2: parse_hostkeys: key 0: ssh-rsa [preauth]
+debug2: parse_hostkeys: key 1: ecdsa-sha2-nistp256 [preauth]
+debug2: parse_hostkeys: key 2: ssh-ed25519 [preauth]
+debug3: recv_privsep_state: done [preauth]
+debug2: parse_server_config_depth: config rexec len 4308 [preauth]
+debug2: parse_server_config_depth: config /etc/ssh/sshd_config.d/99-git.conf len 82 [preauth]
+debug3: /etc/ssh/sshd_config.d/99-git.conf:1 setting PasswordAuthentication yes [preauth]
+debug3: /etc/ssh/sshd_config.d/99-git.conf:2 setting PubkeyAuthentication yes [preauth]
+debug3: /etc/ssh/sshd_config.d/99-git.conf:3 setting PrintMotd no [preauth]
+debug3: /etc/ssh/sshd_config.d/99-git.conf:4 setting PrintLastLog no [preauth]
+debug3: rexec:85 setting KbdInteractiveAuthentication no [preauth]
+debug3: rexec:108 setting UsePAM yes [preauth]
+debug3: rexec:113 setting X11Forwarding yes [preauth]
+debug3: rexec:117 setting PrintMotd no [preauth]
+debug3: rexec:135 setting AcceptEnv LANG LC_* COLORTERM NO_COLOR [preauth]
+debug3: rexec:138 setting Subsystem sftp	/usr/lib/openssh/sftp-server [preauth]
+debug2: fd 5 is TCP_NODELAY [preauth]
+debug3: set_sock_tos: set socket 5 IPV6_TCLASS 0xb8 [preauth]
+debug1: sshd-auth version OpenSSH_10.2, OpenSSL 3.5.5 27 Jan 2026 [preauth]
+debug3: server_process_channel_timeouts: setting 0 timeouts [preauth]
+debug3: channel_clear_timeouts: clearing [preauth]
+debug3: fd 5 is O_NONBLOCK [preauth]
+debug3: ssh_sandbox_init: preparing seccomp filter sandbox [preauth]
+debug3: privsep user:group 994:65534 [preauth]
+debug1: permanently_set_uid: 994/65534 [preauth]
+debug3: ssh_sandbox_child: setting PR_SET_NO_NEW_PRIVS [preauth]
+debug3: ssh_sandbox_child: attaching seccomp filter program [preauth]
+debug3: append_hostkey_type: ssh-rsa key not permitted by HostkeyAlgorithms [preauth]
+debug1: list_hostkey_types: rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp256,ssh-ed25519 [preauth]
+debug3: send packet: type 20 [preauth]
+debug1: SSH2_MSG_KEXINIT sent [preauth]
+debug3: receive packet: type 20 [preauth]
+debug1: SSH2_MSG_KEXINIT received [preauth]
+debug2: local server KEXINIT proposal [preauth]
+debug2: KEX algorithms: mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2
+-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,ext-info-s,kex-strict-s-v00@openssh.com [preauth]
+debug2: host key algorithms: rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp256,ssh-ed25519 [preauth]
+debug2: ciphers ctos: chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr [preauth]
+debug2: ciphers stoc: chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr [preauth]
+debug2: MACs ctos: umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-6
+4@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1 [preauth]
+debug2: MACs stoc: umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-6
+4@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1 [preauth]
+debug2: compression ctos: none,zlib@openssh.com [preauth]
+debug2: compression stoc: none,zlib@openssh.com [preauth]
+debug2: languages ctos:  [preauth]
+debug2: languages stoc:  [preauth]
+debug2: first_kex_follows 0  [preauth]
+debug2: reserved 0  [preauth]
+debug2: peer client KEXINIT proposal [preauth]
+debug2: KEX algorithms: mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2
+-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-
+group14-sha256,ext-info-c,kex-strict-c-v00@openssh.com [preauth]
+debug2: host key algorithms: ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp
+521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01
+@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,
+rsa-sha2-256 [preauth]
+debug2: ciphers ctos: chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr [preauth]
+debug2: ciphers stoc: chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr [preauth]
+debug2: MACs ctos: umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-6
+4@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1 [preauth]
+debug2: MACs stoc: umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-6
+4@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1 [preauth]
+debug2: compression ctos: none,zlib@openssh.com [preauth]
+debug2: compression stoc: none,zlib@openssh.com [preauth]
+debug2: languages ctos:  [preauth]
+debug2: languages stoc:  [preauth]
+debug2: first_kex_follows 0  [preauth]
+debug2: reserved 0  [preauth]
+debug3: kex_choose_conf: will use strict KEX ordering [preauth]
+debug1: kex: algorithm: mlkem768x25519-sha256 [preauth]
+debug1: kex: host key algorithm: ssh-ed25519 [preauth]
+debug1: kex: client->server cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none [preauth]
+debug1: kex: server->client cipher: chacha20-poly1305@openssh.com MAC: <implicit> compression: none [preauth]
+debug1: expecting SSH2_MSG_KEX_ECDH_INIT [preauth]
+debug3: receive packet: type 30 [preauth]
+debug1: SSH2_MSG_KEX_ECDH_INIT received [preauth]
+debug3: mm_sshkey_sign: entering [preauth]
+debug3: mm_request_send: entering, type 6 [preauth]
+debug3: mm_sshkey_sign: waiting for MONITOR_ANS_SIGN [preauth]
+debug3: mm_request_receive_expect: entering, type 7 [preauth]
+debug3: mm_request_receive: entering [preauth]
+debug3: mm_request_receive: entering
+debug3: monitor_read: checking request 6
+debug3: mm_answer_sign: entering
+debug1: mm_answer_sign: hostkey ssh-ed25519 index 2
+debug3: mm_answer_sign: ssh-ed25519 KEX signature len=83
+debug3: mm_request_send: entering, type 7
+debug2: monitor_read: 6 used once, disabling now
+debug3: mm_sshkey_sign: ssh-ed25519 signature len=83 [preauth]
+debug3: send packet: type 31 [preauth]
+debug3: send packet: type 21 [preauth]
+debug1: ssh_packet_send2_wrapped: resetting send seqnr 3 [preauth]
+debug2: ssh_set_newkeys: mode 1 [preauth]
+debug1: rekey out after 134217728 blocks [preauth]
+debug1: SSH2_MSG_NEWKEYS sent [preauth]
+debug1: Sending SSH2_MSG_EXT_INFO [preauth]
+debug3: send packet: type 7 [preauth]
+debug1: expecting SSH2_MSG_NEWKEYS [preauth]
+debug3: receive packet: type 21 [preauth]
+debug1: ssh_packet_read_poll2: resetting read seqnr 3 [preauth]
+debug1: SSH2_MSG_NEWKEYS received [preauth]
+debug2: ssh_set_newkeys: mode 0 [preauth]
+debug1: rekey in after 134217728 blocks [preauth]
+debug2: KEX algorithms: mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2
+-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,ext-info-s,kex-strict-s-v00@openssh.com [preauth]
+debug2: host key algorithms: rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp256,ssh-ed25519 [preauth]
+debug2: ciphers ctos: chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr [preauth]
+debug2: ciphers stoc: chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr [preauth]
+debug2: MACs ctos: umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-6
+4@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1 [preauth]
+debug2: MACs stoc: umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-6
+4@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1 [preauth]
+debug2: compression ctos: none,zlib@openssh.com [preauth]
+debug2: compression stoc: none,zlib@openssh.com [preauth]
+debug2: languages ctos:  [preauth]
+debug2: languages stoc:  [preauth]
+debug2: first_kex_follows 0  [preauth]
+debug2: reserved 0  [preauth]
+debug1: KEX done [preauth]
+debug3: receive packet: type 7 [preauth]
+debug1: SSH2_MSG_EXT_INFO received [preauth]
+debug3: kex_input_ext_info: extension ext-info-in-auth@openssh.com [preauth]
+debug1: kex_ext_info_check_ver: ext-info-in-auth@openssh.com=<0> [preauth]
+debug3: receive packet: type 5 [preauth]
+debug3: send packet: type 6 [preauth]
+debug3: receive packet: type 50 [preauth]
+debug1: userauth-request for user git service ssh-connection method none [preauth]
+debug1: attempt 0 failures 0 [preauth]
+debug3: mm_getpwnamallow: entering [preauth]
+debug3: mm_request_send: entering, type 8 [preauth]
+debug3: mm_getpwnamallow: waiting for MONITOR_ANS_PWNAM [preauth]
+debug3: mm_request_receive_expect: entering, type 9 [preauth]
+debug3: mm_request_receive: entering [preauth]
+debug3: mm_request_receive: entering
+debug3: monitor_read: checking request 8
+debug3: mm_answer_pwnamallow: entering
+debug2: parse_server_config_depth: config reprocess config len 4308
+debug2: parse_server_config_depth: config /etc/ssh/sshd_config.d/99-git.conf len 82
+debug3: mm_answer_pwnamallow: sending MONITOR_ANS_PWNAM: 1
+debug3: mm_request_send: entering, type 9
+debug2: monitor_read: 8 used once, disabling now
+debug3: server_process_channel_timeouts: setting 0 timeouts [preauth]
+debug3: channel_clear_timeouts: clearing [preauth]
+debug2: input_userauth_request: setting up authctxt for git [preauth]
+debug3: mm_start_pam: entering [preauth]
+debug3: mm_request_send: entering, type 100 [preauth]
+debug3: mm_inform_authserv: entering [preauth]
+debug3: mm_request_send: entering, type 4 [preauth]
+debug1: kex_server_update_ext_info: Sending SSH2_MSG_EXT_INFO [preauth]
+debug3: send packet: type 7 [preauth]
+debug2: input_userauth_request: try method none [preauth]
+debug3: userauth_finish: failure partial=0 next methods="publickey,password" [preauth]
+debug3: send packet: type 51 [preauth]
+debug3: receive packet: type 50 [preauth]
+debug1: userauth-request for user git service ssh-connection method password [preauth]
+debug1: attempt 1 failures 0 [preauth]
+debug2: input_userauth_request: try method password [preauth]
+debug3: mm_auth_password: entering [preauth]
+debug3: mm_request_send: entering, type 12 [preauth]
+debug3: mm_auth_password: waiting for MONITOR_ANS_AUTHPASSWORD [preauth]
+debug3: mm_request_receive_expect: entering, type 13 [preauth]
+debug3: mm_request_receive: entering [preauth]
+debug3: mm_request_receive: entering
+debug3: monitor_read: checking request 100
+debug1: PAM: initializing for "git" with service "sshd"
+debug1: PAM: setting PAM_RHOST to "::1"
+debug1: PAM: setting PAM_TTY to "ssh"
+debug2: monitor_read: 100 used once, disabling now
+debug3: mm_request_receive: entering
+debug3: monitor_read: checking request 4
+debug3: mm_answer_authserv: service=ssh-connection, style=, role=
+debug2: monitor_read: 4 used once, disabling now
+debug3: mm_request_receive: entering
+debug3: monitor_read: checking request 12
+debug2: sshpam_auth_passwd: auth information in SSH_AUTH_INFO_0
+debug3: sshpam_passwd_conv: PAM: called with 1 messages
+debug1: PAM: password authentication accepted for git
+debug3: mm_answer_authpassword: sending result 1
+debug3: mm_request_send: entering, type 13
+debug3: mm_request_receive_expect: entering, type 102
+debug3: mm_request_receive: entering
+debug1: do_pam_account: called
+debug2: do_pam_account: auth information in SSH_AUTH_INFO_0
+debug3: PAM: do_pam_account pam_acct_mgmt = 0 (Success)
+debug3: mm_request_send: entering, type 103
+Accepted password for git from ::1 port 36964 ssh2
+debug1: monitor_child_preauth: user git authenticated by privileged process
+debug3: mm_get_keystate: Waiting for new keys
+debug3: mm_request_receive_expect: entering, type 26
+debug3: mm_request_receive: entering
+debug3: mm_get_keystate: GOT new keys
+debug3: mm_auth_password: user authenticated [preauth]
+debug3: user_specific_delay: user specific delay 4.155ms [preauth]
+debug3: ensure_minimum_time_since: elapsed 86.757ms, delaying 59.722ms (requested 9.155ms) [preauth]
+debug3: mm_do_pam_account: entering [preauth]
+debug3: mm_request_send: entering, type 102 [preauth]
+debug3: mm_request_receive_expect: entering, type 103 [preauth]
+debug3: mm_request_receive: entering [preauth]
+debug3: mm_do_pam_account: returning 1 [preauth]
+debug3: send packet: type 52 [preauth]
+debug3: mm_request_send: entering, type 26 [preauth]
+debug3: mm_send_keystate: Finished sending state [preauth]
+debug1: monitor_read_log: child log fd closed
+debug3: monitor_child_preauth: preauth child 1187 terminated successfully
+debug1: PAM: establishing credentials
+debug3: PAM: opening session
+debug2: do_pam_session: auth information in SSH_AUTH_INFO_0
+debug1: auth_restrict_session: restricting session
+debug1: auth_activate_options: setting new authentication options
+PAM: pam_open_session(): Cannot make/remove an entry for the specified session
+User child is on pid 1190
+debug1: SELinux support disabled
+debug1: PAM: establishing credentials
+debug1: permanently_set_uid: 1001/1001
+debug3: monitor_apply_keystate: packet_set_state
+debug2: ssh_set_newkeys: mode 0
+debug1: rekey in after 134217728 blocks
+debug2: ssh_set_newkeys: mode 1
+debug1: rekey out after 134217728 blocks
+debug1: ssh_packet_set_postauth: called
+debug3: ssh_packet_set_state: done
+debug3: notify_hostkeys: key 0: ssh-rsa SHA256:97qQnHf7borHGA4sw365wDRtcfmTT7vzlXu5+41n9zs
+debug3: notify_hostkeys: key 1: ecdsa-sha2-nistp256 SHA256:n0ARu+S3lOucnq9TPqummDFV0pDw1obj60j+rb58FRY
+debug3: notify_hostkeys: key 2: ssh-ed25519 SHA256:j5tzBMOdrEHqevtKPQgmkNDGrcqy0CFDDjtpcit40cc
+debug3: notify_hostkeys: sent 3 hostkeys
+debug3: send packet: type 80
+debug1: active: key options: pty
+debug1: Entering interactive session for SSH2.
+debug1: server_init_dispatch
+debug2: process_output: session QoS is now interactive
+debug3: set_sock_tos: set socket 6 IPV6_TCLASS 0xb8
+debug3: receive packet: type 90
+debug1: server_input_channel_open: ctype session rchan 0 win 2097152 max 32768
+debug1: input_session_request
+debug1: channel 0: new session [server-session] (inactive timeout: 0)
+debug2: session_new: allocate (allocated 0 max 10)
+debug3: session_unused: session id 0 unused
+debug1: session_new: session 0
+debug1: session_open: channel 0
+debug1: session_open: session 0: link with channel 0
+debug1: server_input_channel_open: confirm session
+debug3: send packet: type 91
+debug3: receive packet: type 80
+debug1: server_input_global_request: rtype no-more-sessions@openssh.com want_reply 0
+debug3: receive packet: type 98
+debug1: server_input_channel_req: channel 0 request env reply 0
+debug1: session_by_channel: session 0 channel 0
+debug1: session_input_channel_req: session 0 req env
+debug2: Setting env 0: COLORTERM=truecolor
+debug3: receive packet: type 98
+debug1: server_input_channel_req: channel 0 request env reply 0
+debug1: session_by_channel: session 0 channel 0
+debug1: session_input_channel_req: session 0 req env
+debug2: Setting env 1: LC_CTYPE=C.UTF-8
+debug3: receive packet: type 98
+debug1: server_input_channel_req: channel 0 request exec reply 1
+debug1: session_by_channel: session 0 channel 0
+debug1: session_input_channel_req: session 0 req exec
+debug2: channel_set_xtype: labeled channel 0 as session:command (inactive timeout 0)
+Starting session: command for git from ::1 port 36964 id 0
+debug3: mm_audit_run_command: entering command echo HELLO_WORLD
+debug3: mm_request_send: entering, type 113
+debug3: mm_request_receive: entering
+debug3: monitor_read: checking request 113
+debug3: mm_answer_audit_command: entering
+debug2: fd 11 setting O_NONBLOCK
+debug2: fd 10 setting O_NONBLOCK
+debug2: fd 13 setting O_NONBLOCK
+debug3: send packet: type 99
+debug2: process_output: session QoS is now non-interactive
+debug3: set_sock_tos: set socket 6 IPV6_TCLASS 0x00
+debug2: channel 0: read 41 from efd 13
+debug2: channel 0: rwin 2097152 elen 41 euse 1
+debug2: channel 0: sent ext data 41
+debug2: channel 0: read failed rfd 11 maxlen 32768: Broken pipe
+debug2: channel 0: read failed
+debug2: chan_shutdown_read: channel 0: (i0 o0 sock -1 wfd 11 efd 13 [read])
+debug2: channel 0: input open -> drain
+debug2: channel 0: read 0 from efd 13
+debug2: channel 0: closing read-efd 13
+debug2: channel 0: ibuf empty
+debug2: channel 0: send eof
+debug3: send packet: type 96
+debug2: channel 0: input drain -> closed
+debug1: Received SIGCHLD.
+debug1: session_by_pid: pid 1191
+debug2: channel 0: request exit-status confirm 0
+debug3: send packet: type 98
+debug1: session_exit_message: session 0 channel 0 pid 1191 exit 254
+debug1: session_exit_message: release channel 0
+debug2: channel 0: write failed
+debug2: chan_shutdown_write: channel 0: (i3 o0 sock -1 wfd 10 efd -1 [closed])
+debug2: channel 0: send eow
+debug3: send packet: type 98
+debug2: channel 0: output open -> closed
+debug2: channel 0: send_close2
+debug2: channel 0: send close for remote id 0
+debug3: send packet: type 97
+debug3: channel 0: will not send data after close
+debug3: receive packet: type 97
+debug2: channel 0: rcvd close
+debug3: receive packet: type 1
+Received disconnect from ::1 port 36964:11: disconnected by user
+Disconnected from user git ::1 port 36964
+debug1: do_cleanup
+debug3: sshpam_thread_cleanup: entering
+debug1: temporarily_use_uid: 1001/1001 (e=1001/1001)
+debug1: restore_uid: (unprivileged)
+debug3: mm_request_receive: entering
+debug3: mm_request_receive: monitor fd closed
+debug1: mm_reap: child exited with status 255
+debug1: do_cleanup
+debug1: PAM: cleanup
+debug1: PAM: deleting credentials
+debug3: sshpam_thread_cleanup: entering
+debug1: temporarily_use_uid: 1001/1001 (e=0/0)
+debug1: restore_uid: 0/0
+debug1: audit_event: unhandled event 12
+[1]+  Exit 255                   /usr/sbin/sshd -ddd -p 2222 2> /tmp/sshd.log
+root@08346bd18573:/tmp/testrepo# pkill -f 'sshd -ddd'; sleep 1; printf 'UsePAM no\n' >> /etc/ssh/sshd_config.d/99-git.conf; pkill -x sshd; sleep 1; /usr/sbin/ss
+hd; sleep 1; pgrep -a sshd
+cd /tmp/testrepo && time expect /tmp/push.exp
+1232 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && time expect /tmp/push.exp
+spawn git push origin main dev
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+Enumerating objects: 6, done.
+Counting objects: 100% (6/6), done.
+Delta compression using up to 32 threads
+Compressing objects: 100% (2/2), done.
+Writing objects: 100% (6/6), 418 bytes | 41.00 KiB/s, done.
+Total 6 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+To ssh://localhost/git/project
+ * [new branch]      main -> main
+ * [new branch]      dev -> dev
+
+real	0m0.801s
+user	0m0.002s
+sys	0m0.006s
+root@08346bd18573:/tmp/testrepo# ls -l /var/www/html/ /var/www/html/dev/ 2>&1
+/var/www/html/:
+total 12
+drwxr-xr-x 2 git git 4096 Jul  2 16:36 dev
+-rw-r--r-- 1 git git   19 Jul  2 16:30 index.html
+-rw-r--r-- 1 git git  615 Jul  2 14:56 index.nginx-debian.html
+
+/var/www/html/dev/:
+total 4
+-rw-r--r-- 1 git git 18 Jul  2 16:30 index.html
+root@08346bd18573:/tmp/testrepo# curl -sk https://localhost:8443/index.html; echo '---'; curl -sk https://localhost:8443/dev/index.html; echo '---'
+<h1>Main Page</h1>
+---
+<h1>Dev Page</h1>
+---
+root@08346bd18573:/tmp/testrepo# cd /tmp/testrepo && echo '<h1>Main v2</h1>' > index.html && git add . && git commit -qm v2 && echo '--- push timing ---' && tim
+e expect /tmp/push.exp
+--- push timing ---
+spawn git push origin main dev
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+Enumerating objects: 5, done.
+Counting objects: 100% (5/5), done.
+Writing objects: 100% (3/3), 232 bytes | 232.00 KiB/s, done.
+Total 3 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+To ssh://localhost/git/project
+   7acc426..84feda2  main -> main
+
+real	0m0.420s
+user	0m0.002s
+sys	0m0.006s
+root@08346bd18573:/tmp/testrepo# curl -sk https://localhost:8443/index.html; echo ' === '; curl -sk https://localhost:8443/dev/index.html
+<h1>Main v2</h1>
+ ===
+<h1>Dev Page</h1>
+root@08346bd18573:/tmp/testrepo# pgrep -a sshd; pgrep -a nginx | head -1; curl -sk https://localhost:8443/index.html; echo ' == '; curl -sk https://localhost:84
+43/dev/index.html
+1232 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+315 nginx: master process nginx
+<h1>Main v2</h1>
+ ==
+<h1>Dev Page</h1>
+root@08346bd18573:/tmp/testrepo#

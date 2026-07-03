@@ -1,0 +1,9 @@
+{
+  "analysis": "The tmpfs mount was denied by fuse-overlayfs. The real problem is that fuse-overlayfs misreports available space via statvfs (returns 0), so apt's pre-flight free-space check fails — even though actual writes succeed (I wrote a 100MB file fine). The error names /var/cache/apt/archives specifically. I can work around this by telling apt to use a directory on a filesystem that reports real free space (the /dev/shm tmpfs reports 64M available) for its cache/archives, so the download-space check passes. Real writes to the root fs work, so the actual install should succeed.",
+  "plan": "Point apt's Dir::Cache to /dev/shm/apt (a tmpfs that reports free space) and retry the install. If apt still complains about the install target's free space, I'll fall back to --download-only + dpkg -i. After install succeeds, I'll configure SSH/git/webserver.",
+  "commands": [
+    {"keystrokes": "mkdir -p /dev/shm/apt/archives\n", "duration": 0.1},
+    {"keystrokes": "apt-get -o Dir::Cache=/dev/shm/apt install -y --no-install-recommends git openssh-server 2>&1 | tail -20\n", "duration": 60}
+  ],
+  "task_complete": false
+}

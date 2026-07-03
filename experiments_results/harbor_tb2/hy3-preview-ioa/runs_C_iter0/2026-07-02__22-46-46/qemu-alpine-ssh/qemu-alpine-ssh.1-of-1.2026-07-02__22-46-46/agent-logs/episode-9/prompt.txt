@@ -1,0 +1,38 @@
+New Terminal Output:
+
+root@f7750922546c:/app# cat > /tmp/find.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb'); f.seek(16*SECTOR)
+> pvd=f.read(SECTOR); root=pvd[156:190]
+> def pr(dr): return (struct.unpack('<I',dr[2:6])[0],struct.unpack('<I',dr[10:14])[0],dr[25],dr[33:33+dr[32]])
+> hits=[]
+> def walk(ext,length,path):
+>     f.seek(ext*SECTOR); data=f.read(length); off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0: off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=pr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'): off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full)
+>         else:
+>             u=nm.upper()
+>             if any(k in u for k in ['VMLINUZ','INITRAMFS','UCODE','BOOT']):
+>                 hits.append((full,d))
+>         off+=rl
+> ext,dl,fl,nm=pr(root); walk(ext,dl,'')
+> for h in hits: print(h)
+> EOF
+root@f7750922546c:/app# python3 /tmp/find.py
+('APKS/.BOOT_REPOSITORY', 0)
+('APKS/X86_64/EFIBOOTMGR_18_R2.APK', 23580)
+('APKS/X86_64/LINUX_FIRMWARE_AMD_UCODE_20.APK', 40106)
+('BOOT/AMD_UCODE.IMG', 61440)
+('BOOT/INITRAMFS_LTS.', 20486092)
+('BOOT/INTEL_UCODE.IMG', 7367952)
+('BOOT/SYSLINUX/BOOT.CAT', 2048)
+('BOOT/SYSLINUX/MBOOT.C32', 11712)
+('BOOT/VMLINUZ_LTS.', 11879168)
+('EFI/BOOT/BOOTX64.EFI', 688128)
+root@f7750922546c:/app#

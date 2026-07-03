@@ -1,0 +1,8 @@
+{
+  "analysis": "Root cause identified: `du` shows only ~183MB actually used and a 50MB write to /tmp succeeded, but `df`/statvfs reports 0 available on the fuse-overlayfs. apt uses statvfs to pre-flight disk space and refuses because it sees 0 free — this is a false-positive from the overlay's free-space reporting, not a real limit. The fix is to bypass apt's download space-check entirely: use `apt-get --print-uris` to get the .deb URLs, fetch them with curl (already installed), and install with `dpkg -i`, which doesn't do this pre-flight.",
+  "plan": "1. Get the resolved list of .deb URLs via `apt-get --print-uris` (no actual download/space check). 2. Download each .deb with curl into /tmp/debs. 3. Install all with `dpkg -i`. 4. Verify git and sshd exist.",
+  "commands": [
+    {"keystrokes": "mkdir -p /tmp/debs && cd /tmp/debs && apt-get --print-uris --no-install-recommends install openssh-server openssh-client git curl | grep \"^'\" | sed \"s/^'//;s/'.*//\" > urls.txt && wc -l urls.txt && head urls.txt\n", "duration": 3.0},
+    {"keystrokes": "while read u; do curl -s -O \"$u\"; done < urls.txt; ls -la /tmp/debs | tail -n +2 | wc -l\n", "duration": 30.0}
+  ]
+}

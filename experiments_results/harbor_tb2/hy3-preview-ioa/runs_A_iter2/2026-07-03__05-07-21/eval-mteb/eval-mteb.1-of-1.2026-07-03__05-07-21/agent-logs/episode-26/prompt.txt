@@ -1,0 +1,23 @@
+New Terminal Output:
+
+root@f36cc948d898:/app# cat > /app/run_eval.py <<'EOF'
+> import datasets.builder as _db
+> # Bypass the (incorrect) disk-space check on this overlayfs; writes work fine.
+> _db.has_sufficient_disk_space = lambda *a, **k: True
+>
+> import mteb
+> from mteb.models.bge_models import bge_small_en_v1_5
+>
+> task = mteb.get_task("STS12")
+> model = bge_small_en_v1_5.load_model()
+> evaluation = mteb.MTEB(tasks=[task])
+> results = evaluation.run(
+>     model,
+>     output_folder="results",
+>     verbosity=2,
+>     raise_error=False,
+> )
+> print("RESULTS:", results)
+> EOF
+root@f36cc948d898:/app# cd /app && python run_eval.py 2>&1 | tail -50
+

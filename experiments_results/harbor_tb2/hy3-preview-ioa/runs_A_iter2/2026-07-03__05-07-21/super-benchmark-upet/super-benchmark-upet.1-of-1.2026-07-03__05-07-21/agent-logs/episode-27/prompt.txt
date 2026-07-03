@@ -1,0 +1,41 @@
+Current Terminal Screen:
+root@7bcf8a0cf7c8:/app/UPET# cat > tasks/compat.py <<'EOF'
+> # Compatibility shim for datasets 2.x (which removed datasets.load.load_metric).
+> from datasets import load_dataset
+> import numpy as np
+> from sklearn.metrics import accuracy_score
+>
+> class _AccuracyMetric:
+>     def compute(self, predictions=None, references=None, **kwargs):
+>         return {"accuracy": float(accuracy_score(references, predictions))}
+>
+> def load_metric(*args, **kwargs):
+>     return _AccuracyMetric()
+> EOF
+root@7bcf8a0cf7c8:/app/UPET# python3 _smoke.py
+METRIC_COMPUTE: {'accuracy': 0.6666666666666666}
+Can't set use_return_dict with value False for RobertaConfig {
+  "bos_token_id": 0,
+  "eos_token_id": 2,
+  "model_type": "roberta",
+  "pad_token_id": 1,
+  "pre_seq_len": 10,
+  "prefix_hidden_size": 16,
+  "prefix_projection": false,
+  "transformers_version": "4.40.2"
+}
+
+Traceback (most recent call last):
+  File "/app/UPET/_smoke.py", line 10, in <module>
+    cfg = RobertaConfig(hidden_size=32, num_hidden_layers=2, num_attention_heads=2, intermediate_size=64, hidden_dropout_prob=0.1, num_labels=2, pre_seq_len=10,
+ prefix_projection=False, prefix_hidden_size=16, use_return_dict=False)
+  File "/usr/local/lib/python3.10/site-packages/transformers/models/roberta/configuration_roberta.py", line 123, in __init__
+    super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
+  File "/usr/local/lib/python3.10/site-packages/transformers/configuration_utils.py", line 375, in __init__
+    raise err
+  File "/usr/local/lib/python3.10/site-packages/transformers/configuration_utils.py", line 372, in __init__
+    setattr(self, key, value)
+  File "/usr/local/lib/python3.10/site-packages/transformers/configuration_utils.py", line 258, in __setattr__
+    super().__setattr__(key, value)
+AttributeError: can't set attribute 'use_return_dict'
+root@7bcf8a0cf7c8:/app/UPET#

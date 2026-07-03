@@ -1,0 +1,18 @@
+{
+  "analysis": "The extraction worked but wrote files using the ISO's uppercase names: VMLINUZ_LTS, INITRAMFS_LTS, INTEL_UCODE.IMG, AMD_UCODE.IMG (the script writes using the original path's basename, not the lowercased name). My earlier ls checked lowercase names so they 'didn't exist'. The files are present. I'll rename them to clean names, combine the two microcode images and the initramfs into a single initrd for qemu's -initrd, and verify.",
+  "plan": "1) Confirm the four extracted files exist. 2) Rename them to vmlinuz-lts, initramfs-lts, intel-ucode.img, amd-ucode.img. 3) Concatenate intel-ucode.img + amd-ucode.img + initramfs-lts into initrd.img (Linux multi-archive initrd). 4) Verify sizes. Then in the next batch I'll boot qemu with -kernel/-initrd and console=ttyS0, attach the ISO as -cdrom so the initramfs finds the live media, and forward host 2222->guest 22, then drive a serial console (via expect) to set up sshd and the root password.",
+  "commands": [
+    {
+      "keystrokes": "ls -la /app/VMLINUZ_LTS /app/INITRAMFS_LTS /app/INTEL_UCODE.IMG /app/AMD_UCODE.IMG\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cd /app && mv VMLINUZ_LTS vmlinuz-lts && mv INITRAMFS_LTS initramfs-lts && mv INTEL_UCODE.IMG intel-ucode.img && mv AMD_UCODE.IMG amd-ucode.img\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat intel-ucode.img amd-ucode.img initramfs-lts > initrd.img && ls -la vmlinuz-lts initramfs-lts initrd.img\n",
+      "duration": 1.0
+    }
+  ]
+}

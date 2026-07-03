@@ -1,0 +1,46 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@ee4ed3056f42:/app# df -h / /root /tmp 2>&1
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  962G     0 100% /
+fuse-overlayfs  984G  962G     0 100% /
+fuse-overlayfs  984G  962G     0 100% /
+root@ee4ed3056f42:/app# sed -n '555,585p' /usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py
+        else:
+            return [data]
+
+
+def has_sufficient_disk_space(needed_bytes, directory="."):
+    try:
+        free_bytes = disk_usage(os.path.abspath(directory)).free
+    except OSError:
+        return True
+    return needed_bytes < free_bytes
+
+
+def _convert_github_url(url_path: str) -> Tuple[str, Optional[str]]:
+    """Convert a link to a file on a github repo in a link to the raw github object."""
+    parsed = urlparse(url_path)
+    sub_directory = None
+    if parsed.scheme in ("http", "https", "s3") and parsed.netloc == "github.com":
+        if "blob" in url_path:
+            if not url_path.endswith(".py"):
+                raise ValueError(f"External import from github at {url_path} should point to a file ending with '.py'")
+            url_path = url_path.replace("blob", "raw")  # Point to the raw file
+        else:
+            # Parse github url to point to zip
+            github_path = parsed.path[1:]
+            repo_info, branch = github_path.split("/tree/") if "/tree/" in github_path else (github_path, "master")
+            repo_owner, repo_name = repo_info.split("/")
+            url_path = f"https://github.com/{repo_owner}/{repo_name}/archive/{branch}.zip"
+            sub_directory = f"{repo_name}-{branch}"
+    return url_path, sub_directory
+
+
+root@ee4ed3056f42:/app# grep -rn "has_sufficient_disk_space\|DISK_SIZE_CHECK\|disk_usage" /usr/local/lib/python3.10/site-packages/datasets/builder.py | head
+80:    has_sufficient_disk_space,
+966:                if not has_sufficient_disk_space(
+root@ee4ed3056f42:/app#

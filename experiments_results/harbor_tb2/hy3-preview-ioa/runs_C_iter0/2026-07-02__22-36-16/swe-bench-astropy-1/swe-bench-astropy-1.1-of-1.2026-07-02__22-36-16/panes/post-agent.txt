@@ -1,0 +1,838 @@
+root@8ab9d4e39045:/app/astropy# find /app/astropy -name 'separable.py' -path '*modeling*'
+/app/astropy/astropy/modeling/separable.py
+root@8ab9d4e39045:/app/astropy# cat /app/astropy/astropy/modeling/separable.py
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+"""
+Functions to determine if a model is separable, i.e.
+if the model outputs are independent.
+
+It analyzes ``n_inputs``, ``n_outputs`` and the operators
+in a compound model by stepping through the transforms
+and creating a ``coord_matrix`` of shape (``n_outputs``, ``n_inputs``).
+
+
+Each modeling operator is represented by a function which
+takes two simple models (or two ``coord_matrix`` arrays) and
+returns an array of shape (``n_outputs``, ``n_inputs``).
+
+"""
+
+import numpy as np
+
+from .core import Model, ModelDefinitionError, CompoundModel
+from .mappings import Mapping
+
+
+__all__ = ["is_separable", "separability_matrix"]
+
+
+def is_separable(transform):
+    """
+    A separability test for the outputs of a transform.
+
+    Parameters
+    ----------
+    transform : `~astropy.modeling.core.Model`
+        A (compound) model.
+
+    Returns
+    -------
+    is_separable : ndarray
+        A boolean array with size ``transform.n_outputs`` where
+        each element indicates whether the output is independent
+        and the result of a separable transform.
+
+    Examples
+    --------
+    >>> from astropy.modeling.models import Shift, Scale, Rotation2D, Polynomial2D
+    >>> is_separable(Shift(1) & Shift(2) | Scale(1) & Scale(2))
+        array([ True,  True]...)
+    >>> is_separable(Shift(1) & Shift(2) | Rotation2D(2))
+        array([False, False]...)
+    >>> is_separable(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]) | \
+        Polynomial2D(1) & Polynomial2D(2))
+        array([False, False]...)
+    >>> is_separable(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]))
+        array([ True,  True,  True,  True]...)
+
+    """
+    if transform.n_inputs == 1 and transform.n_outputs > 1:
+        is_separable = np.array([False] * transform.n_outputs).T
+        return is_separable
+    separable_matrix = _separable(transform)
+    is_separable = separable_matrix.sum(1)
+    is_separable = np.where(is_separable != 1, False, True)
+    return is_separable
+
+
+def separability_matrix(transform):
+    """
+    Compute the correlation between outputs and inputs.
+
+    Parameters
+    ----------
+    transform : `~astropy.modeling.core.Model`
+        A (compound) model.
+
+    Returns
+    -------
+    separable_matrix : ndarray
+        A boolean correlation matrix of shape (n_outputs, n_inputs).
+        Indicates the dependence of outputs on inputs. For completely
+        independent outputs, the diagonal elements are True and
+        off-diagonal elements are False.
+
+    Examples
+    --------
+    >>> from astropy.modeling.models import Shift, Scale, Rotation2D, Polynomial2D
+    >>> separability_matrix(Shift(1) & Shift(2) | Scale(1) & Scale(2))
+        array([[ True, False], [False,  True]]...)
+    >>> separability_matrix(Shift(1) & Shift(2) | Rotation2D(2))
+        array([[ True,  True], [ True,  True]]...)
+    >>> separability_matrix(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]) | \
+        Polynomial2D(1) & Polynomial2D(2))
+        array([[ True,  True], [ True,  True]]...)
+    >>> separability_matrix(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]))
+        array([[ True, False], [False,  True], [ True, False], [False,  True]]...)
+
+    """
+    if transform.n_inputs == 1 and transform.n_outputs > 1:
+        return np.ones((transform.n_outputs, transform.n_inputs),
+                       dtype=np.bool_)
+    separable_matrix = _separable(transform)
+    separable_matrix = np.where(separable_matrix != 0, True, False)
+    return separable_matrix
+
+
+def _compute_n_outputs(left, right):
+    """
+    Compute the number of outputs of two models.
+
+    The two models are the left and right model to an operation in
+    the expression tree of a compound model.
+
+    Parameters
+    ----------
+    left, right : `astropy.modeling.Model` or ndarray
+        If input is of an array, it is the output of `coord_matrix`.
+
+    """
+    if isinstance(left, Model):
+        lnout = left.n_outputs
+    else:
+        lnout = left.shape[0]
+    if isinstance(right, Model):
+        rnout = right.n_outputs
+    else:
+        rnout = right.shape[0]
+    noutp = lnout + rnout
+    return noutp
+
+
+def _arith_oper(left, right):
+    """
+    Function corresponding to one of the arithmetic operators
+    ['+', '-'. '*', '/', '**'].
+
+    This always returns a nonseparable output.
+
+
+    Parameters
+    ----------
+    left, right : `astropy.modeling.Model` or ndarray
+        If input is of an array, it is the output of `coord_matrix`.
+
+    Returns
+    -------
+    result : ndarray
+        Result from this operation.
+    """
+    # models have the same number of inputs and outputs
+    def _n_inputs_outputs(input):
+        if isinstance(input, Model):
+            n_outputs, n_inputs = input.n_outputs, input.n_inputs
+        else:
+            n_outputs, n_inputs = input.shape
+        return n_inputs, n_outputs
+
+    left_inputs, left_outputs = _n_inputs_outputs(left)
+    right_inputs, right_outputs = _n_inputs_outputs(right)
+
+    if left_inputs != right_inputs or left_outputs != right_outputs:
+        raise ModelDefinitionError(
+            "Unsupported operands for arithmetic operator: left (n_inputs={}, "
+            "n_outputs={}) and right (n_inputs={}, n_outputs={}); "
+            "models must have the same n_inputs and the same "
+            "n_outputs for this operator.".format(
+                left_inputs, left_outputs, right_inputs, right_outputs))
+
+    result = np.ones((left_outputs, left_inputs))
+    return result
+
+
+def _coord_matrix(model, pos, noutp):
+    """
+    Create an array representing inputs and outputs of a simple model.
+
+    The array has a shape (noutp, model.n_inputs).
+
+    Parameters
+    ----------
+    model : `astropy.modeling.Model`
+        model
+    pos : str
+        Position of this model in the expression tree.
+        One of ['left', 'right'].
+    noutp : int
+        Number of outputs of the compound model of which the input model
+        is a left or right child.
+
+    """
+    if isinstance(model, Mapping):
+        axes = []
+        for i in model.mapping:
+            axis = np.zeros((model.n_inputs,))
+            axis[i] = 1
+            axes.append(axis)
+        m = np.vstack(axes)
+        mat = np.zeros((noutp, model.n_inputs))
+        if pos == 'left':
+            mat[: model.n_outputs, :model.n_inputs] = m
+        else:
+            mat[-model.n_outputs:, -model.n_inputs:] = m
+        return mat
+    if not model.separable:
+        # this does not work for more than 2 coordinates
+        mat = np.zeros((noutp, model.n_inputs))
+        if pos == 'left':
+            mat[:model.n_outputs, : model.n_inputs] = 1
+        else:
+            mat[-model.n_outputs:, -model.n_inputs:] = 1
+    else:
+        mat = np.zeros((noutp, model.n_inputs))
+
+        for i in range(model.n_inputs):
+            mat[i, i] = 1
+        if pos == 'right':
+            mat = np.roll(mat, (noutp - model.n_outputs))
+    return mat
+
+
+def _cstack(left, right):
+    """
+    Function corresponding to '&' operation.
+
+    Parameters
+    ----------
+    left, right : `astropy.modeling.Model` or ndarray
+        If input is of an array, it is the output of `coord_matrix`.
+
+    Returns
+    -------
+    result : ndarray
+        Result from this operation.
+
+    """
+    noutp = _compute_n_outputs(left, right)
+
+    if isinstance(left, Model):
+        cleft = _coord_matrix(left, 'left', noutp)
+    else:
+        cleft = np.zeros((noutp, left.shape[1]))
+        cleft[: left.shape[0], : left.shape[1]] = left
+    if isinstance(right, Model):
+        cright = _coord_matrix(right, 'right', noutp)
+    else:
+        cright = np.zeros((noutp, right.shape[1]))
+        cright[-right.shape[0]:, -right.shape[1]:] = 1
+
+    return np.hstack([cleft, cright])
+
+
+def _cdot(left, right):
+    """
+    Function corresponding to "|" operation.
+
+    Parameters
+    ----------
+    left, right : `astropy.modeling.Model` or ndarray
+        If input is of an array, it is the output of `coord_matrix`.
+
+    Returns
+    -------
+    result : ndarray
+        Result from this operation.
+    """
+
+    left, right = right, left
+
+    def _n_inputs_outputs(input, position):
+        """
+        Return ``n_inputs``, ``n_outputs`` for a model or coord_matrix.
+        """
+        if isinstance(input, Model):
+            coords = _coord_matrix(input, position, input.n_outputs)
+        else:
+            coords = input
+        return coords
+
+    cleft = _n_inputs_outputs(left, 'left')
+    cright = _n_inputs_outputs(right, 'right')
+
+    try:
+        result = np.dot(cleft, cright)
+    except ValueError:
+        raise ModelDefinitionError(
+            'Models cannot be combined with the "|" operator; '
+            'left coord_matrix is {}, right coord_matrix is {}'.format(
+                cright, cleft))
+    return result
+
+
+def _separable(transform):
+    """
+    Calculate the separability of outputs.
+
+    Parameters
+    ----------
+    transform : `astropy.modeling.Model`
+        A transform (usually a compound model).
+
+    Returns :
+    is_separable : ndarray of dtype np.bool
+        An array of shape (transform.n_outputs,) of boolean type
+        Each element represents the separablity of the corresponding output.
+    """
+    if (transform_matrix := transform._calculate_separability_matrix()) is not NotImplemented:
+        return transform_matrix
+    elif isinstance(transform, CompoundModel):
+        sepleft = _separable(transform.left)
+        sepright = _separable(transform.right)
+        return _operators[transform.op](sepleft, sepright)
+    elif isinstance(transform, Model):
+        return _coord_matrix(transform, 'left', transform.n_outputs)
+
+
+# Maps modeling operators to a function computing and represents the
+# relationship of axes as an array of 0-es and 1-s
+_operators = {'&': _cstack, '|': _cdot, '+': _arith_oper, '-': _arith_oper,
+              '*': _arith_oper, '/': _arith_oper, '**': _arith_oper}
+root@8ab9d4e39045:/app/astropy# cd /app/astropy && python -c "from astropy.modeling import models as m; from astropy.modeling.separable import separability_matr
+ix; cm=m.Linear1D(10)&m.Linear1D(5); print(separability_matrix(m.Pix2Sky_TAN()&cm))"
+/app/astropy/astropy/version.py:11: UserWarning: could not determine astropy package version; this indicates a broken installation
+  warnings.warn(
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/app/astropy/astropy/__init__.py", line 41, in <module>
+    from . import config as _config  # noqa: E402
+  File "/app/astropy/astropy/config/__init__.py", line 10, in <module>
+    from .configuration import *
+  File "/app/astropy/astropy/config/configuration.py", line 24, in <module>
+    from astropy.utils import find_current_module, silence
+  File "/app/astropy/astropy/utils/__init__.py", line 17, in <module>
+    from .codegen import *  # noqa
+  File "/app/astropy/astropy/utils/codegen.py", line 13, in <module>
+    from .introspection import find_current_module
+  File "/app/astropy/astropy/utils/introspection.py", line 12, in <module>
+    from packaging.version import Version
+ModuleNotFoundError: No module named 'packaging'
+root@8ab9d4e39045:/app/astropy# pip install packaging 2>&1 | tail -5
+Successfully installed packaging-26.2
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a v
+irtual environment instead: https://pip.pypa.io/warnings/venv
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+root@8ab9d4e39045:/app/astropy# cd /app/astropy && python -c "from astropy.modeling import models as m; from astropy.modeling.separable import separability_matr
+ix; cm=m.Linear1D(10)&m.Linear1D(5); print(separability_matrix(m.Pix2Sky_TAN()&cm))"
+/app/astropy/astropy/version.py:11: UserWarning: could not determine astropy package version; this indicates a broken installation
+  warnings.warn(
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/app/astropy/astropy/__init__.py", line 41, in <module>
+    from . import config as _config  # noqa: E402
+  File "/app/astropy/astropy/config/__init__.py", line 10, in <module>
+    from .configuration import *
+  File "/app/astropy/astropy/config/configuration.py", line 24, in <module>
+    from astropy.utils import find_current_module, silence
+  File "/app/astropy/astropy/utils/__init__.py", line 17, in <module>
+    from .codegen import *  # noqa
+  File "/app/astropy/astropy/utils/codegen.py", line 13, in <module>
+    from .introspection import find_current_module
+  File "/app/astropy/astropy/utils/introspection.py", line 14, in <module>
+    from astropy.utils.decorators import deprecated_renamed_argument
+  File "/app/astropy/astropy/utils/decorators.py", line 14, in <module>
+    from .exceptions import (AstropyDeprecationWarning, AstropyUserWarning,
+  File "/app/astropy/astropy/utils/exceptions.py", line 11, in <module>
+    from erfa import ErfaError, ErfaWarning  # noqa
+ModuleNotFoundError: No module named 'erfa'
+root@8ab9d4e39045:/app/astropy# pip install pyerfa 2>&1 | tail -3
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+root@8ab9d4e39045:/app/astropy# cd /app/astropy && python -c "from astropy.modeling import models as m; from astropy.modeling.separable import separability_matr
+ix; cm=m.Linear1D(10)&m.Linear1D(5); print(separability_matrix(m.Pix2Sky_TAN()&cm))"
+/app/astropy/astropy/version.py:11: UserWarning: could not determine astropy package version; this indicates a broken installation
+  warnings.warn(
+Traceback (most recent call last):
+  File "/app/astropy/astropy/__init__.py", line 143, in _initialize_astropy
+    from .utils import _compiler  # noqa: F401
+ImportError: cannot import name '_compiler' from 'astropy.utils' (/app/astropy/astropy/utils/__init__.py)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/app/astropy/astropy/__init__.py", line 176, in <module>
+    _initialize_astropy()
+  File "/app/astropy/astropy/__init__.py", line 146, in _initialize_astropy
+    raise ImportError('You appear to be trying to import astropy from '
+ImportError: You appear to be trying to import astropy from within a source checkout or from an editable installation without building the extension modules fir
+st. Either run:
+
+  pip install -e .
+
+or
+
+  python setup.py build_ext --inplace
+
+to make sure the extension modules are built
+root@8ab9d4e39045:/app/astropy# grep -n 'cright\[-right' /app/astropy/astropy/modeling/separable.py
+245:        cright[-right.shape[0]:, -right.shape[1]:] = 1
+root@8ab9d4e39045:/app/astropy# sed -n '225,255p' /app/astropy/astropy/modeling/separable.py
+    left, right : `astropy.modeling.Model` or ndarray
+        If input is of an array, it is the output of `coord_matrix`.
+
+    Returns
+    -------
+    result : ndarray
+        Result from this operation.
+
+    """
+    noutp = _compute_n_outputs(left, right)
+
+    if isinstance(left, Model):
+        cleft = _coord_matrix(left, 'left', noutp)
+    else:
+        cleft = np.zeros((noutp, left.shape[1]))
+        cleft[: left.shape[0], : left.shape[1]] = left
+    if isinstance(right, Model):
+        cright = _coord_matrix(right, 'right', noutp)
+    else:
+        cright = np.zeros((noutp, right.shape[1]))
+        cright[-right.shape[0]:, -right.shape[1]:] = 1
+
+    return np.hstack([cleft, cright])
+
+
+def _cdot(left, right):
+    """
+    Function corresponding to "|" operation.
+
+    Parameters
+    ----------
+root@8ab9d4e39045:/app/astropy# sed -i '245s/.*/        cright[-right.shape[0]:, -right.shape[1]:] = right/' /app/astropy/astropy/modeling/separable.py
+root@8ab9d4e39045:/app/astropy# sed -n '243,246p' /app/astropy/astropy/modeling/separable.py
+    else:
+        cright = np.zeros((noutp, right.shape[1]))
+        cright[-right.shape[0]:, -right.shape[1]:] = right
+
+root@8ab9d4e39045:/app/astropy# cd /app/astropy && python setup.py build_ext --inplace 2>&1 | tail -5
+Traceback (most recent call last):
+  File "/app/astropy/setup.py", line 66, in <module>
+    from extension_helpers import get_extensions  # noqa
+ModuleNotFoundError: No module named 'extension_helpers'
+root@8ab9d4e39045:/app/astropy# pip install extension_helpers 2>&1 | tail -3
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+root@8ab9d4e39045:/app/astropy# cd /app/astropy && python setup.py build_ext --inplace 2>&1 | tail -8
+    module = import_file(setup_package, name=packagename + ".setup_package")
+  File "/usr/local/lib/python3.9/site-packages/extension_helpers/_utils.py", line 138, in import_file
+    loader.exec_module(mod)
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "astropy/wcs/setup_package.py", line 12, in <module>
+    from setuptools.dep_util import newer_group
+ModuleNotFoundError: No module named 'setuptools.dep_util'
+root@8ab9d4e39045:/app/astropy# python -c "import setuptools; print(setuptools.__version__)"
+79.0.1
+root@8ab9d4e39045:/app/astropy# pip install 'setuptools==65.5.0' 2>&1 | tail -3
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+root@8ab9d4e39045:/app/astropy# cd /app/astropy && python setup.py build_ext --inplace 2>&1 | tail -8
+building 'astropy.time._parse_times' extension
+creating build
+creating build/temp.linux-x86_64-cpython-39
+creating build/temp.linux-x86_64-cpython-39/astropy
+creating build/temp.linux-x86_64-cpython-39/astropy/time
+creating build/temp.linux-x86_64-cpython-39/astropy/time/src
+gcc -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -fPIC -I/usr/local/lib/python3.9/site-packages/numpy/_core/include -I/usr/local/include/pyth
+on3.9 -c astropy/time/src/parse_times.c -o build/temp.linux-x86_64-cpython-39/astropy/time/src/parse_times.o
+error: command 'gcc' failed: No such file or directory
+root@8ab9d4e39045:/app/astropy# which gcc cc clang 2>&1; echo '---'; apt-get --version 2>&1 | head -1
+---
+apt 2.6.1 (amd64)
+root@8ab9d4e39045:/app/astropy# apt-get install -y gcc 2>&1 | tail -5
+  libc-bin libc6
+2 upgraded, 60 newly installed, 0 to remove and 21 not upgraded.
+Need to get 68.9 MB of archives.
+After this operation, 254 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@8ab9d4e39045:/app/astropy# cat > /tmp/test_cstack.py << 'EOF'
+> import sys, types
+> import numpy as np
+>
+> astropy = types.ModuleType('astropy')
+> astropy_modeling = types.ModuleType('astropy.modeling')
+> sys.modules['astropy'] = astropy
+> sys.modules['astropy.modeling'] = astropy_modeling
+>
+> class Model:
+>     def __init__(self, n_inputs, n_outputs, separable=True):
+>         self.n_inputs = n_inputs
+>         self.n_outputs = n_outputs
+>         self.separable = separable
+>
+> class ModelDefinitionError(Exception):
+>     pass
+>
+> class CompoundModel(Model):
+>     pass
+>
+> core = types.ModuleType('astropy.modeling.core')
+> core.Model = Model
+> core.ModelDefinitionError = ModelDefinitionError
+> core.CompoundModel = CompoundModel
+> sys.modules['astropy.modeling.core'] = core
+>
+> class Mapping(Model):
+>     def __init__(self, mapping):
+>         self.mapping = mapping
+>         self.n_inputs = max(mapping) + 1
+>         self.n_outputs = len(mapping)
+>         self.separable = True
+>
+> mappings = types.ModuleType('astropy.modeling.mappings')
+> mappings.Mapping = Mapping
+> sys.modules['astropy.modeling.mappings'] = mappings
+>
+> import importlib.util
+> spec = importlib.util.spec_from_file_location(
+>     'astropy.modeling.separable',
+>     '/app/astropy/astropy/modeling/separable.py')
+> sep = importlib.util.module_from_spec(spec)
+> sys.modules['astropy.modeling.separable'] = sep
+> spec.loader.exec_module(sep)
+>
+> # Nested case: left is a simple Model (e.g. a 2-output transform),
+> # right is itself a separability matrix (the nested compound 'cm').
+> left = Model(n_inputs=2, n_outputs=2, separable=True)
+> right = np.array([[True, False], [False, True]])
+>
+> res = sep._cstack(left, right)
+> print('result shape:', res.shape)
+> print(res)
+>
+> cright_block = res[2:, 2:]
+> print('cright block:')
+> print(cright_block)
+> assert np.array_equal(cright_block, right), 'BUG: cright block is not the right matrix!'
+> print('PASS: cright block correctly equals the nested separability matrix')
+> EOF
+root@8ab9d4e39045:/app/astropy# python /tmp/test_cstack.py
+result shape: (4, 4)
+[[1. 0. 0. 0.]
+ [0. 1. 0. 0.]
+ [0. 0. 1. 0.]
+ [0. 0. 0. 1.]]
+cright block:
+[[1. 0.]
+ [0. 1.]]
+PASS: cright block correctly equals the nested separability matrix
+root@8ab9d4e39045:/app/astropy# grep -n '= 1\|=1' /app/astropy/astropy/modeling/separable.py
+57:    if transform.n_inputs == 1 and transform.n_outputs > 1:
+62:    is_separable = np.where(is_separable != 1, False, True)
+97:    if transform.n_inputs == 1 and transform.n_outputs > 1:
+193:            axis[i] = 1
+206:            mat[:model.n_outputs, : model.n_inputs] = 1
+208:            mat[-model.n_outputs:, -model.n_inputs:] = 1
+213:            mat[i, i] = 1
+root@8ab9d4e39045:/app/astropy# find /app/astropy -name 'test_separable*' -o -name 'test_compound*' | head
+/app/astropy/astropy/modeling/tests/test_separable.py
+/app/astropy/astropy/modeling/tests/test_compound.py
+root@8ab9d4e39045:/app/astropy# find /app/astropy -path '*tests*' -name '*.py' | xargs grep -l 'separab' 2>/dev/null
+/app/astropy/astropy/modeling/tests/test_separable.py
+/app/astropy/astropy/modeling/tests/test_models.py
+/app/astropy/astropy/modeling/tests/test_core.py
+/app/astropy/astropy/convolution/tests/test_kernel_class.py
+grep -n 'def test\|import\|^from\|separability_matrix' /app/astropy/astropy/modeling/tests/test_separable.py | head -60
+root@8ab9d4e39045:/app/astropy# grep -n 'def test\|import\|^from\|separability_matrix' /app/astropy/astropy/modeling/tests/test_separable.py | head -60
+7:import pytest
+8:import numpy as np
+9:from numpy.testing import assert_allclose
+11:from astropy.modeling import custom_model, models
+12:from astropy.modeling.models import Mapping
+13:from astropy.modeling.separable import (_coord_matrix, is_separable, _cdot,
+14:                                        _cstack, _arith_oper, separability_matrix)
+15:from astropy.modeling.core import ModelDefinitionError
+59:def test_coord_matrix():
+80:def test_cdot():
+98:def test_cstack():
+116:def test_arith_oper():
+133:def test_separable(compound_model, result):
+135:    assert_allclose(separability_matrix(compound_model), result[1])
+138:def test_custom_model_separable():
+150:    assert np.all(separability_matrix(model_c()) == [True, True])
+root@8ab9d4e39045:/app/astropy# sed -n '1,60p' /app/astropy/astropy/modeling/tests/test_separable.py
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
+"""
+Test separability of models.
+
+"""
+# pylint: disable=invalid-name
+import pytest
+import numpy as np
+from numpy.testing import assert_allclose
+
+from astropy.modeling import custom_model, models
+from astropy.modeling.models import Mapping
+from astropy.modeling.separable import (_coord_matrix, is_separable, _cdot,
+                                        _cstack, _arith_oper, separability_matrix)
+from astropy.modeling.core import ModelDefinitionError
+
+
+sh1 = models.Shift(1, name='shift1')
+sh2 = models.Shift(2, name='sh2')
+scl1 = models.Scale(1, name='scl1')
+scl2 = models.Scale(2, name='scl2')
+map1 = Mapping((0, 1, 0, 1), name='map1')
+map2 = Mapping((0, 0, 1), name='map2')
+map3 = Mapping((0, 0), name='map3')
+rot = models.Rotation2D(2, name='rotation')
+p2 = models.Polynomial2D(1, name='p2')
+p22 = models.Polynomial2D(2, name='p22')
+p1 = models.Polynomial1D(1, name='p1')
+
+
+compound_models = {
+    'cm1': (map3 & sh1 | rot & sh1 | sh1 & sh2 & sh1,
+            (np.array([False, False, True]),
+             np.array([[True, False], [True, False], [False, True]]))
+            ),
+    'cm2': (sh1 & sh2 | rot | map1 | p2 & p22,
+            (np.array([False, False]),
+             np.array([[True, True], [True, True]]))
+            ),
+    'cm3': (map2 | rot & scl1,
+            (np.array([False, False, True]),
+             np.array([[True, False], [True, False], [False, True]]))
+            ),
+    'cm4': (sh1 & sh2 | map2 | rot & scl1,
+            (np.array([False, False, True]),
+             np.array([[True, False], [True, False], [False, True]]))
+            ),
+    'cm5': (map3 | sh1 & sh2 | scl1 & scl2,
+            (np.array([False, False]),
+             np.array([[True], [True]]))
+            ),
+    'cm7': (map2 | p2 & sh1,
+            (np.array([False, True]),
+             np.array([[True, False], [False, True]]))
+            )
+}
+
+
+def test_coord_matrix():
+    c = _coord_matrix(p2, 'left', 2)
+root@8ab9d4e39045:/app/astropy# sed -n '98,155p' /app/astropy/astropy/modeling/tests/test_separable.py
+def test_cstack():
+    result = _cstack(sh1, scl1)
+    assert_allclose(result, np.array([[1, 0], [0, 1]]))
+
+    result = _cstack(sh1, rot)
+    assert_allclose(result,
+                    np.array([[1, 0, 0],
+                              [0, 1, 1],
+                              [0, 1, 1]])
+                    )
+    result = _cstack(rot, sh1)
+    assert_allclose(result,
+                    np.array([[1, 1, 0],
+                              [1, 1, 0],
+                              [0, 0, 1]])
+                    )
+
+
+def test_arith_oper():
+    # Models as inputs
+    result = _arith_oper(sh1, scl1)
+    assert_allclose(result, np.array([[1]]))
+    result = _arith_oper(rot, rot)
+    assert_allclose(result, np.array([[1, 1], [1, 1]]))
+
+    # ndarray
+    result = _arith_oper(np.array([[1, 2], [3, 4]]), np.array([[1, 2], [3, 4]]))
+    assert_allclose(result, np.array([[1, 1], [1, 1]]))
+
+    # Error
+    with pytest.raises(ModelDefinitionError, match=r"Unsupported operands for arithmetic operator: .*"):
+        _arith_oper(sh1, map1)
+
+
+@pytest.mark.parametrize(('compound_model', 'result'), compound_models.values())
+def test_separable(compound_model, result):
+    assert_allclose(is_separable(compound_model), result[0])
+    assert_allclose(separability_matrix(compound_model), result[1])
+
+
+def test_custom_model_separable():
+    @custom_model
+    def model_a(x):
+        return x
+
+    assert model_a().separable
+
+    @custom_model
+    def model_c(x, y):
+        return x + y
+
+    assert not model_c().separable
+    assert np.all(separability_matrix(model_c()) == [True, True])
+root@8ab9d4e39045:/app/astropy# cat >> /app/astropy/astropy/modeling/tests/test_separable.py << 'EOF'
+>
+>
+> def test_cstack_nested_compound_model():
+>     # Regression test for the case where the right operand of '&' is itself a
+>     # precomputed separability matrix (a nested CompoundModel).  Previously the
+>     # right block was filled with ones, making independent outputs appear coupled.
+>     right = np.array([[True, False], [False, True]])
+>     result = _cstack(sh1, right)
+>     expected = np.array([[1, 0, 0, 0],
+>                          [0, 1, 0, 0],
+>                          [0, 0, 1, 0],
+>                          [0, 0, 0, 1]])
+>     assert_allclose(result, expected)
+> EOF
+root@8ab9d4e39045:/app/astropy# tail -15 /app/astropy/astropy/modeling/tests/test_separable.py
+    assert not model_c().separable
+    assert np.all(separability_matrix(model_c()) == [True, True])
+
+
+def test_cstack_nested_compound_model():
+    # Regression test for the case where the right operand of '&' is itself a
+    # precomputed separability matrix (a nested CompoundModel).  Previously the
+    # right block was filled with ones, making independent outputs appear coupled.
+    right = np.array([[True, False], [False, True]])
+    result = _cstack(sh1, right)
+    expected = np.array([[1, 0, 0, 0],
+                         [0, 1, 0, 0],
+                         [0, 0, 1, 0],
+                         [0, 0, 0, 1]])
+    assert_allclose(result, expected)
+root@8ab9d4e39045:/app/astropy# grep -n 'def test_cstack_nested_compound_model' /app/astropy/astropy/modeling/tests/test_separable.py
+153:def test_cstack_nested_compound_model():
+root@8ab9d4e39045:/app/astropy# sed -i '153,$d' /app/astropy/astropy/modeling/tests/test_separable.py
+root@8ab9d4e39045:/app/astropy# cat >> /app/astropy/astropy/modeling/tests/test_separable.py << 'EOF'
+>
+>
+> def test_cstack_nested_compound_model():
+>     # Regression test: when the right operand of '&' is itself a precomputed
+>     # separability matrix (i.e. a nested CompoundModel), the right block must be
+>     # copied verbatim.  Previously it was filled with ones, making independent
+>     # outputs of the nested model appear coupled.
+>     right = np.array([[True, False], [False, True]])
+>     result = _cstack(rot, right)
+>     expected = np.array([[1, 1, 0, 0],
+>                          [1, 1, 0, 0],
+>                          [0, 0, 1, 0],
+>                          [0, 0, 0, 1]])
+>     assert_allclose(result, expected)
+> EOF
+root@8ab9d4e39045:/app/astropy# tail -16 /app/astropy/astropy/modeling/tests/test_separable.py
+
+
+
+
+def test_cstack_nested_compound_model():
+    # Regression test: when the right operand of '&' is itself a precomputed
+    # separability matrix (i.e. a nested CompoundModel), the right block must be
+    # copied verbatim.  Previously it was filled with ones, making independent
+    # outputs of the nested model appear coupled.
+    right = np.array([[True, False], [False, True]])
+    result = _cstack(rot, right)
+    expected = np.array([[1, 1, 0, 0],
+                         [1, 1, 0, 0],
+                         [0, 0, 1, 0],
+                         [0, 0, 0, 1]])
+    assert_allclose(result, expected)
+root@8ab9d4e39045:/app/astropy# cat > /tmp/verify.py << 'EOF'
+> import sys, types
+> import numpy as np
+> import importlib.util
+> astropy = types.ModuleType('astropy')
+> am = types.ModuleType('astropy.modeling')
+> sys.modules['astropy']=astropy; sys.modules['astropy.modeling']=am
+> class Model:
+>     def __init__(self,n_i,n_o,sep=True): self.n_inputs=n_i; self.n_outputs=n_o; self.separable=sep
+> class MDE(Exception): pass
+> core=types.ModuleType('astropy.modeling.core'); core.Model=Model; core.ModelDefinitionError=MDE; core.CompoundModel=Model
+> sys.modules['astropy.modeling.core']=core
+> class Mapping(Model):
+>     def __init__(self,m): self.mapping=m; self.n_inputs=max(m)+1; self.n_outputs=len(m); self.separable=True
+> mm=types.ModuleType('astropy.modeling.mappings'); mm.Mapping=Mapping
+> sys.modules['astropy.modeling.mappings']=mm
+> spec=importlib.util.spec_from_file_location('s','/app/astropy/astropy/modeling/separable.py')
+> s=importlib.util.module_from_spec(spec); sys.modules['s']=s; spec.loader.exec_module(s)
+> left=np.array([[1,1],[1,1]])   # Pix2Sky_TAN separability (non-separable)
+> right=np.array([[1,0],[0,1]])  # cm separability
+> res=s._cstack(left,right)
+> print(res)
+> exp=np.array([[1,1,0,0],[1,1,0,0],[0,0,1,0],[0,0,0,1]])
+> assert np.array_equal(res,exp), 'MISMATCH'
+> print('CORRECT: nested compound separability matrix is correct')
+> EOF
+root@8ab9d4e39045:/app/astropy# python /tmp/verify.py
+Traceback (most recent call last):
+  File "/tmp/verify.py", line 17, in <module>
+    s=importlib.util.module_from_spec(spec); sys.modules['s']=s; spec.loader.exec_module(s)
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "/app/astropy/astropy/modeling/separable.py", line 20, in <module>
+    from .core import Model, ModelDefinitionError, CompoundModel
+ImportError: attempted relative import with no known parent package
+root@8ab9d4e39045:/app/astropy# cat > /tmp/verify.py << 'EOF'
+> import sys, types
+> import numpy as np
+> import importlib.util
+> astropy = types.ModuleType('astropy')
+> am = types.ModuleType('astropy.modeling')
+> sys.modules['astropy']=astropy; sys.modules['astropy.modeling']=am
+> class Model:
+>     def __init__(self,n_i,n_o,sep=True): self.n_inputs=n_i; self.n_outputs=n_o; self.separable=sep
+> class MDE(Exception): pass
+> core=types.ModuleType('astropy.modeling.core'); core.Model=Model; core.ModelDefinitionError=MDE; core.CompoundModel=Model
+> sys.modules['astropy.modeling.core']=core
+> class Mapping(Model):
+>     def __init__(self,m): self.mapping=m; self.n_inputs=max(m)+1; self.n_outputs=len(m); self.separable=True
+> mm=types.ModuleType('astropy.modeling.mappings'); mm.Mapping=Mapping
+> sys.modules['astropy.modeling.mappings']=mm
+> spec=importlib.util.spec_from_file_location('astropy.modeling.separable','/app/astropy/astropy/modeling/separable.py')
+> s=importlib.util.module_from_spec(spec); sys.modules['astropy.modeling.separable']=s; spec.loader.exec_module(s)
+> left=np.array([[1,1],[1,1]])   # Pix2Sky_TAN separability (non-separable)
+> right=np.array([[1,0],[0,1]])  # cm separability
+> res=s._cstack(left,right)
+> print(res)
+> exp=np.array([[1,1,0,0],[1,1,0,0],[0,0,1,0],[0,0,0,1]])
+> assert np.array_equal(res,exp), 'MISMATCH'
+> print('CORRECT: nested compound separability matrix is correct')
+> EOF
+root@8ab9d4e39045:/app/astropy# python /tmp/verify.py
+[[1. 1. 0. 0.]
+ [1. 1. 0. 0.]
+ [0. 0. 1. 0.]
+ [0. 0. 0. 1.]]
+CORRECT: nested compound separability matrix is correct
+root@8ab9d4e39045:/app/astropy#

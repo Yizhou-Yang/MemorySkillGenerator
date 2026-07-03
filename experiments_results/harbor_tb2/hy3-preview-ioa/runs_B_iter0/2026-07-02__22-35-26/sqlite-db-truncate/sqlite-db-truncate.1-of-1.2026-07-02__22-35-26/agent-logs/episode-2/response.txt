@@ -1,0 +1,10 @@
+{
+  "analysis": "Python's sqlite3 can't open it ('file is not a database'). The file is exactly 4096 bytes = one page. I need to parse the raw SQLite format. Let me inspect the header bytes to understand page size and structure.",
+  "plan": "Write a Python script to examine the header: magic string, page size, and the b-tree page layout. This will tell me how the page is structured and how to recover records. Let me dump the first 100 bytes and analyze.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"\nd=open('/app/trunc.db','rb').read()\nprint('len',len(d))\nprint('magic',d[:16])\nimport struct\nps=struct.unpack('>H',d[16:18])[0]\nprint('page size field',ps, '->', 65536 if ps==1 else ps)\nprint('page count', struct.unpack('>I',d[28:32])[0])\nprint('first freelist', struct.unpack('>I',d[32:36])[0])\nprint('b-tree page type byte at 100:', d[100])\n\"\n",
+      "duration": 0.5
+    }
+  ]
+}

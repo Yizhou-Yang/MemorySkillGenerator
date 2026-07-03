@@ -1,0 +1,16 @@
+I see a recursion error. Let me debug the actual server interaction to understand what's happening.
+
+{
+  "analysis": "Got a RecursionError at depth ~993 during explore(1). Since maze 1 is only 4x4, a path can't be 993 deep. This means moves are being treated as 'moved' when they shouldn't be — likely my read_prompt is returning empty/early and the result parsing treats it as a successful move, creating phantom moves and deep recursion. I need to debug the actual interaction.",
+  "plan": "Write a small debug script that starts the server for maze 1, sends a couple of moves, and prints the raw bytes returned by read_prompt. This will reveal whether prompt detection works or if reads return empty.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/dbg.py << 'PYEOF'\nimport subprocess\nproc = subprocess.Popen(['python3','-u','/protected/maze_server.py','1'],\n                        stdin=subprocess.PIPE, stdout=subprocess.PIPE)\ndef read_prompt():\n    buf=b''\n    while True:\n        ch=proc.stdout.read(1)\n        if not ch:\n            print('EOF reached, buf=',repr(buf)); break\n        buf+=ch\n        if buf.endswith(b'> '):\n            break\n    return buf\na=read_prompt()\nprint('FIRST:',repr(a))\nproc.stdin.write(b'move N\\n'); proc.stdin.flush()\nb=read_prompt()\nprint('AFTER N:',repr(b), 'result=',repr(b.rsplit('> ',1)[0].strip()))\nproc.stdin.write(b'move E\\n'); proc.stdin.flush()\nc=read_prompt()\nprint('AFTER E:',repr(c))\nproc.stdin.write(b'exit\\n'); proc.stdin.flush()\nproc.wait()\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /app/dbg.py\n",
+      "duration": 2.0
+    }
+  ]
+}

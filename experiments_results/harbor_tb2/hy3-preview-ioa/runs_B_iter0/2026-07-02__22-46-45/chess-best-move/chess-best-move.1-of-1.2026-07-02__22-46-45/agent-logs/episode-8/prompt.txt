@@ -1,0 +1,46 @@
+New Terminal Output:
+
+root@20c7c101c1fc:/app# cat > /tmp/art.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> a = np.array(im).astype(int)
+> files='abcdefgh'
+> def render(r,c):
+>     sq = a[r*80:(r+1)*80, c*80:(c+1)*80]
+>     H,W=sq.shape[:2]
+>     oh,ow=24,40
+>     out=[]
+>     for i in range(oh):
+>         line=''
+>         for j in range(ow):
+>             y0=i*H//oh; y1=(i+1)*H//oh
+>             x0=j*W//ow; x1=(j+1)*W//ow
+>             patch=sq[y0:y1,x0:x1]
+>             dd=np.sqrt(((patch-np.array([0,0,0]))**2).sum(2))<60
+>             ww=np.sqrt(((patch-np.array([255,255,255]))**2).sum(2))<60
+>             if dd.sum()>0:
+>                 line+='#'
+>             elif ww.sum()>0:
+>                 line+='+'
+>             else:
+>                 line+=' '
+>         out.append(line.rstrip())
+>     return out
+> occ=[]
+> for r in range(8):
+>     for c in range(8):
+>         sq=a[r*80:(r+1)*80,c*80:(c+1)*80]
+>         d=np.sqrt(((sq-np.array([0,0,0]))**2).sum(2))<60
+>         w=np.sqrt(((sq-np.array([255,255,255]))**2).sum(2))<60
+>         if d.sum()>40 or w.sum()>40:
+>             occ.append((r,c,d.sum(),w.sum()))
+> for (r,c,dd,ww) in sorted(occ):
+>     color='black' if dd>ww else 'white'
+>     print('=== %s%d (%s) ==='%(files[c],8-r,color))
+>     for line in render(r,c):
+>         print('|'+line+'|')
+> EOF
+root@20c7c101c1fc:/app# python3 /tmp/art.py > /tmp/art_all.txt 2>&1; wc -l /tmp/art_all.txt
+625 /tmp/art_all.txt
+root@20c7c101c1fc:/app#

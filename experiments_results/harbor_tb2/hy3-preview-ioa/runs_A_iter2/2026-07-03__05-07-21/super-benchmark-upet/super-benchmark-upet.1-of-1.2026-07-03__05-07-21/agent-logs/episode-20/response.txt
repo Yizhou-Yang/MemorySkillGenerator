@@ -1,0 +1,14 @@
+{
+  "analysis": "Main blocker identified: the repo uses `from datasets.load import load_dataset, load_metric` and `load_metric(\"./metrics/super_glue\", ...)`, but datasets 2.x removed `load_metric`. The repo targets transformers 4.11.3 but we have 4.40.2. The intended environment is transformers 4.40.2 + torch 2.2.1, so I'll adapt the code to the modern stack. I need to understand how the metric is used in compute_metrics to replace load_metric properly. The canonical RTE script uses `--head_prefix` (parameter-efficient prefix tuning = the UPET/P-tuning style). For few-shot I'll use `--prompt_ptuning --use_pe` with `--num_examples_per_label 5`, seed=42, 1 epoch, and README hyperparameters (bs=32, lr=5e-3, psl=128, dropout=0.1, max_seq_length=128).",
+  "plan": "Read the rest of dataset.py (compute_metrics) and the metrics/super_glue directory to design the load_metric replacement. Then patch the dataset file to use evaluate.load for the metric. Then attempt a run and fix transformers 4.40.2 incompatibilities iteratively.",
+  "commands": [
+    {
+      "keystrokes": "sed -n '230,400p' tasks/superglue/dataset.py\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "ls -la metrics/super_glue 2>/dev/null; echo '---'; ls metrics | head\n",
+      "duration": 0.1
+    }
+  ]
+}

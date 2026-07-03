@@ -1,0 +1,50 @@
+New Terminal Output:
+
+root@ed898f350b6a:/app# cat > /tmp/fit.py << 'EOF'
+> import numpy as np, json
+> from scipy.optimize import curve_fit
+>
+> xs, ys = [], []
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         p = line.split()
+>         if len(p) < 2: continue
+>         xs.append(float(p[0].replace(',', '.')))
+>         ys.append(float(p[1].replace(',', '.')))
+> x = np.array(xs); y = np.array(ys)
+> idx = np.argsort(x); x = x[idx]; y = y[idx]
+>
+> def lor(x, x0, g, a):
+>     return a*g*g/((x-x0)**2 + g*g)
+>
+> def model(x, c0, c1, x0, g, a):
+>     return c0 + c1*x + lor(x, x0, g, a)
+>
+> def fit(lo, hi, x0g, gg, ag, c0g, c1g):
+>     m = (x>=lo)&(x<=hi)
+>     xf, yf = x[m], y[m]
+>     p0 = [c0g, c1g, x0g, gg, ag]
+>     popt, _ = curve_fit(model, xf, yf, p0=p0, maxfev=200000,
+>                         bounds=([0,-5,x0g-3000,1,0],[1e6,5,x0g+3000,5000,1e6]))
+>     c0,c1,x0,g,a = popt
+>     fitv = model(xf,*popt)
+>     ss = np.sum((yf-fitv)**2); sst = np.sum((yf-np.mean(yf))**2)
+>     r2 = 1-ss/sst
+>     off = c0 + c1*x0
+>     return dict(x0=float(x0), gamma=float(g), amplitude=float(a), offset=float(off)), r2
+>
+> g, r2g = fit(18100, 19900, 19139, 530, 60000, 30000, 0.0)
+> d, r2d = fit(31200, 35400, 33245, 850, 2500, 19000, 0.0)
+> print('G :', g, 'R2=%.5f'%r2g)
+> print('2D:', d, 'R2=%.5f'%r2d)
+>
+> res = {'G': g, '2D': d}
+> with open('/app/results.json','w') as f:
+>     json.dump(res, f, indent=2)
+> print('written')
+> EOF
+root@ed898f350b6a:/app# python3 /tmp/fit.py
+G : {'x0': 19230.97089668671, 'gamma': 456.03816192801514, 'amplitude': 78482.27562057937, 'offset': 6231.873000107167} R2=0.96310
+2D: {'x0': 33086.696638883404, 'gamma': 1185.004963763992, 'amplitude': 2618.918100161608, 'offset': 18541.85283032241} R2=0.97685
+written
+root@ed898f350b6a:/app#

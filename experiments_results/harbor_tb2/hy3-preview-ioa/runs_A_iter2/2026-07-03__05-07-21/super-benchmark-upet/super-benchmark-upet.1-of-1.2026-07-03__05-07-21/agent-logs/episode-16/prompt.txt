@@ -1,0 +1,80 @@
+New Terminal Output:
+
+root@7bcf8a0cf7c8:/app/UPET# grep -rn 'datasets.load\|load_metric\|from datasets' --include=*.py . | head
+./metrics/mean_iou/mean_iou.py:64:    >>> mean_iou = datasets.load_metric("mean_iou")
+./metrics/cer/cer.py:23:from datasets.config import PY_VERSION
+./metrics/cer/cer.py:110:    >>> cer = datasets.load_metric("cer")
+./metrics/spearmanr/spearmanr.py:49:        >>> spearmanr_metric = datasets.load_metric("spearmanr")
+./metrics/spearmanr/spearmanr.py:55:        >>> spearmanr_metric = datasets.load_metric("spearmanr")
+./metrics/bleu/bleu.py:85:    >>> bleu = datasets.load_metric("bleu")
+./metrics/squad/squad.py:59:    >>> squad_metric = datasets.load_metric("squad")
+./metrics/chrf/chrf.py:97:        >>> chrf = datasets.load_metric("chrf")
+./metrics/chrf/chrf.py:105:        >>> chrf = datasets.load_metric("chrf")
+./metrics/chrf/chrf.py:115:        >>> chrf = datasets.load_metric("chrf")
+grep: write error: Broken pipe
+root@7bcf8a0cf7c8:/app/UPET# sed -n '1,60p' model/head_for_sequence_classification.py
+'''
+Head Tuning with Prefix / Adapter
+'''
+import torch
+from torch._C import NoopLogger
+import torch.nn
+import torch.nn.functional as F
+from torch import Tensor
+from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
+
+from transformers import BertModel, BertPreTrainedModel
+from transformers import RobertaModel, RobertaPreTrainedModel
+from transformers.modeling_outputs import SequenceClassifierOutput, BaseModelOutput, Seq2SeqLMOutput
+
+from model.prefix_encoder import PrefixEncoder
+from model.deberta import DebertaModel, DebertaPreTrainedModel, ContextPooler, StableDropout
+
+from model.model_adaptation import BertAdaModel, RobertaAdaModel, init_adapter
+from model.parameter_freeze import ParameterFreeze # add by wjn
+import copy
+
+freezer = ParameterFreeze()
+
+## ======== BERT ========
+
+#  Vanilla Fine-tuning For BERT
+class BertForSequenceClassification(BertPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+        self.config = config
+
+        self.bert = BertModel(config)
+        if self.config.use_pe:
+            self.bert = freezer.freeze_lm(self.bert)
+
+        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
+
+        self.init_weights()
+
+    def freeze_backbone(self, use_pe: bool=True):
+        if use_pe:
+            self.bert = freezer.freeze_lm(self.bert)
+        else:
+            self.bert = freezer.unfreeze_lm(self.bert)
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
+root@7bcf8a0cf7c8:/app/UPET# wc -l model/head_for_sequence_classification.py model/prefix_encoder.py
+ 1038 model/head_for_sequence_classification.py
+   37 model/prefix_encoder.py
+ 1075 total
+root@7bcf8a0cf7c8:/app/UPET#

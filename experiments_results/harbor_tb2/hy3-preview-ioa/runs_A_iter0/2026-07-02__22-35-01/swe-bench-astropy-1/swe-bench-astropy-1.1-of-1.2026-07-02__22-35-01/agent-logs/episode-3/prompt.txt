@@ -1,0 +1,89 @@
+New Terminal Output:
+
+root@64f840f9395e:/app/astropy# sed -n '105,185p' /app/astropy/astropy/modeling/separable.py
+def _compute_n_outputs(left, right):
+    """
+grep -n '_calculate_separability_matrix\|def separable' /app/astropy/astropy/modeling/core.py
+    Compute the number of outputs of two models.
+
+    The two models are the left and right model to an operation in
+    the expression tree of a compound model.
+
+    Parameters
+    ----------
+    left, right : `astropy.modeling.Model` or ndarray
+        If input is of an array, it is the output of `coord_matrix`.
+
+    """
+    if isinstance(left, Model):
+        lnout = left.n_outputs
+    else:
+        lnout = left.shape[0]
+    if isinstance(right, Model):
+        rnout = right.n_outputs
+    else:
+        rnout = right.shape[0]
+    noutp = lnout + rnout
+    return noutp
+
+
+def _arith_oper(left, right):
+    """
+    Function corresponding to one of the arithmetic operators
+    ['+', '-'. '*', '/', '**'].
+
+    This always returns a nonseparable output.
+
+
+    Parameters
+    ----------
+    left, right : `astropy.modeling.Model` or ndarray
+        If input is of an array, it is the output of `coord_matrix`.
+
+    Returns
+    -------
+    result : ndarray
+        Result from this operation.
+    """
+    # models have the same number of inputs and outputs
+    def _n_inputs_outputs(input):
+        if isinstance(input, Model):
+            n_outputs, n_inputs = input.n_outputs, input.n_inputs
+        else:
+            n_outputs, n_inputs = input.shape
+        return n_inputs, n_outputs
+
+    left_inputs, left_outputs = _n_inputs_outputs(left)
+    right_inputs, right_outputs = _n_inputs_outputs(right)
+
+    if left_inputs != right_inputs or left_outputs != right_outputs:
+        raise ModelDefinitionError(
+            "Unsupported operands for arithmetic operator: left (n_inputs={}, "
+            "n_outputs={}) and right (n_inputs={}, n_outputs={}); "
+            "models must have the same n_inputs and the same "
+            "n_outputs for this operator.".format(
+                left_inputs, left_outputs, right_inputs, right_outputs))
+
+    result = np.ones((left_outputs, left_inputs))
+    return result
+
+
+def _coord_matrix(model, pos, noutp):
+    """
+    Create an array representing inputs and outputs of a simple model.
+
+    The array has a shape (noutp, model.n_inputs).
+
+    Parameters
+    ----------
+    model : `astropy.modeling.Model`
+        model
+    pos : str
+        Position of this model in the expression tree.
+        One of ['left', 'right'].
+    noutp : int
+        Number of outputs of the compound model of which the input model
+root@64f840f9395e:/app/astropy# grep -n '_calculate_separability_matrix\|def separable' /app/astropy/astropy/modeling/core.py
+808:    def _calculate_separability_matrix(self):
+1532:    def separable(self):
+root@64f840f9395e:/app/astropy#

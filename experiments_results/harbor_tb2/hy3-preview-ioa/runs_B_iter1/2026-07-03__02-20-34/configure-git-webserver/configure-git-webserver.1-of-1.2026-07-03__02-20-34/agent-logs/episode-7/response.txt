@@ -1,0 +1,19 @@
+{
+  "analysis": "Direct python downloads got HTTP 403 — likely the environment's proxy/mirror rejects the urllib user-agent, but apt's own fetcher worked fine during `apt-get update`. The real blocker for apt is its pre-download free-space check, which reads statvfs on the overlay filesystem and sees 0 available (a false positive, since `dd` proved 60MB writes succeed). Solution: mount a tmpfs over /var/cache/apt/archives so statvfs reports real free space there, letting apt's own fetcher download the .debs. I'll also rely on python3 (already present) for the HTTPS server instead of nginx, so I only need git + openssh-server.",
+  "plan": "1) Check available RAM to size a tmpfs. 2) Mount a tmpfs (e.g. 2G) on /var/cache/apt/archives. 3) Retry `apt-get install -y git openssh-server`. apt's fetcher should now pass the space check and download via the working mirror path.",
+  "commands": [
+    {
+      "keystrokes": "free -h\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "mount -t tmpfs -o size=2g tmpfs /var/cache/apt/archives && df -h /var/cache/apt/archives\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "apt-get install -y git openssh-server 2>&1 | tail -30\n",
+      "duration": 40.0
+    }
+  ],
+  "task_complete": false
+}

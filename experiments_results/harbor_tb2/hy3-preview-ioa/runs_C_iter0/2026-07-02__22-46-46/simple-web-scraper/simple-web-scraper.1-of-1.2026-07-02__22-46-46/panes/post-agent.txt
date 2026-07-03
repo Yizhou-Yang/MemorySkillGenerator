@@ -1,0 +1,188 @@
+root@866520a71d29:/app# curl -s http://server:8000 | head -60
+<!DOCTYPE html><html><head><title>Book Store</title></head><body><h1>Simple Book Store</h1><div class='books-container'>
+            <div class="book">
+                <div class="book-title">The Great Gatsby</div>
+                <div class="book-author">by F. Scott Fitzgerald</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1925</span>
+                    <span class="book-rating">Rating: 4.2/5</span>
+                    <span class="book-price">$12.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">To Kill a Mockingbird</div>
+                <div class="book-author">by Harper Lee</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1960</span>
+                    <span class="book-rating">Rating: 4.8/5</span>
+                    <span class="book-price">$14.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">1984</div>
+                <div class="book-author">by George Orwell</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1949</span>
+                    <span class="book-rating">Rating: 4.6/5</span>
+                    <span class="book-price">$11.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">Pride and Prejudice</div>
+                <div class="book-author">by Jane Austen</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1813</span>
+                    <span class="book-rating">Rating: 4.5/5</span>
+                    <span class="book-price">$9.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">The Catcher in the Rye</div>
+                <div class="book-author">by J.D. Salinger</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1951</span>
+                    <span class="book-rating">Rating: 4.1/5</span>
+                    <span class="book-price">$13.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">Moby Dick</div>
+                <div class="book-author">by Herman Melville</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1851</span>
+                    <span class="book-rating">Rating: 4.0/5</span>
+                    <span class="book-price">$15.99</span>
+                </div>
+            </div>
+root@866520a71d29:/app# curl -s -i http://server:8000 | head -40
+HTTP/1.0 200 OK
+Server: BaseHTTP/0.6 Python/3.13.14
+Date: Thu, 02 Jul 2026 16:11:06 GMT
+Content-type: text/html
+
+<!DOCTYPE html><html><head><title>Book Store</title></head><body><h1>Simple Book Store</h1><div class='books-container'>
+            <div class="book">
+                <div class="book-title">The Great Gatsby</div>
+                <div class="book-author">by F. Scott Fitzgerald</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1925</span>
+                    <span class="book-rating">Rating: 4.2/5</span>
+                    <span class="book-price">$12.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">To Kill a Mockingbird</div>
+                <div class="book-author">by Harper Lee</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1960</span>
+                    <span class="book-rating">Rating: 4.8/5</span>
+                    <span class="book-price">$14.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">1984</div>
+                <div class="book-author">by George Orwell</div>
+                <div class="book-details">
+                    <span class="book-year">Published: 1949</span>
+                    <span class="book-rating">Rating: 4.6/5</span>
+                    <span class="book-price">$11.99</span>
+                </div>
+            </div>
+
+            <div class="book">
+                <div class="book-title">Pride and Prejudice</div>
+                <div class="book-author">by Jane Austen</div>
+                <div class="book-details">
+root@866520a71d29:/app# cat > /app/scraper.py << 'EOF'
+> import re
+>
+> import requests
+> from bs4 import BeautifulSoup
+> import pandas as pd
+>
+> URL = "http://server:8000"
+>
+>
+> def parse_book(book):
+>     title = book.find("div", class_="book-title").get_text(strip=True)
+>     author = book.find("div", class_="book-author").get_text(strip=True)
+>     author = re.sub(r"^by\s+", "", author)
+>     year = book.find("span", class_="book-year").get_text(strip=True)
+>     year = re.search(r"(\d{4})", year).group(1)
+>     rating = book.find("span", class_="book-rating").get_text(strip=True)
+>     rating = re.search(r"([\d.]+)/?\s*5", rating).group(1)
+>     price = book.find("span", class_="book-price").get_text(strip=True)
+>     price = re.search(r"\$?([\d.]+)", price).group(1)
+>     return {
+>         "title": title,
+>         "author": author,
+>         "year": int(year),
+>         "rating": float(rating),
+>         "price": float(price),
+>     }
+>
+>
+> def main():
+>     resp = requests.get(URL, timeout=10)
+>     resp.raise_for_status()
+>     soup = BeautifulSoup(resp.text, "html.parser")
+>     books = [parse_book(b) for b in soup.find_all("div", class_="book")]
+>
+>     df = pd.DataFrame(books, columns=["title", "author", "year", "rating", "price"])
+>     df.to_csv("books.csv", index=False)
+>
+>     total = len(df)
+>     avg_price = df["price"].mean()
+>     highest = df.loc[df["rating"].idxmax()]
+>
+>     lines = [
+>         "Book Store Scraping Summary Report",
+>         "=================================",
+>         f"Total number of books scraped: {total}",
+>         f"Average book price: ${avg_price:.2f}",
+>         f"Highest rated book: {highest['title']} (Rating: {highest['rating']}/5)",
+>     ]
+>     with open("report.txt", "w") as f:
+>         f.write("\n".join(lines) + "\n")
+>
+>     print("\n".join(lines))
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@866520a71d29:/app# cd /app && python3 scraper.py
+ls -la /app/books.csv /app/report.txt
+echo '--- books.csv ---'; cat /app/books.csv; echo '--- report.txt ---'; cat /app/report.txt
+Book Store Scraping Summary Report
+=================================
+Total number of books scraped: 7
+Average book price: $13.85
+Highest rated book: To Kill a Mockingbird (Rating: 4.8/5)
+root@866520a71d29:/app# ls -la /app/books.csv /app/report.txt
+-rw-r--r-- 1 root root 345 Jul  2 16:11 /app/books.csv
+-rw-r--r-- 1 root root 187 Jul  2 16:11 /app/report.txt
+root@866520a71d29:/app# echo '--- books.csv ---'; cat /app/books.csv; echo '--- report.txt ---'; cat /app/report.txt
+--- books.csv ---
+title,author,year,rating,price
+The Great Gatsby,F. Scott Fitzgerald,1925,4.2,12.99
+To Kill a Mockingbird,Harper Lee,1960,4.8,14.99
+1984,George Orwell,1949,4.6,11.99
+Pride and Prejudice,Jane Austen,1813,4.5,9.99
+The Catcher in the Rye,J.D. Salinger,1951,4.1,13.99
+Moby Dick,Herman Melville,1851,4.0,15.99
+The Hobbit,J.R.R. Tolkien,1937,4.7,16.99
+--- report.txt ---
+Book Store Scraping Summary Report
+=================================
+Total number of books scraped: 7
+Average book price: $13.85
+Highest rated book: To Kill a Mockingbird (Rating: 4.8/5)
+root@866520a71d29:/app#

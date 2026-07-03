@@ -1,0 +1,55 @@
+New Terminal Output:
+
+root@d7094f788f94:/app# cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> GIT_DIR=/git/project
+> while read oldrev newrev refname; do
+>   branch="${refname#refs/heads/}"
+>   case "$branch" in
+>     main) target=/var/www ;;
+>     dev) target=/var/www/dev ;;
+>     *) continue ;;
+>   esac
+>   mkdir -p "$target"
+>   git --git-dir="$GIT_DIR" archive "$branch" | tar -x -C "$target"
+> done
+> EOF
+root@d7094f788f94:/app# chmod +x /git/project/hooks/post-receive; chown git:git /git/project/hooks/post-receive; cat /git/project/hooks/post-receive
+#!/bin/bash
+GIT_DIR=/git/project
+while read oldrev newrev refname; do
+  branch="${refname#refs/heads/}"
+  case "$branch" in
+    main) target=/var/www ;;
+    dev) target=/var/www/dev ;;
+    *) continue ;;
+  esac
+  mkdir -p "$target"
+  git --git-dir="$GIT_DIR" archive "$branch" | tar -x -C "$target"
+done
+root@d7094f788f94:/app# openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/server.key -out /etc/nginx/ssl/server.crt -days 365 -subj "/CN=localhos
+t" >/dev/null 2>&1; ls -la /etc/nginx/ssl/
+total 16
+drwxr-xr-x 2 root root 4096 Jul  2 19:08 .
+drwxr-xr-x 9 root root 4096 Jul  2 19:07 ..
+-rw-r--r-- 1 root root 1115 Jul  2 19:08 server.crt
+-rw------- 1 root root 1704 Jul  2 19:08 server.key
+root@d7094f788f94:/app# cat > /etc/nginx/conf.d/gitdeploy.conf <<'EOF'
+> server {
+>     listen 8443 ssl;
+>     listen [::]:8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/server.crt;
+>     ssl_certificate_key /etc/nginx/ssl/server.key;
+>     root /var/www;
+>     index index.html;
+>     location / {
+>         try_files $uri $uri/ =404;
+>     }
+> }
+> EOF
+root@d7094f788f94:/app# nginx -t
+2026/07/02 19:08:15 [warn] 236#236: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@d7094f788f94:/app#

@@ -1,0 +1,9 @@
+{
+  "analysis": "Progress so far: git user created with password 'password', sshd started with password auth enabled, bare repo at /git/project created, deployment dirs /var/www and /var/www/dev created and owned by git. Now I need to: (1) write the post-receive hook that deploys main->/var/www and dev->/var/www/dev, (2) generate a self-signed cert, (3) configure and start nginx on 8443 with HTTPS serving /var/www.",
+  "plan": "Create the post-receive hook using git archive piped to tar for fast deployment. Generate a self-signed cert for localhost. Write an nginx server block listening on 8443 with SSL serving /var/www (which covers both index.html and dev/index.html). Then test nginx config and start it. Finally do a local push test to verify the hook deploys correctly.",
+  "commands": [
+    {"keystrokes": "cat > /git/project/hooks/post-receive <<'EOF'\n#!/bin/bash\nGIT_DIR=/git/project\nwhile read oldrev newrev refname; do\n  branch=\"${refname#refs/heads/}\"\n  case \"$branch\" in\n    main) target=/var/www ;;\n    dev) target=/var/www/dev ;;\n    *) continue ;;\n  esac\n  mkdir -p \"$target\"\n  git --git-dir=\"$GIT_DIR\" archive \"$branch\" | tar -x -C \"$target\"\ndone\nEOF\nchmod +x /git/project/hooks/post-receive; chown git:git /git/project/hooks/post-receive; cat /git/project/hooks/post-receive\n", "duration": 0.3},
+    {"keystrokes": "openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/server.key -out /etc/nginx/ssl/server.crt -days 365 -subj \"/CN=localhost\" >/dev/null 2>&1; ls -la /etc/nginx/ssl/\n", "duration": 1.5},
+    {"keystrokes": "cat > /etc/nginx/conf.d/gitdeploy.conf <<'EOF'\nserver {\n    listen 8443 ssl;\n    listen [::]:8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/server.crt;\n    ssl_certificate_key /etc/nginx/ssl/server.key;\n    root /var/www;\n    index index.html;\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}\nEOF\nnginx -t\n", "duration": 1.0}
+  ]
+}

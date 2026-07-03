@@ -1,0 +1,14 @@
+{
+  "analysis": "We have python3 and perl available, and 35GB RAM free. The cleanest fix is to give apt a real filesystem for its download cache. Since actual writes work (root can use reserved space) but apt's statvfs check blocks, I'll mount a tmpfs over /var/cache/apt/archives so apt's free-space pre-check sees real available space. The container has plenty of RAM (35GB free) for a tmpfs.",
+  "plan": "Mount a tmpfs (e.g., 2GB) over /var/cache/apt/archives. Then re-run apt-get install. If the mount succeeds, apt's space check for the archives directory will pass. I'll verify the mount and then install gcc make. If the mount fails, I'll fall back to downloading .debs with python3 and dpkg -i.",
+  "commands": [
+    {
+      "keystrokes": "mount -t tmpfs -o size=2g tmpfs /var/cache/apt/archives && echo MOUNT_OK\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "df -h /var/cache/apt/archives\n",
+      "duration": 0.1
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+New Terminal Output:
+
+root@d5d72e93e229:/tmp/work# cat > /app/dbg.exp <<'EOF'
+> #!/usr/bin/expect -f
+> log_file -a /app/out.txt
+> set timeout 30
+> spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost "echo MARK_BEGIN; echo PATH=$PATH; command -v git-receive-pack; git-receiv
+e-pack /git/project; echo RC=$?; echo MARK_END"
+> expect {
+>   -re {(?i)password} { send "password\r"; exp_continue }
+>   eof {}
+> }
+> EOF
+root@d5d72e93e229:/tmp/work# : > /app/out.txt; /app/dbg.exp; echo '=== captured ==='; cat /app/out.txt
+bash: /app/dbg.exp: Permission denied
+=== captured ===
+root@d5d72e93e229:/tmp/work# su - git -c 'echo PATH=$PATH; command -v git-receive-pack; id' < /dev/null
+

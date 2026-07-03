@@ -1,0 +1,50 @@
+New Terminal Output:
+
+root@b539af01810d:/app# cat > /tmp/rpctest3.py << 'EOF'
+> import urllib.request, json
+>
+> def post(url, body, timeout=20):
+>     data = json.dumps(body).encode()
+>     req = urllib.request.Request(url, data=data, headers={'Content-Type':'application/json'})
+>     try:
+>         r = urllib.request.urlopen(req, timeout=timeout)
+>         return r.status, r.read().decode()[:120]
+>     except Exception as e:
+>         return 'ERR', repr(e)[:160]
+>
+> body = {'jsonrpc':'2.0','id':1,'method':'getHealth'}
+> urls = [
+>   'https://rpc.ankr.com/solana',
+>   'https://solana-mainnet.rpc.extrnode.com',
+>   'https://solana-devnet.rpc.extrnode.com',
+>   'https://mainnet-ams.chainstacklabs.com',
+>   'https://api.mainnet-beta.solana.com',
+>   'https://ssc-dao.genesysgo.net',
+>   'https://mango.devnet.rpcpool.com',
+>   'https://free.rpcpool.com',
+>   'https://solana.drpc.org',
+>   'https://api.testnet.solana.com',
+> ]
+> for u in urls:
+>     s, out = post(u, body)
+>     print(u, '->', s, out)
+> EOF
+root@b539af01810d:/app# python3 /tmp/rpctest3.py
+https://rpc.ankr.com/solana -> ERR <HTTPError 403: 'Forbidden'>
+https://solana-mainnet.rpc.extrnode.com -> ERR URLError(gaierror(-2, 'Name or service not known'))
+https://solana-devnet.rpc.extrnode.com -> ERR URLError(SSLError(1, '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1018)'))
+https://mainnet-ams.chainstacklabs.com -> ERR URLError(gaierror(-2, 'Name or service not known'))
+https://api.mainnet-beta.solana.com -> ERR URLError(SSLError(1, '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1018)'))
+https://ssc-dao.genesysgo.net -> 200 <!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="wi
+https://mango.devnet.rpcpool.com -> 200 {"jsonrpc":"2.0","result":"ok","id":1}
+
+https://free.rpcpool.com -> ERR <HTTPError 403: 'Forbidden'>
+https://solana.drpc.org -> ERR <HTTPError 403: 'Forbidden'>
+https://api.testnet.solana.com -> ERR URLError(SSLError(1, '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1018)'))
+root@b539af01810d:/app#

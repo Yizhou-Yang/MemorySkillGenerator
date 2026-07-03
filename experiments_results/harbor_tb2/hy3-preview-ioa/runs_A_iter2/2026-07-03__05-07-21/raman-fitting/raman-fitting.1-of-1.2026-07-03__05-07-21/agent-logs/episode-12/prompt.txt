@@ -1,0 +1,39 @@
+New Terminal Output:
+
+root@4008c52d3fe4:/app# cat > /tmp/fitcheck.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> rows=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         rows.append((float(p[0]),float(p[1])))
+> d=np.array(rows); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> def lor(x, x0, gamma, amp, off):
+>     return off + amp*gamma**2/((x-x0)**2+gamma**2)
+> cands={3745.1:80, 6329.4:80, 10289.9:600, 19139.5:1200}
+> for c,w in cands.items():
+>     m=(x>=c-w)&(x<=c+w)
+>     xx=x[m]; yy=y[m]
+>     i0=np.argmax(yy); x0g=xx[i0]; amp0=yy[i0]-np.median(yy[:5])
+>     off0=np.median(yy[-10:])
+>     p0=[x0g, w*0.2, amp0, off0]
+>     try:
+>         popt,pcov=curve_fit(lor,xx,yy,p0=p0,maxfev=20000)
+>         pred=lor(xx,*popt)
+>         ss_res=np.sum((yy-pred)**2); ss_tot=np.sum((yy-yy.mean())**2)
+>         r2=1-ss_res/ss_tot
+>         print(f'cand={c:9.1f} R2={r2:.4f} x0={popt[0]:9.2f} gamma={popt[1]:9.2f} amp={popt[2]:10.2f} off={popt[3]:10.2f} npts={len(xx)}')
+>     except Exception as e:
+>         print('cand',c,'fail',e)
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/fitcheck.py
+cand=   3745.1 R2=0.9948 x0=  3745.31 gamma=    27.88 amp=  12926.30 off=    387.67 npts=60
+cand=   6329.4 R2=0.9933 x0=  6327.64 gamma=    37.50 amp=   8625.32 off=   5304.15 npts=17
+cand=  10289.9 R2=0.9577 x0= 10416.75 gamma=   516.11 amp=  15480.76 off=   3976.59 npts=46
+cand=  19139.5 R2=0.9389 x0= 19197.45 gamma=   439.81 amp=  76427.19 off=   8393.57 npts=25
+root@4008c52d3fe4:/app#

@@ -1,0 +1,91 @@
+New Terminal Output:
+
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/extract.py
+> import struct, sys, os
+> ISO = '/app/alpine.iso'
+> OUT = '/app/run'
+> def read_sectors(f, lba, count):
+>     f.seek(lba*2048)
+>     return f.read(2048*count)
+> def parse_entry(rec):
+>     length = rec[0]
+>     if length == 0:
+>         return None
+>     ext_lba = struct.unpack_from('<I', rec, 2)[0]
+>     data_len = struct.unpack_from('<I', rec, 10)[0]
+>     flags = rec[25]
+>     name_len = rec[length-1]
+>     name = rec[length:length+name_len]
+>     is_dir = bool(flags & 0x02)
+>     nm = name.split(b';')[0]
+>     return (ext_lba, data_len, is_dir, nm)
+> def list_dir(f, lba, length):
+>     buf = read_sectors(f, lba, (length+2047)//2048)
+>     entries = []
+>     off = 0
+>     while off < len(buf):
+>         reclen = buf[off]
+>         if reclen == 0:
+>             break
+>         rec = buf[off:off+reclen]
+>         e = parse_entry(rec)
+>         if e:
+>             entries.append(e)
+>         off += reclen
+>     return entries
+> def main():
+>     f = open(ISO, 'rb')
+>     lba = 16
+>     pvd = None
+>     while True:
+>         vd = read_sectors(f, lba, 1)
+>         if vd[1:6] != b'CD001':
+>             break
+>         if vd[0] == 1:
+>             pvd = vd
+>             break
+>         if vd[0] == 255:
+>             break
+>         lba += 1
+>     if pvd is None:
+>         print('PVD not found'); sys.exit(1)
+>     root_e = parse_entry(pvd[156:156+34])
+>     print('root entries:')
+>     for e in list_dir(f, root_e[0], root_e[1]):
+>         print('  ', e[3], 'dir' if e[2] else 'file')
+>     def find(parent_e, want):
+>         for e in list_dir(f, parent_e[0], parent_e[1]):
+>             if e[3].decode('latin1').lower() == want:
+>                 return e
+>         return None
+>     boot = find(root_e, 'boot')
+>     if not boot:
+>         print('boot not found'); sys.exit(1)
+>     wanted = {}
+>     for e in list_dir(f, boot[0], boot[1]):
+>         nm = e[3].decode('latin1').lower()
+>         print('  boot/', e[3])
+>         if nm.startswith('vmlinuz') and 'lts' in nm:
+>             wanted.setdefault('vmlinuz-lts', e)
+>         if nm.startswith('initramfs') and 'lts' in nm:
+>             wanted.setdefault('initramfs-lts', e)
+>     os.makedirs(OUT, exist_ok=True)
+>     for key, e in wanted.items():
+>         f.seek(e[0]*2048)
+>         data = f.read(e[1])
+>         open(os.path.join(OUT, key), 'wb').write(data)
+>         print('wrote', key, e[1], 'bytes')
+>     if 'vmlinuz-lts' not in wanted or 'initramfs-lts' not in wanted:
+>         print('MISSING; got', list(wanted.keys())); sys.exit(1)
+> main()
+> PYEOF
+root@fb781a110bd4:/app# python3 /app/run/extract.py
+root entries:
+   b'' dir
+   b'' dir
+   b'' file
+   b'' dir
+   b'' dir
+   b'' dir
+boot not found
+root@fb781a110bd4:/app#

@@ -1,0 +1,10 @@
+{
+  "analysis": "Confirmed /tmp/data.bin is a PDP-11 OMAGIC a.out: magic 0407, a_text=1062, a_data=30, a_bss=572, a_syms=276, entry=0. Only python3 + od are available; no emulator and no network. I need to build my own PDP-11 emulator. The displayed `od` words are octal 16-bit and reconstruct correctly (magic 0407 = bytes 07 01). The first text word 0o170011=0xF009 looks like a branch, which is odd for an entry, so the real entry is likely given by a symbol. There's a symbol table (276 bytes, probably 12-byte entries) that should contain `_start`/`main` and their values. I need to parse that to find the true entry, and inspect strings in the data/text.",
+  "plan": "Write an analysis script that: (1) parses the symbol table at offset 1108 (12-byte stride: 8-byte name + 2-byte type + 2-byte value) and prints names+values so I can find the entry symbol; (2) prints readable ASCII strings from the file to see the program's message; (3) dumps the text region. Then I'll write a PDP-11 emulator (implementing the subset of instructions actually used) and run it to capture the output of the write() syscalls (traps 4) and exit (trap 1).",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/analyze.py << 'EOF'\nb=open('/tmp/data.bin','rb').read()\nprint('len',len(b))\n# header\nimport struct\nprint('magic %o'%struct.unpack('<H',b[0:2])[0])\n# symbol table at 16+1062+30 = 1108\noff=1108\nprint('sym bytes',len(b)-off)\n# show symbol table raw\nfor i in range(off, off+276, 12):\n    name=b[i:i+8]\n    t=struct.unpack('<H',b[i+8:i+10])[0]\n    v=struct.unpack('<H',b[i+10:i+12])[0]\n    nm=name.split(b'\\x00')[0]\n    if nm:\n        print(repr(nm), 'type=%o'%t, 'val=%d (0o%o)'%(v,v))\nprint('--- strings ---')\nimport re\nfor m in re.finditer(rb'[\\x20-\\x7e]{3,}', b):\n    print(m.start(), repr(m.group()))\nEOF\npython3 /tmp/analyze.py\n",
+      "duration": 0.3
+    }
+  ]
+}

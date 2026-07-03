@@ -1,0 +1,14 @@
+{
+  "analysis": "Confirmed root cause: fuse-overlayfs reports 0 bytes available via statfs, so apt refuses to download packages ('not enough free space'), even though real writes to / succeed (I wrote 500MB with dd). tmpfs mount and unshare both fail due to restricted privileges. The cleanest bypass is to avoid apt's downloader entirely: use `apt-get install --print-uris` to get the list of .deb URLs, download them directly with wget (which doesn't do a free-space check), then install with dpkg. dpkg writes to / which has real space.",
+  "plan": "1) Run `apt-get install --print-uris` to obtain all resolved package URLs; check it doesn't itself hit the space error. 2) Verify it produced URL lines. Next batch: extract URLs, wget them, then dpkg -i. First let me confirm print-uris works.",
+  "commands": [
+    {
+      "keystrokes": "apt-get install --print-uris -y build-essential wget flex bison libssl-dev bc xz-utils > /tmp/uris.txt 2>/tmp/uris.err; echo \"exit=$?\"\n",
+      "duration": 5.0
+    },
+    {
+      "keystrokes": "echo '--- err tail ---'; tail -3 /tmp/uris.err; echo '--- uri line count ---'; grep -c \"^'\" /tmp/uris.txt; echo '--- sample ---'; grep \"^'\" /tmp/uris.txt | head -3\n",
+      "duration": 0.3
+    }
+  ]
+}

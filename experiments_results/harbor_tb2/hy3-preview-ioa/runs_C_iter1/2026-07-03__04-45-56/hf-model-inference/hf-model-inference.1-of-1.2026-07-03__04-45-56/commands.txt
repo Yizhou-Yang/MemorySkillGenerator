@@ -1,0 +1,21 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'python3 --version; pip --version; mkdir -p /app/model_cache/sentiment_model\n'
+'pip install --no-cache-dir flask transformers torch huggingface_hub 2>&1 | tail -20\n'
+''
+''
+''
+'python3 -c "from huggingface_hub import snapshot_download; p=snapshot_download(repo_id=\'distilbert-base-uncased-finetuned-sst-2-english\', local_dir=\'/app/model_cache/sentiment_model\'); print(\'SAVED_TO\', p)"\n'
+'cat > /app/app.py << \'EOF\'\nfrom flask import Flask, request, jsonify\nfrom transformers import AutoTokenizer, AutoModelForSequenceClassification\nimport torch\nimport os\n\nMODEL_PATH = "/app/model_cache/sentiment_model"\n\napp = Flask(__name__)\n\ntokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)\nmodel = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)\nmodel.eval()\n\n# id2label for SST-2 distilbert: 0=NEGATIVE, 1=POSITIVE\nid2label = model.config.id2label\nif not id2label:\n    id2label = {0: "NEGATIVE", 1: "POSITIVE"}\n\ndef normalize(label):\n    return label.lower()\n\n@app.route("/sentiment", methods=["POST"])\ndef sentiment():\n    try:\n        data = request.get_json(silent=True)\n        if not data or "text" not in data:\n            return jsonify({"error": "Missing \'text\' field in request body"}), 400\n        text = data["text"]\n        if not isinstance(text, str) or text.strip() == "":\n            return jsonify({"error": "\'text\' must be a non-empty string"}), 400\n\n        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)\n        with torch.no_grad():\n            logits = model(**inputs).logits\n            probs = torch.softmax(logits, dim=-1)[0]\n\n        # build confidence dict keyed by lowercase label\n        conf = {}\n        for idx, lab in id2label.items():\n            conf[normalize(lab)] = float(probs[int(idx)])\n\n        # ensure positive/negative keys exist\n        positive = conf.get("positive", 0.0)\n        negative = conf.get("negative", 0.0)\n\n        pred_idx = int(torch.argmax(probs).item())\n        pred_label = normalize(id2label[pred_idx])\n\n        return jsonify({\n            "sentiment": pred_label,\n            "confidence": {\n                "positive": positive,\n                "negative": negative\n            }\n        })\n    except Exception as e:\n        return jsonify({"error": str(e)}), 500\n\n@app.route("/health", methods=["GET"])\ndef health():\n    return jsonify({"status": "ok"})\n\nif __name__ == "__main__":\n    app.run(host="0.0.0.0", port=5000)\nEOF\n'
+'cat > /app/test.py << \'EOF\'\nimport requests\nimport json\n\nURL = "http://0.0.0.0:5000/sentiment"\n\nsamples = [\n    "I absolutely loved this movie, it was fantastic!",\n    "This was a terrible waste of time and very boring.",\n    "The service was okay, nothing special but not bad.",\n]\n\nfor text in samples:\n    try:\n        r = requests.post(URL, json={"text": text})\n        print("TEXT:", text)\n        print("RESPONSE:", r.status_code, r.text)\n        print("-" * 60)\n    except Exception as e:\n        print("TEXT:", text)\n        print("ERROR:", e)\n        print("-" * 60)\nEOF\n'
+'nohup python3 /app/app.py > /app/app.log 2>&1 &\n'
+'sleep 8; cat /app/app.log\n'
+'sleep 10; cat /app/app.log\n'
+'python3 /app/test.py\n'
+''
+'jobs; ls -la /app/model_cache/sentiment_model | head\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

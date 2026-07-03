@@ -1,0 +1,87 @@
+New Terminal Output:
+
+LIMIT HIT
+cat > /app/explore.py << 'PYEOF'
+import subprocess, os, sys
+
+DIRS = [('N', -1, 0), ('S', 1, 0), ('E', 0, 1), ('W', 0, -1)]
+OPP = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
+sys.setrecursionlimit(1000000)
+
+def explore(maze_id):
+    proc = subprocess.Popen(['python3', '-u', '/protected/maze_server.py', str(maze_id)],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    def read_prompt():
+        buf = b''
+        while True:
+            ch = proc.stdout.read(1)
+            if not ch:
+                break
+            buf += ch
+            if buf.endswith(b'> '):
+                break
+        return buf.decode(errors='replace')
+
+    read_prompt()  # consume welcome + first prompt
+
+    cell_type = {(0, 0): 'S'}   # open cells -> char
+    visited = {(0, 0)}
+    probed = set()              # (r,c,d) edges already tested
+
+    def dfs(r, c):
+        for d, dr, dc in DIRS:
+            if (r, c, d) in probed:
+                continue
+            probed.add((r, c, d))
+            proc.stdin.write(('move ' + d + '\n').encode())
+            proc.stdin.flush()
+            chunk = read_prompt()
+            result = chunk.rsplit('> ', 1)[0].strip()
+            nr, nc = r + dr, c + dc
+            if result == 'hit wall':
+                continue  # wall -> stays '#'
+            # server physically moved here
+            ch = 'E' if result == 'reached exit' else ' '
+            cell_type[(nr, nc)] = ch
+            if (nr, nc) not in visited:
+                visited.add((nr, nc))
+                dfs(nr, nc)
+            # ALWAYS return to current cell (server moved, must undo)
+            proc.stdin.write(('move ' + OPP[d] + '\n').encode())
+            proc.stdin.flush()
+            read_prompt()
+
+    dfs(0, 0)
+    proc.stdin.write(b'exit\n')
+    proc.stdin.flush()
+    proc.wait()
+
+    open_cells = list(cell_type.keys())
+    min_r = min(p[0] for p in open_cells)
+    max_r = max(p[0] for p in open_cells)
+    min_c = min(p[1] for p in open_cells)
+    max_c = max(p[1] for p in open_cells)
+    top, bottom = min_r - 1, max_r + 1
+    left, right = min_c - 1, max_c + 1
+    rows = []
+    for r in range(top, bottom + 1):
+        rows.append(''.join(cell_type.get((r, c), '#') for c in range(left, right + 1)))
+    return '\n'.join(rows)
+
+
+def main():
+    os.makedirs('/app/output', exist_ok=True)
+    for mid in range(1, 11):
+        m = explore(mid)
+        with open('/app/output/%d.txt' % mid, 'w') as f:
+            f.write(m + '\n')
+        print('=== maze %d ===' % mid)
+        print(m)
+        print()
+
+if __name__ == '__main__':
+    main()
+PYEOF
+python3 /app/explore.py
+

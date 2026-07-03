@@ -1,0 +1,61 @@
+New Terminal Output:
+
+root@3bded9ad04d7:/app# cat > /app/revert.py << 'PYEOF'
+> #!/usr/bin/env python3
+> '''Revert c4_reshard/ back to the original (flat) c4_sample/ layout.
+>
+> The files of the original c4_sample/ were reshaped into c4_reshard/ for upload:
+> they were distributed into part_* sub-directories, each holding at most 30 files.
+> This script reverses that reshape: it moves every file found in any sub-directory
+> of c4_reshard/ up to the top level of c4_reshard/ and removes the now-empty
+> sub-directories. After running this, c4_reshard/ contains the same flat set of
+> files that originally lived in c4_sample/, so the two match.
+> '''
+> import os
+> import shutil
+> import sys
+>
+> BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+> RESHARD = os.path.join(BASE_DIR, 'c4_reshard')
+>
+>
+> def main():
+>     if not os.path.isdir(RESHARD):
+>         print('Nothing to revert: ' + RESHARD + ' does not exist.', file=sys.stderr)
+>         return 1
+>
+>     moved = 0
+>     for entry in sorted(os.listdir(RESHARD)):
+>         sub = os.path.join(RESHARD, entry)
+>         if not os.path.isdir(sub):
+>             continue
+>         for name in sorted(os.listdir(sub)):
+>             src = os.path.join(sub, name)
+>             if os.path.isfile(src):
+>                 dst = os.path.join(RESHARD, name)
+>                 if os.path.abspath(src) != os.path.abspath(dst):
+>                     shutil.move(src, dst)
+>                     moved += 1
+>         try:
+>             os.rmdir(sub)
+>         except OSError as e:
+>             print('Could not remove ' + sub + ': ' + str(e), file=sys.stderr)
+>
+>     print('Reverted c4_reshard/: moved ' + str(moved) +
+>           ' file(s) up to the top level and removed sub-directories.')
+>     return 0
+>
+>
+> if __name__ == '__main__':
+>     sys.exit(main())
+> PYEOF
+root@3bded9ad04d7:/app# echo CHECK_SAMPLE; ls c4_sample | wc -l
+CHECK_SAMPLE
+echo CHECK_RESHARD; find c4_reshard -type f | wc -l; ls -d c4_reshard/part_* | wc -l
+echo CHECK_MAXPER; for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1; echo CHECK_MAXBYTES; find c4_reshard -type f -printf '%s\n' | sort
+-n | tail -1
+9898
+root@3bded9ad04d7:/app# echo CHECK_RESHARD; find c4_reshard -type f | wc -l; ls -d c4_reshard/part_* | wc -l
+CHECK_RESHARD
+echo CHECK_SCRIPT; ls -la /app/revert.py
+

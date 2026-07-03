@@ -1,0 +1,10 @@
+{
+  "analysis": "Big breakthrough: the sky gradient matches RTOW EXACTLY. At image-center-top the measured color is (146,190,255), and computing RTOW's gradient color(y=0.707) = (1-0.8535)*(255,255,255)+0.8535*(127,179,255) = (146,190,255). Perfect match. So the camera is the standard RTOW pinhole: origin=(0,0,0), lower_left=(-aspect,-1,-1), horizontal=(2*aspect,0,0), vertical=(0,2,0), with aspect=800/600=1.333, and sky gradient t=0.5*(dir.y+1), col=(1-t)*white + t*(0.5,0.7,1.0).\n\nThe red sphere projects to pixel center (417.5,312), radius~42.5. Below it is a checkerboard ground. I need to confirm the horizon row (camera level vs tilted), characterize the checkerboard, and the sphere's lighting/shading. Let me measure the column at x=10 (no sphere) to find the true horizon, dump the checkerboard, and measure sphere shading.",
+  "plan": "Measurement #3: dump full column x=10 (find sky/ground horizon), dump the checkerboard structure at a bottom row, and measure the sphere's shading across its center. This confirms camera orientation and gives ground/sphere params to build a faithful ray tracer.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/m3.py << 'EOF'\nimport sys\nf=open('image.ppm','rb'); f.read(15)\ndata=f.read(); w,h=800,600\ndef px(x,y):\n    o=(y*w+x)*3; return data[o],data[o+1],data[o+2]\n# horizon at several columns: first non-sky pixel\ndef is_sky(r,g,b):\n    return b>245 and r<210 and g<210 and (r-g)<40 and (g-b)<-40\ndef horizon(x):\n    for y in range(h):\n        r,g,b=px(x,y)\n        if not is_sky(r,g,b): return y\n    return -1\nfor x in [10,200,400,600,790]:\n    print('col',x,'horizon y=',horizon(x))\n# sphere shading across center row y=312\nprint('sphere horiz at y=312:')\nfor x in range(375,461,5):\n    print(x,px(x,312))\n# checkerboard at bottom row y=560\nprint('checker y=560 (luminance):')\nl=[(r+g+b)//3 for (r,g,b) in (px(x,560) for x in range(0,800,4))]\nprint(l)\nEOF\npython3 /tmp/m3.py\n",
+      "duration": 3.0
+    }
+  ]
+}

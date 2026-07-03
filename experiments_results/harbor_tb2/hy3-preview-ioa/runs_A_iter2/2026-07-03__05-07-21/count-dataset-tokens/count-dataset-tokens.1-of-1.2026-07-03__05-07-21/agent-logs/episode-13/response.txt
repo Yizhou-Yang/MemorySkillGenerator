@@ -1,0 +1,10 @@
+{
+  "analysis": "The smallest metadata shard (70.7MB) downloaded successfully. Now I'll inspect it to confirm the exact 'science' domain label and verify the tokenizer loads. The disk warnings are spurious — downloads succeed, so I'll process shards one at a time and delete each after use.",
+  "plan": "Write a quick inspection script that loads train-00007, prints the distinct domain values, the count of domain=='science', and samples the deepseek_reasoning/deepseek_solution columns. Also verify the tokenizers library can load the Qwen tokenizer.json. This confirms my filter before the full run.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/inspect.py << 'EOF'\nimport pyarrow.parquet as pq\nfrom tokenizers import Tokenizer\n\ntok = Tokenizer.from_file('/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json')\nprint('tokenizer loaded, vocab:', tok.get_vocab_size())\n\np='/root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/snapshots/bd093c3994fd54d2390985b66988ddf282a55eb6/metadata/train-00007-of-00012.parquet'\nt=pq.read_table(p)\nprint('columns:', t.column_names)\nfrom collections import Counter\nc=Counter(t.column('domain').to_pylist())\nprint('domain counts:', c)\nprint('n rows:', t.num_rows)\n# sample\nfor i in range(2):\n    r=t.slice(i,1).to_pylist()[0]\n    print('---row',i,'domain=',r['domain'])\n    print(' dr len', len(r['deepseek_reasoning'] or ''), ' ds len', len(r['deepseek_solution'] or ''))\n    print(' dr head:', (r['deepseek_reasoning'] or '')[:120])\nEOF\npython3 /app/inspect.py\n",
+    "duration": 15.0
+    }
+  ]
+}

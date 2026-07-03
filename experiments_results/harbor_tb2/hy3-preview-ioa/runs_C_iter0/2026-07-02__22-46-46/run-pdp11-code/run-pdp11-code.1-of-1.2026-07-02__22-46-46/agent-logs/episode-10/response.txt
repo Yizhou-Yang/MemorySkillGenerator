@@ -1,0 +1,26 @@
+{
+  "analysis": "Both candidate files failed to load in SIMH with 'Format error'. I need to inspect: (1) the exact a.out header fields, (2) what load formats SIMH supports, and (3) try stripping the symbol table which sometimes confuses SIMH's loader. data_le.bin is the correct little-endian PDP-11 a.out (magic 0x0107=0407, sensible a_text/a_data/a_bss). The 'Format error' may come from the symbol table or SIMH's a.out quirks.",
+  "plan": "1. Dump the a.out header fields precisely and create a symbol-table-stripped version (data_nosym.bin) with a_syms set to 0. 2. Query SIMH's `load` help to learn accepted formats. 3. Try loading data_le.bin and data_nosym.bin via SIMH scripts, examining the first words and running a bounded number of instructions, capturing all output.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'PY'\nimport struct\nb=open('/app/data_le.bin','rb').read()\nmagic,text,data,bss,syms,entry,unused,flag=struct.unpack('<8H',b[:16])\nfor n,v in zip(['a_magic','a_text','a_data','a_bss','a_syms','a_entry','a_unused','a_flag'],[magic,text,data,bss,syms,entry,unused,flag]):\n    print(n,v,oct(v))\nprint('filesize',len(b),'expected',16+text+data+syms)\nnb=bytearray(b[:16+text+data]); struct.pack_into('<H',nb,8,0)\nopen('/app/data_nosym.bin','wb').write(nb)\nprint('nosym bytes',len(nb))\nPY\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "printf 'help load\\nquit\\n' | pdp11 2>&1 | head -40\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "printf 'set cpu 11/70\\nload /app/data_le.bin\\nexamine 0 20\\nrun 2000\\nquit\\n' > /app/run3.scr; pdp11 /app/run3.scr > /app/simh3.txt 2>&1; echo EXIT=$?\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "printf 'set cpu 11/70\\nload /app/data_nosym.bin\\nexamine 0 20\\nrun 2000\\nquit\\n' > /app/run4.scr; pdp11 /app/run4.scr > /app/simh4.txt 2>&1; echo EXIT=$?\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "echo '=== simh3 ==='; cat /app/simh3.txt; echo '=== simh4 ==='; cat /app/simh4.txt\n",
+      "duration": 0.3
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "analysis": "Critical insight: stat -f shows the overlay's b_avail=0 (which is why apt refuses with 'no free space'), but Free blocks = 8,034,995 (~32GB actual free), and our dd test proved we CAN write 100MB to /app. So real space exists; only apt's statvfs-based precheck blocks us. /dev/shm and cgroup tmpfs report b_avail>0. /sys/fs/cgroup is tmpfs with ~32GB available but likely special. Strategy: get the .deb download URIs via 'apt-get --print-uris' (which bypasses the install space check), download the .debs with python (urllib ignores b_avail), then install with dpkg -i, which doesn't enforce the same space check. First, capture the URI list for tesseract-ocr+ffmpeg with --no-install-recommends to gauge closure size.",
+  "plan": "1. Run 'apt-get install --no-install-recommends --print-uris tesseract-ocr ffmpeg python3-pip' and redirect to /app/uris.txt to capture all download URIs and total size. 2. Inspect the summary to confirm it's manageable. 3. Then write a python script to download all .debs, and install via dpkg. Let me capture the URIs first.",
+  "commands": [
+    {
+      "keystrokes": "apt-get install -y --no-install-recommends --print-uris tesseract-ocr ffmpeg python3-pip > /app/uris.txt 2>&1; echo \"exit=$?\"; grep -c \"^'\" /app/uris.txt; tail -3 /app/uris.txt\n",
+      "duration": 5.0
+    }
+  ]
+}
