@@ -1014,13 +1014,10 @@ async def main():
         if "terminal_bench_2" in _keep and os.environ.get("ALLOW_RETIRED_TB2") != "1":
             raise SystemExit(
                 "[latest_runner] REFUSING to run terminal_bench_2 through the "
-                "retired simplified loop.
-  Use the harbor bridge instead:
-"
-                "    bash scripts/latest/run_all_benchmarks.sh <MODEL>
-"
-                "    # or: python scripts/latest/tb2_harbor_bridge.py --arm A|B|C ...
-"
+                "retired simplified loop.\n"
+                "  Use the harbor bridge instead:\n"
+                "    bash scripts/latest/run_all_benchmarks.sh <MODEL>\n"
+                "    # or: python scripts/latest/tb2_harbor_bridge.py --arm A|B|C ...\n"
                 "  (override for debugging only: ALLOW_RETIRED_TB2=1)")
         BENCHMARKS_TO_RUN = [b for b in BENCHMARKS_TO_RUN if b in _keep]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
