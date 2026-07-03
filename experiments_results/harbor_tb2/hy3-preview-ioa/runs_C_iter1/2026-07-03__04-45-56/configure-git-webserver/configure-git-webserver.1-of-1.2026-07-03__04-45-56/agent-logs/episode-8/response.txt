@@ -1,8 +1,0 @@
-{
-  "analysis": "Found the real blocker: `curl` was never installed (only python3/openssl were). My curl loop failed. But `apt-get update` earlier successfully downloaded 31MB, and a 50MB file wrote fine to /tmp — so the '0 free space' from `df`/statvfs is a fuse-overlayfs artifact. apt refuses based on that statvfs pre-flight, but it CAN download. I'll bypass the curl dependency by downloading the .debs with python3 (urllib), then install via `dpkg -i` which does no such pre-flight space check.",
-  "plan": "1. Clear /tmp/debs. 2. Use python3 to download all 35 .debs from urls.txt. 3. Install with `dpkg -i *.deb`. 4. Verify git/sshd present. This gets the prerequisite packages in without fighting the bogus free-space check.",
-  "commands": [
-    {"keystrokes": "rm -f /tmp/debs/*.deb; cd /tmp/debs && python3 - <<'EOF'\nimport urllib.request\nfor line in open('urls.txt'):\n    url=line.strip()\n    if not url: continue\n    fn=url.rsplit('/',1)[-1]\n    print('DL',fn)\n    urllib.request.urlretrieve(url,fn)\nprint('DONE')\nEOF\n", "duration": 30.0},
-    {"keystrokes": "ls -la /tmp/debs | tail -n +2 | wc -l; ls /tmp/debs/*.deb | head -3\n", "duration": 0.1}
-  ]
-}
