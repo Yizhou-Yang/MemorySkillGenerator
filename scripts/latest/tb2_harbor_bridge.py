@@ -246,7 +246,13 @@ def main() -> None:
                     "phase": "test", "task_id": r["task_id"],
                     "task_desc": (r["instruction"] or r["task_name"])[:500],
                     "score": r["reward"], "em": 1.0 if r["reward"] >= 1.0 else 0.0,
-                    "response": r["response"], "error": "",
+                    "response": r["response"],
+                    # failure_mode straight from the official harness; env-level
+                    # deaths (compose/pull failures) must be visible per-arm so
+                    # the paired analysis can verify all arms died on the SAME
+                    # tasks and footnote them, instead of diluting means silently.
+                    "failure_mode": r.get("failure_mode", ""),
+                    "error": "",
                     "iteration": it, "iter_total": args.iters,
                     "method": "harbor_terminus2", "code_rev": rev,
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),

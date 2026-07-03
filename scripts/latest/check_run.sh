@@ -41,7 +41,11 @@ for f in files:
             it1 += 1
             if r.get("mutated"): mut += 1
         if r.get("patch_injected"): inj += 1
-    arms = " | ".join(f"{g.split('_')[0]}:n={n},err={100*e//max(n,1)}%"
+    uniq = collections.Counter()
+    for r in rows:
+        uniq[(r.get("group","?"), r.get("task_id"), r.get("iteration"))] += 1
+    uarm = collections.Counter(g for (g,_,_) in uniq)
+    arms = " | ".join(f"{g.split('_')[0]}:n={n}(uniq={uarm.get(g,0)}),err={100*e//max(n,1)}%"
                       for g, (n, e) in sorted(by.items()))
     flags = []
     if any(e / max(n, 1) > 0.1 for n, e in by.values()): flags.append("HIGH-ERR")
@@ -50,6 +54,35 @@ for f in files:
     print(f"  {'':18s} rev={list(revs)[0] if len(revs)==1 else dict(revs)}"
           f" fb={dict(fb)} mutated={mut}/{it1} injected={inj}"
           + ("  <-- " + ",".join(flags) if flags else ""))
+EOF
+
+echo ""
+echo "── TB2 (harbor): env-death visibility + arm fairness ──"
+"$PY" - "$H" <<'EOF'
+import json, sys, collections, glob
+tb = glob.glob(f"{sys.argv[1]}/*/trace.jsonl")
+if not tb:
+    print("  (no harbor TB2 trace yet)")
+else:
+    rows = [json.loads(l) for l in open(tb[0]) if l.strip()]
+    fm = collections.defaultdict(collections.Counter)
+    tasks = collections.defaultdict(set)
+    for r in rows:
+        g = r.get("group", "?")
+        fm[g][r.get("failure_mode") or "(none)"] += 1
+        tasks[g].add(r.get("task_id"))
+    for g in sorted(fm):
+        top = ", ".join(f"{k}x{v}" for k, v in fm[g].most_common(4))
+        print(f"  {g:12s} failure_mode: {top}")
+    sets = list(tasks.values())
+    if len(sets) > 1:
+        common = set.intersection(*sets); union = set.union(*sets)
+        if common != union:
+            print(f"  <-- ARM TASK-SET MISMATCH: {len(union)-len(common)} tasks "
+                  f"missing from some arm (harness died pre-result) — paired "
+                  f"stats must restrict to the {len(common)} common tasks")
+        else:
+            print(f"  arm task sets identical ({len(common)} tasks) — paired-safe")
 EOF
 
 echo ""
