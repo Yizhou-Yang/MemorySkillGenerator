@@ -50,7 +50,7 @@ from scripts.latest.eval import (
     compute_partial_results_from_trace,
 )
 
-MODEL = "hy3-preview"
+MODEL = os.environ.get("CODEBUDDY_MODEL", "hy3-preview")  # NEVER hardcode: a hardcoded constant here silently ran the whole GAIA2 arm of a deepseek sweep on HY3
 CONCURRENCY = 5
 TASK_TIMEOUT_QA = 180
 TASK_TIMEOUT_AGENT = 300

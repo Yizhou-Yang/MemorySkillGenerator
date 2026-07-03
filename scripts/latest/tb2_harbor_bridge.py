@@ -231,6 +231,14 @@ def main() -> None:
             print(f"[bridge] terminal-bench exited rc={rc} — stopping arm", flush=True)
             break
         rows = _parse_results(run_dir)
+        _empty = sum(1 for r in rows if not r["response"]
+                     or r["response"].startswith("resolved="))
+        if rows and _empty / len(rows) > 0.5:
+            print(f"[bridge] WARNING: {_empty}/{len(rows)} tasks have no agent "
+                  f"transcript — _agent_transcript() glob patterns likely do not "
+                  f"match this terminal-bench version's layout; B/C patch content "
+                  f"is degraded to one-line summaries (VERIFY marker, plan §3)",
+                  flush=True)
         with open(trace, "a") as f:
             for r in rows:
                 f.write(json.dumps({

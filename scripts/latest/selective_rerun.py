@@ -36,7 +36,7 @@ os.environ['LLM_PROVIDER'] = 'codebuddy'
 os.environ['CODEBUDDY_MODEL'] = 'deepseek-v4-pro'
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
-MODEL = "deepseek-v4-pro"
+MODEL = os.environ.get("CODEBUDDY_MODEL", "hy3-preview")  # NEVER hardcode: a hardcoded constant here silently ran the whole GAIA2 arm of a deepseek sweep on HY3
 CONCURRENCY = 5
 RESULTS_DIR = "experiments_results/latest"
 

@@ -144,16 +144,12 @@ class SkillForgeLatest:
         return exp
 
     def _find_previous_versions(self, task_id: str, task_desc: str) -> list[Experience]:
+        # Version history is CHAIN-SCOPED: same task_id only. The old >0.7
+        # word-overlap fallback could attach a *different* task's history and
+        # contaminate the refiner's "evolution" context (audit item). Our chains
+        # always share task_id (iteration variants keep it), so exact is enough.
         exact = [e for e in self.library.experiences if e.task_id == task_id]
-        if exact:
-            return sorted(exact, key=lambda e: e.version)
-        stop_words = {"the","a","an","to","and","or","in","on","at","for","of","with",
-                      "is","are","was","were","be","been","that","this","it","my","all","i","me"}
-        task_words = set(task_desc.lower().split()) - stop_words
-        similar = [e for e in self.library.experiences
-                   if len(task_words & (set(e.task_desc.lower().split()) - stop_words))
-                   / max(len(task_words | (set(e.task_desc.lower().split()) - stop_words)), 1) > 0.7]
-        return sorted(similar, key=lambda e: e.version) if similar else []
+        return sorted(exact, key=lambda e: e.version) if exact else []
 
     def save(self, path: str):
         data = self.library.to_dict()

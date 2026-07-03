@@ -456,8 +456,9 @@ def _parse_pytest_counts(test_output: str) -> tuple[int, int]:
         n = int(num)
         if kind in ("passed", "xpassed"):
             passed += n
-        elif kind in ("failed", "error", "errors", "xfailed"):
+        elif kind in ("failed", "error", "errors"):
             failed += n
+        # xfailed = expected-to-fail: neither passed nor failed (pytest semantics)
     if passed == 0 and failed == 0:
         # Fallback: per-file progress line, e.g. "../tests/test_x.py FFFF [100%]"
         for letters in _re.findall(r'\.py\s+([.FEsxX]{1,})', text):
