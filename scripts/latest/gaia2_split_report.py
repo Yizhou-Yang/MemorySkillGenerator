@@ -11,7 +11,7 @@ C-B delta per split.
 
 Usage (server, where the dataset lives):
   GAIA2_SCENARIO_DIR=$PWD/.datasets/gaia2-cli \
-    python scripts/latest/gaia2_split_report.py experiments_results/latest/hy3-preview-ioa
+    python scripts/latest/gaia2_split_report.py experiments_results/latest/hy3-preview
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def build_split_map(scenario_dir: Path) -> dict[str, str]:
 
 def main() -> None:
     base = Path(sys.argv[1] if len(sys.argv) > 1 else
-                "experiments_results/latest/hy3-preview-ioa")
+                "experiments_results/latest/hy3-preview")
     trace = base / "gaia2" / "trace.jsonl"
     sdir = Path(os.environ.get("GAIA2_SCENARIO_DIR",
                                PROJECT_ROOT / ".datasets" / "gaia2-cli"))

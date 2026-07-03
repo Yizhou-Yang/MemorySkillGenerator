@@ -22,7 +22,7 @@ cd "$(dirname "$0")/../.."   # repo root
 # USD x7). Running cheap models first surfaces pipeline bugs before the expensive
 # ones burn budget. First entry is the in-house primary.
 MODELS=(
-  "hy3-preview-ioa"     # HY3-preview      in-house  (PRIMARY)            -- confirmed
+  "hy3-preview"     # HY3-preview      in-house  (PRIMARY)            -- confirmed
   "deepseek-v4-pro"     # DeepSeek-V4-Pro  out ~¥6                        -- confirmed
   "minimax-m2.7"        # MiniMax-M2.7     out ~¥8.4                      -- confirmed
   "glm-5.1"             # GLM-5.1          out ~¥24                       -- confirmed

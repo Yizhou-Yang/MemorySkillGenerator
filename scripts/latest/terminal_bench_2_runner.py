@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
 os.environ['LLM_PROVIDER'] = 'codebuddy'
-os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview-ioa')
+os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview')
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
 

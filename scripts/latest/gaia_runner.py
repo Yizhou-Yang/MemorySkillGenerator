@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
 os.environ['LLM_PROVIDER'] = 'codebuddy'
-os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview-ioa')
+os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview')
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
 try:
@@ -50,7 +50,7 @@ from scripts.latest.eval import (
     compute_partial_results_from_trace,
 )
 
-MODEL = "hy3-preview-ioa"
+MODEL = "hy3-preview"
 CONCURRENCY = 5
 TASK_TIMEOUT_QA = 180
 TASK_TIMEOUT_AGENT = 300

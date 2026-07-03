@@ -11,7 +11,7 @@ Usage:
     # Then point terminal-bench at it:
     export OPENAI_API_BASE=http://localhost:8741/v1
     export OPENAI_API_KEY=dummy
-    terminal-bench run -a terminus-2 -m "openai/hy3-preview-ioa" ...
+    terminal-bench run -a terminus-2 -m "openai/hy3-preview" ...
 
 Architecture:
     Request (OpenAI chat format) -> extract messages -> CodeBuddy SDK query()
@@ -52,7 +52,7 @@ except ImportError:
 
 PORT = int(os.environ.get("CODEBUDDY_PROXY_PORT", "8741"))
 # Model name reported to clients (cosmetic; CodeBuddy uses its own routing)
-DEFAULT_MODEL = os.environ.get("CODEBUDDY_MODEL", "hy3-preview-ioa")
+DEFAULT_MODEL = os.environ.get("CODEBUDDY_MODEL", "hy3-preview")
 # Max turns for CodeBuddy agent (we want pure text, so keep low)
 MAX_TURNS = int(os.environ.get("CODEBUDDY_PROXY_MAX_TURNS", "1"))
 # Default timeout per request (seconds)

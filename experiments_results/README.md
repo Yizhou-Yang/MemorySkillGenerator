@@ -27,7 +27,7 @@ experiments_results/
 ├── README.md                      # this file
 ├── EXPERIMENT_QUALITY.md          # how to vet a run (read first)
 ├── latest/                        # current (overwritable) runs
-│   └── <model>/<benchmark>/       # e.g. hy3-preview-ioa/gaia/
+│   └── <model>/<benchmark>/       # e.g. hy3-preview/gaia/
 │       └── trace.jsonl            #   one JSON row per (task, arm, iteration)
 ├── formal/                        # frozen, immutable snapshots (see formal/README.md)
 │   └── <date>_<tag>/<benchmark>/

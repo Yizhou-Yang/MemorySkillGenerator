@@ -26,7 +26,7 @@ endpoint (we already run one for hy3/CodeBuddy; see `.env.example` OPENAI_*):
 ```bash
 export OPENAI_API_BASE=<internal-openai-compatible-endpoint>
 export OPENAI_API_KEY=<key>
-MODEL="openai/hy3-preview-ioa"      # litellm provider/model syntax
+MODEL="openai/hy3-preview"      # litellm provider/model syntax
 ```
 
 **Gate 1 (baseline sanity, no memory):**

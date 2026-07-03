@@ -16,7 +16,7 @@
 #
 # Usage:
 #   bash scripts/latest/rerun_broken.sh [MODEL]
-#   MODEL defaults to hy3-preview-ioa.
+#   MODEL defaults to hy3-preview.
 # Env overrides:
 #   GAIA2_SCENARIO_DIR  persistent gaia2-cli path (default: <repo>/.datasets/gaia2-cli)
 #   PYTHON              python interpreter (default: skillforge conda env)
@@ -25,7 +25,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."          # repo root
 REPO="$PWD"
 
-MODEL="${1:-hy3-preview-ioa}"
+MODEL="${1:-hy3-preview}"
 D="experiments_results/latest/$MODEL"
 DATASET="${GAIA2_SCENARIO_DIR:-$REPO/.datasets/gaia2-cli}"
 PYTHON="${PYTHON:-/root/.conda/envs/skillforge/bin/python}"

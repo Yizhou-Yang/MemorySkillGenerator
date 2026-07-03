@@ -10,7 +10,7 @@ plus the mechanism / breakdown sub-tables.
 
   | # | model id (CodeBuddy) | out price | note |
   |---|---|---|---|
-  | 1 | `hy3-preview-ioa` | in-house | **primary**, in-house |
+  | 1 | `hy3-preview` | in-house | **primary**, in-house |
   | 2 | `deepseek-v4-pro` | ¥6 | confirmed |
   | 3 | `minimax-m2.7` | ¥8.4 | confirmed (SDK probe ✓) |
   | 4 | `glm-5.1` | ¥24 | confirmed (SDK probe ✓) |

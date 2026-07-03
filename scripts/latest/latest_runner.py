@@ -19,7 +19,7 @@ os.environ['LLM_PROVIDER'] = 'codebuddy'
 # Backbone model for this run. The wrapper scripts/latest/run_all_models.sh sets
 # CODEBUDDY_MODEL per model and invokes this script once per model; setdefault
 # keeps HY3-preview (in-house) as the default when run directly.
-os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview-ioa')
+os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview')
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
 # ── Cap CPU thread fan-out BEFORE importing torch / sentence-transformers ──
@@ -141,7 +141,7 @@ _TRANSIENT_MARKERS = (
 # Per-model results so the 7 backbones do not overwrite each other:
 #   experiments_results/latest/<model>/<benchmark>/{trace.jsonl,report.json}
 _MODEL_SLUG = re.sub(r"[^A-Za-z0-9._-]", "_",
-                     os.environ.get("CODEBUDDY_MODEL", "hy3-preview-ioa"))
+                     os.environ.get("CODEBUDDY_MODEL", "hy3-preview"))
 _RESULTS_BASE = os.environ.get("RESULTS_BASE", "latest")  # ablation arms write elsewhere
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / _RESULTS_BASE / _MODEL_SLUG)
 

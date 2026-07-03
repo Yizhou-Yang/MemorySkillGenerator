@@ -13,7 +13,7 @@ Usage (server, after Gate 1 smoke of HARBOR_TB2_PLAN §1):
   # Then run the bridge:
   OPENAI_API_BASE=http://localhost:8741/v1 OPENAI_API_KEY=dummy \
   /root/.conda/envs/harbor312/bin/python scripts/latest/tb2_harbor_bridge.py \
-      --arm B --iters 3 --model openai/hy3-preview-ioa --n-tasks 80
+      --arm B --iters 3 --model openai/hy3-preview --n-tasks 80
 
 Trace lands in experiments_results/harbor_tb2/<model-slug>/terminal_bench_2/
 (kept separate from the simplified-loop results until Gate 4 signs off).
@@ -176,7 +176,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", choices=["A", "B", "C"], required=True)
     ap.add_argument("--iters", type=int, default=int(os.environ.get("ITER_CHAIN", "3")))
-    ap.add_argument("--model", default=os.environ.get("TB2_MODEL", "openai/hy3-preview-ioa"))
+    ap.add_argument("--model", default=os.environ.get("TB2_MODEL", "openai/hy3-preview"))
     ap.add_argument("--dataset-path",
                     default=str(PROJECT_ROOT / ".datasets" / "terminal-bench-2"),
                     help="Path to downloaded terminal-bench-core dataset")

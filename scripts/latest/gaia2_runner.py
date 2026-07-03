@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
 os.environ['LLM_PROVIDER'] = 'codebuddy'
-os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview-ioa')
+os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview')
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
 try:
@@ -77,7 +77,7 @@ except Exception:
     ToolInputSchema = None
     _MCP_AVAILABLE = False
 
-MODEL = "hy3-preview-ioa"
+MODEL = "hy3-preview"
 CONCURRENCY = 15
 TASK_TIMEOUT_QA = 180
 TASK_TIMEOUT_AGENT = 300

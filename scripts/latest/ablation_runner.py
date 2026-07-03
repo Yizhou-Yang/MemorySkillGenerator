@@ -23,7 +23,7 @@ directory during aggregation.
 
 Run (server):
   ABLATION_BENCHMARKS=locomo,gaia2 TASK_LIMIT=100 ITER_CHAIN=3 \
-    CODEBUDDY_MODEL=hy3-preview-ioa python scripts/latest/ablation_runner.py
+    CODEBUDDY_MODEL=hy3-preview python scripts/latest/ablation_runner.py
 Aggregate only (no runs):
   python scripts/latest/ablation_runner.py --report
 """
@@ -37,7 +37,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-MODEL = os.environ.get("CODEBUDDY_MODEL", "hy3-preview-ioa")
+MODEL = os.environ.get("CODEBUDDY_MODEL", "hy3-preview")
 BENCHES = [b.strip() for b in
            os.environ.get("ABLATION_BENCHMARKS", "locomo,gaia2").split(",") if b.strip()]
 
