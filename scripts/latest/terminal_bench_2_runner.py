@@ -1,3 +1,6 @@
+# RETIRED (2026-07-03): TB2 paper numbers come from the OFFICIAL harbor
+# harness via scripts/latest/tb2_harbor_bridge.py. This simplified loop is
+# kept for reference/tests only — do not use it for reported results.
 #!/usr/bin/env python3
 """SkillForge Latest — Terminal-Bench-2.0 Runner (Terminus2 Agent)."""
 import asyncio

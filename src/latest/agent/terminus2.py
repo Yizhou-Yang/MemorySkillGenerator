@@ -1,3 +1,6 @@
+# RETIRED (2026-07-03): TB2 paper numbers come from the OFFICIAL harbor
+# harness via scripts/latest/tb2_harbor_bridge.py. This simplified loop is
+# kept for reference/tests only — do not use it for reported results.
 """
 Terminus 2 agent -- Docker-based terminal execution for Terminal-Bench-2.0.
 

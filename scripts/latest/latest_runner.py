@@ -947,9 +947,15 @@ async def main():
     if completed_benchmarks:
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
+    # terminal_bench_2 RETIRED from the default sweep: TB2 now runs on the
+    # official harbor harness (scripts/latest/tb2_harbor_bridge.py) — the
+    # simplified Terminus-2-style loop stays available only via an explicit
+    # BENCHMARKS=terminal_bench_2 override and must not feed paper numbers.
     BENCHMARKS_TO_RUN = [
-        "gaia", "gaia2", "terminal_bench_2", "locomo"
+        "gaia", "gaia2", "locomo"
     ]
+    if os.environ.get("BENCHMARKS", "").strip():
+        BENCHMARKS_TO_RUN = ["gaia", "gaia2", "terminal_bench_2", "locomo"]
     # Benchmark selection (ablation driver / partial reruns): BENCHMARKS=locomo,gaia2
     _bf = os.environ.get("BENCHMARKS", "").strip()
     if _bf:

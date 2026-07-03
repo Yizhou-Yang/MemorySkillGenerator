@@ -190,6 +190,9 @@ class ExperienceLibrary:
             This is equivalent to a temperature-adjusted Boltzmann distribution
             that adapts based on empirical reward signals.
         """
+        import os as _os
+        if _os.environ.get("W_C_DISABLED") == "1":
+            return 1.0  # ablation arm C_no_wc: pure-similarity retrieval
         stats = self._exp_effectiveness.get(exp_id)
         if not stats or stats["count"] < 2:
             return 1.0  # Default: full weight (cold start)
