@@ -20,6 +20,9 @@
 #                               on one box should each use 12 to stay < the ~24
 #                               internal-API ceiling)
 #   NO_TB2=1                    skip TB2 (QA-only run)
+#   LEAN=1                      budget protocol for expensive models: ITER_CHAIN=2,
+#                               gaia2 at 100 tasks (~50% cost; per-split power and
+#                               ablation stay on the cheap/free backbones)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 REPO="$PWD"
@@ -35,7 +38,10 @@ CONC="${TASK_CONCURRENCY:-12}"
 echo "==> launching all benchmarks for model=$MODEL"
 
 # ── 1) QA sweep: gaia + gaia2 + locomo (evolving protocol) ──
-RESULTS_BASE=latest_evolving ITER_MUTATE=1 ITER_FEEDBACK=self ITER_CHAIN=3 \
+ITERS=3; G2LIM=""
+if [ "${LEAN:-0}" = "1" ]; then ITERS=2; G2LIM=100; echo "    [lean] ITER_CHAIN=2, gaia2=100"; fi
+RESULTS_BASE=latest_evolving ITER_MUTATE=1 ITER_FEEDBACK=self ITER_CHAIN="$ITERS" \
+  ${G2LIM:+GAIA2_TASK_LIMIT="$G2LIM"} \
   BENCHMARKS=gaia,gaia2,locomo GAIA2_SCENARIO_DIR="$DATASET" \
   CODEBUDDY_MODEL="$MODEL" TASK_CONCURRENCY="$CONC" \
   nohup "$SKILLFORGE_PY" -u scripts/latest/latest_runner.py \
@@ -51,7 +57,7 @@ if [ "${NO_TB2:-0}" != "1" ]; then
   for ARM in A B C; do
     OPENAI_API_BASE=http://localhost:8741/v1 OPENAI_API_KEY=dummy TB2_N_TASKS="$TB2_N" \
       nohup "$HARBOR_PY" scripts/latest/tb2_harbor_bridge.py \
-      --arm "$ARM" --iters 3 --model "openai/$MODEL" --n-tasks "$TB2_N" \
+      --arm "$ARM" --iters "$ITERS" --model "openai/$MODEL" --n-tasks "$TB2_N" \
       > "run_${MODEL}_tb2_${ARM}.log" 2>&1 &
     echo "    [tb2] arm $ARM  PID $!  -> run_${MODEL}_tb2_${ARM}.log"
   done
