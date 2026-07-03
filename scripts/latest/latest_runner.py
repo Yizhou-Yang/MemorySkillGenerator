@@ -324,6 +324,40 @@ async def _mutate_task_desc(task: dict, iteration: int) -> str:
     return desc
 
 
+# What flows into MEMORY between iterations (reporting always stays gold):
+#   gold  legacy — evaluate_task's score (uses the gold label). On frozen
+#         same-task chains this leaks the correctness bit into the scored
+#         instance; defensible only with ITER_MUTATE variants (graded practice).
+#   env   environment-observable signal only: TB2's in-container test results
+#         (the agent can run them itself — Reflexion-style). Other benchmarks
+#         have no env signal and fall through to self-assessment.
+#   self  deployable self-assessment: one reference-free LLM call estimating
+#         P(correct). Never touches the gold label.
+ITER_FEEDBACK = os.environ.get("ITER_FEEDBACK", "gold")
+
+
+async def _feedback_score(task: dict, r: dict, ev: dict, benchmark: str) -> float:
+    if ITER_FEEDBACK == "gold":
+        return ev.get("score", 0.0)
+    if ITER_FEEDBACK == "env" and benchmark == "terminal_bench_2":
+        return ev.get("score", 0.0)  # tests run in the container: observable
+    try:
+        out = await _llm_call_notool(
+            "You are a strict self-assessor. Given a task and an attempted "
+            "answer, estimate the probability that the answer is correct. "
+            "Return ONLY a number between 0 and 1.",
+            f"Task:\n{task.get('description', '')[:3000]}\n\n"
+            f"Attempt:\n{(r.get('response') or '')[:3000]}\n\n"
+            "Probability correct:",
+            timeout=45)
+        m = re.search(r"(\d*\.?\d+)", out.get("text") or "")
+        if m:
+            return max(0.0, min(1.0, float(m.group(1))))
+    except Exception:
+        pass
+    return 0.5  # unknown — neutral, neither success nor failure
+
+
 def _load_done_map(trace_path: Path) -> dict:
     """Read an existing trace.jsonl into {(group, task_id): record} for resume.
     Later records win, so a re-run of a task overrides an earlier partial."""
@@ -614,7 +648,10 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 # would retrieve against an empty store).
                 if mem is not None:
                     try:
-                        await mem.record(task, r, ev.get("score", 0.0))
+                        _fb = prev.get("fb_score")
+                        if _fb is None:
+                            _fb = ev.get("score", 0.0) if ITER_FEEDBACK == "gold" else 0.5
+                        await mem.record(task, r, float(_fb))
                     except Exception:
                         pass
                 print(f"    [{label}] {i+1}/{total} ⟳ {tid} (resumed EM={ev['em']:.0%})",
@@ -654,9 +691,11 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 ev = await evaluate_task(r, benchmark)
                 # Record WITH the real score so the NEXT iteration of this chain
                 # can retrieve it (and C weights retrieval by it).
+                fb = None
                 if mem is not None and isinstance(r, dict):
                     try:
-                        await mem.record(cur_task, r, ev.get("score", 0.0))
+                        fb = await _feedback_score(cur_task, r, ev, benchmark)
+                        await mem.record(cur_task, r, fb)
                     except Exception:
                         pass
                 expected = task.get("expected", r.get("expected", ""))
@@ -686,6 +725,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "iteration": _it,
                                   "iter_total": ITER_CHAIN,
                                   "mutated": bool(ITER_MUTATE and _it >= 1 and cur_task is not task),
+                                  "fb_score": fb, "fb_mode": ITER_FEEDBACK,
                                   "code_rev": _CODE_REV,
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
