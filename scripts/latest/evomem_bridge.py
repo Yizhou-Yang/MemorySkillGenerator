@@ -99,6 +99,13 @@ _C_SIM_FLOOR = 0.08
 #   avoidance channel= everything else with a usable note (worse-than-best
 #                      attempts and critic-rejected entries).
 _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
+# Injection-dose knob (ablation instrument): cap C's rendered block at this many
+# chars (entries dropped whole from the tail, never truncated mid-entry).
+# 0 = off (default, unchanged behavior). Evidence motivating it: on gaia2 the
+# critic-gated C injects ~1.5x B's block size and scores BELOW its own
+# not-injected tasks — the dose, not only the content, looks harmful in
+# agentic tool loops.
+_C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "0"))
 
 
 def _critic_q(e) -> int:
@@ -177,6 +184,19 @@ def _format_curated(successes: list, failures: list = ()) -> str:
         seen.add(key)
         fail_blocks.append(f"[✗ Earlier attempt fell short]\n"
                            f"Task: {_core_task(e.task_desc)[:200]}\nAvoid: {note}")
+    if _C_INJECT_BUDGET > 0:
+        kept, used = [], 0
+        for b in blocks:
+            if used + len(b) > _C_INJECT_BUDGET:
+                break
+            kept.append(b); used += len(b)
+        blocks = kept
+        kept, _budget = [], max(0, _C_INJECT_BUDGET - used)
+        for b in fail_blocks:
+            if len(b) > _budget:
+                break
+            kept.append(b); _budget -= len(b)
+        fail_blocks = kept
     if not blocks and not fail_blocks:
         return ""
     out = ""

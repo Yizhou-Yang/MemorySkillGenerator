@@ -49,6 +49,8 @@ ARMS = {
                         "C", "C_gpr"),
     "C_no_wc":         ({"ARMS": "C", "W_C_DISABLED": "1"},
                         "C", "C_gpr"),
+    "C_small_inject":  ({"ARMS": "C", "C_INJECT_BUDGET_CH": "500"},
+                        "C", "C_gpr"),
     "ctrl_reprompt":   ({"ARMS": "A", "REPROMPT_CONTROL": "1",
                          "REPROMPT_CALLS": os.environ.get("REPROMPT_CALLS", "2")},
                         "A", "A_baseline"),
@@ -120,6 +122,7 @@ def report() -> None:
              ("+ critic", None, "C_refine_critic"),
              ("+ enrichment (= C, main sweep)", main_dir, "C_gpr"),
              ("C without w_c (pure similarity)", None, "C_no_wc"),
+             ("C with 500-char injection budget", None, "C_small_inject"),
              ("Reprompt (equal budget, no memory)", None, "ctrl_reprompt")])
     for label, base, key in plan:
         cells = []
