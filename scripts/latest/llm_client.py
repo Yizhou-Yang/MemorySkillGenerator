@@ -48,7 +48,7 @@ except Exception:  # pragma: no cover - profiling is optional plumbing
             return None
 
 
-MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro")
+MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro").lower()
 
 # ─── OpenAI-compatible backend (reproducibility path) ─────────────────────
 # When the CodeBuddy SDK is absent, or LLM_PROVIDER asks for it, every LLM call
@@ -69,7 +69,7 @@ _OPENAI_BASE_URL = (os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_
 _OPENAI_API_KEY = (os.environ.get("OPENAI_API_KEY")
                    or os.environ.get("DEEPSEEK_API_KEY") or "")
 _OPENAI_MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("DEEPSEEK_MODEL")
-                 or os.environ.get("CODEBUDDY_MODEL") or MODEL)
+                 or os.environ.get("CODEBUDDY_MODEL") or MODEL).lower()
 
 
 def use_openai_backend() -> bool:

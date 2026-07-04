@@ -188,7 +188,7 @@ def main() -> None:
                     help="Specific task IDs to run (default: all)")
     args = ap.parse_args()
 
-    slug = re.sub(r"[^A-Za-z0-9._-]", "_", args.model.split("/")[-1])
+    slug = re.sub(r"[^A-Za-z0-9._-]", "_", args.model.split("/")[-1]).lower()
     out_root = PROJECT_ROOT / "experiments_results/harbor_tb2" / slug
     trace_dir = out_root / "terminal_bench_2"
     trace_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +214,7 @@ def main() -> None:
             cmd = [tb_bin, "run",
                    "--agent-import-path",
                    "scripts.latest.tb2_harbor_agent:CuratedTerminus"]
-        cmd += ["-m", args.model,
+        cmd += ["-m", args.model.split("/")[-1].lower(),
                 "-p", args.dataset_path,
                 "--output-path", str(run_dir),
                 "--n-attempts", "1",

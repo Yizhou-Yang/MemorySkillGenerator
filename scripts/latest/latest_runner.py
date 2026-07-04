@@ -71,7 +71,7 @@ from scripts.latest.terminal_bench_2_runner import run_terminal_bench_2_task, ru
 from scripts.latest.locomo_runner import run_locomo_task, run_locomo_task_controlled
 from scripts.latest.evomem_bridge import BenchmarkMemory, CuratedMemory, solve_with_memory
 
-MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro")
+MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro").lower()
 
 
 def _auto_slots() -> int:
@@ -141,7 +141,7 @@ _TRANSIENT_MARKERS = (
 # Per-model results so the 7 backbones do not overwrite each other:
 #   experiments_results/latest/<model>/<benchmark>/{trace.jsonl,report.json}
 _MODEL_SLUG = re.sub(r"[^A-Za-z0-9._-]", "_",
-                     os.environ.get("CODEBUDDY_MODEL", "hy3-preview"))
+                     os.environ.get("CODEBUDDY_MODEL", "hy3-preview")).lower()
 _RESULTS_BASE = os.environ.get("RESULTS_BASE", "latest")  # ablation arms write elsewhere
 RESULTS_DIR = str(PROJECT_ROOT / "experiments_results" / _RESULTS_BASE / _MODEL_SLUG)
 

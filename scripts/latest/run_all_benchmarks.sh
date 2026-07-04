@@ -28,6 +28,8 @@ cd "$(dirname "$0")/../.."
 REPO="$PWD"
 
 MODEL="${1:?usage: run_all_benchmarks.sh <MODEL>}"
+# Force lowercase: API model names are case-sensitive and only accept lowercase
+MODEL=$(echo "$MODEL" | tr '[:upper:]' '[:lower:]')
 SKILLFORGE_PY="${SKILLFORGE_PY:-/root/.conda/envs/skillforge/bin/python}"
 HARBOR_PY="${HARBOR_PY:-/root/.conda/envs/harbor312/bin/python}"
 command -v "$SKILLFORGE_PY" >/dev/null 2>&1 || SKILLFORGE_PY="$(command -v python3)"
