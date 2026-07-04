@@ -99,13 +99,16 @@ _C_SIM_FLOOR = 0.08
 #   avoidance channel= everything else with a usable note (worse-than-best
 #                      attempts and critic-rejected entries).
 _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
-# Injection-dose knob (ablation instrument): cap C's rendered block at this many
-# chars (entries dropped whole from the tail, never truncated mid-entry).
-# 0 = off (default, unchanged behavior). Evidence motivating it: on gaia2 the
-# critic-gated C injects ~1.5x B's block size and scores BELOW its own
-# not-injected tasks — the dose, not only the content, looks harmful in
-# agentic tool loops.
-_C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "0"))
+# Injection-dose control — a FIRST-CLASS mechanism of the frozen method (v-final,
+# 2026-07-03): C's rendered block is capped at ~the raw baseline's measured dose
+# (B ≈ 900ch on gaia/gaia2), entries dropped whole from the tail. Evidence: on
+# gaia2 an unbudgeted C injected ~1.6x B's block and scored BELOW its own
+# not-injected tasks (C−B significantly negative), while content quality alone
+# was ~neutral across two backbones — the dose, not the content, was the harm.
+# Dose-matching C to B also removes the block-size confound from C−B: what
+# remains is purely WHAT is injected. Set 0 to disable (legacy), or override
+# per ablation arm (C_small_inject=500).
+_C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
 
 
 def _critic_q(e) -> int:

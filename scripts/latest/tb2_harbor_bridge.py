@@ -252,6 +252,7 @@ def main() -> None:
                     # the paired analysis can verify all arms died on the SAME
                     # tasks and footnote them, instead of diluting means silently.
                     "failure_mode": r.get("failure_mode", ""),
+                    "fb_mode": "env",  # TB2 feedback = in-container tests
                     "error": "",
                     "iteration": it, "iter_total": args.iters,
                     "method": "harbor_terminus2", "code_rev": rev,
