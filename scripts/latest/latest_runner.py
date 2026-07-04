@@ -310,7 +310,12 @@ async def _run_bounded(build_coro, task: dict, needs_docker: bool) -> dict:
 # Variants MUST be identical across arms (else C-B compares different task
 # texts), across RESUME, and across backbone rows of Table 1 — so they are
 # cached in ONE file shared by every model dir of this protocol base.
-_MUTATIONS_PATH = PROJECT_ROOT / "experiments_results" / _RESULTS_BASE / "mutations.json"
+# MUTATIONS_PATH override: ablation arms (RESULTS_BASE=ablation/<arm>) must
+# share the MAIN sweep's variant file, or every arm would mint its own variants
+# and cross-arm comparisons stop being paired.
+_MUTATIONS_PATH = Path(os.environ.get("MUTATIONS_PATH")
+                       or (PROJECT_ROOT / "experiments_results" / _RESULTS_BASE
+                           / "mutations.json"))
 try:
     _MUTATIONS: dict = json.loads(_MUTATIONS_PATH.read_text())
 except Exception:

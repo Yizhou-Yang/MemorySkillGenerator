@@ -4,11 +4,18 @@ equal-budget control, WITHOUT a second experiment harness.
 
 Design (decided 2026-07-02): LoCoMo + GAIA2, n=100, ITER_CHAIN=3, the PRIMARY
 backbone, same tasks as the main table. Arms B (raw store) and C (full method)
-are REUSED from the main sweep at experiments_results/latest/<model>/ — only
-three new arms run here:
+are REUSED from the main sweep at experiments_results/<MAIN_RESULTS_BASE>/
+<model>/ (default latest_evolving) — only the new arms run here, under the SAME
+honest protocol (ITER_MUTATE=1, ITER_FEEDBACK=self) and the SAME shared
+mutations.json as the main sweep, so every comparison is paired:
 
   C_refine        refinement only            (C_USE_CRITIC=0, C_USE_ENRICH=0)
   C_refine_critic refinement + critic        (C_USE_CRITIC=1, C_USE_ENRICH=0)
+  C_no_wc         retrieval by similarity    (W_C_DISABLED=1)
+  C_small_inject  tighter dose budget        (C_INJECT_BUDGET_CH=500)
+  C_no_budget     dose budget lifted         (C_INJECT_BUDGET_CH=0 = unbounded;
+                  the paper's "L=inf" row — evidence that the harm of an
+                  unbudgeted curator is dose, not content)
   ctrl_reprompt   equal-budget, no memory    (REPROMPT_CONTROL=1: the baseline
                   answer gets REPROMPT_CALLS=2 generic self-refinement calls,
                   spending C's write-time budget with no store)
@@ -51,10 +58,15 @@ ARMS = {
                         "C", "C_gpr"),
     "C_small_inject":  ({"ARMS": "C", "C_INJECT_BUDGET_CH": "500"},
                         "C", "C_gpr"),
+    "C_no_budget":     ({"ARMS": "C", "C_INJECT_BUDGET_CH": "0"},
+                        "C", "C_gpr"),
     "ctrl_reprompt":   ({"ARMS": "A", "REPROMPT_CONTROL": "1",
                          "REPROMPT_CALLS": os.environ.get("REPROMPT_CALLS", "2")},
                         "A", "A_baseline"),
 }
+
+
+MAIN_BASE = os.environ.get("MAIN_RESULTS_BASE", "latest_evolving")
 
 
 def _run_arm(arm: str, overrides: dict) -> int:
@@ -64,18 +76,29 @@ def _run_arm(arm: str, overrides: dict) -> int:
     env["BENCHMARKS"] = ",".join(BENCHES)
     env.setdefault("RESUME", "1")            # crash-safe: rerun only what's missing
     env.setdefault("ITER_CHAIN", "3")
+    # Paired-with-main-table discipline: same honest protocol as the main sweep
+    # (mutated variants + self feedback) and the SAME variant file, so every
+    # ablation arm sees the exact task rewordings B and C saw.
+    env.setdefault("ITER_MUTATE", "1")
+    env.setdefault("ITER_FEEDBACK", "self")
+    env.setdefault("MUTATIONS_PATH",
+                   str(PROJECT_ROOT / "experiments_results" / MAIN_BASE
+                       / "mutations.json"))
     print(f"\n=== [ablation] arm {arm} on {BENCHES} (model={MODEL}) ===", flush=True)
     return subprocess.call([sys.executable, "-u",
                             str(PROJECT_ROOT / "scripts/latest/latest_runner.py")],
                            env=env, cwd=str(PROJECT_ROOT))
 
 
-def _final_iter_mean(trace: Path) -> tuple[float, float, int]:
+def _final_iter_mean(trace: Path) -> tuple[float, float, int, float]:
     """Mean (score, em) over each task's LAST traced iteration (the paper's
-    main-table methodology), plus n."""
+    main-table methodology), plus n and the mean injected-block size in chars
+    (aug_len over rows where a patch WAS injected; 0.0 if none) — the paper's
+    dose axis (tab:ablation L rows; the "1.6x B" ratio = C_no_budget dose / B
+    dose)."""
     last: dict = {}
     if not trace.exists():
-        return 0.0, 0.0, 0
+        return 0.0, 0.0, 0, 0.0
     for line in open(trace):
         line = line.strip()
         if not line:
@@ -87,15 +110,17 @@ def _final_iter_mean(trace: Path) -> tuple[float, float, int]:
             last[tid] = r
     rows = list(last.values())
     if not rows:
-        return 0.0, 0.0, 0
+        return 0.0, 0.0, 0, 0.0
     n = len(rows)
+    inj = [r.get("aug_len") or 0 for r in rows if r.get("patch_injected")]
+    dose = (sum(inj) / len(inj)) if inj else 0.0
     return (sum(r.get("score") or 0.0 for r in rows) / n,
-            sum(r.get("em") or 0.0 for r in rows) / n, n)
+            sum(r.get("em") or 0.0 for r in rows) / n, n, dose)
 
 
 def report() -> None:
-    """tab:ablation markdown: main-sweep B and C + the three ablation arms."""
-    main_dir = PROJECT_ROOT / "experiments_results/latest" / MODEL
+    """tab:ablation markdown: main-sweep B and C + the ablation arms."""
+    main_dir = PROJECT_ROOT / "experiments_results" / MAIN_BASE / MODEL
     rows = []
 
     def _arm_row(label, trace_path, group):
@@ -110,12 +135,12 @@ def report() -> None:
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
             f.write("\n".join(tmp))
             p = Path(f.name)
-        s, e, n = _final_iter_mean(p)
+        s, e, n, d = _final_iter_mean(p)
         p.unlink(missing_ok=True)
-        return s, e, n
+        return s, e, n, d
 
     print(f"\n## tab:ablation — model={MODEL}, benchmarks={BENCHES}\n")
-    print("| arm | " + " | ".join(f"{b} score (em, n)" for b in BENCHES) + " |")
+    print("| arm | " + " | ".join(f"{b} score (em, n, dose)" for b in BENCHES) + " |")
     print("|---|" + "---|" * len(BENCHES))
     plan = ([("B (raw store, main sweep)", main_dir, "B_evomem"),
              ("+ refinement", None, "C_refine"),
@@ -123,17 +148,18 @@ def report() -> None:
              ("+ enrichment (= C, main sweep)", main_dir, "C_gpr"),
              ("C without w_c (pure similarity)", None, "C_no_wc"),
              ("C with 500-char injection budget", None, "C_small_inject"),
+             ("C without dose budget (L=inf)", None, "C_no_budget"),
              ("Reprompt (equal budget, no memory)", None, "ctrl_reprompt")])
     for label, base, key in plan:
         cells = []
         for b in BENCHES:
             if base is not None:                      # reused main-sweep arm
-                s, e, n = _arm_row(label, base / b / "trace.jsonl", key)
+                s, e, n, d = _arm_row(label, base / b / "trace.jsonl", key)
             else:                                     # ablation arm directory
                 arm_dir = PROJECT_ROOT / "experiments_results/ablation" / key / MODEL
                 group = ARMS[key][2]
-                s, e, n = _arm_row(label, arm_dir / b / "trace.jsonl", group)
-            cells.append(f"{s:.3f} ({e:.2f}, n={n})" if n else "--")
+                s, e, n, d = _arm_row(label, arm_dir / b / "trace.jsonl", group)
+            cells.append(f"{s:.3f} ({e:.2f}, n={n}, {d:.0f}ch)" if n else "--")
         print(f"| {label} | " + " | ".join(cells) + " |")
     print("\nGate: every arm needs n>0 and (for memory arms) injected n>0 "
           "(scripts/latest/breakdown.py <arm dir>).")
