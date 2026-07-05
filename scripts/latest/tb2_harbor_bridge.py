@@ -183,7 +183,7 @@ def main() -> None:
     ap.add_argument("--n-tasks", type=int,
                     default=int(os.environ.get("TB2_N_TASKS", "50")),
                     help="tasks per iteration (default 50; 0 = all ~88 — raw output is ~5MB/task/iter, keep runs_* out of git)")
-    ap.add_argument("--n-concurrent", type=int, default=3)
+    ap.add_argument("--n-concurrent", type=int, default=2)
     ap.add_argument("--task-ids", nargs="*", default=None,
                     help="Specific task IDs to run (default: all)")
     args = ap.parse_args()
@@ -214,11 +214,17 @@ def main() -> None:
             cmd = [tb_bin, "run",
                    "--agent-import-path",
                    "scripts.latest.tb2_harbor_agent:CuratedTerminus"]
+        # Use arm-specific run-id to prevent Docker container name collisions
+        # when multiple arms run concurrently (container names include run-id).
+        # Docker compose project names must be lowercase alphanumeric + hyphens/underscores.
+        run_id = time.strftime("%Y-%m-%d__%H-%M-%S") + f"-arm-{args.arm.lower()}"
         cmd += ["-m", args.model,
                 "-p", args.dataset_path,
                 "--output-path", str(run_dir),
+                "--run-id", run_id,
                 "--n-attempts", "2",
-                "--n-concurrent", str(args.n_concurrent)]
+                "--n-concurrent", str(args.n_concurrent),
+                "--cleanup"]
         if args.n_tasks:
             cmd += ["--n-tasks", str(args.n_tasks)]
         if args.task_ids:
