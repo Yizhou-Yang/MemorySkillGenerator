@@ -64,19 +64,27 @@ RESULTS_BASE=latest_evolving ITER_MUTATE=1 ITER_FEEDBACK=self ITER_CHAIN="$ITERS
   > "run_${MODEL}_qa.log" 2>&1 &
 echo "    [qa]  gaia/gaia2/locomo  PID $!  -> run_${MODEL}_qa.log"
 
-# ── 2) TB2 via official harbor Terminus-2 (A/B/C arms) ──
+# ── 2) TB2 via official harbor Terminus-2 (A/B/C arms, SERIALIZED) ──
+# Arms run SEQUENTIALLY inside one background subshell. Parallel arms meant
+# 3 arms x DOCKER-slots heavy containers (kernel builds etc.) on one box —
+# the container-name collisions and agent timeouts came from exactly that.
+# Wall-clock cost is small: each arm still runs its own internal concurrency,
+# and B/C depend on their previous iteration anyway.
 if [ "${NO_TB2:-0}" != "1" ]; then
   if ! curl -sf localhost:8741/v1/models >/dev/null 2>&1; then
     nohup "$SKILLFORGE_PY" scripts/latest/codebuddy_oai_proxy.py > proxy.log 2>&1 &
     echo "    [tb2] started OAI proxy PID $! (waiting 5s)"; sleep 5
   fi
-  for ARM in A B C; do
-    OPENAI_API_BASE=http://localhost:8741/v1 OPENAI_API_KEY=dummy TB2_N_TASKS="$TB2_N" \
-      nohup "$HARBOR_PY" scripts/latest/tb2_harbor_bridge.py \
-      --arm "$ARM" --iters "$ITERS" --model "openai/$MODEL" --n-tasks "$TB2_N" \
-      > "run_${MODEL}_tb2_${ARM}.log" 2>&1 &
-    echo "    [tb2] arm $ARM  PID $!  -> run_${MODEL}_tb2_${ARM}.log"
-  done
+  (
+    for ARM in A B C; do
+      OPENAI_API_BASE=http://localhost:8741/v1 OPENAI_API_KEY=dummy TB2_N_TASKS="$TB2_N" \
+        "$HARBOR_PY" scripts/latest/tb2_harbor_bridge.py \
+        --arm "$ARM" --iters "$ITERS" --model "openai/$MODEL" --n-tasks "$TB2_N" \
+        > "run_${MODEL}_tb2_${ARM}.log" 2>&1
+      echo "[tb2-serial] arm $ARM finished rc=$? $(date)" >> "run_${MODEL}_tb2_serial.log"
+    done
+  ) &
+  echo "    [tb2] arms A->B->C serialized, PID $!  -> run_${MODEL}_tb2_{A,B,C}.log"
 fi
 
 echo "==> all 4 benchmarks launched for $MODEL. Tail: tail -f run_${MODEL}_*.log"
