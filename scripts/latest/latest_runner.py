@@ -158,7 +158,7 @@ _TASK_N = int(os.environ.get("TASK_LIMIT", "100"))
 # run extends the task set instead of resampling it.
 TASK_LIMITS = {
     "gaia": _TASK_N,
-    "gaia2": int(os.environ.get("GAIA2_TASK_LIMIT", "100")),
+    "gaia2": int(os.environ.get("GAIA2_TASK_LIMIT", str(max(100, _TASK_N)))),
     "terminal_bench_2": _TASK_N,
     "locomo": _TASK_N,
 }
