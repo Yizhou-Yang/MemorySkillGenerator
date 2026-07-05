@@ -42,7 +42,7 @@ SKILLFORGE_PY="${SKILLFORGE_PY:-/root/.conda/envs/skillforge/bin/python}"
 HARBOR_PY="${HARBOR_PY:-/root/.conda/envs/harbor312/bin/python}"
 command -v "$SKILLFORGE_PY" >/dev/null 2>&1 || SKILLFORGE_PY="$(command -v python3)"
 DATASET="${GAIA2_SCENARIO_DIR:-$REPO/.datasets/gaia2-cli}"
-TB2_N="${TB2_N_TASKS:-50}"
+TB2_N="${TB2_N_TASKS:-30}"
 CONC="${TASK_CONCURRENCY:-30}"
 # Weighted gaia2 sampling (pre-declared): 50% on the dynamic splits where the
 # thesis predicts C-B, 25% on ambiguity where memory value is MEASURED largest
