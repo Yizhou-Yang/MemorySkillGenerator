@@ -217,14 +217,17 @@ def main() -> None:
         cmd += ["-m", args.model,
                 "-p", args.dataset_path,
                 "--output-path", str(run_dir),
-                "--n-attempts", "1",
-                "--n-concurrent", str(args.n_concurrent),
-                "--no-rebuild"]
+                "--n-attempts", "2",
+                "--n-concurrent", str(args.n_concurrent)]
         if args.n_tasks:
             cmd += ["--n-tasks", str(args.n_tasks)]
         if args.task_ids:
             for tid in args.task_ids:
                 cmd += ["-t", tid]
+        # Clean up any stopped/orphaned Docker containers from previous runs to
+        # prevent "container name already in use" conflicts (terminal-bench's
+        # docker compose down is not always thorough after crashes).
+        subprocess.call("docker container prune -f > /dev/null 2>&1", shell=True)
         print(f"[bridge] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
         rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
         if rc != 0:
