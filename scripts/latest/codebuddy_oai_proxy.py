@@ -156,7 +156,10 @@ async def chat_completions(request: Request):
     model = body.get("model", DEFAULT_MODEL)
     timeout = DEFAULT_TIMEOUT
 
-    # Strip provider prefix if present (litellm sends "openai/model-name")
+    # Strip provider prefix for internal CodeBuddy call only.
+    # Keep original_model for the response — litellm (inside terminal-bench)
+    # validates that the response model matches the request model exactly.
+    original_model = model
     if "/" in model:
         model = model.split("/", 1)[1]
 
@@ -187,7 +190,7 @@ async def chat_completions(request: Request):
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": model,
+        "model": original_model,
         "choices": [{
             "index": 0,
             "message": {
