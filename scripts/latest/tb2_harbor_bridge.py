@@ -224,6 +224,7 @@ def main() -> None:
                 "--run-id", run_id,
                 "--n-attempts", "2",
                 "--n-concurrent", str(args.n_concurrent),
+                "--global-agent-timeout-sec", "1800",
                 "--cleanup"]
         if args.n_tasks:
             cmd += ["--n-tasks", str(args.n_tasks)]
