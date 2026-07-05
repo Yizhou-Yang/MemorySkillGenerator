@@ -100,7 +100,7 @@ def _auto_slots() -> int:
 # so parallelism no longer multiplies (old 2×N model OOM'd). Docker-backed
 # benchmarks take an extra, tighter sub-cap because containers are memory-hungry.
 GLOBAL_TASK_SLOTS = int(os.environ.get("TASK_CONCURRENCY", "0")) or _auto_slots()
-DOCKER_TASK_SLOTS = int(os.environ.get("DOCKER_CONCURRENCY", "2"))
+DOCKER_TASK_SLOTS = int(os.environ.get("DOCKER_CONCURRENCY", "3"))
 BENCHMARK_CONCURRENCY = int(os.environ.get("BENCH_CONCURRENCY", "6"))  # benchmarks may interleave
 # Iteration chains: run each task ITER_CHAIN times in sequence, threading B/C
 # memory across iterations (chain-scoped retrieval). This is the substrate where
@@ -158,7 +158,7 @@ _TASK_N = int(os.environ.get("TASK_LIMIT", "100"))
 # run extends the task set instead of resampling it.
 TASK_LIMITS = {
     "gaia": _TASK_N,
-    "gaia2": int(os.environ.get("GAIA2_TASK_LIMIT", str(max(200, _TASK_N)))),
+    "gaia2": int(os.environ.get("GAIA2_TASK_LIMIT", str(max(100, _TASK_N)))),
     "terminal_bench_2": _TASK_N,
     "locomo": _TASK_N,
 }

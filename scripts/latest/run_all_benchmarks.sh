@@ -35,7 +35,7 @@ HARBOR_PY="${HARBOR_PY:-/root/.conda/envs/harbor312/bin/python}"
 command -v "$SKILLFORGE_PY" >/dev/null 2>&1 || SKILLFORGE_PY="$(command -v python3)"
 DATASET="${GAIA2_SCENARIO_DIR:-$REPO/.datasets/gaia2-cli}"
 TB2_N="${TB2_N_TASKS:-80}"
-CONC="${TASK_CONCURRENCY:-12}"
+CONC="${TASK_CONCURRENCY:-30}"
 
 echo "==> launching all benchmarks for model=$MODEL"
 
