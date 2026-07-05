@@ -44,7 +44,7 @@ Create `scripts/latest/tb2_harbor_agent.py`:
 - `class CuratedTerminus(Terminus2)` (import from `terminal_bench.agents`):
   override the method that renders the task instruction (in Terminus-2 this
   is where the task prompt is composed) to prepend our injected block:
-  `mem.inject(task_dict)` → prefix `"## Relevant past solutions…"` when arm
+  `mem.inject(task_dict)` → prefix `"## Curated prior attempts…"` when arm
   B/C, empty for A. Env `TB2_ARM=A|B|C` selects the arm; the agent reads the
   same `BenchmarkMemory` / `CuratedMemory` from `evomem_bridge` (task_id =
   harbor task id; chain = task_id ⇒ ITER_CHAIN semantics preserved by

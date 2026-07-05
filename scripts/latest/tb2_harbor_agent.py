@@ -12,7 +12,7 @@ VERIFY ON SERVER (Gate 1 of the plan): the exact Terminus2 import path and the
 perform_task signature of the pinned terminal-bench version. The override below
 is signature-agnostic (prefixes the first str argument), so minor drift is
 tolerated, but confirm on the smoke run that the prefix actually lands in the
-prompt (grep the agent transcript for 'Relevant past solutions').
+prompt (grep the agent transcript for '## Curated prior attempts').
 """
 from __future__ import annotations
 

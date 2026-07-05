@@ -134,11 +134,23 @@ def main() -> None:
           f"{[s for s, r in strata_rows if r]}, CUPED={USE_CUPED}\n")
     print("| pair | pooled Δ | 95% CI | p (sign-flip) | n | per-stratum n |")
     print("|---|---|---|---|---|---|")
+    dead_warned = set()
     for g1, g2 in PAIRS:
         strata, names = [], []
         for name, rows in strata_rows:
             d_fin, d_zero = _stratum_deltas(rows, g1, g2)
             if not d_fin:
+                continue
+            # Dead-stratum guard: a benchmark whose scores are ALL zero in both
+            # arms (e.g. an infra-failed TB2 round) contributes only 0-deltas,
+            # dragging the pooled estimate toward 0 without carrying signal.
+            scores = [r.get("score") or 0.0 for r in rows
+                      if r.get("group") in (g1, g2)]
+            if scores and not any(scores):
+                if name not in dead_warned:
+                    print(f"[!] stratum {name}: all scores 0 in both arms — "
+                          "excluded as infra-dead, investigate before final")
+                    dead_warned.add(name)
                 continue
             strata.append(_cuped(d_fin, d_zero) if USE_CUPED else d_fin)
             names.append(f"{name}:{len(d_fin)}")

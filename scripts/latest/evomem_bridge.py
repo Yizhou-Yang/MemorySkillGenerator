@@ -190,16 +190,25 @@ def _format_curated(successes: list, failures: list = (),
         seen.add(key)
         parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
                  f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
-                 f"Task: {_core_task(e.task_desc)[:180]}"]
+                 f"Task: {_core_task(e.task_desc)[:150]}"]
+        # Agentic benchmarks (GAIA2 soft-recall over oracle ACTIONS, TB2 tests)
+        # are scored on which actions occurred, not on answer text — render the
+        # action/tool sequence as the payload there and drop the prose trace;
+        # QA entries have no actions and keep the text fields. Field caps are
+        # sized so ONE maximally rich block stays under the dose budget: a
+        # first block that alone exceeded L rendered the whole success channel
+        # empty (the tail-drop loop breaks before keeping anything).
+        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
+                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])])
         if outcome:
-            parts.append(f"Answer reached: {outcome[:260]}")
-        if concrete:
-            # trim the approach when the verbatim answer is already carried, so
-            # one rich entry fits the dose budget instead of crowding it out
-            parts.append(f"What worked: {concrete[:220 if outcome else 500]}")
+            parts.append(f"Answer reached: {outcome[:160 if acts else 240]}")
+        if acts:
+            parts.append("Actions used: " + " -> ".join(acts)[:200])
+        elif concrete:
+            parts.append(f"What worked: {concrete[:200 if outcome else 450]}")
         lesson = (tax.get("causal_lesson") or "").strip()
         if lesson and not _is_weak_lesson(lesson):
-            parts.append(f"Lesson: {lesson[:220]}")
+            parts.append(f"Lesson: {lesson[:180]}")
         blocks.append("\n".join(parts))
     fail_blocks = []
     for e in failures:
@@ -220,12 +229,12 @@ def _format_curated(successes: list, failures: list = (),
             continue
         seen.add(key)
         parts = [f"[✗ Earlier attempt fell short]",
-                 f"Task: {_core_task(e.task_desc)[:180]}"]
+                 f"Task: {_core_task(e.task_desc)[:150]}"]
         if outcome:
             parts.append("Answer given then (self-assessed doubtful, verify "
-                         f"before reuse): {outcome[:220]}")
+                         f"before reuse): {outcome[:200]}")
         if not weak:
-            parts.append(f"Avoid: {note[:220]}")
+            parts.append(f"Avoid: {note[:180]}")
         fail_blocks.append("\n".join(parts))
     if _C_INJECT_BUDGET > 0:
         kept, used = [], 0
@@ -233,6 +242,11 @@ def _format_curated(successes: list, failures: list = (),
             if used + len(b) > _C_INJECT_BUDGET:
                 break
             kept.append(b); used += len(b)
+        if not kept and blocks:
+            # never let one oversized block silence the whole channel:
+            # hard-truncate the best entry to the budget instead
+            kept, used = [blocks[0][:_C_INJECT_BUDGET]], min(
+                len(blocks[0]), _C_INJECT_BUDGET)
         blocks = kept
         kept, _budget = [], max(0, _C_INJECT_BUDGET - used)
         for b in fail_blocks:
@@ -244,7 +258,11 @@ def _format_curated(successes: list, failures: list = (),
         return ""
     out = ""
     if blocks:
-        out += "## Relevant past solutions (curated from similar solved tasks)\n\n" + "\n\n".join(blocks)
+        # Header must not overclaim: self-assessment mislabels many entries
+        # (gaia: 56% of gold-wrong attempts self-assess >=0.5), so these are
+        # "prior attempts", not "solved tasks". TB2 transcript checks grep for
+        # the stable "## Curated prior attempts" marker.
+        out += "## Curated prior attempts (this task's chain)\n\n" + "\n\n".join(blocks)
     if fail_blocks:
         out += ("\n\n" if out else "") + "## What to avoid (from earlier attempts)\n\n" + "\n\n".join(fail_blocks)
     return out
@@ -259,17 +277,26 @@ def _format_raw(entries: list) -> str:
     blocks, seen = [], set()
     for e in entries:
         concrete = _concrete_approach(e)
-        if not concrete:
+        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
+                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])])
+        if not concrete and not acts:
             continue
-        key = concrete[:80].lower()
+        key = (concrete or " ".join(acts))[:80].lower()
         if key in seen:
             continue
         seen.add(key)
         sc = getattr(e, "score", 0.0) or 0.0
         head = "What was tried and seemed to work" if sc >= 0.5 else \
                "What was tried and fell short"
-        blocks.append(f"[Prior attempt on this task — raw, self-assessed {sc:.0%}]\n"
-                      f"Task: {_core_task(e.task_desc)[:200]}\n{head}: {concrete[:400]}")
+        parts = [f"[Prior attempt on this task — raw, self-assessed {sc:.0%}]",
+                 f"Task: {_core_task(e.task_desc)[:150]}"]
+        if acts:   # agentic: the action sequence is the payload (see curated)
+            parts.append("Actions used: " + " -> ".join(acts)[:200])
+            if concrete:
+                parts.append(f"{head}: {concrete[:200]}")
+        else:
+            parts.append(f"{head}: {concrete[:400]}")
+        blocks.append("\n".join(parts))
     if _C_INJECT_BUDGET > 0:
         kept, used = [], 0
         for b in blocks:
