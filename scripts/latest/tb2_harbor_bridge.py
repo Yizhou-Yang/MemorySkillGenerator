@@ -214,7 +214,7 @@ def main() -> None:
             cmd = [tb_bin, "run",
                    "--agent-import-path",
                    "scripts.latest.tb2_harbor_agent:CuratedTerminus"]
-        cmd += ["-m", args.model.split("/")[-1].lower(),
+        cmd += ["-m", args.model,
                 "-p", args.dataset_path,
                 "--output-path", str(run_dir),
                 "--n-attempts", "1",
