@@ -173,18 +173,32 @@ def _format_curated(successes: list, failures: list = ()) -> str:
     instead of going silent. No empty fields, no [PLACEHOLDER] templates."""
     blocks, seen = [], set()
     for e in successes:
+        tax = e.failure_taxonomy or {}
         concrete = _concrete_approach(e)
-        key = (concrete[:80] or _core_task(e.task_desc)[:80]).lower()
-        if not concrete or key in seen:
+        # Verbatim prior OUTCOME, stashed at record() before refinement. This is
+        # the answer B replays raw (content_after); C dropped it when curation
+        # abstracted the trace into "what worked", so on exact-match QA whose
+        # gold survives the reword, C lost to B by paraphrasing away the exact
+        # string. Carrying it makes C's block a SUPERSET of B's — recall AND the
+        # version-conditioned lesson — so C >= B on static QA and supersedes a
+        # STALE verbatim answer on a shifted chain via the lesson below.
+        outcome = (tax.get("verbatim_outcome") or "").strip()
+        key = ((concrete[:80] or outcome[:80] or _core_task(e.task_desc)[:80])).lower()
+        if (not concrete and not outcome) or key in seen:
             continue
         seen.add(key)
         parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
                  f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
-                 f"Task: {_core_task(e.task_desc)[:200]}",
-                 f"What worked: {concrete}"]
-        lesson = ((e.failure_taxonomy or {}).get("causal_lesson") or "").strip()
+                 f"Task: {_core_task(e.task_desc)[:180]}"]
+        if outcome:
+            parts.append(f"Answer reached: {outcome[:260]}")
+        if concrete:
+            # trim the approach when the verbatim answer is already carried, so
+            # one rich entry fits the dose budget instead of crowding it out
+            parts.append(f"What worked: {concrete[:220 if outcome else 500]}")
+        lesson = (tax.get("causal_lesson") or "").strip()
         if lesson and not _is_weak_lesson(lesson):
-            parts.append(f"Lesson: {lesson}")
+            parts.append(f"Lesson: {lesson[:220]}")
         blocks.append("\n".join(parts))
     fail_blocks = []
     for e in failures:
@@ -497,6 +511,16 @@ class CuratedMemory:
             _exps = self._sf.library.experiences
             _mine = next((e for e in reversed(_exps) if e.task_id == tid), None)
             if _mine is not None:
+                # Stash the verbatim outcome BEFORE it is lost to refinement, so
+                # inject() can replay the exact answer alongside the curated
+                # lesson (the B-superset rendering; see _format_curated). Only
+                # for a genuine success — a wrong answer is not worth replaying.
+                if score is not None and float(score) >= 0.5:
+                    try:
+                        _mine.failure_taxonomy.setdefault("verbatim_outcome",
+                                                          resp[:400])
+                    except Exception:
+                        pass
                 self._chain_entries.setdefault(chain, []).append(_mine)
             # w_c cold-start prior from the critic (deployable, no extra calls):
             # seed one pseudo-observation so a high-quality patch starts above
