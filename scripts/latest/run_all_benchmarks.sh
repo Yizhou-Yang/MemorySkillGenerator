@@ -11,7 +11,12 @@
 #
 # Usage:
 #   bash scripts/latest/run_all_benchmarks.sh <MODEL>
-#   MODEL is the CodeBuddy id (deepseek-v4-pro, hy3-preview, glm-5.1, ...).
+#   MODEL is the CodeBuddy id. Paper roster (5 backbones):
+#     PRIMARY (free, run now, full ITER_CHAIN=3):
+#       glm-5.1 · kimi-2.6 · hunyuan3-preview-ioa   (=hy3, A/B kept, rerun C)
+#     TABLE-FILL (paid, ~Aug, LEAN ok):
+#       gpt-5.3-codex (~Y1500) · claude-haiku-4.5 (~Y4000)
+#   The 3 free primaries alone give ~900 pooled pairs (MDE~3.3pp).
 # Env overrides:
 #   SKILLFORGE_PY / HARBOR_PY   interpreters (default: the two conda envs)
 #   GAIA2_SCENARIO_DIR          persistent gaia2-cli path
