@@ -39,10 +39,12 @@ command -v "$SKILLFORGE_PY" >/dev/null 2>&1 || SKILLFORGE_PY="$(command -v pytho
 DATASET="${GAIA2_SCENARIO_DIR:-$REPO/.datasets/gaia2-cli}"
 TB2_N="${TB2_N_TASKS:-50}"
 CONC="${TASK_CONCURRENCY:-30}"
-# Weighted gaia2 sampling (thesis-motivated, pre-declared): concentrate n on the
-# dynamic splits. Sums to 100; every per-split count is <= the 40/split a
-# previous uniform-200 run took, so existing A/B rows still pair.
-G2W="${GAIA2_SPLIT_WEIGHTS:-adaptability:30,time:30,ambiguity:14,execution:13,search:13}"
+# Weighted gaia2 sampling (pre-declared): 50% on the dynamic splits where the
+# thesis predicts C-B, 25% on ambiguity where memory value is MEASURED largest
+# (B-A=+6.8pp on the uniform-200 A/B data; adaptability +0.0, time +1.9).
+# Sums to 100; every per-split count is <= the 40/split a previous uniform-200
+# run took, so existing A/B rows still pair.
+G2W="${GAIA2_SPLIT_WEIGHTS:-adaptability:25,time:25,ambiguity:25,execution:12,search:13}"
 
 echo "==> launching all benchmarks for model=$MODEL"
 

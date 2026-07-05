@@ -165,7 +165,8 @@ def _concrete_approach(exp) -> str:
     return ""
 
 
-def _format_curated(successes: list, failures: list = ()) -> str:
+def _format_curated(successes: list, failures: list = (),
+                    current_tid: str = "") -> str:
     """Inject concrete, relevance-gated, de-duplicated successful approaches plus
     the refined lesson WHEN genuinely useful; and, for prior attempts that
     FAILED on this chain, the refined avoidance note (what to not repeat) — so C
@@ -204,14 +205,28 @@ def _format_curated(successes: list, failures: list = ()) -> str:
     for e in failures:
         tax = e.failure_taxonomy or {}
         note = (tax.get("avoidance_note") or tax.get("causal_lesson") or "").strip()
-        if not note or _is_weak_lesson(note):
+        # Same-task entries also carry their verbatim answer here: self-
+        # assessment routes many gold-CORRECT attempts into this channel
+        # (LoCoMo: 66% false-failure rate), and dropping their answers is how
+        # C lost to a raw baseline that replays everything. Tagged honestly:
+        # the agent is told the answer is self-assessed as doubtful.
+        outcome = (tax.get("verbatim_outcome") or "").strip() \
+            if e.task_id == current_tid else ""
+        weak = not note or _is_weak_lesson(note)
+        if weak and not outcome:
             continue
-        key = ("avoid:" + note[:80]).lower()
+        key = ("avoid:" + (note or outcome)[:80]).lower()
         if key in seen:
             continue
         seen.add(key)
-        fail_blocks.append(f"[✗ Earlier attempt fell short]\n"
-                           f"Task: {_core_task(e.task_desc)[:200]}\nAvoid: {note}")
+        parts = [f"[✗ Earlier attempt fell short]",
+                 f"Task: {_core_task(e.task_desc)[:180]}"]
+        if outcome:
+            parts.append("Answer given then (self-assessed doubtful, verify "
+                         f"before reuse): {outcome[:220]}")
+        if not weak:
+            parts.append(f"Avoid: {note[:220]}")
+        fail_blocks.append("\n".join(parts))
     if _C_INJECT_BUDGET > 0:
         kept, used = [], 0
         for b in blocks:
@@ -441,22 +456,36 @@ class CuratedMemory:
                    if _content_overlap(core, _core_task(e.task_desc)) >= _C_SIM_FLOOR]
         if floored:
             cands = floored
-        best = max((getattr(e, "score", 0.0) or 0.0 for e in cands), default=0.0)
-        succ = [e for e in cands
+        # SAME-TASK FIRST: in a session chain (LoCoMo: one chain = a whole
+        # session of questions) the current task's own prior iterations are the
+        # direct evidence; other questions' entries are auxiliary context.
+        # Stable sort keeps the sim x w_c order within each group, and the
+        # chain-best anchor uses own attempts when any exist, so another
+        # question's high self-score cannot evict this task's own attempt from
+        # the success channel — cross-question replay is precisely the raw
+        # baseline's measured failure mode on LoCoMo (B−A = −5.6pp).
+        tid_now = task.get("task_id", "")
+        cands.sort(key=lambda e: 0 if e.task_id == tid_now else 1)
+        own = [e for e in cands if e.task_id == tid_now]
+        pool = own if own else cands
+        best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
+        succ = [e for e in pool
                 if _critic_q(e) >= _CRITIC_GATE
                 and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
-        out = _format_curated(succ, fail)
+        out = _format_curated(succ, fail, current_tid=tid_now)
         served = succ + fail
         if not out and cands and _C_RAW_FALLBACK:
             # Curated channels rendered nothing -> degrade to the raw store
             # under the same budget, never to no memory (see _C_RAW_FALLBACK).
+            # Same-task-first order makes the fallback replay this task's own
+            # attempts before any session-mate's.
             served = cands[: self.top_k]
             out = _format_raw(served)
         if out:
             # remember what was actually served, for the effectiveness update
-            self._served[task.get("task_id", "")] = [e.task_id for e in served]
+            self._served[tid_now] = [e.task_id for e in served]
         return out
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
@@ -513,14 +542,24 @@ class CuratedMemory:
             if _mine is not None:
                 # Stash the verbatim outcome BEFORE it is lost to refinement, so
                 # inject() can replay the exact answer alongside the curated
-                # lesson (the B-superset rendering; see _format_curated). Only
-                # for a genuine success — a wrong answer is not worth replaying.
-                if score is not None and float(score) >= 0.5:
-                    try:
-                        _mine.failure_taxonomy.setdefault("verbatim_outcome",
-                                                          resp[:400])
-                    except Exception:
-                        pass
+                # lesson (the B-superset rendering; see _format_curated).
+                # UNCONDITIONAL on purpose: the stash key is the SELF-assessed
+                # score, and self-assessment is badly miscalibrated exactly
+                # where memory pays (LoCoMo: 66% of gold-correct attempts
+                # self-assess <0.5, so a success-only stash silently drops the
+                # answers B keeps). Measured replay effects justify keeping
+                # wrong-looking answers too: replaying a gold-wrong answer is
+                # ~neutral (gaia +3.4pp / locomo −1.1pp B−A) while replaying a
+                # gold-right one is the payoff (+7 / +13pp); the render tags
+                # low-self-score answers honestly instead of hiding them.
+                try:
+                    _mine.failure_taxonomy.setdefault("verbatim_outcome",
+                                                      resp[:400])
+                    if score is not None:
+                        _mine.failure_taxonomy.setdefault(
+                            "outcome_selfscore", float(score))
+                except Exception:
+                    pass
                 self._chain_entries.setdefault(chain, []).append(_mine)
             # w_c cold-start prior from the critic (deployable, no extra calls):
             # seed one pseudo-observation so a high-quality patch starts above
