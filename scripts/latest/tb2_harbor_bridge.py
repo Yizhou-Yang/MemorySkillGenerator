@@ -181,7 +181,7 @@ def main() -> None:
                     default=str(PROJECT_ROOT / ".datasets" / "terminal-bench-2"),
                     help="Path to downloaded terminal-bench-core dataset")
     ap.add_argument("--n-tasks", type=int,
-                    default=int(os.environ.get("TB2_N_TASKS", "0")),
+                    default=int(os.environ.get("TB2_N_TASKS", "30")),
                     help="tasks per iteration (0 = all ~80; raw output is ~5MB/task/iter, keep runs_* out of git)")
     ap.add_argument("--n-concurrent", type=int, default=3)
     ap.add_argument("--task-ids", nargs="*", default=None,
