@@ -181,9 +181,9 @@ def main() -> None:
                     default=str(PROJECT_ROOT / ".datasets" / "terminal-bench-2"),
                     help="Path to downloaded terminal-bench-core dataset")
     ap.add_argument("--n-tasks", type=int,
-                    default=int(os.environ.get("TB2_N_TASKS", "50")),
-                    help="tasks per iteration (default 50; 0 = all ~88 — raw output is ~5MB/task/iter, keep runs_* out of git)")
-    ap.add_argument("--n-concurrent", type=int, default=2)
+                    default=int(os.environ.get("TB2_N_TASKS", "0")),
+                    help="tasks per iteration (0 = all ~80; raw output is ~5MB/task/iter, keep runs_* out of git)")
+    ap.add_argument("--n-concurrent", type=int, default=3)
     ap.add_argument("--task-ids", nargs="*", default=None,
                     help="Specific task IDs to run (default: all)")
     args = ap.parse_args()
@@ -224,7 +224,8 @@ def main() -> None:
                 "--run-id", run_id,
                 "--n-attempts", "2",
                 "--n-concurrent", str(args.n_concurrent),
-                "--global-agent-timeout-sec", "1800",
+                "--global-agent-timeout-sec", "2400",
+                "--global-test-timeout-sec", "900",
                 "--cleanup"]
         if args.n_tasks:
             cmd += ["--n-tasks", str(args.n_tasks)]
