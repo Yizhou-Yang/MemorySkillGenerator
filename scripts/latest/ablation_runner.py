@@ -16,6 +16,9 @@ mutations.json as the main sweep, so every comparison is paired:
   C_no_budget     dose budget lifted         (C_INJECT_BUDGET_CH=0 = unbounded;
                   the paper's "L=inf" row — evidence that the harm of an
                   unbudgeted curator is dose, not content)
+  C_no_fallback   raw fallback off           (C_RAW_FALLBACK=0: curated channels
+                  empty -> inject nothing, the pre-v2 behaviour — evidence for
+                  the "degrade to raw, never to silence" design)
   ctrl_reprompt   equal-budget, no memory    (REPROMPT_CONTROL=1: the baseline
                   answer gets REPROMPT_CALLS=2 generic self-refinement calls,
                   spending C's write-time budget with no store)
@@ -59,6 +62,8 @@ ARMS = {
     "C_small_inject":  ({"ARMS": "C", "C_INJECT_BUDGET_CH": "500"},
                         "C", "C_gpr"),
     "C_no_budget":     ({"ARMS": "C", "C_INJECT_BUDGET_CH": "0"},
+                        "C", "C_gpr"),
+    "C_no_fallback":   ({"ARMS": "C", "C_RAW_FALLBACK": "0"},
                         "C", "C_gpr"),
     "ctrl_reprompt":   ({"ARMS": "A", "REPROMPT_CONTROL": "1",
                          "REPROMPT_CALLS": os.environ.get("REPROMPT_CALLS", "2")},
@@ -149,6 +154,7 @@ def report() -> None:
              ("C without w_c (pure similarity)", None, "C_no_wc"),
              ("C with 500-char injection budget", None, "C_small_inject"),
              ("C without dose budget (L=inf)", None, "C_no_budget"),
+             ("C without raw fallback (silent when gated)", None, "C_no_fallback"),
              ("Reprompt (equal budget, no memory)", None, "ctrl_reprompt")])
     for label, base, key in plan:
         cells = []

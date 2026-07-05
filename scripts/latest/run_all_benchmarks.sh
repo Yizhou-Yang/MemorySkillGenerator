@@ -15,7 +15,10 @@
 # Env overrides:
 #   SKILLFORGE_PY / HARBOR_PY   interpreters (default: the two conda envs)
 #   GAIA2_SCENARIO_DIR          persistent gaia2-cli path
-#   TB2_N_TASKS                 TB2 tasks/iter (default 80, matched across models)
+#   TB2_N_TASKS                 TB2 tasks/iter (default 50, matched across models)
+#   GAIA2_SPLIT_WEIGHTS         per-split counts (default weights the dynamic
+#                               splits, adaptability/time, where the thesis
+#                               predicts the effect; declared in the paper)
 #   TASK_CONCURRENCY            main-sweep global slots (default 12; two models
 #                               on one box should each use 12 to stay < the ~24
 #                               internal-API ceiling)
@@ -34,16 +37,20 @@ SKILLFORGE_PY="${SKILLFORGE_PY:-/root/.conda/envs/skillforge/bin/python}"
 HARBOR_PY="${HARBOR_PY:-/root/.conda/envs/harbor312/bin/python}"
 command -v "$SKILLFORGE_PY" >/dev/null 2>&1 || SKILLFORGE_PY="$(command -v python3)"
 DATASET="${GAIA2_SCENARIO_DIR:-$REPO/.datasets/gaia2-cli}"
-TB2_N="${TB2_N_TASKS:-80}"
+TB2_N="${TB2_N_TASKS:-50}"
 CONC="${TASK_CONCURRENCY:-30}"
+# Weighted gaia2 sampling (thesis-motivated, pre-declared): concentrate n on the
+# dynamic splits. Sums to 100; every per-split count is <= the 40/split a
+# previous uniform-200 run took, so existing A/B rows still pair.
+G2W="${GAIA2_SPLIT_WEIGHTS:-adaptability:30,time:30,ambiguity:14,execution:13,search:13}"
 
 echo "==> launching all benchmarks for model=$MODEL"
 
 # ── 1) QA sweep: gaia + gaia2 + locomo (evolving protocol) ──
-ITERS=3; G2LIM=""
-if [ "${LEAN:-0}" = "1" ]; then ITERS=2; G2LIM=100; echo "    [lean] ITER_CHAIN=2, gaia2=100"; fi
+ITERS=3
+if [ "${LEAN:-0}" = "1" ]; then ITERS=2; echo "    [lean] ITER_CHAIN=2"; fi
 RESULTS_BASE=latest_evolving ITER_MUTATE=1 ITER_FEEDBACK=self ITER_CHAIN="$ITERS" \
-  ${G2LIM:+GAIA2_TASK_LIMIT="$G2LIM"} \
+  GAIA2_SPLIT_WEIGHTS="$G2W" \
   BENCHMARKS=gaia,gaia2,locomo GAIA2_SCENARIO_DIR="$DATASET" \
   CODEBUDDY_MODEL="$MODEL" TASK_CONCURRENCY="$CONC" \
   nohup "$SKILLFORGE_PY" -u scripts/latest/latest_runner.py \

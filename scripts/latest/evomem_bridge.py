@@ -109,6 +109,17 @@ _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
 # remains is purely WHAT is injected. Set 0 to disable (legacy), or override
 # per ablation arm (C_small_inject=500).
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
+# Raw fallback (frozen method v2, 2026-07-05): when every curated channel comes
+# up empty (critic approves nothing, no note survives the weak-lesson floor, or
+# the reworded variant drops the chain below the similarity floor), C injects
+# the RAW store's own entries under the SAME dose budget — it degrades to the
+# \patchmem baseline, never to no memory. Evidence from the first frozen sweep:
+# C skipped injection on 28-37% of opportunities (B: ~100%) and paid for the
+# silence exactly where memory helped most (gaia, C-skipped subset: B−A=+13.5pp,
+# C−B=−8.1pp); the dilution arithmetic reproduces the observed C−B to the
+# decimal. With the fallback, C−B ≥ 0 becomes structural on the read path.
+# C_RAW_FALLBACK=0 is the ablation arm (C_no_fallback).
+_C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
 
 
 def _critic_q(e) -> int:
@@ -208,6 +219,39 @@ def _format_curated(successes: list, failures: list = ()) -> str:
     if fail_blocks:
         out += ("\n\n" if out else "") + "## What to avoid (from earlier attempts)\n\n" + "\n\n".join(fail_blocks)
     return out
+
+
+def _format_raw(entries: list) -> str:
+    """Raw-fallback rendering: B-equivalent content under C's dose budget. No
+    curated field is required — the concrete approach (reasoning trace or
+    commands) always exists for any recorded attempt — so a chain that HAS
+    history is never rendered as silence. Honest tag: the agent sees these are
+    raw prior attempts, not curator-approved solutions."""
+    blocks, seen = [], set()
+    for e in entries:
+        concrete = _concrete_approach(e)
+        if not concrete:
+            continue
+        key = concrete[:80].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        sc = getattr(e, "score", 0.0) or 0.0
+        head = "What was tried and seemed to work" if sc >= 0.5 else \
+               "What was tried and fell short"
+        blocks.append(f"[Prior attempt on this task — raw, self-assessed {sc:.0%}]\n"
+                      f"Task: {_core_task(e.task_desc)[:200]}\n{head}: {concrete[:400]}")
+    if _C_INJECT_BUDGET > 0:
+        kept, used = [], 0
+        for b in blocks:
+            if used + len(b) > _C_INJECT_BUDGET:
+                break
+            kept.append(b)
+            used += len(b)
+        blocks = kept
+    if not blocks:
+        return ""
+    return "## Prior attempts on this task (raw memory)\n\n" + "\n\n".join(blocks)
 
 
 class BenchmarkMemory:
@@ -328,6 +372,13 @@ class CuratedMemory:
         self._served: dict[str, list[str]] = {}
         self._last_score: dict[str, float] = {}
         self._record_failures = 0
+        # Per-chain index of this bridge's own recorded experiences. inject()'s
+        # global retrieve_similar ranks against the WHOLE library, so a reworded
+        # variant can push this chain's entries out of the pool while other
+        # tasks' entries fill it — B never has this failure because it scopes
+        # retrieval to the chain at the store. The index guarantees C's recall
+        # of its own chain history is at least B's.
+        self._chain_entries: dict[str, list] = {}
 
     # Pickled by the harbor bridge between iterations: drop the LLM function
     # ref on dump (re-imported on load). If SkillForgeLatest's embedder turns
@@ -339,6 +390,7 @@ class CuratedMemory:
 
     def __setstate__(self, d):
         self.__dict__.update(d)
+        self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
         from scripts.latest.llm_client import llm_review_fn
         self._llm = llm_review_fn
 
@@ -352,17 +404,29 @@ class CuratedMemory:
         try:
             # No outcome filter here: we want both prior successes (to copy) and
             # prior failures (to avoid) from this chain.
-            cands = self._sf.library.retrieve_similar(core, top_k=self.top_k * 6)
+            pool = self._sf.library.retrieve_similar(core, top_k=self.top_k * 6)
         except Exception:
-            return ""
+            pool = []  # the chain index below still serves
         # CHAIN-SCOPED: keep only experiences from the SAME chain (this task's
         # earlier iterations, or same LoCoMo session) — patch memory is not
-        # cross-task transfer. Then a relevance gate as extra hygiene within
-        # multi-task chains. On a single-pass independent-task run nothing is
+        # cross-task transfer. On a single-pass independent-task run nothing is
         # in-chain, so C honestly injects nothing (value appears under chains).
-        cands = [e for e in cands if self._chain_of.get(e.task_id) == chain]
-        cands = [e for e in cands
-                 if _content_overlap(core, _core_task(e.task_desc)) >= _C_SIM_FLOOR]
+        ranked = [e for e in pool if self._chain_of.get(e.task_id) == chain]
+        # Recall rescue: append any in-chain entry the global pool missed
+        # (keeps retrieve_similar's sim x w_c order for what it DID surface).
+        _key = lambda e: (e.task_id, getattr(e, "version", 0),
+                          getattr(e, "timestamp", 0.0))
+        _have = {_key(e) for e in ranked}
+        cands = ranked + [e for e in self._chain_entries.get(chain, [])
+                          if _key(e) not in _have]
+        # Similarity floor as HYGIENE only: within multi-task chains (LoCoMo
+        # sessions) it filters off-topic entries, but it must never zero out a
+        # chain that has history — on reworded variants the floor is exactly
+        # what silenced C (63-72% injection) while B kept injecting (~100%).
+        floored = [e for e in cands
+                   if _content_overlap(core, _core_task(e.task_desc)) >= _C_SIM_FLOOR]
+        if floored:
+            cands = floored
         best = max((getattr(e, "score", 0.0) or 0.0 for e in cands), default=0.0)
         succ = [e for e in cands
                 if _critic_q(e) >= _CRITIC_GATE
@@ -370,9 +434,15 @@ class CuratedMemory:
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
         out = _format_curated(succ, fail)
+        served = succ + fail
+        if not out and cands and _C_RAW_FALLBACK:
+            # Curated channels rendered nothing -> degrade to the raw store
+            # under the same budget, never to no memory (see _C_RAW_FALLBACK).
+            served = cands[: self.top_k]
+            out = _format_raw(served)
         if out:
             # remember what was actually served, for the effectiveness update
-            self._served[task.get("task_id", "")] = [e.task_id for e in succ + fail]
+            self._served[task.get("task_id", "")] = [e.task_id for e in served]
         return out
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
@@ -421,14 +491,20 @@ class CuratedMemory:
             # retrieval). Same-task iterations share a task_id; LoCoMo shares a
             # session chain_id.
             self._chain_of[task.get("task_id", "")] = _chain_id(task)
+            # Locate the experience just stored for THIS task (search by id, not
+            # experiences[-1]: concurrent records interleave) and index it on
+            # its chain for inject()'s recall rescue.
+            _exps = self._sf.library.experiences
+            _mine = next((e for e in reversed(_exps) if e.task_id == tid), None)
+            if _mine is not None:
+                self._chain_entries.setdefault(chain, []).append(_mine)
             # w_c cold-start prior from the critic (deployable, no extra calls):
             # seed one pseudo-observation so a high-quality patch starts above
             # unit weight and a critic-rejected one below, instead of every
             # patch idling at w_c=1.0 until two real reuse deltas accumulate.
             try:
-                _exps = self._sf.library.experiences
-                if _exps:
-                    _q = _critic_q(_exps[-1])
+                if _mine is not None:
+                    _q = _critic_q(_mine)
                     self._sf.library.update_effectiveness(
                         tid, (_q - _CRITIC_GATE) / 10.0)
             except Exception:
