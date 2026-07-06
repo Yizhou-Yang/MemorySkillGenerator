@@ -207,18 +207,27 @@ def _format_curated(successes: list, failures: list = (),
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
                 or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
             if action_scored else []
-        if outcome:
-            # NEUTRAL label on purpose: the stash is resp[:400], often
-            # mid-reasoning rather than a final answer, and self-assessment
-            # is miscalibrated — an assertive "Answer reached" turned B's
-            # hedged raw replay into C's confident wrong claim (gaia cases:
-            # "Answer reached: Let me verify Morocco's borderline...").
-            parts.append("Answer given then (unverified): "
-                         f"{outcome[:160 if acts else 240]}")
-        if acts:
-            parts.append("Actions used: " + " -> ".join(acts)[:200])
+        if action_scored:
+            # gaia2/TB2: scored on which actions occurred — action list is the
+            # payload, answer text secondary (v2.3, trend-positive on gaia2).
+            if outcome:
+                parts.append(f"Answer given then (unverified): {outcome[:160]}")
+            if acts:
+                parts.append("Actions used: " + " -> ".join(acts)[:200])
+            elif concrete:
+                parts.append(f"What worked: {concrete[:200]}")
+        elif outcome:
+            # Answer-scored QA (v2.4 SUPERSET RENDERING): carry the raw
+            # attempt VERBATIM — the same resp[:400] head B replays, hedges
+            # and discrepancy notes intact — and let curation only ANNOTATE
+            # below it. Twice now, C lost gaia exactly where its rewrite
+            # replaced B's hedged raw text with a confident paraphrase; a
+            # rewrite can lose what raw replay keeps, an annotation cannot.
+            # This makes C's block a textual superset of B's: strictly
+            # additive at render time, not just at store time.
+            parts.append(f"As recorded: {outcome[:400]}")
         elif concrete:
-            parts.append(f"What worked: {concrete[:200 if outcome else 450]}")
+            parts.append(f"What worked: {concrete[:450]}")
         lesson = (tax.get("causal_lesson") or "").strip()
         if lesson and not _is_weak_lesson(lesson):
             parts.append(f"Lesson: {lesson[:180]}")
@@ -244,8 +253,9 @@ def _format_curated(successes: list, failures: list = (),
         parts = [f"[✗ Earlier attempt fell short]",
                  f"Task: {_core_task(e.task_desc)[:150]}"]
         if outcome:
-            parts.append("Answer given then (self-assessed doubtful, verify "
-                         f"before reuse): {outcome[:200]}")
+            # same superset principle: verbatim raw, honest doubt tag
+            parts.append("As recorded (self-assessed doubtful, verify before "
+                         f"reuse): {outcome[:200]}")
         if not weak:
             parts.append(f"Avoid: {note[:180]}")
         fail_blocks.append("\n".join(parts))

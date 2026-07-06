@@ -97,22 +97,29 @@ def main() -> None:
         if caugs:
             hdr = sum("## Curated prior attempts" in a for a in caugs)
             ans = sum("Answer given then" in a for a in caugs)
+            raw = sum("As recorded" in a for a in caugs)
             act = sum("Actions used:" in a for a in caugs)
             print(f"  G3 markers: header {hdr}/{len(caugs)}, answer-lines {ans}, "
-                  f"action-lines {act}")
+                  f"as-recorded {raw}, action-lines {act}")
             if hdr == 0:
                 print("  G3 ✗ no v2.2 header in any C block — old code ran?")
                 hard_fail = True
-            # v2.3: action payload is benchmark-scoped — action lines belong on
-            # gaia2/TB2 ONLY; on answer-scored benches they displaced the prose
-            # and drove gaia C−B to −9.1pp.
+            # v2.3/2.4 scoping: gaia2/TB2 render action payload; answer-scored
+            # benches render the raw attempt VERBATIM (superset of B) and must
+            # carry no action lines (they displaced prose and drove gaia C−B
+            # to −9.1pp).
             if bench == "gaia2" and act == 0:
                 print("  G3 ✗ gaia2 has no action-lines — v2.3 payload missing")
                 hard_fail = True
-            if bench in ("gaia", "locomo") and act > 0:
-                print(f"  G3 ✗ {bench} has {act} action-lines — v2.3 scoping "
-                      "not in effect (pre-v2.3 code ran)")
-                hard_fail = True
+            if bench in ("gaia", "locomo"):
+                if act > 0:
+                    print(f"  G3 ✗ {bench} has {act} action-lines — v2.3+ "
+                          "scoping not in effect (stale code ran)")
+                    hard_fail = True
+                if raw == 0:
+                    print(f"  G3 ✗ {bench} has no 'As recorded' verbatim lines "
+                          "— v2.4 superset rendering missing")
+                    hard_fail = True
     print("\n" + ("v2 GATE: FAIL — do not trust these numbers"
                   if hard_fail else "v2 GATE: PASS"))
     sys.exit(1 if hard_fail else 0)
