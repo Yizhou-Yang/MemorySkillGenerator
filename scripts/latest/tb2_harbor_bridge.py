@@ -42,6 +42,27 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 GROUP_KEY = {"A": "A_baseline", "B": "B_evomem", "C": "C_gpr"}
 
+# High-risk tasks excluded from TB2 runs:
+# - crypto/blockchain: downloads binaries, triggers security alerts
+# - youtube downloads: yt-dlp can trigger network policy violations
+# - docker-compose failures: known exit 17 / exit 1 on our infra
+# - 1800s+ agent timeouts: wastes compute without completing
+# - intrusion/security-vulhub: name pattern can trigger EDR
+TB2_SAFE_EXCLUDE = [
+    "get-bitcoin-nodes",
+    "solana-data",
+    "intrusion-detection",
+    "download-youtube",
+    "extract-moves-from-video",
+    "build-linux-kernel-qemu",
+    "super-benchmark-upet",
+    "play-zork",
+    "eval-mteb",
+    "eval-mteb.hard",
+    "create-bucket",
+    "security-vulhub-minio",
+]
+
 
 def _task_key(instruction: str) -> str:
     return "tb2h_" + hashlib.sha1((instruction or "").encode()).hexdigest()[:12]
@@ -262,6 +283,9 @@ def main() -> None:
         if args.task_ids:
             for tid in args.task_ids:
                 cmd += ["-t", tid]
+        # Exclude high-risk tasks (crypto binaries, youtube downloads, known docker failures)
+        for ex in TB2_SAFE_EXCLUDE:
+            cmd += ["-e", ex]
         # Clean up any stopped/orphaned Docker containers from previous runs to
         # prevent "container name already in use" conflicts (terminal-bench's
         # docker compose down is not always thorough after crashes).
