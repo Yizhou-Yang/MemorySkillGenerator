@@ -177,33 +177,34 @@ _ACTION_SCORED = {"gaia2", "terminal_bench_2"}
 
 def _format_curated(successes: list, failures: list = (),
                     current_tid: str = "", action_scored: bool = False) -> str:
-    """Inject concrete, relevance-gated, de-duplicated successful approaches plus
-    the refined lesson WHEN genuinely useful; and, for prior attempts that
-    FAILED on this chain, the refined avoidance note (what to not repeat) — so C
-    still guides the agent on a hard chain whose earlier iterations all failed,
-    instead of going silent. No empty fields, no [PLACEHOLDER] templates."""
-    blocks, seen = [], set()
+    """v2.5 LAYERED RENDERING. The replay layer (every prior attempt, verbatim)
+    is the guaranteed base; annotations (Lesson/Avoid) are a bonus layer added
+    only while the dose budget allows. v2.4 rendered one rich block that ate
+    the budget and squeezed the second attempt out: on gaia, 8 of C's 10
+    final-iteration losses to B were exactly "C shows 1 attempt, B shows 2".
+    The superset the paper claims must hold at the SET level first, so field
+    caps adapt to the number of attempts and annotations never displace an
+    attempt. No empty fields, no [PLACEHOLDER] templates."""
+    def _payload(e):
+        tax = e.failure_taxonomy or {}
+        return ((tax.get("verbatim_outcome") or "").strip(),
+                _concrete_approach(e))
+
+    n_est = sum(1 for e in list(successes) + list(failures)
+                if any(_payload(e)))
+    vcap = 400 if n_est <= 1 else (300 if n_est == 2 else 180)
+    tcap = 150 if n_est <= 1 else 90
+    pairs, seen, n_succ = [], set(), 0   # (lean_block, annotation) in order
     for e in successes:
         tax = e.failure_taxonomy or {}
-        concrete = _concrete_approach(e)
-        # Verbatim prior OUTCOME, stashed at record() before refinement. This is
-        # the answer B replays raw (content_after); C dropped it when curation
-        # abstracted the trace into "what worked", so on exact-match QA whose
-        # gold survives the reword, C lost to B by paraphrasing away the exact
-        # string. Carrying it makes C's block a SUPERSET of B's — recall AND the
-        # version-conditioned lesson — so C >= B on static QA and supersedes a
-        # STALE verbatim answer on a shifted chain via the lesson below.
-        outcome = (tax.get("verbatim_outcome") or "").strip()
+        outcome, concrete = _payload(e)
         key = ((concrete[:80] or outcome[:80] or _core_task(e.task_desc)[:80])).lower()
         if (not concrete and not outcome) or key in seen:
             continue
         seen.add(key)
         parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
                  f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
-                 f"Task: {_core_task(e.task_desc)[:150]}"]
-        # Field caps are sized so ONE maximally rich block stays under the dose
-        # budget: a first block that alone exceeded L rendered the whole
-        # success channel empty (the tail-drop loop breaks before keeping).
+                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
                 or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
             if action_scored else []
@@ -217,66 +218,67 @@ def _format_curated(successes: list, failures: list = (),
             elif concrete:
                 parts.append(f"What worked: {concrete[:200]}")
         elif outcome:
-            # Answer-scored QA (v2.4 SUPERSET RENDERING): carry the raw
-            # attempt VERBATIM — the same resp[:400] head B replays, hedges
-            # and discrepancy notes intact — and let curation only ANNOTATE
-            # below it. Twice now, C lost gaia exactly where its rewrite
-            # replaced B's hedged raw text with a confident paraphrase; a
-            # rewrite can lose what raw replay keeps, an annotation cannot.
-            # This makes C's block a textual superset of B's: strictly
-            # additive at render time, not just at store time.
-            parts.append(f"As recorded: {outcome[:400]}")
+            # Answer-scored QA: the raw attempt VERBATIM — the same resp head
+            # B replays, hedges and discrepancy notes intact (truncated only
+            # to share the dose budget across ALL attempts of the chain).
+            parts.append(f"As recorded: {outcome[:vcap]}")
         elif concrete:
-            parts.append(f"What worked: {concrete[:450]}")
+            parts.append(f"What worked: {concrete[:vcap]}")
         lesson = (tax.get("causal_lesson") or "").strip()
-        if lesson and not _is_weak_lesson(lesson):
-            parts.append(f"Lesson: {lesson[:180]}")
-        blocks.append("\n".join(parts))
-    fail_blocks = []
+        annot = (f"\nLesson: {lesson[:180]}"
+                 if lesson and not _is_weak_lesson(lesson) else "")
+        pairs.append(["\n".join(parts), annot])
+        n_succ += 1
     for e in failures:
         tax = e.failure_taxonomy or {}
         note = (tax.get("avoidance_note") or tax.get("causal_lesson") or "").strip()
-        # Same-task entries also carry their verbatim answer here: self-
+        # Same-task entries carry their verbatim answer here too: self-
         # assessment routes many gold-CORRECT attempts into this channel
         # (LoCoMo: 66% false-failure rate), and dropping their answers is how
-        # C lost to a raw baseline that replays everything. Tagged honestly:
-        # the agent is told the answer is self-assessed as doubtful.
+        # C lost to a raw baseline that replays everything.
         outcome = (tax.get("verbatim_outcome") or "").strip() \
             if e.task_id == current_tid else ""
         weak = not note or _is_weak_lesson(note)
         if weak and not outcome:
             continue
-        key = ("avoid:" + (note or outcome)[:80]).lower()
+        # dedup by the actual PAYLOAD: outcome first (distinct attempts can
+        # share an identical weak note, which must not merge them)
+        key = ("avoid:" + (outcome or note)[:80]).lower()
         if key in seen:
             continue
         seen.add(key)
         parts = [f"[✗ Earlier attempt fell short]",
-                 f"Task: {_core_task(e.task_desc)[:150]}"]
+                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
         if outcome:
-            # same superset principle: verbatim raw, honest doubt tag
             parts.append("As recorded (self-assessed doubtful, verify before "
-                         f"reuse): {outcome[:200]}")
-        if not weak:
+                         f"reuse): {outcome[:min(150, vcap)]}")
+            annot = f"\nAvoid: {note[:180]}" if not weak else ""
+        else:
+            # no verbatim payload: the avoidance note IS the payload
             parts.append(f"Avoid: {note[:180]}")
-        fail_blocks.append("\n".join(parts))
+            annot = ""
+        pairs.append(["\n".join(parts), annot])
     if _C_INJECT_BUDGET > 0:
+        # layer 1: keep as many LEAN attempt blocks as fit (attempts first,
+        # annotations never displace an attempt)
         kept, used = [], 0
-        for b in blocks:
-            if used + len(b) > _C_INJECT_BUDGET:
+        for lean, annot in pairs:
+            if used + len(lean) > _C_INJECT_BUDGET:
                 break
-            kept.append(b); used += len(b)
-        if not kept and blocks:
-            # never let one oversized block silence the whole channel:
-            # hard-truncate the best entry to the budget instead
-            kept, used = [blocks[0][:_C_INJECT_BUDGET]], min(
-                len(blocks[0]), _C_INJECT_BUDGET)
-        blocks = kept
-        kept, _budget = [], max(0, _C_INJECT_BUDGET - used)
-        for b in fail_blocks:
-            if len(b) > _budget:
-                break
-            kept.append(b); _budget -= len(b)
-        fail_blocks = kept
+            kept.append([lean, annot]); used += len(lean)
+        if not kept and pairs:
+            # never let one oversized block silence the whole channel
+            kept = [[pairs[0][0][:_C_INJECT_BUDGET], ""]]
+            used = len(kept[0][0])
+        # layer 2: upgrade kept blocks with their annotations while budget lasts
+        for kb in kept:
+            if kb[1] and used + len(kb[1]) <= _C_INJECT_BUDGET:
+                kb[0] += kb[1]; used += len(kb[1])
+        rendered = [kb[0] for kb in kept]
+    else:
+        rendered = [lean + annot for lean, annot in pairs]
+    k_succ = min(n_succ, len(rendered))
+    blocks, fail_blocks = rendered[:k_succ], rendered[k_succ:]
     if not blocks and not fail_blocks:
         return ""
     out = ""

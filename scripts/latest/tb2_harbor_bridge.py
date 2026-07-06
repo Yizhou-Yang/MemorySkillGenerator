@@ -209,19 +209,28 @@ def main() -> None:
                     help="Specific task IDs to run (default: all)")
     args = ap.parse_args()
 
-    # ── Security-policy task exclusion (fixed a priori, identical across arms
-    # and backbones — declared in the paper's TB2 setup). These tasks require
-    # operations that trip host-security (HIDS) policies on our production
-    # boxes: cryptocurrency node binaries (a real "trojan download" alert
-    # fired on get-bitcoin-nodes pulling bitcoind), hash cracking, intrusion
-    # simulation. Exclusion is by task CONTENT class, never by difficulty or
-    # observed score, so arm comparisons are unaffected. Override with
-    # TB2_SECURITY_EXCLUDE="" to disable, or a comma list to change.
+    # ── A-priori task exclusion, ONE mechanism (fixed before any arm's
+    # results, identical across arms and backbones — declared in the paper's
+    # TB2 setup). Two declared classes, both content/feasibility, never
+    # difficulty-of-solving:
+    #   security policy  — operations that trip HIDS/EDR/network policy on the
+    #                      production boxes (crypto binaries, hash cracking,
+    #                      intrusion tooling, media downloads);
+    #   infra feasibility — tasks that cannot COMPLETE on this runner for any
+    #                       arm (known docker-compose failures, tasks that
+    #                       always exceed the agent wall-clock), which would
+    #                       only contribute all-zero rows with no paired
+    #                       signal.
+    # The union feeds ONE selection pass (sorted − excluded → first N, passed
+    # via -t), so the run always fills N tasks; TB2_SAFE_EXCLUDE's old -e
+    # flags are gone — mixing -t and -e made the effective task count depend
+    # on flag interplay.
     _excl_env = os.environ.get(
         "TB2_SECURITY_EXCLUDE",
         "get-bitcoin-nodes,solana-data,crack-7z-hash,crack-7z-hash.easy,"
         "crack-7z-hash.hard,password-recovery,intrusion-detection")
     _excluded = {x.strip() for x in _excl_env.split(",") if x.strip()}
+    _excluded |= set(TB2_SAFE_EXCLUDE)
     if args.task_ids is None and args.n_tasks:
         _ds = Path(args.dataset_path)
         _all = sorted(d.name for d in _ds.iterdir() if d.is_dir()) \
@@ -232,11 +241,11 @@ def main() -> None:
             args.n_tasks = 0          # explicit -t list supersedes --n-tasks
             _hit = [t for t in _all if t in _excluded]
             print(f"[bridge] task selection: {len(_all)} in dataset, "
-                  f"{len(_hit)} security-excluded ({','.join(_hit)}), "
+                  f"{len(_hit)} excluded a priori ({','.join(_hit)}), "
                   f"running first {len(args.task_ids)}", flush=True)
         else:
             print(f"[bridge] WARNING: dataset path {_ds} not listable — "
-                  "falling back to --n-tasks (security exclusion NOT applied)",
+                  "falling back to --n-tasks (a-priori exclusion NOT applied)",
                   flush=True)
 
     slug = re.sub(r"[^A-Za-z0-9._-]", "_", args.model.split("/")[-1]).lower()
@@ -283,9 +292,9 @@ def main() -> None:
         if args.task_ids:
             for tid in args.task_ids:
                 cmd += ["-t", tid]
-        # Exclude high-risk tasks (crypto binaries, youtube downloads, known docker failures)
-        for ex in TB2_SAFE_EXCLUDE:
-            cmd += ["-e", ex]
+        # (exclusions are already folded into the -t list above — do NOT also
+        # pass -e: mixing -t and -e made the effective task count depend on
+        # the harness's flag precedence and silently shrank the run)
         # Clean up any stopped/orphaned Docker containers from previous runs to
         # prevent "container name already in use" conflicts (terminal-bench's
         # docker compose down is not always thorough after crashes).
