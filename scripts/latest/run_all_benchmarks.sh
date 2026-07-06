@@ -57,6 +57,7 @@ echo "==> launching all benchmarks for model=$MODEL"
 ITERS=3
 if [ "${LEAN:-0}" = "1" ]; then ITERS=2; echo "    [lean] ITER_CHAIN=2"; fi
 RESULTS_BASE=latest_evolving ITER_MUTATE=1 ITER_FEEDBACK=self ITER_CHAIN="$ITERS" \
+  RESUME=1 \
   GAIA2_SPLIT_WEIGHTS="$G2W" \
   BENCHMARKS=gaia,gaia2,locomo GAIA2_SCENARIO_DIR="$DATASET" \
   CODEBUDDY_MODEL="$MODEL" TASK_CONCURRENCY="$CONC" \
