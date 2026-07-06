@@ -120,7 +120,7 @@ def _pooled_test(strata: list[list[float]]) -> tuple[float, float, float, float,
 
 
 def main() -> None:
-    models = [m.lower() for m in sys.argv[1:]] or ["hy3-preview-ioa"]
+    models = [m.lower() for m in sys.argv[1:]] or ["hy3"]
     strata_rows: list[tuple[str, list[dict]]] = []
     for m in models:
         for b in BENCHES:

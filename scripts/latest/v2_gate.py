@@ -36,7 +36,7 @@ def rows(p: Path) -> list[dict]:
 
 
 def main() -> None:
-    model = (sys.argv[1] if len(sys.argv) > 1 else "hy3-preview-ioa").lower()
+    model = (sys.argv[1] if len(sys.argv) > 1 else "hy3").lower()
     base = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BASE", "latest_evolving")
     hard_fail = False
     for bench in ["gaia", "gaia2", "locomo"]:

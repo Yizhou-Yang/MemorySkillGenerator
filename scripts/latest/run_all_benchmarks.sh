@@ -13,7 +13,7 @@
 #   bash scripts/latest/run_all_benchmarks.sh <MODEL>
 #   MODEL is the CodeBuddy id. Paper roster (5 backbones):
 #     PRIMARY (free, run now, full ITER_CHAIN=3):
-#       glm-5.1 · kimi-2.6 · hunyuan3-preview-ioa   (=hy3, A/B kept, rerun C)
+#       glm-5.1 · kimi-2.6 · hy3   (=hunyuan3, A/B kept, rerun C)
 #     TABLE-FILL (paid, ~Aug, LEAN ok):
 #       gpt-5.3-codex (~Y1500) · claude-haiku-4.5 (~Y4000)
 #   The 3 free primaries alone give ~900 pooled pairs (MDE~3.3pp).
