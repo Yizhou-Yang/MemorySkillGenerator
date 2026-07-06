@@ -188,6 +188,36 @@ def main() -> None:
                     help="Specific task IDs to run (default: all)")
     args = ap.parse_args()
 
+    # ── Security-policy task exclusion (fixed a priori, identical across arms
+    # and backbones — declared in the paper's TB2 setup). These tasks require
+    # operations that trip host-security (HIDS) policies on our production
+    # boxes: cryptocurrency node binaries (a real "trojan download" alert
+    # fired on get-bitcoin-nodes pulling bitcoind), hash cracking, intrusion
+    # simulation. Exclusion is by task CONTENT class, never by difficulty or
+    # observed score, so arm comparisons are unaffected. Override with
+    # TB2_SECURITY_EXCLUDE="" to disable, or a comma list to change.
+    _excl_env = os.environ.get(
+        "TB2_SECURITY_EXCLUDE",
+        "get-bitcoin-nodes,solana-data,crack-7z-hash,crack-7z-hash.easy,"
+        "crack-7z-hash.hard,password-recovery,intrusion-detection")
+    _excluded = {x.strip() for x in _excl_env.split(",") if x.strip()}
+    if args.task_ids is None and args.n_tasks:
+        _ds = Path(args.dataset_path)
+        _all = sorted(d.name for d in _ds.iterdir() if d.is_dir()) \
+            if _ds.is_dir() else []
+        if _all:
+            _kept = [t for t in _all if t not in _excluded]
+            args.task_ids = _kept[: args.n_tasks]
+            args.n_tasks = 0          # explicit -t list supersedes --n-tasks
+            _hit = [t for t in _all if t in _excluded]
+            print(f"[bridge] task selection: {len(_all)} in dataset, "
+                  f"{len(_hit)} security-excluded ({','.join(_hit)}), "
+                  f"running first {len(args.task_ids)}", flush=True)
+        else:
+            print(f"[bridge] WARNING: dataset path {_ds} not listable — "
+                  "falling back to --n-tasks (security exclusion NOT applied)",
+                  flush=True)
+
     slug = re.sub(r"[^A-Za-z0-9._-]", "_", args.model.split("/")[-1]).lower()
     out_root = PROJECT_ROOT / "experiments_results/harbor_tb2" / slug
     trace_dir = out_root / "terminal_bench_2"

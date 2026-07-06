@@ -20,7 +20,9 @@
 # Env overrides:
 #   SKILLFORGE_PY / HARBOR_PY   interpreters (default: the two conda envs)
 #   GAIA2_SCENARIO_DIR          persistent gaia2-cli path
-#   TB2_N_TASKS                 TB2 tasks/iter (default 50, matched across models)
+#   TB2_N_TASKS                 TB2 tasks/iter (default 30, matched across models;
+#                               7 security-policy tasks excluded a priori in the
+#                               bridge - TB2_SECURITY_EXCLUDE to override)
 #   GAIA2_SPLIT_WEIGHTS         per-split counts (default weights the dynamic
 #                               splits, adaptability/time, where the thesis
 #                               predicts the effect; declared in the paper)
