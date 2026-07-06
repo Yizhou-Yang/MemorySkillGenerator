@@ -44,12 +44,21 @@ def main() -> None:
         if not rs:
             print(f"[{bench}] no trace — skipped")
             continue
-        revs = {str(r.get("code_rev", ""))[:8] for r in rs}
         kf = max(int(r.get("iter_total", 1) or 1) for r in rs) - 1
-        print(f"\n[{bench}] rev={sorted(revs)} final_iter={kf}")
-        if len(revs) > 1:
-            print("  G4 ✗ MIXED code_rev — audit which rows predate the fix")
-            hard_fail = True
+        # Rev uniformity is PER GROUP: keeping valid A/B rows from an earlier
+        # rev while C reruns on the frozen rev is the sanctioned plan; only a
+        # rev mix WITHIN one arm means half an arm ran different code.
+        by_rev = {}
+        for r in rs:
+            by_rev.setdefault(r.get("group", "?"), set()).add(
+                str(r.get("code_rev", ""))[:8])
+        print(f"\n[{bench}] rev per group="
+              f"{ {g: sorted(v) for g, v in sorted(by_rev.items())} } final_iter={kf}")
+        for g, v in sorted(by_rev.items()):
+            if len(v) > 1:
+                print(f"  G4 ✗ arm {g} has MIXED code_rev {sorted(v)} — "
+                      "audit which rows predate the fix")
+                hard_fail = True
         doses = {}
         for g in ["A_baseline", "B_evomem", "C_gpr"]:
             grs = [r for r in rs if r.get("group") == g]
@@ -87,12 +96,22 @@ def main() -> None:
                  if r.get("group") == "C_gpr" and r.get("patch_injected")]
         if caugs:
             hdr = sum("## Curated prior attempts" in a for a in caugs)
-            ans = sum("Answer given then" in a or "Answer reached" in a for a in caugs)
+            ans = sum("Answer given then" in a for a in caugs)
             act = sum("Actions used:" in a for a in caugs)
             print(f"  G3 markers: header {hdr}/{len(caugs)}, answer-lines {ans}, "
-                  f"action-lines {act}{' (expected >0 on gaia2)' if bench=='gaia2' else ''}")
+                  f"action-lines {act}")
             if hdr == 0:
                 print("  G3 ✗ no v2.2 header in any C block — old code ran?")
+                hard_fail = True
+            # v2.3: action payload is benchmark-scoped — action lines belong on
+            # gaia2/TB2 ONLY; on answer-scored benches they displaced the prose
+            # and drove gaia C−B to −9.1pp.
+            if bench == "gaia2" and act == 0:
+                print("  G3 ✗ gaia2 has no action-lines — v2.3 payload missing")
+                hard_fail = True
+            if bench in ("gaia", "locomo") and act > 0:
+                print(f"  G3 ✗ {bench} has {act} action-lines — v2.3 scoping "
+                      "not in effect (pre-v2.3 code ran)")
                 hard_fail = True
     print("\n" + ("v2 GATE: FAIL — do not trust these numbers"
                   if hard_fail else "v2 GATE: PASS"))

@@ -165,8 +165,18 @@ def _concrete_approach(exp) -> str:
     return ""
 
 
+# Benchmarks scored on WHICH ACTIONS OCCURRED (gaia2 soft-recall over oracle
+# events, TB2 in-container tests). Only there is the action/tool sequence the
+# payload worth displacing prose for. gaia/locomo agents also log tool calls,
+# but they are scored on ANSWER text — v2.2's entry-has-actions heuristic fired
+# on 96% of gaia blocks, dropped every "What worked" prose line, truncated
+# answers to 160ch, and turned C−B from −2.1 to −9.1pp. Scope by benchmark,
+# never by entry shape.
+_ACTION_SCORED = {"gaia2", "terminal_bench_2"}
+
+
 def _format_curated(successes: list, failures: list = (),
-                    current_tid: str = "") -> str:
+                    current_tid: str = "", action_scored: bool = False) -> str:
     """Inject concrete, relevance-gated, de-duplicated successful approaches plus
     the refined lesson WHEN genuinely useful; and, for prior attempts that
     FAILED on this chain, the refined avoidance note (what to not repeat) — so C
@@ -191,17 +201,20 @@ def _format_curated(successes: list, failures: list = (),
         parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
                  f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
                  f"Task: {_core_task(e.task_desc)[:150]}"]
-        # Agentic benchmarks (GAIA2 soft-recall over oracle ACTIONS, TB2 tests)
-        # are scored on which actions occurred, not on answer text — render the
-        # action/tool sequence as the payload there and drop the prose trace;
-        # QA entries have no actions and keep the text fields. Field caps are
-        # sized so ONE maximally rich block stays under the dose budget: a
-        # first block that alone exceeded L rendered the whole success channel
-        # empty (the tail-drop loop breaks before keeping anything).
+        # Field caps are sized so ONE maximally rich block stays under the dose
+        # budget: a first block that alone exceeded L rendered the whole
+        # success channel empty (the tail-drop loop breaks before keeping).
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
-                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])])
+                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+            if action_scored else []
         if outcome:
-            parts.append(f"Answer reached: {outcome[:160 if acts else 240]}")
+            # NEUTRAL label on purpose: the stash is resp[:400], often
+            # mid-reasoning rather than a final answer, and self-assessment
+            # is miscalibrated — an assertive "Answer reached" turned B's
+            # hedged raw replay into C's confident wrong claim (gaia cases:
+            # "Answer reached: Let me verify Morocco's borderline...").
+            parts.append("Answer given then (unverified): "
+                         f"{outcome[:160 if acts else 240]}")
         if acts:
             parts.append("Actions used: " + " -> ".join(acts)[:200])
         elif concrete:
@@ -268,7 +281,7 @@ def _format_curated(successes: list, failures: list = (),
     return out
 
 
-def _format_raw(entries: list) -> str:
+def _format_raw(entries: list, action_scored: bool = False) -> str:
     """Raw-fallback rendering: B-equivalent content under C's dose budget. No
     curated field is required — the concrete approach (reasoning trace or
     commands) always exists for any recorded attempt — so a chain that HAS
@@ -278,7 +291,8 @@ def _format_raw(entries: list) -> str:
     for e in entries:
         concrete = _concrete_approach(e)
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
-                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])])
+                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+            if action_scored else []
         if not concrete and not acts:
             continue
         key = (concrete or " ".join(acts))[:80].lower()
@@ -501,7 +515,9 @@ class CuratedMemory:
                 and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
-        out = _format_curated(succ, fail, current_tid=tid_now)
+        _action_scored = self.benchmark in _ACTION_SCORED
+        out = _format_curated(succ, fail, current_tid=tid_now,
+                              action_scored=_action_scored)
         served = succ + fail
         if not out and cands and _C_RAW_FALLBACK:
             # Curated channels rendered nothing -> degrade to the raw store
@@ -509,7 +525,7 @@ class CuratedMemory:
             # Same-task-first order makes the fallback replay this task's own
             # attempts before any session-mate's.
             served = cands[: self.top_k]
-            out = _format_raw(served)
+            out = _format_raw(served, action_scored=_action_scored)
         if out:
             # remember what was actually served, for the effectiveness update
             self._served[tid_now] = [e.task_id for e in served]
