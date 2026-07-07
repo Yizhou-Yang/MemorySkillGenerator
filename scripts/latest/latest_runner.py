@@ -70,6 +70,7 @@ from scripts.latest.gaia2_runner import run_gaia2_task_with_are
 from scripts.latest.terminal_bench_2_runner import run_terminal_bench_2_task, run_terminal_bench_2_task_controlled
 from scripts.latest.locomo_runner import run_locomo_task, run_locomo_task_controlled
 from scripts.latest.evomem_bridge import BenchmarkMemory, CuratedMemory, solve_with_memory
+from scripts.latest.arms import norm_group
 
 MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro").lower()
 
@@ -420,7 +421,7 @@ def _load_done_map(trace_path: Path) -> dict:
             if not line:
                 continue
             rec = json.loads(line)
-            done[(rec.get("group", ""), rec.get("task_id", ""))] = rec
+            done[(norm_group(rec.get("group", "")), rec.get("task_id", ""))] = rec
     except Exception as e:
         print(f"  [resume] failed to parse {trace_path}: {e}")
     return done
