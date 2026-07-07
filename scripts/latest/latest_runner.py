@@ -1050,6 +1050,31 @@ async def main():
     print(f"  Model: {MODEL:<22} | Global slots: {GLOBAL_TASK_SLOTS} "
           f"(docker {min(DOCKER_TASK_SLOTS, GLOBAL_TASK_SLOTS)}) "
           f"| embed threads: {_EMBED_THREADS}")
+    # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
+    # config echo). One glance at the log answers "what exactly ran?" — the
+    # stale-checkout incident (C rerun on pre-v2 code) would have been caught
+    # at launch, not after 128 wasted solves, had this existed then.
+    _knobs = {
+        "code_rev": _CODE_REV, "ARMS": ",".join(sorted(_ARMS)),
+        "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),
+        "ITER_FEEDBACK": os.environ.get("ITER_FEEDBACK", "gold"),
+        "RESUME": int(RESUME), "TASK_LIMIT": _TASK_N,
+        "GAIA2_TASK_LIMIT": os.environ.get("GAIA2_TASK_LIMIT", "(default)"),
+        "GAIA2_SPLIT_WEIGHTS": os.environ.get("GAIA2_SPLIT_WEIGHTS", "(uniform)"),
+        "C_INJECT_BUDGET_CH": os.environ.get("C_INJECT_BUDGET_CH", "900"),
+        "C_CRITIC_GATE": os.environ.get("C_CRITIC_GATE", "5"),
+        "C_RAW_FALLBACK": os.environ.get("C_RAW_FALLBACK", "1"),
+        "C_PAGE_KEEP": os.environ.get("C_PAGE_KEEP", "0"),
+        "C_USE_CRITIC": os.environ.get("C_USE_CRITIC", "1"),
+        "C_USE_ENRICH": os.environ.get("C_USE_ENRICH", "1"),
+        "W_C_DISABLED": os.environ.get("W_C_DISABLED", "0"),
+        "REPROMPT_CONTROL": os.environ.get("REPROMPT_CONTROL", "0"),
+        "PASSK": os.environ.get("PASSK", "0"),
+        "PASSK_FINAL": os.environ.get("PASSK_FINAL", "0"),
+        "EXTERNAL_MEMS": os.environ.get("EXTERNAL_MEMS", "(none)"),
+        "RESULTS_BASE": _RESULTS_BASE,
+    }
+    print("  knobs: " + " ".join(f"{k}={v}" for k, v in _knobs.items()))
     print("=" * 70)
 
     print("\n  Probing API availability...", flush=True)

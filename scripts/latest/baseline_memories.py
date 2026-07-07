@@ -49,6 +49,20 @@ def _ns(benchmark: str, task: dict) -> str:
     return f"{benchmark}:{_chain_id(task)}"
 
 
+def _log_version(name: str, module) -> None:
+    """Print AND persist the baseline module's version — the paper pins
+    versions in the appendix, and this file is where those pins come from
+    (captured at run time, not transcribed by hand)."""
+    ver = getattr(module, "__version__", "unknown")
+    print(f"[baseline:{name}] version={ver}", flush=True)
+    try:
+        _STORE_ROOT.mkdir(parents=True, exist_ok=True)
+        with open(_STORE_ROOT / "versions.txt", "a") as f:
+            f.write(f"{name}=={ver}\n")
+    except Exception:
+        pass
+
+
 class Mem0Memory:
     """Mem0 (mem0.ai OSS) as a baseline arm, using ITS OWN add/search."""
 
@@ -87,8 +101,7 @@ class Mem0Memory:
         self._m = Memory.from_config(cfg)
         try:
             import mem0 as _m0
-            print(f"[baseline:mem0] version={getattr(_m0, '__version__', '?')} "
-                  f"store={_STORE_ROOT / 'mem0'}", flush=True)
+            _log_version("mem0ai", _m0)
         except Exception:
             pass
         self._add_failures = 0
@@ -161,6 +174,12 @@ class AMemMemory:
                 llm_backend="openai", llm_model=model)
         except TypeError:
             self._sys = AgenticMemorySystem()
+        try:
+            import agentic_memory as _am
+            _log_version("agentic-memory", _am)
+        except Exception:
+            print("[baseline:amem] version=repo (pin the commit hash in the "
+                  "appendix)", flush=True)
         self._per_chain: dict[str, list[str]] = {}
 
     def inject(self, task: dict) -> str:
@@ -229,6 +248,11 @@ class MemoryOSMemory:
                 "[baseline:memoryos] pip install memoryos (BAI-LAB/MemoryOS) "
                 f"or swap the third baseline: {e}")
         self._cls = Memoryos
+        try:
+            import memoryos as _mos
+            _log_version("memoryos", _mos)
+        except Exception:
+            pass
         self._per_ns: dict[str, object] = {}
         self._base = os.environ.get("OPENAI_API_BASE", "http://localhost:8741/v1")
         self._key = os.environ.get("OPENAI_API_KEY", "dummy")

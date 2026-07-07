@@ -338,6 +338,20 @@ def main() -> None:
             asyncio.run(_record_all(mem, rows))
             with open(state, "wb") as f:
                 pickle.dump(mem, f)     # next iteration's agent injects this
+            # Store integrity echo (MemoryOS-style persistence discipline):
+            # size + entry count in the log makes a silently-empty store —
+            # the failure mode behind the "no transcript" warning above —
+            # visible at the iteration boundary instead of at analysis time.
+            try:
+                _n_entries = len(mem)
+                _sz = state.stat().st_size
+                print(f"[bridge] state saved: {_n_entries} entries, "
+                      f"{_sz/1e3:.0f} KB -> {state.name}", flush=True)
+                if it >= 1 and _n_entries == 0:
+                    print("[bridge] WARNING: store EMPTY after recording "
+                          f"iter {it} — memory arm is running blind", flush=True)
+            except Exception:
+                pass
     print(f"[bridge] done. trace: {trace}", flush=True)
 
 
