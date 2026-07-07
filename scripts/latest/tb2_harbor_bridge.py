@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-GROUP_KEY = {"A": "A_baseline", "B": "B_evomem", "C": "C_gpr"}
+GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch"}  # canonical (arms.py)
 
 # High-risk tasks excluded from TB2 runs:
 # - crypto/blockchain: downloads binaries, triggers security alerts

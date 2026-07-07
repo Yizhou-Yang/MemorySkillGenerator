@@ -16,6 +16,8 @@ Usage (server, where the dataset lives):
 from __future__ import annotations
 
 import json
+_LEGACY_MAP = {"A_baseline": "no_mem", "B_evomem": "raw_patch", "C_gpr": "curated_patch"}
+def _norm_group(g): return _LEGACY_MAP.get(g, g)
 import os
 import sys
 from collections import defaultdict
@@ -77,13 +79,13 @@ def main() -> None:
     order = ["adaptability", "time", "ambiguity", "execution", "search"]
     for s in sorted(by, key=lambda x: (order.index(x) if x in order else 99, x)):
         d = by[s]
-        n = len(d.get("C_gpr", {}) or d.get("A_baseline", {}))
+        n = len(d.get("curated_patch", {}) or d.get("no_mem", {}))
 
         def mean(g):
             v = list(d.get(g, {}).values())
             return sum(v) / len(v) if v else float("nan")
 
-        a, b, c = mean("A_baseline"), mean("B_evomem"), mean("C_gpr")
+        a, b, c = mean("no_mem"), mean("raw_patch"), mean("curated_patch")
         print(f"{s:14s} {n:3d}  {a:.3f}  {b:.3f}  {c:.3f}  {c-b:+.3f}  {b-a:+.3f}")
     print("\n(dynamic splits = adaptability/time/ambiguity — where the thesis "
           "predicts C-B > 0; execution/search are the static controls)")

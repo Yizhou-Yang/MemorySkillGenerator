@@ -29,11 +29,17 @@ import random
 import sys
 from pathlib import Path
 
+try:
+    from scripts.latest.arms import norm_group as _norm_group
+except ImportError:
+    _LEGACY_MAP = {"A_baseline": "no_mem", "B_evomem": "raw_patch", "C_gpr": "curated_patch"}
+    def _norm_group(g): return _LEGACY_MAP.get(g, g)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BASE = os.environ.get("BASE", "latest_evolving")
 BENCHES = [b.strip() for b in
            os.environ.get("POOL_BENCHMARKS", "gaia,gaia2,locomo").split(",") if b.strip()]
-PAIRS = [("C_gpr", "B_evomem"), ("C_gpr", "A_baseline"), ("B_evomem", "A_baseline")]
+PAIRS = [("curated_patch", "raw_patch"), ("curated_patch", "no_mem"), ("raw_patch", "no_mem")]
 N_PERM = int(os.environ.get("N_PERM", "10000"))
 N_BOOT = int(os.environ.get("N_BOOT", "4000"))
 USE_CUPED = os.environ.get("CUPED", "1") == "1"
@@ -47,7 +53,7 @@ def _rows(path: Path) -> list[dict]:
     for line in open(path):
         line = line.strip()
         if line:
-            out.append(json.loads(line))
+            r = json.loads(line); r["group"] = _norm_group(r.get("group","")); out.append(r)
     return out
 
 
@@ -156,7 +162,7 @@ def main() -> None:
             names.append(f"{name}:{len(d_fin)}")
         mean, lo, hi, p, n = _pooled_test(strata)
         tag = " **SIG**" if p < 0.05 else ""
-        print(f"| {g1[0]}−{g2[0]} | {mean:+.4f} | [{lo:+.4f}, {hi:+.4f}] "
+        print(f"| {g1}−{g2} | {mean:+.4f} | [{lo:+.4f}, {hi:+.4f}] "
               f"| {p:.4f}{tag} | {n} | {', '.join(names)} |")
     print("\nSecondary: per-benchmark deltas via scripts/latest/soft_stats.py; "
           "gate first with scripts/latest/check_run.sh <model>.")

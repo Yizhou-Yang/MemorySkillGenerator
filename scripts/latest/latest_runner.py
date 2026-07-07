@@ -851,22 +851,52 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
 
     results_a = results_b = results_c = []
     evals_a = evals_b = evals_c = []
-    if "A" in _ARMS:
+    # pass@k variance/compute control: k INDEPENDENT no-memory samples per
+    # task, one group per sample (no_mem_passk_s<i>) so RESUME's (group,task)
+    # bookkeeping stays untouched. Single-shot by design — refuse chains.
+    _PASSK = int(os.environ.get("PASSK", "0"))
+    if _PASSK > 1 and ITER_CHAIN != 1:
+        raise SystemExit("PASSK is a single-shot control: run it with "
+                         "ITER_CHAIN=1 ARMS=A PASSK=<k> (separate invocation).")
+    if "A" in _ARMS and _PASSK > 1:
+        for _s in range(_PASSK):
+            print(f"    [A·pass@k] no-memory sample {_s+1}/{_PASSK}...", flush=True)
+            _r, _e = await _run_group("A", f"no_mem_passk_s{_s}", test_tasks,
+                                      lambda t: run_fn_a(t, "", "A"))
+            results_a, evals_a = _r, _e     # last sample stands in for reporting
+    elif "A" in _ARMS:
         print(f"    [A] Vanilla (no memory)...", flush=True)
-        results_a, evals_a = await _run_group("A", "A_baseline", test_tasks,
+        results_a, evals_a = await _run_group("A", "no_mem", test_tasks,
                                               lambda t: run_fn_a(t, "", "A"))
     if "B" in _ARMS:
         print(f"    [B] PatchMem (naive cross-task patch memory)...", flush=True)
-        results_b, evals_b = await _run_group("B", "B_evomem", test_tasks,
+        results_b, evals_b = await _run_group("B", "raw_patch", test_tasks,
             lambda t: solve_with_memory(run_fn_a, t, mem_b, "B"), mem=mem_b)
     if "C" in _ARMS:
         print(f"    [C] Curator (refined experiences + effectiveness-weighted retrieval)...", flush=True)
-        results_c, evals_c = await _run_group("C", "C_gpr", test_tasks,
+        results_c, evals_c = await _run_group("C", "curated_patch", test_tasks,
             lambda t: solve_with_memory(run_fn_a, t, mem_c, "C"), mem=mem_c)
 
+    # External baseline memory systems (Wen 07/06: 2-3 recent methods with
+    # ready modules, run WITHOUT the raw_patch arm, pairing against the
+    # existing no_mem rows). EXTERNAL_MEMS="mem0,amem"; each adapter exposes
+    # the same inject()/record() interface, so the protocol (mutated chains,
+    # self feedback, record-after-eval) is IDENTICAL to B/C.
+    _ext_scores = {}
+    for _ext in [x.strip().lower() for x in
+                 os.environ.get("EXTERNAL_MEMS", "").split(",") if x.strip()]:
+        from scripts.latest.baseline_memories import make_external_memory
+        _mem_x = make_external_memory(_ext, benchmark)
+        print(f"    [{_ext}] external baseline memory...", flush=True)
+        _rx, _ex = await _run_group(_ext.upper(), _ext, test_tasks,
+            lambda t, _m=_mem_x, _g=_ext: solve_with_memory(run_fn_a, t, _m, _g),
+            mem=_mem_x)
+        _ext_scores[_ext] = _ex
+
     # Flat evals + per-group scores for the arms that actually ran.
-    scores = {g: e for g, e in (("A_baseline", evals_a), ("B_evomem", evals_b),
-                                ("C_gpr", evals_c)) if e}
+    scores = {g: e for g, e in (("no_mem", evals_a), ("raw_patch", evals_b),
+                                ("curated_patch", evals_c)) if e}
+    scores.update({g: e for g, e in _ext_scores.items() if e})
     all_evals = [e for evs in scores.values() for e in evs]
 
     report = {}
@@ -883,9 +913,9 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     print(f"\n  Results ({benchmark}, model={MODEL}):")
     for _g, _r in report.items():
         print(f"    {_g:12s}: {metric_name}={_r['em']:.1%}")
-    if {"A_baseline", "B_evomem", "C_gpr"} <= set(report):
-        delta_ac = report['C_gpr']['em'] - report['A_baseline']['em']
-        delta_bc = report['C_gpr']['em'] - report['B_evomem']['em']
+    if {"no_mem", "raw_patch", "curated_patch"} <= set(report):
+        delta_ac = report['curated_patch']['em'] - report['no_mem']['em']
+        delta_bc = report['curated_patch']['em'] - report['raw_patch']['em']
         print(f"    Delta(C-A): {delta_ac:+.1%} | Delta(C-B): {delta_bc:+.1%}")
 
     # ── Per-task wall-clock breakdown (where time goes → how to scale) ──
@@ -923,10 +953,10 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         for i, task in enumerate(test_tasks):
             config = (task.get("metadata") or {}).get("config", "unknown")
             if config not in config_scores:
-                config_scores[config] = {"A_baseline": [], "B_evomem": [], "C_gpr": []}
-            config_scores[config]["A_baseline"].append(all_evals[i * 3])
-            config_scores[config]["B_evomem"].append(all_evals[i * 3 + 1])
-            config_scores[config]["C_gpr"].append(all_evals[i * 3 + 2])
+                config_scores[config] = {"no_mem": [], "raw_patch": [], "curated_patch": []}
+            config_scores[config]["no_mem"].append(all_evals[i * 3])
+            config_scores[config]["raw_patch"].append(all_evals[i * 3 + 1])
+            config_scores[config]["curated_patch"].append(all_evals[i * 3 + 2])
         per_config_report = {}
         for config, groups in sorted(config_scores.items()):
             per_config_report[config] = {}
@@ -945,10 +975,10 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         for i, task in enumerate(test_tasks):
             level = (task.get("metadata") or {}).get("level", "unknown")
             if level not in level_scores:
-                level_scores[level] = {"A_baseline": [], "B_evomem": [], "C_gpr": []}
-            level_scores[level]["A_baseline"].append(all_evals[i * 3])
-            level_scores[level]["B_evomem"].append(all_evals[i * 3 + 1])
-            level_scores[level]["C_gpr"].append(all_evals[i * 3 + 2])
+                level_scores[level] = {"no_mem": [], "raw_patch": [], "curated_patch": []}
+            level_scores[level]["no_mem"].append(all_evals[i * 3])
+            level_scores[level]["raw_patch"].append(all_evals[i * 3 + 1])
+            level_scores[level]["curated_patch"].append(all_evals[i * 3 + 2])
         per_level_report = {}
         for level, groups in sorted(level_scores.items()):
             per_level_report[level] = {}
@@ -962,8 +992,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         print(f"    {'Level':<10} {'Baseline':>10} {'EvoArena+SkillForge':>20} {'n':>4}")
         print(f"    {'-'*46}")
         for level in sorted(per_level_report.keys()):
-            a = per_level_report[level]["A_baseline"]
-            c = per_level_report[level]["C_gpr"]
+            a = per_level_report[level]["no_mem"]
+            c = per_level_report[level]["curated_patch"]
             print(f"    Level {level:<5} {a['score']:>9.1%} {c['score']:>19.1%} {a['n']:>4}")
 
     with open(f"{RESULTS_DIR}/{benchmark}/report.json", "w") as f:
@@ -1090,7 +1120,7 @@ async def main():
     for name, report in all_reports.items():
         if isinstance(report, dict) and "results" in report:
             r = report["results"]
-            print(f"  {name:>20}: A={r['A_baseline']['em']:.1%}, B={r['B_evomem']['em']:.1%}, C={r['C_gpr']['em']:.1%}")
+            print(f"  {name:>20}: A={r.get('no_mem',{}).get('em',0):.1%}, B={r.get('raw_patch',{}).get('em',0):.1%}, C={r.get('curated_patch',{}).get('em',0):.1%}")
         elif isinstance(report, dict) and "error" in report:
             print(f"  {name:>20}: ERROR — {report['error'][:80]}")
         else:

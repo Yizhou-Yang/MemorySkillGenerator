@@ -27,9 +27,9 @@ from pathlib import Path
 BENCHES = ["gaia", "gaia2", "locomo", "terminal_bench_2"]
 # tolerate both the legacy and current group labels
 GROUP = {
-    "A_baseline": "A",
-    "B_evoarena": "B", "B_evomem": "B",
-    "C_skillforge": "C", "C_gpr": "C",
+    "A_baseline": "A", "no_mem": "A",
+    "B_evoarena": "B", "B_evomem": "B", "raw_patch": "B",
+    "C_skillforge": "C", "C_gpr": "C", "curated_patch": "C",
 }
 
 

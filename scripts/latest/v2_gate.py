@@ -29,10 +29,19 @@ SLACK = 130          # headers + section titles around the budgeted blocks
 COVERAGE_FLOOR = 0.95
 
 
+_LEGACY_MAP = {"A_baseline": "no_mem", "B_evomem": "raw_patch", "C_gpr": "curated_patch"}
+
+
 def rows(p: Path) -> list[dict]:
     if not p.exists():
         return []
-    return [json.loads(l) for l in open(p) if l.strip()]
+    out = []
+    for l in open(p):
+        if l.strip():
+            r = json.loads(l)
+            r["group"] = _LEGACY_MAP.get(r.get("group", ""), r.get("group", ""))
+            out.append(r)
+    return out
 
 
 def main() -> None:
@@ -60,7 +69,7 @@ def main() -> None:
                       "audit which rows predate the fix")
                 hard_fail = True
         doses = {}
-        for g in ["A_baseline", "B_evomem", "C_gpr"]:
+        for g in ["no_mem", "raw_patch", "curated_patch"]:
             grs = [r for r in rs if r.get("group") == g]
             fin = {r["task_id"] for r in grs if (r.get("iteration", 0) or 0) == kf}
             late = [r for r in grs if (r.get("iteration", 0) or 0) >= 1]
@@ -70,7 +79,7 @@ def main() -> None:
             cov = (len(inj) / len(late)) if late else 0.0
             print(f"  {g}: finished n={len(fin)}  inj@iter>=1 {len(inj)}/{len(late)}"
                   f" ({100*cov:.0f}%)  dose mean={doses[g]:.0f} max={max(lens) if lens else 0}")
-            if g == "C_gpr" and late:
+            if g == "curated_patch" and late:
                 if cov < COVERAGE_FLOOR:
                     print(f"  G1 ✗ C coverage {100*cov:.0f}% < {100*COVERAGE_FLOOR:.0f}%"
                           " — chain-index/fallback not effective")
@@ -78,22 +87,22 @@ def main() -> None:
                 if lens and max(lens) > BUDGET + SLACK:
                     print(f"  G2 ✗ C max dose {max(lens)} > {BUDGET}+{SLACK}")
                     hard_fail = True
-        if doses.get("C_gpr") and doses.get("B_evomem") and \
-                doses["C_gpr"] > doses["B_evomem"] + 1:
+        if doses.get("curated_patch") and doses.get("raw_patch") and \
+                doses["curated_patch"] > doses["raw_patch"] + 1:
             # The paper's below-B-dose claim is scoped to the AGENTIC
             # benchmarks (gaia2/TB2), where dose harm was measured. On
             # QA benches B's natural render can sit far below L (locomo
             # B≈225ch) and C legitimately exceeds it under the same cap.
             if bench == "gaia2":
-                print(f"  G2 ✗ C mean dose {doses['C_gpr']:.0f} > B "
-                      f"{doses['B_evomem']:.0f} (agentic below-B claim broken)")
+                print(f"  G2 ✗ C mean dose {doses['curated_patch']:.0f} > B "
+                      f"{doses['raw_patch']:.0f} (agentic below-B claim broken)")
                 hard_fail = True
             else:
-                print(f"  G2 note: C mean dose {doses['C_gpr']:.0f} > B "
-                      f"{doses['B_evomem']:.0f} (allowed off-agentic; cap is L)")
+                print(f"  G2 note: C mean dose {doses['curated_patch']:.0f} > B "
+                      f"{doses['raw_patch']:.0f} (allowed off-agentic; cap is L)")
         # G3 markers (soft): rendered-channel fingerprints in C prompts
         caugs = [r.get("augmented_prompt") or "" for r in rs
-                 if r.get("group") == "C_gpr" and r.get("patch_injected")]
+                 if r.get("group") == "curated_patch" and r.get("patch_injected")]
         if caugs:
             hdr = sum("## Curated prior attempts" in a for a in caugs)
             ans = sum("Answer given then" in a for a in caugs)

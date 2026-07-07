@@ -30,6 +30,14 @@
 #                               on one box should each use 12 to stay < the ~24
 #                               internal-API ceiling)
 #   NO_TB2=1                    skip TB2 (QA-only run)
+#   Separate invocations (NOT part of this launcher):
+#     external baselines:  EXTERNAL_MEMS=mem0,amem ARMS= RESULTS_BASE=latest_evolving \
+#                            ITER_MUTATE=1 ITER_FEEDBACK=self ITER_CHAIN=3 RESUME=1 \
+#                            CODEBUDDY_MODEL=<m> python scripts/latest/latest_runner.py
+#                          (pairs against existing no_mem rows; raw_patch NOT rerun)
+#     pass@k control:      PASSK=3 ITER_CHAIN=1 ARMS=A RESULTS_BASE=latest_evolving \
+#                            CODEBUDDY_MODEL=<m> python scripts/latest/latest_runner.py
+#                          then: python scripts/latest/passk_report.py <m>
 #   LEAN=1                      budget protocol for expensive models: ITER_CHAIN=2,
 #                               gaia2 at 100 tasks (~50% cost; per-split power and
 #                               ablation stay on the cheap/free backbones)
