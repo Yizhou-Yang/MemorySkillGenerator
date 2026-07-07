@@ -56,42 +56,70 @@ def main() -> None:
         if not rs:
             print(f"[{bench}] no trace")
             continue
-        samples = {}          # task -> {sample_idx: score}
+        kf = max((int(r.get("iter_total", 1) or 1) for r in rs), default=1) - 1
+        # no-memory control: k independent single-shot samples
+        nm = {}               # task -> {sample_idx: score}
+        # raw-patch control: chain run once, FINAL iteration resampled k times
+        # (sample 0 = the arm's own final row; s1.. = raw_patch_passk_s<i>)
+        rp = {}
         for r in rs:
             g = r["group"]
             if g.startswith("no_mem_passk_s"):
                 s = int(g.rsplit("_s", 1)[1])
-                samples.setdefault(r["task_id"], {})[s] = r.get("score") or 0.0
-        kf = max((int(r.get("iter_total", 1) or 1) for r in rs), default=1) - 1
+                nm.setdefault(r["task_id"], {})[s] = r.get("score") or 0.0
+            elif g.startswith("raw_patch_passk_s"):
+                s = int(g.rsplit("_s", 1)[1])
+                rp.setdefault(r["task_id"], {})[s] = r.get("score") or 0.0
+            elif g == "raw_patch" and (r.get("iteration", 0) or 0) == kf:
+                rp.setdefault(r["task_id"], {})[0] = r.get("score") or 0.0
         cur = {r["task_id"]: r.get("score") or 0.0 for r in rs
                if r["group"] == "curated_patch"
                and (r.get("iteration", 0) or 0) == kf}
-        if not samples:
-            print(f"[{bench}] no pass@k groups — run "
-                  f"PASSK=k ITER_CHAIN=1 ARMS=A first")
+
+        def _passk_block(label, samples, chain_calls):
+            if not samples:
+                return None
+            k = max(max(v) for v in samples.values()) + 1
+            tasks = sorted(t for t, v in samples.items() if len(v) == k)
+            if not tasks or k < 2:
+                return None
+            print(f"  {label} (n={len(tasks)}, k={k}):")
+            for j in range(1, k + 1):
+                pk = sum(1 for t in tasks
+                         if any(samples[t][s] >= 0.5 for s in range(j))) / len(tasks)
+                print(f"    pass@{j}: {100*pk:.2f}%   "
+                      f"(budget: {chain_calls + j - 1 + 1:.0f} solve calls, "
+                      "oracle answer-selection)" if chain_calls else
+                      f"    pass@{j}: {100*pk:.2f}%   (budget: {j} solve calls, "
+                      "oracle answer-selection)")
+            means = [sum(samples[t][s] >= 0.5 for t in tasks) / len(tasks)
+                     for s in range(k)]
+            mu = sum(means) / k
+            sd = (sum((m - mu) ** 2 for m in means) / k) ** 0.5
+            print(f"    single-sample: {100*mu:.2f}% ± {100*sd:.2f}pp "
+                  "(between-sample std)")
+            return set(tasks)
+
+        print(f"\n[{bench}]")
+        t1 = _passk_block("no_mem pass@k (single-shot)", nm, 0)
+        t2 = _passk_block(f"raw_patch pass@k (chain kept, final iter resampled)",
+                          rp, kf)
+        if t1 is None and t2 is None:
+            print("  no pass@k groups — run PASSK=k ITER_CHAIN=1 ARMS=A "
+                  "(no_mem) and/or PASSK_FINAL=k ARMS=B (raw_patch) first")
             continue
-        k = max(max(v) for v in samples.values()) + 1
-        tasks = sorted(t for t, v in samples.items() if len(v) == k)
-        print(f"\n[{bench}] pass@k over n={len(tasks)} tasks, k={k}")
-        for j in range(1, k + 1):
-            pk = sum(1 for t in tasks
-                     if any(samples[t][s] >= 0.5 for s in range(j))) / len(tasks)
-            calls = j
-            print(f"  pass@{j}: {100*pk:.2f}%   (budget: {calls} solve calls, "
-                  "oracle answer-selection)")
-        means = [sum(samples[t][s] >= 0.5 for t in tasks) / len(tasks)
-                 for s in range(k)]
-        mu = sum(means) / k
-        sd = (sum((m - mu) ** 2 for m in means) / k) ** 0.5
-        print(f"  single-sample accuracy: {100*mu:.2f}% ± {100*sd:.2f}pp "
-              "(between-sample std — the LLM-randomness the control exposes)")
         if cur:
-            common = [t for t in tasks if t in cur]
+            base = t2 or t1 or set(cur)
+            common = [t for t in base if t in cur]
             if common:
                 ca = sum(cur[t] >= 0.5 for t in common) / len(common)
                 print(f"  curated_patch (final iter, n={len(common)}): "
-                      f"{100*ca:.2f}% at ~{1 + W_WRITE:.1f} calls/iteration, "
-                      "single final answer (no oracle)")
+                      f"{100*ca:.2f}% at ~{kf + 1 + (kf + 1) * W_WRITE:.1f} "
+                      "calls/chain, single final answer (no oracle)")
+                print("  note: write-time calls are short single-shot "
+                      "completions; solve calls are full agent loops — on "
+                      "agentic benches one solve dwarfs one write in tokens, "
+                      "so call counts overstate curation's relative cost.")
 
 
 if __name__ == "__main__":

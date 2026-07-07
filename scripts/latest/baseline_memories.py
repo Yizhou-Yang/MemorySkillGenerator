@@ -189,7 +189,89 @@ class AMemMemory:
         return sum(len(v) for v in self._per_chain.values())
 
 
-_REGISTRY = {"mem0": Mem0Memory, "amem": AMemMemory}
+class MemoryOSMemory:
+    """MemoryOS (BAI-LAB, 2025) as a baseline arm — short/mid/long-term
+    hierarchical memory behind its own module (pip install memoryos), pointed
+    at the local OAI proxy."""
+
+    def __init__(self, benchmark: str, top_k: int = 3) -> None:
+        self.benchmark = benchmark
+        self.top_k = top_k
+        try:
+            from memoryos import Memoryos
+        except ImportError as e:
+            raise SystemExit(
+                "[baseline:memoryos] pip install memoryos (BAI-LAB/MemoryOS) "
+                f"or swap the third baseline: {e}")
+        self._cls = Memoryos
+        self._per_ns: dict[str, object] = {}
+        self._base = os.environ.get("OPENAI_API_BASE", "http://localhost:8741/v1")
+        self._key = os.environ.get("OPENAI_API_KEY", "dummy")
+        self._model = os.environ.get("CODEBUDDY_MODEL", "hy3").lower()
+
+    def _sys_for(self, ns: str):
+        if ns not in self._per_ns:
+            safe = ns.replace(":", "_").replace("/", "_")
+            try:
+                self._per_ns[ns] = self._cls(
+                    user_id=safe, openai_api_key=self._key,
+                    openai_base_url=self._base,
+                    data_storage_path=str(_STORE_ROOT / "memoryos" / safe),
+                    llm_model=self._model)
+            except TypeError:
+                self._per_ns[ns] = self._cls(user_id=safe,
+                                             openai_api_key=self._key)
+        return self._per_ns[ns]
+
+    def inject(self, task: dict) -> str:
+        ns = _ns(self.benchmark, task)
+        if ns not in self._per_ns:
+            return ""      # nothing recorded for this chain yet
+        sys_ = self._per_ns[ns]
+        query = task.get("description", "")[:2000]
+        ctx = None
+        for meth in ("retrieve_context", "get_retrieval_context", "retrieve",
+                     "search"):
+            fn = getattr(sys_, meth, None)
+            if fn is None:
+                continue
+            try:
+                ctx = fn(query)
+                break
+            except TypeError:
+                try:
+                    ctx = fn(query, self.top_k)
+                    break
+                except Exception:
+                    continue
+            except Exception as e:
+                print(f"[baseline:memoryos] {meth} failed: {e}", flush=True)
+                return ""
+        if not ctx:
+            return ""
+        text = ctx if isinstance(ctx, str) else str(ctx)
+        text = text.strip()[:1200]
+        if len(text) < 3:
+            return ""
+        return "## Memories from earlier attempts (MemoryOS)\n\n" + text
+
+    async def record(self, task: dict, result: dict, score=None) -> None:
+        resp = (result.get("response") or "").strip()
+        if not resp:
+            return
+        ns = _ns(self.benchmark, task)
+        try:
+            self._sys_for(ns).add_memory(
+                user_input=task.get("description", "")[:3000],
+                agent_response=resp[:3000])
+        except Exception as e:
+            print(f"[baseline:memoryos] add failed: {e}", flush=True)
+
+    def __len__(self) -> int:
+        return len(self._per_ns)
+
+
+_REGISTRY = {"mem0": Mem0Memory, "amem": AMemMemory, "memoryos": MemoryOSMemory}
 
 
 def make_external_memory(name: str, benchmark: str):

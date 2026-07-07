@@ -786,6 +786,42 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                       "cmds_executed", "pre_test_passed")
                                      if isinstance(r, dict) and k in r},
                                   **{f"prof_{k}": v for k, v in prof.items()}})
+                # ── FINAL-ITERATION resampling for the raw-patch arm
+                # (PASSK_FINAL=k): after the chain's last iteration, draw k-1
+                # extra independent solves of the SAME variant with the SAME
+                # frozen memory state (no record between samples), logged as
+                # groups raw_patch_passk_s1..s{k-1}; the normal final row is
+                # sample 0. This is the fair counterpart to the no-memory
+                # pass@k control: B keeps its chain advantage and spends the
+                # extra calls on resampling, exactly the budget C spends on
+                # curation. Set PASSK_FINAL from the START of the B run —
+                # RESUME skips completed chains and will not backfill samples.
+                _PKF = int(os.environ.get("PASSK_FINAL", "0"))
+                if (_PKF > 1 and group_key == "raw_patch"
+                        and _it == ITER_CHAIN - 1):
+                    for _s in range(1, _PKF):
+                        if needs_docker and docker_sem is not None:
+                            async with docker_sem:
+                                async with global_sem:
+                                    _rs = await _run_bounded(build_coro, cur_task, True)
+                        else:
+                            async with global_sem:
+                                _rs = await _run_bounded(build_coro, cur_task, False)
+                        _evs = await evaluate_task(_rs, benchmark)
+                        _trace.log(
+                            benchmark=benchmark, group=f"raw_patch_passk_s{_s}",
+                            phase="test", task_id=_rs.get("task_id", tid),
+                            task_desc=cur_task.get("description", ""),
+                            augmented_prompt=_rs.get("_aug_prompt", ""),
+                            response=_rs.get("response", ""), expected=expected,
+                            score=_evs.get("score", 0.0),
+                            extra={"em": _evs.get("em", 0.0),
+                                   "iteration": _it, "iter_total": ITER_CHAIN,
+                                   "sample_idx": _s,
+                                   "patch_injected": bool(_rs.get("_aug_prompt")),
+                                   "aug_len": len(_rs.get("_aug_prompt") or ""),
+                                   "fb_mode": ITER_FEEDBACK,
+                                   "code_rev": _CODE_REV})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
