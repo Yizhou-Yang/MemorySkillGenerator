@@ -25,11 +25,16 @@ a silently-degraded baseline would be worse than no baseline.
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_STORE_ROOT = PROJECT_ROOT / "experiments_results" / "_extmem"
+_MODEL_SLUG = re.sub(r"[^A-Za-z0-9._-]", "_",
+                     os.environ.get("CODEBUDDY_MODEL", "hy3")).lower()
+# per-model roots: two backbones on one box must not share vector stores
+_STORE_ROOT = PROJECT_ROOT / "experiments_results" / "_extmem" / _MODEL_SLUG
 
 
 def _chain_id(task: dict) -> str:
@@ -64,10 +69,13 @@ class Mem0Memory:
             "llm": {"provider": "openai",
                     "config": {"model": model, "api_key": key,
                                "openai_base_url": base}},
-            "embedder": {"provider": "openai",
+            # LOCAL embedder by default: the chat proxy does not serve
+            # /embeddings, and this matches the embedding stack the B/C arms
+            # use, so no arm gets a better encoder.
+            "embedder": {"provider": "huggingface",
                          "config": {"model": os.environ.get(
-                             "MEM0_EMBED_MODEL", "text-embedding-3-small"),
-                             "api_key": key, "openai_base_url": base}},
+                             "MEM0_EMBED_MODEL",
+                             "sentence-transformers/all-MiniLM-L6-v2")}},
             "vector_store": {"provider": "qdrant",
                              "config": {"path": str(_STORE_ROOT / "mem0"),
                                         "on_disk": True}},
@@ -77,6 +85,13 @@ class Mem0Memory:
             import json
             cfg = json.loads(override)
         self._m = Memory.from_config(cfg)
+        try:
+            import mem0 as _m0
+            print(f"[baseline:mem0] version={getattr(_m0, '__version__', '?')} "
+                  f"store={_STORE_ROOT / 'mem0'}", flush=True)
+        except Exception:
+            pass
+        self._add_failures = 0
 
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
@@ -99,12 +114,18 @@ class Mem0Memory:
         if not resp:
             return
         try:
-            self._m.add(
+            # mem0.add runs its own LLM extraction — blocking; keep it off
+            # the event loop or it throttles every concurrent task.
+            await asyncio.to_thread(
+                self._m.add,
                 [{"role": "user", "content": task.get("description", "")[:4000]},
                  {"role": "assistant", "content": resp[:4000]}],
                 user_id=_ns(self.benchmark, task))
         except Exception as e:
-            print(f"[baseline:mem0] add failed: {e}", flush=True)
+            self._add_failures += 1
+            if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                print(f"[baseline:mem0] add failed ({self._add_failures}): {e}",
+                      flush=True)
 
     def __len__(self) -> int:  # parity with other arms' logging
         return 0
@@ -179,11 +200,15 @@ class AMemMemory:
         try:
             note = (f"Task: {task.get('description', '')[:1500]}\n"
                     f"Attempt: {resp[:2500]}")
-            nid = self._sys.add_note(note) if hasattr(self._sys, "add_note") \
-                else self._sys.create_memory(note)
+            _fn = self._sys.add_note if hasattr(self._sys, "add_note") \
+                else self._sys.create_memory
+            nid = await asyncio.to_thread(_fn, note)   # LLM link-gen inside
             self._per_chain.setdefault(ns, []).append(nid)
         except Exception as e:
-            print(f"[baseline:amem] add failed: {e}", flush=True)
+            self._add_failures = getattr(self, "_add_failures", 0) + 1
+            if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                print(f"[baseline:amem] add failed ({self._add_failures}): {e}",
+                      flush=True)
 
     def __len__(self) -> int:
         return sum(len(v) for v in self._per_chain.values())
@@ -261,11 +286,15 @@ class MemoryOSMemory:
             return
         ns = _ns(self.benchmark, task)
         try:
-            self._sys_for(ns).add_memory(
+            await asyncio.to_thread(
+                self._sys_for(ns).add_memory,
                 user_input=task.get("description", "")[:3000],
                 agent_response=resp[:3000])
         except Exception as e:
-            print(f"[baseline:memoryos] add failed: {e}", flush=True)
+            self._add_failures = getattr(self, "_add_failures", 0) + 1
+            if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                print(f"[baseline:memoryos] add failed ({self._add_failures}): "
+                      f"{e}", flush=True)
 
     def __len__(self) -> int:
         return len(self._per_ns)
