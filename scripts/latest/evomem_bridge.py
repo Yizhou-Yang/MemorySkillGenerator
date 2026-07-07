@@ -109,6 +109,17 @@ _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
 # remains is purely WHAT is injected. Set 0 to disable (legacy), or override
 # per ablation arm (C_small_inject=500).
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
+# Weak-compaction knob (ablation arm C_weak_compact, NOT part of the frozen
+# method — default off): C_PAGE_KEEP=n makes retrieval see only the newest n
+# same-chain entries, a MemoryOS-style paging of older ones out of the read
+# path. The store itself is untouched (paging is reversible, unlike eviction),
+# so this isolates exactly what the append-only read path buys: the paper's
+# compaction row compares n=2 against the default n=inf. Read dynamically so
+# the ablation driver can set it per-arm without reimport.
+def _page_keep() -> int:
+    return int(os.environ.get("C_PAGE_KEEP", "0"))
+
+
 # Raw fallback (frozen method v2, 2026-07-05): when every curated channel comes
 # up empty (critic approves nothing, no note survives the weak-lesson floor, or
 # the reworded variant drops the chain below the similarity floor), C injects
@@ -501,6 +512,13 @@ class CuratedMemory:
         _have = {_key(e) for e in ranked}
         cands = ranked + [e for e in self._chain_entries.get(chain, [])
                           if _key(e) not in _have]
+        _pk = _page_keep()
+        if _pk > 0:
+            # weak compaction (ablation only): page all but the newest n
+            # chain entries out of the read path; the store keeps everything
+            _allowed = {_key(e) for e in
+                        self._chain_entries.get(chain, [])[-_pk:]}
+            cands = [e for e in cands if _key(e) in _allowed]
         # Similarity floor as HYGIENE only: within multi-task chains (LoCoMo
         # sessions) it filters off-topic entries, but it must never zero out a
         # chain that has history — on reworded variants the floor is exactly

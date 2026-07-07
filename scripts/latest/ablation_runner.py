@@ -19,6 +19,9 @@ mutations.json as the main sweep, so every comparison is paired:
   C_no_fallback   raw fallback off           (C_RAW_FALLBACK=0: curated channels
                   empty -> inject nothing, the pre-v2 behaviour — evidence for
                   the "degrade to raw, never to silence" design)
+  C_weak_compact  MemoryOS-style paging      (C_PAGE_KEEP=2: read path sees only
+                  the newest 2 chain entries; store untouched — prices what the
+                  append-only read path buys vs weak compaction)
   ctrl_reprompt   equal-budget, no memory    (REPROMPT_CONTROL=1: the baseline
                   answer gets REPROMPT_CALLS=2 generic self-refinement calls,
                   spending C's write-time budget with no store)
@@ -65,6 +68,8 @@ ARMS = {
     "C_no_budget":     ({"ARMS": "C", "C_INJECT_BUDGET_CH": "0"},
                         "C", "curated_patch"),
     "C_no_fallback":   ({"ARMS": "C", "C_RAW_FALLBACK": "0"},
+                        "C", "curated_patch"),
+    "C_weak_compact":  ({"ARMS": "C", "C_PAGE_KEEP": "2"},
                         "C", "curated_patch"),
     "ctrl_reprompt":   ({"ARMS": "A", "REPROMPT_CONTROL": "1",
                          "REPROMPT_CALLS": os.environ.get("REPROMPT_CALLS", "2")},
@@ -161,6 +166,7 @@ def report() -> None:
              ("C with 500-char injection budget", None, "C_small_inject"),
              ("C without dose budget (L=inf)", None, "C_no_budget"),
              ("C without raw fallback (silent when gated)", None, "C_no_fallback"),
+             ("C with paged retrieval (keep last 2 = weak compaction)", None, "C_weak_compact"),
              ("Reprompt (equal budget, no memory)", None, "ctrl_reprompt")])
     for label, base, key in plan:
         cells = []
