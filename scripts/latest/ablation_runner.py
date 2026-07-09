@@ -12,6 +12,11 @@ mutations.json as the main sweep, so every comparison is paired:
   C_refine        refinement only            (C_USE_CRITIC=0, C_USE_ENRICH=0)
   C_refine_critic refinement + critic        (C_USE_CRITIC=1, C_USE_ENRICH=0)
   C_no_wc         retrieval by similarity    (W_C_DISABLED=1)
+  C_no_partition  no partition pruning       (C_NO_PARTITION=1: read path sees
+                  the flat global similarity pool, no chain scoping and no
+                  chain-index rescue; store untouched — the accuracy side of
+                  the manifest's partition claim; tab:manifest is the systems
+                  side)
   C_small_inject  tighter dose budget        (C_INJECT_BUDGET_CH=500)
   C_no_budget     dose budget lifted         (C_INJECT_BUDGET_CH=0 = unbounded;
                   the paper's "L=inf" row — evidence that the harm of an
@@ -62,6 +67,8 @@ ARMS = {
     "C_refine_critic": ({"ARMS": "C", "C_USE_CRITIC": "1", "C_USE_ENRICH": "0"},
                         "C", "curated_patch"),
     "C_no_wc":         ({"ARMS": "C", "W_C_DISABLED": "1"},
+                        "C", "curated_patch"),
+    "C_no_partition":  ({"ARMS": "C", "C_NO_PARTITION": "1"},
                         "C", "curated_patch"),
     "C_small_inject":  ({"ARMS": "C", "C_INJECT_BUDGET_CH": "500"},
                         "C", "curated_patch"),
@@ -163,6 +170,7 @@ def report() -> None:
              ("+ critic", None, "C_refine_critic"),
              ("+ enrichment (= C, main sweep)", main_dir, "curated_patch"),
              ("C without w_c (pure similarity)", None, "C_no_wc"),
+             ("C without partition pruning (global pool)", None, "C_no_partition"),
              ("C with 500-char injection budget", None, "C_small_inject"),
              ("C without dose budget (L=inf)", None, "C_no_budget"),
              ("C without raw fallback (silent when gated)", None, "C_no_fallback"),

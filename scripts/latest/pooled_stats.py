@@ -43,7 +43,21 @@ PAIRS = [("curated_patch", "raw_patch"), ("curated_patch", "no_mem"), ("raw_patc
 N_PERM = int(os.environ.get("N_PERM", "10000"))
 N_BOOT = int(os.environ.get("N_BOOT", "4000"))
 USE_CUPED = os.environ.get("CUPED", "1") == "1"
+# Metric mapping. Primary endpoint = the continuous per-task `score` for every
+# benchmark (most powerful, disclosed as such). NATIVE_METRIC=1 reruns the same
+# test under each benchmark's *native* metric: strict exact-match for GAIA and
+# LoCoMo (the `em` field), and the continuous score for GAIA2 (soft recall) and
+# TB-2 (verified pass fraction). Reported as an honest robustness view.
+NATIVE_METRIC = os.environ.get("NATIVE_METRIC", "0") == "1"
+_EM_BENCH = {"gaia", "locomo"}
 random.seed(20260705)
+
+
+def _task_score(r: dict) -> float:
+    if NATIVE_METRIC and (r.get("benchmark", "") or "").lower() in _EM_BENCH \
+            and r.get("em") is not None:
+        return float(r.get("em") or 0.0)
+    return float(r.get("score") or 0.0)
 
 
 def _rows(path: Path) -> list[dict]:
@@ -62,7 +76,7 @@ def _by_task_iter(rows: list[dict], group: str) -> dict:
     out = {}
     for r in rows:
         if r.get("group") == group:
-            out[(r.get("task_id"), int(r.get("iteration", 0) or 0))] = r.get("score") or 0.0
+            out[(r.get("task_id"), int(r.get("iteration", 0) or 0))] = _task_score(r)
     return out
 
 
@@ -150,7 +164,7 @@ def main() -> None:
             # Dead-stratum guard: a benchmark whose scores are ALL zero in both
             # arms (e.g. an infra-failed TB2 round) contributes only 0-deltas,
             # dragging the pooled estimate toward 0 without carrying signal.
-            scores = [r.get("score") or 0.0 for r in rows
+            scores = [_task_score(r) for r in rows
                       if r.get("group") in (g1, g2)]
             if scores and not any(scores):
                 if name not in dead_warned:

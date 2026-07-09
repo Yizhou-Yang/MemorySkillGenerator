@@ -120,6 +120,19 @@ def _page_keep() -> int:
     return int(os.environ.get("C_PAGE_KEEP", "0"))
 
 
+# No-partition knob (ablation arm C_no_partition, NOT part of the frozen
+# method — default off): C_NO_PARTITION=1 switches the manifest's partition
+# metadata off at read time — no chain pruning of the similarity pool and no
+# chain-index recall rescue (the index IS the partition being ablated) — so
+# retrieval reads the flat, similarity-ranked global pool, exactly what a log
+# without partitions serves. Store writes are untouched. This is the accuracy
+# side of the manifest's partition claim: tab:manifest prices the read-path
+# latency, this arm prices what pruning buys in answer quality. Read
+# dynamically so the ablation driver can set it per-arm without reimport.
+def _no_partition() -> bool:
+    return os.environ.get("C_NO_PARTITION", "0") == "1"
+
+
 # Raw fallback (frozen method v2, 2026-07-05): when every curated channel comes
 # up empty (critic approves nothing, no note survives the weak-lesson floor, or
 # the reworded variant drops the chain below the similarity floor), C injects
@@ -500,18 +513,27 @@ class CuratedMemory:
             pool = self._sf.library.retrieve_similar(core, top_k=self.top_k * 6)
         except Exception:
             pool = []  # the chain index below still serves
-        # CHAIN-SCOPED: keep only experiences from the SAME chain (this task's
-        # earlier iterations, or same LoCoMo session) — patch memory is not
-        # cross-task transfer. On a single-pass independent-task run nothing is
-        # in-chain, so C honestly injects nothing (value appears under chains).
-        ranked = [e for e in pool if self._chain_of.get(e.task_id) == chain]
-        # Recall rescue: append any in-chain entry the global pool missed
-        # (keeps retrieve_similar's sim x w_c order for what it DID surface).
         _key = lambda e: (e.task_id, getattr(e, "version", 0),
                           getattr(e, "timestamp", 0.0))
-        _have = {_key(e) for e in ranked}
-        cands = ranked + [e for e in self._chain_entries.get(chain, [])
-                          if _key(e) not in _have]
+        if _no_partition():
+            # No-partition foil (ablation only, see _no_partition): serve the
+            # flat similarity-ranked pool — no chain pruning, no chain-index
+            # rescue. Downstream (floor, same-task sort, channels, budget)
+            # is identical, so the arm isolates the partition metadata.
+            cands = list(pool)
+        else:
+            # CHAIN-SCOPED: keep only experiences from the SAME chain (this
+            # task's earlier iterations, or same LoCoMo session) — patch memory
+            # is not cross-task transfer. On a single-pass independent-task run
+            # nothing is in-chain, so C honestly injects nothing (value appears
+            # under chains).
+            ranked = [e for e in pool if self._chain_of.get(e.task_id) == chain]
+            # Recall rescue: append any in-chain entry the global pool missed
+            # (keeps retrieve_similar's sim x w_c order for what it DID
+            # surface).
+            _have = {_key(e) for e in ranked}
+            cands = ranked + [e for e in self._chain_entries.get(chain, [])
+                              if _key(e) not in _have]
         _pk = _page_keep()
         if _pk > 0:
             # weak compaction (ablation only): page all but the newest n

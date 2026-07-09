@@ -15,7 +15,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
-os.environ['LLM_PROVIDER'] = 'codebuddy'
+# CodeBuddy stays the default (existing path). setdefault (not '=') lets a run
+# opt into an alternate OpenAI-compatible backend via LLM_PROVIDER=openrouter in
+# the shell or .env without touching the CodeBuddy SDK path.
+os.environ.setdefault('LLM_PROVIDER', 'codebuddy')
 # Backbone model for this run. The wrapper scripts/latest/run_all_models.sh sets
 # CODEBUDDY_MODEL per model and invokes this script once per model; setdefault
 # keeps HY3-preview (in-house) as the default when run directly.
@@ -946,13 +949,19 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             "n": len(valid),
         }
 
-    metric_name = "EM"
+    # Native metric per benchmark: GAIA2 is scored by soft recall over oracle
+    # events (the continuous `avg_score`); GAIA/LoCoMo by exact match (`em`).
+    # The stale blanket "EM" label made the GAIA2 `em` column (a meaningless hard
+    # threshold on soft recall) look like the headline number. Both fields stay
+    # stored; only the label and the printed/delta field follow the native metric.
+    metric_name, metric_field = (("soft_recall", "avg_score") if benchmark == "gaia2"
+                                 else ("EM", "em"))
     print(f"\n  Results ({benchmark}, model={MODEL}):")
     for _g, _r in report.items():
-        print(f"    {_g:12s}: {metric_name}={_r['em']:.1%}")
+        print(f"    {_g:12s}: {metric_name}={_r[metric_field]:.1%}")
     if {"no_mem", "raw_patch", "curated_patch"} <= set(report):
-        delta_ac = report['curated_patch']['em'] - report['no_mem']['em']
-        delta_bc = report['curated_patch']['em'] - report['raw_patch']['em']
+        delta_ac = report['curated_patch'][metric_field] - report['no_mem'][metric_field]
+        delta_bc = report['curated_patch'][metric_field] - report['raw_patch'][metric_field]
         print(f"    Delta(C-A): {delta_ac:+.1%} | Delta(C-B): {delta_bc:+.1%}")
 
     # ── Per-task wall-clock breakdown (where time goes → how to scale) ──
@@ -975,14 +984,13 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         "n_test": len(test_tasks),
         "profile_avg_s": _profile_avg,
         "design": [
-            "evoarena_evomem_within_task_patch_memory",
-            "failure_aware_attention_routing",
-            "cross_agent_critic_gating",
-            "exact_match_metrics",
+            "append_only_manifested_patch_store",
+            "additive_curation_refine_critique_enrich",
+            "effectiveness_weighted_chain_scoped_retrieval",
         ],
         "results": report,
-        "delta_skillforge_vs_baseline": delta_ac,
-        "delta_skillforge_vs_evoarena": delta_bc,
+        "delta_curated_vs_no_mem": delta_ac,   # C - A
+        "delta_curated_vs_raw_patch": delta_bc,  # C - B
     }
 
     if benchmark == "gaia2":
@@ -1066,6 +1074,7 @@ async def main():
         "C_CRITIC_GATE": os.environ.get("C_CRITIC_GATE", "5"),
         "C_RAW_FALLBACK": os.environ.get("C_RAW_FALLBACK", "1"),
         "C_PAGE_KEEP": os.environ.get("C_PAGE_KEEP", "0"),
+        "C_NO_PARTITION": os.environ.get("C_NO_PARTITION", "0"),
         "C_USE_CRITIC": os.environ.get("C_USE_CRITIC", "1"),
         "C_USE_ENRICH": os.environ.get("C_USE_ENRICH", "1"),
         "W_C_DISABLED": os.environ.get("W_C_DISABLED", "0"),

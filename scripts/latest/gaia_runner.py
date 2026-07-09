@@ -187,7 +187,7 @@ async def run_gaia_task(task: dict, experience_section: str = "",
               "error": None, "time_cost": 0, "augmented": bool(experience_section),
               "group": group, "actions": []}
     t0 = time.time()
-    r = await _llm_call(prompt, max_turns=30, timeout=TASK_TIMEOUT_AGENT)
+    r = await _llm_call(prompt, max_turns=int(os.environ.get("GAIA_MAX_TURNS", "20")), timeout=TASK_TIMEOUT_AGENT)
     if _check_api_error(r):
         raise APIUnavailableError(f"API unavailable after {_API_FAILURE_THRESHOLD} consecutive failures")
     result["response"] = r.get("text", "")
@@ -384,9 +384,10 @@ async def run_gaia_task_controlled(task: dict, experience_section: str = "",
         max_retries=3,
     )
     nr_guard = NoRepeatGuard()
-    budget = BudgetTracker(max_turns=40)
+    _gaia_turns = int(os.environ.get("GAIA_MAX_TURNS", "20"))
+    budget = BudgetTracker(max_turns=_gaia_turns)
 
-    max_turns = 40
+    max_turns = _gaia_turns
     all_responses = []
     within_task_patches: list[dict] = []
     _last_answer: str | None = None  # Track answer across turns for implicit correction detection
