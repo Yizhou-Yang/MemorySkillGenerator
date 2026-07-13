@@ -121,6 +121,16 @@ def _parse_results(save_to: Path) -> list[dict]:
           "termination_reason": str}], ...}
     Fallbacks: results/tasks for the list, reward for reward_info.reward,
     trajectory/conversation for messages."""
+    # tau2 `--save-to X.json` may write X.json as a FILE, or (version-dependent)
+    # create X.json as a DIRECTORY holding results.json — resolve to the json.
+    if save_to.is_dir():
+        cands = sorted(save_to.rglob("results.json"),
+                       key=lambda q: q.stat().st_mtime, reverse=True) \
+            or sorted(save_to.glob("*.json"))
+        if not cands:
+            raise RuntimeError(
+                f"{save_to} is a directory with no results.json — inspect layout")
+        save_to = cands[0]
     try:
         data = json.loads(save_to.read_text())
     except Exception as e:
@@ -137,9 +147,19 @@ def _parse_results(save_to: Path) -> list[dict]:
         raise RuntimeError(
             f"no simulation list in {save_to} (looked for simulations/results/"
             "tasks) — inspect the layout and extend _parse_results()")
-    out = []
+    out, skipped_infra = [], 0
     for i, s in enumerate(sims):
         if not isinstance(s, dict):
+            continue
+        messages = (s.get("messages") or s.get("trajectory")
+                    or s.get("conversation") or [])
+        term = str(s.get("termination_reason") or "")
+        # A sim where the agent NEVER ran (harness/infra crash, no transcript) is
+        # not a task result: dropping it stops a broken run from masquerading as an
+        # all-zero no_mem baseline (which would silently inflate B/C gains). Real
+        # attempts that scored 0 keep their messages, so they are retained.
+        if not messages and term in ("infrastructure_error", "error", ""):
+            skipped_infra += 1
             continue
         ri = s.get("reward_info") or {}
         reward = ri.get("reward") if isinstance(ri, dict) else None
@@ -147,8 +167,6 @@ def _parse_results(save_to: Path) -> list[dict]:
             reward = s.get("reward", s.get("score", 0.0))
         if isinstance(reward, bool):
             reward = float(reward)
-        messages = (s.get("messages") or s.get("trajectory")
-                    or s.get("conversation") or [])
         instruction = _opening_user(messages) or str(s.get("instruction") or "")
         task_id = str(s.get("task_id") or s.get("id") or f"tau2_task_{i}")
         trial = s.get("trial", s.get("trial_id", ""))
@@ -162,9 +180,14 @@ def _parse_results(save_to: Path) -> list[dict]:
                            f"term={s.get('termination_reason') or 'n/a'}",
             "failure_mode": str(s.get("termination_reason") or "")[:200],
         })
+    if skipped_infra:
+        print(f"[tau2] WARNING: dropped {skipped_infra}/{len(sims)} sims that never "
+              f"ran (infrastructure_error, empty transcript) in {save_to}", flush=True)
     if not out:
         raise RuntimeError(
-            f"empty simulation list in {save_to} — extend _parse_results()")
+            f"no usable sims in {save_to}: {skipped_infra}/{len(sims)} were "
+            "infrastructure_error with no transcript — the run is BROKEN, rerun it "
+            "(do not treat as an all-zero baseline)")
     return out
 
 
