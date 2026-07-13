@@ -166,3 +166,14 @@ if _BaseAgent is not object:
     for _mname in _GEN_METHODS:
         if hasattr(_BaseAgent, _mname):
             setattr(CuratedTau2Agent, _mname, _make_wrapper(_mname))
+
+
+def create_curated_tau2_agent(tools, domain_policy, **kwargs):
+    """Factory function for CuratedTau2Agent — matches tau2's create_llm_agent
+    signature so it can be registered via registry.register_agent_factory()."""
+    return CuratedTau2Agent(
+        tools=tools,
+        domain_policy=domain_policy,
+        llm=kwargs.get("llm"),
+        llm_args=kwargs.get("llm_args"),
+    )

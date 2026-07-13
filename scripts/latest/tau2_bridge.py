@@ -202,12 +202,29 @@ async def _record_all(mem, rows: list[dict]) -> None:
 
 def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
               num_trials: int, concurrency: int, save_to: Path,
-              task_ids: list[str] | None) -> list[str]:
+              task_ids: list[str] | None,
+              launcher_path: str | None = None) -> list[str]:
     """Build the `tau2 run` invocation. VERIFY the flag spellings on the pinned
     version (`tau2 run --help`); kept in one place so a mismatch is a one-line
-    fix. Agent + user share our endpoint model (LiteLLM reads OPENAI_API_*)."""
-    cmd = [tau2_bin, "run",
+    fix. Agent + user share our endpoint model (LiteLLM reads OPENAI_API_*).
+
+    For arms B/C we use tau2_launcher.py which registers CuratedTau2Agent
+    in tau2's global registry BEFORE the CLI parses --agent. tau2 CLI does NOT
+    support --agent-import-path, so we inject the custom agent at the launcher
+    level instead."""
+    # Arm A uses the official tau2 CLI; arms B/C use the launcher that first
+    # registers curated_tau2_agent and then delegates to tau2.cli.main()
+    if arm != "A" and launcher_path:
+        # uv run python from tau2-bench dir — uv sets up the correct venv + deps
+        bin_cmd = ["uv", "run", "python", launcher_path]
+        agent_name = "curated_tau2_agent"
+    else:
+        bin_cmd = [tau2_bin]
+        agent_name = "llm_agent"
+
+    cmd = bin_cmd + ["run",
            "--domain", domain,
+           "--agent", agent_name,
            "--agent-llm", model,
            "--user-llm", model,
            "--num-trials", str(num_trials),
@@ -218,10 +235,6 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
         cmd += ["--num-tasks", str(n_tasks)]
     for t in (task_ids or []):
         cmd += ["--task-id", t]
-    if arm != "A":
-        # B/C: custom memory-injecting agent (VERIFY the flag name —
-        # --agent-import-path / --agent / --agent-class — on the pinned version).
-        cmd += ["--agent-import-path", "scripts.latest.tau2_agent:CuratedTau2Agent"]
     return cmd
 
 
@@ -246,6 +259,7 @@ def main() -> None:
     args = ap.parse_args()
 
     tau2_bin = os.environ.get("TAU2_BIN", "tau2")
+    launcher_path = str(PROJECT_ROOT / "scripts" / "latest" / "tau2_launcher.py") if args.arm != "A" else None
     results_base = os.environ.get("RESULTS_BASE", "latest_evolving")
     slug = re.sub(r"[^A-Za-z0-9._-]", "_", args.model.split("/")[-1]).lower()
     out_root = PROJECT_ROOT / "experiments_results" / results_base / slug
@@ -265,14 +279,23 @@ def main() -> None:
         env = os.environ.copy()
         env["TAU2_ARM"] = args.arm
         env["TAU2_MEM_STATE"] = str(state)
-        # the custom agent is imported inside tau2's process — make the repo
-        # importable there (mirrors TB2 needing our deps in the harbor env).
-        env["PYTHONPATH"] = (str(PROJECT_ROOT) +
-                             (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""))
+        # Make both our repo AND tau2-bench importable (launcher needs tau2.*,
+        # the custom agent needs our src). tau2-bench lives beside us in Ceph.
+        tau2_root = str(PROJECT_ROOT.parent / "tau2-bench")
+        extra_paths = [str(PROJECT_ROOT)]
+        if os.path.isdir(tau2_root):
+            extra_paths.append(tau2_root)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(extra_paths +
+            ([existing] if existing else []))
         cmd = _tau2_cmd(tau2_bin, args.arm, args.model, args.domain, args.n_tasks,
-                        args.num_trials, args.n_concurrent, save_to, args.task_ids)
-        print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
-        rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
+                        args.num_trials, args.n_concurrent, save_to, args.task_ids,
+                        launcher_path)
+        # Arm A runs tau2 from repo root; arms B/C need uv run python from
+        # tau2-bench dir (so uv finds pyproject.toml and resolves the venv).
+        cwd = tau2_root if (args.arm != "A" and launcher_path and os.path.isdir(tau2_root)) else str(PROJECT_ROOT)
+        print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)} (cwd={cwd})", flush=True)
+        rc = subprocess.call(cmd, env=env, cwd=cwd)
         if rc != 0:
             print(f"[tau2] tau2 exited rc={rc} — stopping arm", flush=True)
             break
