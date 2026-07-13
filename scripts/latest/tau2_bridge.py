@@ -275,6 +275,13 @@ def main() -> None:
         pickle.loads(pickle.dumps(mem))
         print(f"[tau2] arm {args.arm} store pickle round-trip ok", flush=True)
     import asyncio
+    # tau2's litellm needs OPENAI_API_BASE + OPENAI_API_KEY (NOT openrouter vars).
+    # The parent process may only have OPENROUTER_* set — translate them here so
+    # the tau2 subprocess always gets a valid endpoint + key.
+    os.environ.setdefault("OPENAI_API_BASE",
+                          os.environ.get("OPENROUTER_BASE_URL", "http://localhost:8000/v1"))
+    os.environ.setdefault("OPENAI_API_KEY",
+                          os.environ.get("OPENROUTER_API_KEY", "EMPTY"))
     for it in range(args.iters):
         save_to = out_root / f"tau2_{args.domain}_{args.arm}_iter{it}.json"
         env = os.environ.copy()
