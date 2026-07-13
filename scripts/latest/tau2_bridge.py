@@ -189,6 +189,7 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
            "--user-llm", model,
            "--num-trials", str(num_trials),
            "--max-concurrency", str(concurrency),
+           "--auto-resume",
            "--save-to", str(save_to)]
     if n_tasks:
         cmd += ["--num-tasks", str(n_tasks)]
