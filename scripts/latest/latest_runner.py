@@ -1099,10 +1099,12 @@ async def main():
     if completed_benchmarks:
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
-    # terminal_bench_2 RETIRED from the default sweep: TB2 now runs on the
-    # official harbor harness (scripts/latest/tb2_harbor_bridge.py) — the
-    # simplified Terminus-2-style loop stays available only via an explicit
-    # BENCHMARKS=terminal_bench_2 override and must not feed paper numbers.
+    # terminal_bench_2 RETIRED (2026-07-09): replaced by tau2-bench
+    # (scripts/latest/tau2_bridge.py, routed automatically by
+    # run_all_benchmarks.sh). The old harbor harness is archived under
+    # scripts/latest/obsolete/. The simplified Terminus-2-style loop below stays
+    # only as a hard-guarded BENCHMARKS=terminal_bench_2 override and must never
+    # feed paper numbers.
     BENCHMARKS_TO_RUN = [
         "gaia", "gaia2", "locomo"
     ]
@@ -1114,17 +1116,16 @@ async def main():
         _keep = {b.strip() for b in _bf.split(",") if b.strip()}
         # HARD GUARD: TB2 through this runner is the RETIRED simplified loop.
         # An explicit BENCHMARKS list quietly revived it once and burned 2h+801
-        # trace rows on a box where docker pulls fail; paper TB2 numbers come
-        # from the official harbor bridge (scripts/latest/tb2_harbor_bridge.py,
-        # or run_all_benchmarks.sh which routes TB2 there automatically).
+        # trace rows on a box where docker pulls fail. TB2 is retired entirely;
+        # the current agentic benchmark is tau2 (Docker-free).
         if "terminal_bench_2" in _keep and os.environ.get("ALLOW_RETIRED_TB2") != "1":
             raise SystemExit(
-                "[latest_runner] REFUSING to run terminal_bench_2 through the "
-                "retired simplified loop.\n"
-                "  Use the harbor bridge instead:\n"
+                "[latest_runner] REFUSING to run terminal_bench_2 — it is RETIRED.\n"
+                "  The agentic benchmark is now tau2 (Docker-free):\n"
                 "    bash scripts/latest/run_all_benchmarks.sh <MODEL>\n"
-                "    # or: python scripts/latest/tb2_harbor_bridge.py --arm A|B|C ...\n"
-                "  (override for debugging only: ALLOW_RETIRED_TB2=1)")
+                "    # or: python scripts/latest/tau2_bridge.py --arm A|B|C ...\n"
+                "  (the old harbor bridge is archived under scripts/latest/obsolete/;\n"
+                "   override for debugging only: ALLOW_RETIRED_TB2=1)")
         BENCHMARKS_TO_RUN = [b for b in BENCHMARKS_TO_RUN if b in _keep]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}

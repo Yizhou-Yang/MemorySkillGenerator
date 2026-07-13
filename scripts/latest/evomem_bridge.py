@@ -190,13 +190,13 @@ def _concrete_approach(exp) -> str:
 
 
 # Benchmarks scored on WHICH ACTIONS OCCURRED (gaia2 soft-recall over oracle
-# events, TB2 in-container tests). Only there is the action/tool sequence the
-# payload worth displacing prose for. gaia/locomo agents also log tool calls,
-# but they are scored on ANSWER text — v2.2's entry-has-actions heuristic fired
-# on 96% of gaia blocks, dropped every "What worked" prose line, truncated
-# answers to 160ch, and turned C−B from −2.1 to −9.1pp. Scope by benchmark,
-# never by entry shape.
-_ACTION_SCORED = {"gaia2", "terminal_bench_2"}
+# events, TB2 in-container tests, tau2 final-DB-state + action checks). Only
+# there is the action/tool sequence the payload worth displacing prose for.
+# gaia/locomo agents also log tool calls, but they are scored on ANSWER text —
+# v2.2's entry-has-actions heuristic fired on 96% of gaia blocks, dropped every
+# "What worked" prose line, truncated answers to 160ch, and turned C−B from −2.1
+# to −9.1pp. Scope by benchmark, never by entry shape.
+_ACTION_SCORED = {"gaia2", "terminal_bench_2", "tau2"}
 
 
 def _format_curated(successes: list, failures: list = (),
