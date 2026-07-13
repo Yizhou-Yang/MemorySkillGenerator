@@ -212,14 +212,15 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
     in tau2's global registry BEFORE the CLI parses --agent. tau2 CLI does NOT
     support --agent-import-path, so we inject the custom agent at the launcher
     level instead."""
-    # Arm A uses the official tau2 CLI; arms B/C use the launcher that first
-    # registers curated_tau2_agent and then delegates to tau2.cli.main()
+    # Arm A uses the official tau2 CLI via python -m; arms B/C use the launcher
+    # that first registers curated_tau2_agent and then delegates to tau2.cli.main()
     if arm != "A" and launcher_path:
-        # uv run python from tau2-bench dir — uv sets up the correct venv + deps
-        bin_cmd = ["uv", "run", "python", launcher_path]
+        # Launcher registers CuratedTau2Agent THEN runs tau2.cli.main()
+        bin_cmd = [sys.executable, launcher_path]
         agent_name = "curated_tau2_agent"
     else:
-        bin_cmd = [tau2_bin]
+        # Use python -m tau2.cli (conda env has the deps; PYTHONPATH has tau2 src)
+        bin_cmd = [sys.executable, "-m", "tau2.cli"]
         agent_name = "llm_agent"
 
     cmd = bin_cmd + ["run",
@@ -291,11 +292,8 @@ def main() -> None:
         cmd = _tau2_cmd(tau2_bin, args.arm, args.model, args.domain, args.n_tasks,
                         args.num_trials, args.n_concurrent, save_to, args.task_ids,
                         launcher_path)
-        # Arm A runs tau2 from repo root; arms B/C need uv run python from
-        # tau2-bench dir (so uv finds pyproject.toml and resolves the venv).
-        cwd = tau2_root if (args.arm != "A" and launcher_path and os.path.isdir(tau2_root)) else str(PROJECT_ROOT)
-        print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)} (cwd={cwd})", flush=True)
-        rc = subprocess.call(cmd, env=env, cwd=cwd)
+        print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
+        rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
         if rc != 0:
             print(f"[tau2] tau2 exited rc={rc} — stopping arm", flush=True)
             break
