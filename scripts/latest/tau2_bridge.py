@@ -282,8 +282,12 @@ def main() -> None:
                           os.environ.get("OPENROUTER_BASE_URL", "http://localhost:8000/v1"))
     os.environ.setdefault("OPENAI_API_KEY",
                           os.environ.get("OPENROUTER_API_KEY", "EMPTY"))
-    for it in range(args.iters):
-        save_to = out_root / f"tau2_{args.domain}_{args.arm}_iter{it}.json"
+    # Support comma-separated domains (e.g. airline,retail); tau2 run only
+    # accepts a single --domain, so loop across them sequentially.
+    domains = [d.strip() for d in args.domain.split(",") if d.strip()]
+    for domain in domains:
+        for it in range(args.iters):
+            save_to = out_root / f"tau2_{domain}_{args.arm}_iter{it}.json"
         env = os.environ.copy()
         env["TAU2_ARM"] = args.arm
         env["TAU2_MEM_STATE"] = str(state)
@@ -296,7 +300,7 @@ def main() -> None:
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = os.pathsep.join(extra_paths +
             ([existing] if existing else []))
-        cmd = _tau2_cmd(tau2_bin, args.arm, args.model, args.domain, args.n_tasks,
+        cmd = _tau2_cmd(tau2_bin, args.arm, args.model, domain, args.n_tasks,
                         args.num_trials, args.n_concurrent, save_to, args.task_ids,
                         launcher_path)
         print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)

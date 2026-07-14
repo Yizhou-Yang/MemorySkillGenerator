@@ -85,19 +85,30 @@ echo "    [qa]  gaia/gaia2/locomo  PID $!  -> run_${MODEL}_qa.log"
 # Arms run SEQUENTIALLY inside one background subshell (B/C depend on their
 # previous iteration's store anyway); each arm still uses tau2's own internal
 # concurrency, so wall-clock cost is small. tau2 speaks OpenAI via LiteLLM:
-# self-host sets OPENAI_API_BASE to your vLLM endpoint; otherwise we reuse the
-# CodeBuddy OAI proxy exactly as TB2 did.
+# self-host sets OPENROUTER_BASE_URL to your vLLM endpoint (port 8000);
+# otherwise falls back to CodeBuddy OAI proxy (port 8741).
 if [ "${NO_TAU2:-0}" != "1" ]; then
-  if [ -z "${OPENAI_API_BASE:-}" ] && ! curl -sf localhost:8741/v1/models >/dev/null 2>&1; then
+  # Priority: self-hosted vLLM (OPENROUTER_BASE_URL) > explicit OPENAI_API_BASE > CodeBuddy proxy
+  if [ -n "${OPENROUTER_BASE_URL:-}" ] && curl -sf localhost:8000/health >/dev/null 2>&1; then
+    OAI_BASE="${OPENROUTER_BASE_URL}"
+    echo "    [tau2] using self-hosted vLLM: $OAI_BASE"
+  elif [ -n "${OPENAI_API_BASE:-}" ]; then
+    OAI_BASE="${OPENAI_API_BASE}"
+  elif curl -sf localhost:8741/v1/models >/dev/null 2>&1; then
+    OAI_BASE="http://localhost:8741/v1"
+  else
     nohup "$SKILLFORGE_PY" scripts/latest/codebuddy_oai_proxy.py > proxy.log 2>&1 &
     echo "    [tau2] started OAI proxy PID $! (waiting 5s)"; sleep 5
+    OAI_BASE="http://localhost:8741/v1"
   fi
-  OAI_BASE="${OPENAI_API_BASE:-http://localhost:8741/v1}"
+  # tau2_bridge reads OPENROUTER_BASE_URL (preferred) or OPENAI_API_BASE (fallback)
+  # Pass both so the bridge picks the right one
   (
     for ARM in A B C; do
       for DOM in ${TAU2_DOMAINS//,/ }; do
-        OPENAI_API_BASE="$OAI_BASE" OPENAI_API_KEY="${OPENAI_API_KEY:-dummy}" \
-        PYTHONPATH="$REPO" TAU2_N_TASKS="$TAU2_N" \
+        OPENROUTER_BASE_URL="$OAI_BASE" OPENAI_API_BASE="$OAI_BASE" OPENAI_API_KEY="${OPENAI_API_KEY:-dummy}" \
+        TAU2_LOCAL_VLLM=1 \
+        PYTHONPATH="${TAU2_ROOT:-}:$REPO" TAU2_N_TASKS="$TAU2_N" \
           "$TAU2_PY" scripts/latest/tau2_bridge.py \
           --arm "$ARM" --iters "$ITERS" --model "openai/$MODEL" \
           --domain "$DOM" --n-tasks "$TAU2_N" \

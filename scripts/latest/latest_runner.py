@@ -19,6 +19,13 @@ load_dotenv(PROJECT_ROOT / ".env")
 # opt into an alternate OpenAI-compatible backend via LLM_PROVIDER=openrouter in
 # the shell or .env without touching the CodeBuddy SDK path.
 os.environ.setdefault('LLM_PROVIDER', 'codebuddy')
+# Auto-detect local vLLM/OpenAI backend: if an OpenAI-compatible endpoint is
+# configured but LLM_PROVIDER still defaults to codebuddy, switch to vllm so
+# the OpenAI path initialises correctly at module-import time.
+_openai_endpoint = (os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
+                    or os.environ.get("OPENROUTER_BASE_URL"))
+if _openai_endpoint and os.environ.get("LLM_PROVIDER") == "codebuddy":
+    os.environ["LLM_PROVIDER"] = "vllm"
 # Backbone model for this run. The wrapper scripts/latest/run_all_models.sh sets
 # CODEBUDDY_MODEL per model and invokes this script once per model; setdefault
 # keeps HY3-preview (in-house) as the default when run directly.
@@ -1088,11 +1095,25 @@ async def main():
     print("=" * 70)
 
     print("\n  Probing API availability...", flush=True)
-    api_ok = await probe_api_available()
-    if not api_ok:
-        print("  DeepSeek V4 Pro API is NOT available. Aborting.", flush=True)
-        return
-    print("  API is responding.", flush=True)
+    # When running with a local vLLM/OpenAI backend (LLM_PROVIDER in
+    # vllm/openrouter/openai/oai/openai_compatible), the CodeBuddy SDK probe is
+    # irrelevant. Skip it and trust the endpoint directly.
+    _llm_provider = os.environ.get("LLM_PROVIDER", "").lower()
+    if _llm_provider in ("vllm", "openrouter", "openai", "oai", "openai_compatible"):
+        print("  Skipping probe (using local/OpenAI backend: %s)." % _llm_provider, flush=True)
+        api_ok = True
+    # Detect local endpoint via OPENAI_* vars even when LLM_PROVIDER didn't
+    # make it through the env chain (nohup/ceph edge cases).
+    elif os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL"):
+        print("  Skipping probe (OPENAI_API_BASE/OPENAI_BASE_URL detected).", flush=True)
+        os.environ["LLM_PROVIDER"] = "vllm"
+        api_ok = True
+    else:
+        api_ok = await probe_api_available()
+        if not api_ok:
+            print("  DeepSeek V4 Pro API is NOT available. Aborting.", flush=True)
+            return
+    print("  API is ready.", flush=True)
 
     checkpoint = load_checkpoint(CHECKPOINT_FILE)
     completed_benchmarks = checkpoint.get("completed_benchmarks", {})

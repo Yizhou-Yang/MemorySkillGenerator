@@ -42,6 +42,8 @@ setsid nohup vllm serve "$MODEL_PATH" \
   --max-model-len "$MAX_LEN" \
   --gpu-memory-utilization "$GPU_UTIL" \
   --trust-remote-code \
+  --enable-auto-tool-choice --tool-call-parser llama3_json \
+  --enforce-eager \
   --port "$PORT" >"$LOG" 2>&1 &
 echo "[deploy] vllm starting, pid=$!  log=$LOG"
 
