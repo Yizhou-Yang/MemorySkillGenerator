@@ -70,13 +70,18 @@ G2W="${GAIA2_SPLIT_WEIGHTS:-adaptability:25,time:25,ambiguity:25,execution:12,se
 echo "==> launching all benchmarks for model=$MODEL"
 
 # ── 1) QA sweep: gaia + gaia2 + locomo (evolving protocol) ──
+# Runs arms A (no_mem), B (raw_patch), C (curated_patch) for every benchmark.
+# B/C arms are essential: they measure memory improvement over the A baseline.
 ITERS=3
 if [ "${LEAN:-0}" = "1" ]; then ITERS=2; echo "    [lean] ITER_CHAIN=2"; fi
+# HF_TOKEN: pass through if set, to avoid 429 rate-limit on gaia2 dataset files
 RESULTS_BASE=latest_evolving ITER_MUTATE=1 ITER_FEEDBACK=self ITER_CHAIN="$ITERS" \
   RESUME=1 \
   GAIA2_SPLIT_WEIGHTS="$G2W" \
   BENCHMARKS=gaia,gaia2,locomo GAIA2_SCENARIO_DIR="$DATASET" \
   CODEBUDDY_MODEL="$MODEL" TASK_CONCURRENCY="$CONC" \
+  ${HF_TOKEN:+HF_TOKEN="$HF_TOKEN"} \
+  ${HUGGINGFACE_HUB_TOKEN:+HUGGINGFACE_HUB_TOKEN="$HUGGINGFACE_HUB_TOKEN"} \
   nohup "$SKILLFORGE_PY" -u scripts/latest/latest_runner.py \
   > "run_${MODEL}_qa.log" 2>&1 &
 echo "    [qa]  gaia/gaia2/locomo  PID $!  -> run_${MODEL}_qa.log"
