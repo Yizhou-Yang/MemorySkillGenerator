@@ -63,11 +63,24 @@ def _task_score(r: dict) -> float:
 def _rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
-    out = []
+    out, dropped = [], 0
     for line in open(path):
         line = line.strip()
-        if line:
-            r = json.loads(line); r["group"] = _norm_group(r.get("group","")); out.append(r)
+        if not line:
+            continue
+        r = json.loads(line)
+        # Infra rows (endpoint down / timeout / empty agent loop) carry an error
+        # and no response; averaging their 0.0 as real scores poisons every mean
+        # and inflates memory deltas via a fake-zero baseline (llama-33 gaia had
+        # 770 such rows). Exclude them, loudly.
+        if str(r.get("error") or "").strip() and not str(r.get("response") or "").strip():
+            dropped += 1
+            continue
+        r["group"] = _norm_group(r.get("group",""))
+        out.append(r)
+    if dropped:
+        print(f"  [filter] {path.parent.parent.name}/{path.parent.name}: "
+              f"dropped {dropped} infra error-rows (error set, empty response)")
     return out
 
 

@@ -53,6 +53,30 @@ def main() -> None:
         if not rs:
             print(f"[{bench}] no trace — skipped")
             continue
+        # ── G0: infra health. Error rows (endpoint down / timeout) and
+        # empty-response zero rows (agent loop never engaged) are not task
+        # results; a run dominated by them is broken hardware, not a baseline
+        # (llama-33: gaia 770 APIUnavailable rows, gaia2 433 empty rows). They
+        # are excluded from the gate stats below, and a rate >20% hard-fails.
+        _is_err = lambda r: bool(str(r.get("error") or "").strip()) \
+            and not str(r.get("response") or "").strip()
+        _is_empty = lambda r: not str(r.get("response") or "").strip() \
+            and not str(r.get("error") or "").strip() \
+            and not float(r.get("score") or 0.0)
+        n_err = sum(1 for r in rs if _is_err(r))
+        n_empty = sum(1 for r in rs if _is_empty(r))
+        infra_rate = (n_err + n_empty) / len(rs)
+        if n_err or n_empty:
+            print(f"[{bench}] G0 infra: {n_err} error-rows + {n_empty} "
+                  f"empty-response zero-rows = {100*infra_rate:.0f}% of {len(rs)}")
+        if infra_rate > 0.20:
+            print(f"  G0 ✗ infra-row rate {100*infra_rate:.0f}% > 20% — the "
+                  "endpoint/harness was broken during this run; rerun it")
+            hard_fail = True
+        rs = [r for r in rs if not _is_err(r) and not _is_empty(r)]
+        if not rs:
+            print(f"[{bench}] all rows were infra failures — nothing to gate")
+            continue
         kf = max(int(r.get("iter_total", 1) or 1) for r in rs) - 1
         # Rev uniformity is PER GROUP: keeping valid A/B rows from an earlier
         # rev while C reruns on the frozen rev is the sanctioned plan; only a

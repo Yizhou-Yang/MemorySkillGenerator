@@ -137,6 +137,14 @@ _SEMS: dict = {}
 # Per-task retry on transient (rate-limit / timeout) failures.
 TASK_MAX_RETRIES = int(os.environ.get("TASK_MAX_RETRIES", "3"))
 TASK_RETRY_BASE_DELAY = float(os.environ.get("TASK_RETRY_BASE_DELAY", "8"))
+# Mid-run circuit breaker: the startup probe catches an endpoint that is dead at
+# t=0, but one that dies MID-sweep previously let the run keep going for hours —
+# llama-33 wrote 770 consecutive APIUnavailable zero-rows. After API_DOWN_LIMIT
+# consecutive tasks end with a transient/API-unavailable error (or an empty
+# response), abort the whole sweep loudly. Trace rows are flushed per line, so
+# finished work is preserved and RESUME=1 reruns the aborted tasks.
+API_DOWN_LIMIT = int(os.environ.get("API_DOWN_LIMIT", "12"))
+_api_down_streak = 0
 # RESUME=1 keeps existing trace.jsonl and skips already-completed (group, task_id)
 # pairs instead of wiping and restarting from scratch.
 RESUME = os.environ.get("RESUME", "0") == "1"
@@ -260,6 +268,36 @@ def _is_transient(err: str) -> bool:
 
 
 async def _build_with_retry(build_coro, task: dict) -> dict:
+    """Retry wrapper + infra accounting. Beyond `_build_with_retry_inner`'s
+    per-task retries, this (a) marks a still-empty result as an explicit infra
+    error, so it is excluded from stats and rerun on RESUME instead of scoring a
+    silent 0 (gaia2 committed 433 such rows), and (b) trips the API-down circuit
+    breaker after API_DOWN_LIMIT consecutive infra failures."""
+    global _api_down_streak
+    r = await _build_with_retry_inner(build_coro, task)
+    err = str(r.get("error") or "")
+    resp = (r.get("response") or "").strip()
+    if not resp and not err and not r.get("actions"):
+        # No answer, no actions, no recorded error: the loop never engaged.
+        # That is an infra zero, not a task result — mark it as such.
+        r["error"] = err = "empty_response_after_retries"
+    if _is_transient(err) or err == "empty_response_after_retries":
+        _api_down_streak += 1
+        if _api_down_streak >= API_DOWN_LIMIT:
+            print("\n" + "=" * 72 +
+                  f"\n  ✖ ABORT: {_api_down_streak} consecutive tasks failed with "
+                  "transient/API-unavailable errors —\n    the endpoint is down. "
+                  "Stopping the sweep instead of writing zero-rows.\n    Finished "
+                  "work is preserved; RESUME=1 reruns the failed tasks.\n" +
+                  "=" * 72, flush=True)
+            sys.stdout.flush()
+            os._exit(2)
+    elif resp or err:
+        _api_down_streak = 0
+    return r
+
+
+async def _build_with_retry_inner(build_coro, task: dict) -> dict:
     """Run a single task builder, retrying with exponential backoff on transient
     (rate-limit / timeout / overload) failures. Non-transient errors and successful
     results are returned immediately. The whole point is that one flaky API call no
@@ -423,6 +461,7 @@ def _load_done_map(trace_path: Path) -> dict:
     """Read an existing trace.jsonl into {(group, task_id): record} for resume.
     Later records win, so a re-run of a task overrides an earlier partial."""
     done: dict = {}
+    skipped_infra = 0
     if not trace_path.exists():
         return done
     try:
@@ -431,9 +470,20 @@ def _load_done_map(trace_path: Path) -> dict:
             if not line:
                 continue
             rec = json.loads(line)
+            # An infra row (error set, nothing produced) is NOT completed work:
+            # counting it as done made RESUME skip — and thereby keep — the 770
+            # APIUnavailable zero-rows forever. Leave it out so the task reruns;
+            # later records win, so the rerun's row supersedes it downstream.
+            if str(rec.get("error") or "").strip() \
+                    and not str(rec.get("response") or "").strip():
+                skipped_infra += 1
+                continue
             done[(norm_group(rec.get("group", "")), rec.get("task_id", ""))] = rec
     except Exception as e:
         print(f"  [resume] failed to parse {trace_path}: {e}")
+    if skipped_infra:
+        print(f"  [resume] {skipped_infra} infra error-rows in {trace_path.parent.name} "
+              "not counted as done — those tasks will rerun")
     return done
 
 

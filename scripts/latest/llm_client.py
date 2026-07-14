@@ -68,8 +68,15 @@ _OPENAI_BASE_URL = (os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_
                     or os.environ.get("DEEPSEEK_BASE_URL"))
 _OPENAI_API_KEY = (os.environ.get("OPENAI_API_KEY")
                    or os.environ.get("DEEPSEEK_API_KEY") or "")
-_OPENAI_MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("DEEPSEEK_MODEL")
-                 or os.environ.get("CODEBUDDY_MODEL") or MODEL).lower()
+if (os.environ.get("LLM_PROVIDER") or "").lower() in ("vllm", "openrouter"):
+    # Self-host/OpenRouter: the endpoint serves CODEBUDDY_MODEL. A DEEPSEEK_MODEL
+    # left in .env (deepseek-chat) must not win here — it 404s against a vLLM
+    # that only serves the backbone (it did: judge calls on the llama-33 run).
+    _OPENAI_MODEL = (os.environ.get("OPENAI_MODEL")
+                     or os.environ.get("CODEBUDDY_MODEL") or MODEL).lower()
+else:
+    _OPENAI_MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("DEEPSEEK_MODEL")
+                     or os.environ.get("CODEBUDDY_MODEL") or MODEL).lower()
 
 # ─── OpenRouter (opt-in, OpenAI-compatible) ───────────────────────────────
 # Activated ONLY by LLM_PROVIDER=openrouter, so the default CodeBuddy SDK path is
