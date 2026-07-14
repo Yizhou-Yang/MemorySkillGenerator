@@ -15,7 +15,17 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
-os.environ['LLM_PROVIDER'] = 'codebuddy'
+# CodeBuddy stays the default (existing path). setdefault (not '=') lets a run
+# opt into an alternate OpenAI-compatible backend via LLM_PROVIDER=openrouter in
+# the shell or .env without touching the CodeBuddy SDK path.
+os.environ.setdefault('LLM_PROVIDER', 'codebuddy')
+# Auto-detect local vLLM/OpenAI backend: if an OpenAI-compatible endpoint is
+# configured but LLM_PROVIDER still defaults to codebuddy, switch to vllm so
+# the OpenAI path initialises correctly at module-import time.
+_openai_endpoint = (os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
+                    or os.environ.get("OPENROUTER_BASE_URL"))
+if _openai_endpoint and os.environ.get("LLM_PROVIDER") == "codebuddy":
+    os.environ["LLM_PROVIDER"] = "vllm"
 # Backbone model for this run. The wrapper scripts/latest/run_all_models.sh sets
 # CODEBUDDY_MODEL per model and invokes this script once per model; setdefault
 # keeps HY3-preview (in-house) as the default when run directly.
@@ -70,6 +80,7 @@ from scripts.latest.gaia2_runner import run_gaia2_task_with_are
 from scripts.latest.terminal_bench_2_runner import run_terminal_bench_2_task, run_terminal_bench_2_task_controlled
 from scripts.latest.locomo_runner import run_locomo_task, run_locomo_task_controlled
 from scripts.latest.evomem_bridge import BenchmarkMemory, CuratedMemory, solve_with_memory
+from scripts.latest.arms import norm_group
 
 MODEL = os.environ.get("CODEBUDDY_MODEL", "deepseek-v4-pro").lower()
 
@@ -100,7 +111,7 @@ def _auto_slots() -> int:
 # so parallelism no longer multiplies (old 2×N model OOM'd). Docker-backed
 # benchmarks take an extra, tighter sub-cap because containers are memory-hungry.
 GLOBAL_TASK_SLOTS = int(os.environ.get("TASK_CONCURRENCY", "0")) or _auto_slots()
-DOCKER_TASK_SLOTS = int(os.environ.get("DOCKER_CONCURRENCY", "2"))
+DOCKER_TASK_SLOTS = int(os.environ.get("DOCKER_CONCURRENCY", "3"))
 BENCHMARK_CONCURRENCY = int(os.environ.get("BENCH_CONCURRENCY", "6"))  # benchmarks may interleave
 # Iteration chains: run each task ITER_CHAIN times in sequence, threading B/C
 # memory across iterations (chain-scoped retrieval). This is the substrate where
@@ -158,7 +169,7 @@ _TASK_N = int(os.environ.get("TASK_LIMIT", "100"))
 # run extends the task set instead of resampling it.
 TASK_LIMITS = {
     "gaia": _TASK_N,
-    "gaia2": int(os.environ.get("GAIA2_TASK_LIMIT", str(max(200, _TASK_N)))),
+    "gaia2": int(os.environ.get("GAIA2_TASK_LIMIT", str(max(100, _TASK_N)))),
     "terminal_bench_2": _TASK_N,
     "locomo": _TASK_N,
 }
@@ -420,7 +431,7 @@ def _load_done_map(trace_path: Path) -> dict:
             if not line:
                 continue
             rec = json.loads(line)
-            done[(rec.get("group", ""), rec.get("task_id", ""))] = rec
+            done[(norm_group(rec.get("group", "")), rec.get("task_id", ""))] = rec
     except Exception as e:
         print(f"  [resume] failed to parse {trace_path}: {e}")
     return done
@@ -786,6 +797,42 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                       "cmds_executed", "pre_test_passed")
                                      if isinstance(r, dict) and k in r},
                                   **{f"prof_{k}": v for k, v in prof.items()}})
+                # ── FINAL-ITERATION resampling for the raw-patch arm
+                # (PASSK_FINAL=k): after the chain's last iteration, draw k-1
+                # extra independent solves of the SAME variant with the SAME
+                # frozen memory state (no record between samples), logged as
+                # groups raw_patch_passk_s1..s{k-1}; the normal final row is
+                # sample 0. This is the fair counterpart to the no-memory
+                # pass@k control: B keeps its chain advantage and spends the
+                # extra calls on resampling, exactly the budget C spends on
+                # curation. Set PASSK_FINAL from the START of the B run —
+                # RESUME skips completed chains and will not backfill samples.
+                _PKF = int(os.environ.get("PASSK_FINAL", "0"))
+                if (_PKF > 1 and group_key == "raw_patch"
+                        and _it == ITER_CHAIN - 1):
+                    for _s in range(1, _PKF):
+                        if needs_docker and docker_sem is not None:
+                            async with docker_sem:
+                                async with global_sem:
+                                    _rs = await _run_bounded(build_coro, cur_task, True)
+                        else:
+                            async with global_sem:
+                                _rs = await _run_bounded(build_coro, cur_task, False)
+                        _evs = await evaluate_task(_rs, benchmark)
+                        _trace.log(
+                            benchmark=benchmark, group=f"raw_patch_passk_s{_s}",
+                            phase="test", task_id=_rs.get("task_id", tid),
+                            task_desc=cur_task.get("description", ""),
+                            augmented_prompt=_rs.get("_aug_prompt", ""),
+                            response=_rs.get("response", ""), expected=expected,
+                            score=_evs.get("score", 0.0),
+                            extra={"em": _evs.get("em", 0.0),
+                                   "iteration": _it, "iter_total": ITER_CHAIN,
+                                   "sample_idx": _s,
+                                   "patch_injected": bool(_rs.get("_aug_prompt")),
+                                   "aug_len": len(_rs.get("_aug_prompt") or ""),
+                                   "fb_mode": ITER_FEEDBACK,
+                                   "code_rev": _CODE_REV})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
@@ -851,22 +898,52 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
 
     results_a = results_b = results_c = []
     evals_a = evals_b = evals_c = []
-    if "A" in _ARMS:
+    # pass@k variance/compute control: k INDEPENDENT no-memory samples per
+    # task, one group per sample (no_mem_passk_s<i>) so RESUME's (group,task)
+    # bookkeeping stays untouched. Single-shot by design — refuse chains.
+    _PASSK = int(os.environ.get("PASSK", "0"))
+    if _PASSK > 1 and ITER_CHAIN != 1:
+        raise SystemExit("PASSK is a single-shot control: run it with "
+                         "ITER_CHAIN=1 ARMS=A PASSK=<k> (separate invocation).")
+    if "A" in _ARMS and _PASSK > 1:
+        for _s in range(_PASSK):
+            print(f"    [A·pass@k] no-memory sample {_s+1}/{_PASSK}...", flush=True)
+            _r, _e = await _run_group("A", f"no_mem_passk_s{_s}", test_tasks,
+                                      lambda t: run_fn_a(t, "", "A"))
+            results_a, evals_a = _r, _e     # last sample stands in for reporting
+    elif "A" in _ARMS:
         print(f"    [A] Vanilla (no memory)...", flush=True)
-        results_a, evals_a = await _run_group("A", "A_baseline", test_tasks,
+        results_a, evals_a = await _run_group("A", "no_mem", test_tasks,
                                               lambda t: run_fn_a(t, "", "A"))
     if "B" in _ARMS:
         print(f"    [B] PatchMem (naive cross-task patch memory)...", flush=True)
-        results_b, evals_b = await _run_group("B", "B_evomem", test_tasks,
+        results_b, evals_b = await _run_group("B", "raw_patch", test_tasks,
             lambda t: solve_with_memory(run_fn_a, t, mem_b, "B"), mem=mem_b)
     if "C" in _ARMS:
         print(f"    [C] Curator (refined experiences + effectiveness-weighted retrieval)...", flush=True)
-        results_c, evals_c = await _run_group("C", "C_gpr", test_tasks,
+        results_c, evals_c = await _run_group("C", "curated_patch", test_tasks,
             lambda t: solve_with_memory(run_fn_a, t, mem_c, "C"), mem=mem_c)
 
+    # External baseline memory systems (Wen 07/06: 2-3 recent methods with
+    # ready modules, run WITHOUT the raw_patch arm, pairing against the
+    # existing no_mem rows). EXTERNAL_MEMS="mem0,amem"; each adapter exposes
+    # the same inject()/record() interface, so the protocol (mutated chains,
+    # self feedback, record-after-eval) is IDENTICAL to B/C.
+    _ext_scores = {}
+    for _ext in [x.strip().lower() for x in
+                 os.environ.get("EXTERNAL_MEMS", "").split(",") if x.strip()]:
+        from scripts.latest.baseline_memories import make_external_memory
+        _mem_x = make_external_memory(_ext, benchmark)
+        print(f"    [{_ext}] external baseline memory...", flush=True)
+        _rx, _ex = await _run_group(_ext.upper(), _ext, test_tasks,
+            lambda t, _m=_mem_x, _g=_ext: solve_with_memory(run_fn_a, t, _m, _g),
+            mem=_mem_x)
+        _ext_scores[_ext] = _ex
+
     # Flat evals + per-group scores for the arms that actually ran.
-    scores = {g: e for g, e in (("A_baseline", evals_a), ("B_evomem", evals_b),
-                                ("C_gpr", evals_c)) if e}
+    scores = {g: e for g, e in (("no_mem", evals_a), ("raw_patch", evals_b),
+                                ("curated_patch", evals_c)) if e}
+    scores.update({g: e for g, e in _ext_scores.items() if e})
     all_evals = [e for evs in scores.values() for e in evs]
 
     report = {}
@@ -879,13 +956,19 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             "n": len(valid),
         }
 
-    metric_name = "EM"
+    # Native metric per benchmark: GAIA2 is scored by soft recall over oracle
+    # events (the continuous `avg_score`); GAIA/LoCoMo by exact match (`em`).
+    # The stale blanket "EM" label made the GAIA2 `em` column (a meaningless hard
+    # threshold on soft recall) look like the headline number. Both fields stay
+    # stored; only the label and the printed/delta field follow the native metric.
+    metric_name, metric_field = (("soft_recall", "avg_score") if benchmark == "gaia2"
+                                 else ("EM", "em"))
     print(f"\n  Results ({benchmark}, model={MODEL}):")
     for _g, _r in report.items():
-        print(f"    {_g:12s}: {metric_name}={_r['em']:.1%}")
-    if {"A_baseline", "B_evomem", "C_gpr"} <= set(report):
-        delta_ac = report['C_gpr']['em'] - report['A_baseline']['em']
-        delta_bc = report['C_gpr']['em'] - report['B_evomem']['em']
+        print(f"    {_g:12s}: {metric_name}={_r[metric_field]:.1%}")
+    if {"no_mem", "raw_patch", "curated_patch"} <= set(report):
+        delta_ac = report['curated_patch'][metric_field] - report['no_mem'][metric_field]
+        delta_bc = report['curated_patch'][metric_field] - report['raw_patch'][metric_field]
         print(f"    Delta(C-A): {delta_ac:+.1%} | Delta(C-B): {delta_bc:+.1%}")
 
     # ── Per-task wall-clock breakdown (where time goes → how to scale) ──
@@ -908,14 +991,13 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         "n_test": len(test_tasks),
         "profile_avg_s": _profile_avg,
         "design": [
-            "evoarena_evomem_within_task_patch_memory",
-            "failure_aware_attention_routing",
-            "cross_agent_critic_gating",
-            "exact_match_metrics",
+            "append_only_manifested_patch_store",
+            "additive_curation_refine_critique_enrich",
+            "effectiveness_weighted_chain_scoped_retrieval",
         ],
         "results": report,
-        "delta_skillforge_vs_baseline": delta_ac,
-        "delta_skillforge_vs_evoarena": delta_bc,
+        "delta_curated_vs_no_mem": delta_ac,   # C - A
+        "delta_curated_vs_raw_patch": delta_bc,  # C - B
     }
 
     if benchmark == "gaia2":
@@ -923,10 +1005,10 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         for i, task in enumerate(test_tasks):
             config = (task.get("metadata") or {}).get("config", "unknown")
             if config not in config_scores:
-                config_scores[config] = {"A_baseline": [], "B_evomem": [], "C_gpr": []}
-            config_scores[config]["A_baseline"].append(all_evals[i * 3])
-            config_scores[config]["B_evomem"].append(all_evals[i * 3 + 1])
-            config_scores[config]["C_gpr"].append(all_evals[i * 3 + 2])
+                config_scores[config] = {"no_mem": [], "raw_patch": [], "curated_patch": []}
+            config_scores[config]["no_mem"].append(all_evals[i * 3])
+            config_scores[config]["raw_patch"].append(all_evals[i * 3 + 1])
+            config_scores[config]["curated_patch"].append(all_evals[i * 3 + 2])
         per_config_report = {}
         for config, groups in sorted(config_scores.items()):
             per_config_report[config] = {}
@@ -945,10 +1027,10 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         for i, task in enumerate(test_tasks):
             level = (task.get("metadata") or {}).get("level", "unknown")
             if level not in level_scores:
-                level_scores[level] = {"A_baseline": [], "B_evomem": [], "C_gpr": []}
-            level_scores[level]["A_baseline"].append(all_evals[i * 3])
-            level_scores[level]["B_evomem"].append(all_evals[i * 3 + 1])
-            level_scores[level]["C_gpr"].append(all_evals[i * 3 + 2])
+                level_scores[level] = {"no_mem": [], "raw_patch": [], "curated_patch": []}
+            level_scores[level]["no_mem"].append(all_evals[i * 3])
+            level_scores[level]["raw_patch"].append(all_evals[i * 3 + 1])
+            level_scores[level]["curated_patch"].append(all_evals[i * 3 + 2])
         per_level_report = {}
         for level, groups in sorted(level_scores.items()):
             per_level_report[level] = {}
@@ -962,8 +1044,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
         print(f"    {'Level':<10} {'Baseline':>10} {'EvoArena+SkillForge':>20} {'n':>4}")
         print(f"    {'-'*46}")
         for level in sorted(per_level_report.keys()):
-            a = per_level_report[level]["A_baseline"]
-            c = per_level_report[level]["C_gpr"]
+            a = per_level_report[level]["no_mem"]
+            c = per_level_report[level]["curated_patch"]
             print(f"    Level {level:<5} {a['score']:>9.1%} {c['score']:>19.1%} {a['n']:>4}")
 
     with open(f"{RESULTS_DIR}/{benchmark}/report.json", "w") as f:
@@ -984,24 +1066,66 @@ async def main():
     print(f"  Model: {MODEL:<22} | Global slots: {GLOBAL_TASK_SLOTS} "
           f"(docker {min(DOCKER_TASK_SLOTS, GLOBAL_TASK_SLOTS)}) "
           f"| embed threads: {_EMBED_THREADS}")
+    # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
+    # config echo). One glance at the log answers "what exactly ran?" — the
+    # stale-checkout incident (C rerun on pre-v2 code) would have been caught
+    # at launch, not after 128 wasted solves, had this existed then.
+    _knobs = {
+        "code_rev": _CODE_REV, "ARMS": ",".join(sorted(_ARMS)),
+        "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),
+        "ITER_FEEDBACK": os.environ.get("ITER_FEEDBACK", "gold"),
+        "RESUME": int(RESUME), "TASK_LIMIT": _TASK_N,
+        "GAIA2_TASK_LIMIT": os.environ.get("GAIA2_TASK_LIMIT", "(default)"),
+        "GAIA2_SPLIT_WEIGHTS": os.environ.get("GAIA2_SPLIT_WEIGHTS", "(uniform)"),
+        "C_INJECT_BUDGET_CH": os.environ.get("C_INJECT_BUDGET_CH", "900"),
+        "C_CRITIC_GATE": os.environ.get("C_CRITIC_GATE", "5"),
+        "C_RAW_FALLBACK": os.environ.get("C_RAW_FALLBACK", "1"),
+        "C_PAGE_KEEP": os.environ.get("C_PAGE_KEEP", "0"),
+        "C_NO_PARTITION": os.environ.get("C_NO_PARTITION", "0"),
+        "C_USE_CRITIC": os.environ.get("C_USE_CRITIC", "1"),
+        "C_USE_ENRICH": os.environ.get("C_USE_ENRICH", "1"),
+        "W_C_DISABLED": os.environ.get("W_C_DISABLED", "0"),
+        "REPROMPT_CONTROL": os.environ.get("REPROMPT_CONTROL", "0"),
+        "PASSK": os.environ.get("PASSK", "0"),
+        "PASSK_FINAL": os.environ.get("PASSK_FINAL", "0"),
+        "EXTERNAL_MEMS": os.environ.get("EXTERNAL_MEMS", "(none)"),
+        "RESULTS_BASE": _RESULTS_BASE,
+    }
+    print("  knobs: " + " ".join(f"{k}={v}" for k, v in _knobs.items()))
     print("=" * 70)
 
     print("\n  Probing API availability...", flush=True)
-    api_ok = await probe_api_available()
-    if not api_ok:
-        print("  DeepSeek V4 Pro API is NOT available. Aborting.", flush=True)
-        return
-    print("  API is responding.", flush=True)
+    # When running with a local vLLM/OpenAI backend (LLM_PROVIDER in
+    # vllm/openrouter/openai/oai/openai_compatible), the CodeBuddy SDK probe is
+    # irrelevant. Skip it and trust the endpoint directly.
+    _llm_provider = os.environ.get("LLM_PROVIDER", "").lower()
+    if _llm_provider in ("vllm", "openrouter", "openai", "oai", "openai_compatible"):
+        print("  Skipping probe (using local/OpenAI backend: %s)." % _llm_provider, flush=True)
+        api_ok = True
+    # Detect local endpoint via OPENAI_* vars even when LLM_PROVIDER didn't
+    # make it through the env chain (nohup/ceph edge cases).
+    elif os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL"):
+        print("  Skipping probe (OPENAI_API_BASE/OPENAI_BASE_URL detected).", flush=True)
+        os.environ["LLM_PROVIDER"] = "vllm"
+        api_ok = True
+    else:
+        api_ok = await probe_api_available()
+        if not api_ok:
+            print("  DeepSeek V4 Pro API is NOT available. Aborting.", flush=True)
+            return
+    print("  API is ready.", flush=True)
 
     checkpoint = load_checkpoint(CHECKPOINT_FILE)
     completed_benchmarks = checkpoint.get("completed_benchmarks", {})
     if completed_benchmarks:
         print(f"\n  Resuming from checkpoint: {list(completed_benchmarks.keys())} already done.", flush=True)
 
-    # terminal_bench_2 RETIRED from the default sweep: TB2 now runs on the
-    # official harbor harness (scripts/latest/tb2_harbor_bridge.py) — the
-    # simplified Terminus-2-style loop stays available only via an explicit
-    # BENCHMARKS=terminal_bench_2 override and must not feed paper numbers.
+    # terminal_bench_2 RETIRED (2026-07-09): replaced by tau2-bench
+    # (scripts/latest/tau2_bridge.py, routed automatically by
+    # run_all_benchmarks.sh). The old harbor harness is archived under
+    # scripts/latest/obsolete/. The simplified Terminus-2-style loop below stays
+    # only as a hard-guarded BENCHMARKS=terminal_bench_2 override and must never
+    # feed paper numbers.
     BENCHMARKS_TO_RUN = [
         "gaia", "gaia2", "locomo"
     ]
@@ -1013,17 +1137,16 @@ async def main():
         _keep = {b.strip() for b in _bf.split(",") if b.strip()}
         # HARD GUARD: TB2 through this runner is the RETIRED simplified loop.
         # An explicit BENCHMARKS list quietly revived it once and burned 2h+801
-        # trace rows on a box where docker pulls fail; paper TB2 numbers come
-        # from the official harbor bridge (scripts/latest/tb2_harbor_bridge.py,
-        # or run_all_benchmarks.sh which routes TB2 there automatically).
+        # trace rows on a box where docker pulls fail. TB2 is retired entirely;
+        # the current agentic benchmark is tau2 (Docker-free).
         if "terminal_bench_2" in _keep and os.environ.get("ALLOW_RETIRED_TB2") != "1":
             raise SystemExit(
-                "[latest_runner] REFUSING to run terminal_bench_2 through the "
-                "retired simplified loop.\n"
-                "  Use the harbor bridge instead:\n"
+                "[latest_runner] REFUSING to run terminal_bench_2 — it is RETIRED.\n"
+                "  The agentic benchmark is now tau2 (Docker-free):\n"
                 "    bash scripts/latest/run_all_benchmarks.sh <MODEL>\n"
-                "    # or: python scripts/latest/tb2_harbor_bridge.py --arm A|B|C ...\n"
-                "  (override for debugging only: ALLOW_RETIRED_TB2=1)")
+                "    # or: python scripts/latest/tau2_bridge.py --arm A|B|C ...\n"
+                "  (the old harbor bridge is archived under scripts/latest/obsolete/;\n"
+                "   override for debugging only: ALLOW_RETIRED_TB2=1)")
         BENCHMARKS_TO_RUN = [b for b in BENCHMARKS_TO_RUN if b in _keep]
     print(f"\n  Loading benchmarks: {BENCHMARKS_TO_RUN}...")
     benchmarks = {}
@@ -1090,7 +1213,7 @@ async def main():
     for name, report in all_reports.items():
         if isinstance(report, dict) and "results" in report:
             r = report["results"]
-            print(f"  {name:>20}: A={r['A_baseline']['em']:.1%}, B={r['B_evomem']['em']:.1%}, C={r['C_gpr']['em']:.1%}")
+            print(f"  {name:>20}: A={r.get('no_mem',{}).get('em',0):.1%}, B={r.get('raw_patch',{}).get('em',0):.1%}, C={r.get('curated_patch',{}).get('em',0):.1%}")
         elif isinstance(report, dict) and "error" in report:
             print(f"  {name:>20}: ERROR — {report['error'][:80]}")
         else:

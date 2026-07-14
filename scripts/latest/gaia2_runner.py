@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
-os.environ['LLM_PROVIDER'] = 'codebuddy'
+os.environ.setdefault('LLM_PROVIDER', 'codebuddy')  # opt into openrouter via env
 os.environ.setdefault('CODEBUDDY_MODEL', 'hy3-preview')
 os.environ.setdefault('CODEBUDDY_INTERNET_ENVIRONMENT', 'ioa')
 
@@ -303,6 +303,23 @@ def _gaia2_native_sync(scenario_path, task_desc, experience_section, base_result
     return result
 
 
+def _window_messages(messages, keep_recent=None):
+    """Sliding-window the chat history to cap re-sent context (the dominant token
+    cost in a long agent loop). Keep the system prompt + the first user turn (the
+    task) + the most recent `keep_recent` messages, dropping the middle. Never
+    start the tail on an orphan tool result (OpenAI requires each tool message to
+    follow its assistant tool_call), so back up to the owning assistant turn."""
+    if keep_recent is None:
+        keep_recent = int(os.environ.get("GAIA2_HISTORY_KEEP", "24"))
+    if len(messages) <= keep_recent + 2:
+        return messages
+    head = messages[:2]                      # system + first user (the task)
+    tail = messages[-keep_recent:]
+    while tail and tail[0].get("role") == "tool":
+        tail = tail[1:]
+    return head + tail
+
+
 def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base_result, max_turns):
     """OpenAI-compatible native tool-calling worker (external-reviewer path).
 
@@ -361,6 +378,7 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
         timeout = int(os.environ.get("GAIA2_OPENAI_TIMEOUT", "120"))
 
         for _turn in range(max_turns):
+            messages = _window_messages(messages)   # cap re-sent context per turn
             r = openai_tool_chat(messages, tools, timeout=timeout)
             if r.get("error"):
                 result.setdefault("error", r["error"])
@@ -388,7 +406,8 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
                     "tool": name, "args": args, "result_preview": str(tr)[:500]})
                 messages.append({
                     "role": "tool", "tool_call_id": tc["id"],
-                    "content": json.dumps(tr, default=str)[:4000]})
+                    "content": json.dumps(tr, default=str)[
+                        :int(os.environ.get("GAIA2_TOOL_TRUNC", "2000"))]})
 
         result["response"] = "\n".join(t for t in texts if t)[:8000]
         result["reasoning_trace"] = texts[-20:]
@@ -462,7 +481,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             # (run_in_executor does not copy the context by itself).
             import contextvars as _cv
             _ctx = _cv.copy_context()
-            _max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "50"))
+            _max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "20"))
             native = await loop.run_in_executor(
                 None, lambda: _ctx.run(
                     worker, scenario_path, task_desc, experience_section,
@@ -539,7 +558,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
         # exploration and a twist follow-up, and the BudgetTracker's own thresholds
         # (75,50,30,15,5) assume a larger budget -- at 25 the "URGENT/FINAL" hints fire
         # in the first half and the agent quits mid-task. Env-tunable.
-        max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "50"))
+        max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "20"))
         all_responses = []
         reasoning_trace = []  # Collect AI-filtered valuable reasoning across turns
 

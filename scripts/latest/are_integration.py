@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
@@ -487,17 +488,17 @@ def load_gaia2_tasks_from_cli_dir(
         logger.warning("GAIA2 CLI directory not found: %s", base_dir)
         return []
 
-    task_dirs = sorted(base_dir.iterdir())
+    # Support both flat (<base>/<task>/environment/scenario.json) and
+    # split-grouped (<base>/<split>/<task>/environment/scenario.json) layouts.
+    # Recursively find every task by locating environment/scenario.json so the
+    # dataset loads regardless of how the CLI dir is organized.
+    scenario_paths = sorted(base_dir.rglob("environment/scenario.json"))
 
     # First pass: load ALL tasks grouped by config
     tasks_by_config: dict[str, list[dict]] = {}
 
-    for task_dir in task_dirs:
-        if not task_dir.is_dir():
-            continue
-
-        # Required files
-        scenario_path = task_dir / "environment" / "scenario.json"
+    for scenario_path in scenario_paths:
+        task_dir = scenario_path.parent.parent
         oracle_task_path = task_dir / "tests" / "oracle_task.txt"
         oracle_events_path = task_dir / "tests" / "oracle_events.json"
         oracle_answer_path = task_dir / "tests" / "oracle_answer.txt"
@@ -573,6 +574,28 @@ def load_gaia2_tasks_from_cli_dir(
     # n=200's task set is then a superset of n=100's, so raising the limit on
     # an existing run extends it under RESUME instead of resampling. Do NOT
     # add shuffling here without seeding and versioning the protocol.
+    # GAIA2_SPLIT_WEIGHTS="adaptability:30,time:30,ambiguity:14,execution:13,search:13"
+    # overrides uniform stratification with per-config counts (declared in the
+    # paper: the dynamic splits are where the evolving-environment thesis makes
+    # its prediction, so the confirmatory n concentrates there). Still sorted +
+    # first-k per config, so a weighted set whose per-config counts are <= a
+    # previous uniform run's per-config take is a SUBSET of that run — existing
+    # A/B rows keep pairing with a C rerun, and RESUME stays valid.
+    _weights_env = os.environ.get("GAIA2_SPLIT_WEIGHTS", "").strip()
+    if _weights_env:
+        want: dict[str, int] = {}
+        for _part in _weights_env.split(","):
+            _k, _, _v = _part.strip().partition(":")
+            if _k.strip() and _v.strip().isdigit():
+                want[_k.strip()] = int(_v.strip())
+        tasks = []
+        for config in sorted(tasks_by_config.keys()):
+            take = min(want.get(config, 0), len(tasks_by_config[config]))
+            tasks.extend(tasks_by_config[config][:take])
+        logger.info("GAIA2 weighted stratified sample %s -> %d tasks",
+                    _weights_env, len(tasks))
+        return tasks
+
     n_configs = len(tasks_by_config)
     per_config = max(1, num_samples // n_configs)
     remainder = num_samples - per_config * n_configs

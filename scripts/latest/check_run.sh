@@ -101,11 +101,16 @@ else
 fi
 
 echo ""
+echo "── v2 method gate (hard: coverage / dose / rev; soft: markers) ──"
+"$PY" scripts/latest/v2_gate.py "$MODEL" "$BASE" || echo "  ⚠️  v2 gate FAILED — do not trust C numbers"
+
+echo ""
 echo "── verdict checklist ──"
 cat <<'TXT'
   [ ] every benchmark has A/B/C at expected n, err≈0, ONE code_rev
   [ ] fb_mode=self everywhere (QA) / env-by-construction (TB2)
   [ ] mutated≈100% of iter>=1 rows; injected>0 for B and C
-  [ ] C vs B soft CI: the paper claim lives or dies here
+  [ ] v2 gate PASS (C coverage ~100%, dose <= B, v2.2 markers present)
+  [ ] C vs B soft CI (secondary) + pooled_stats primary endpoint
   [ ] gaia2: dynamic splits (adaptability/time/ambiguity) vs static controls
 TXT

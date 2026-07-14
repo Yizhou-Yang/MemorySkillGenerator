@@ -109,6 +109,41 @@ _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
 # remains is purely WHAT is injected. Set 0 to disable (legacy), or override
 # per ablation arm (C_small_inject=500).
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
+# Weak-compaction knob (ablation arm C_weak_compact, NOT part of the frozen
+# method — default off): C_PAGE_KEEP=n makes retrieval see only the newest n
+# same-chain entries, a MemoryOS-style paging of older ones out of the read
+# path. The store itself is untouched (paging is reversible, unlike eviction),
+# so this isolates exactly what the append-only read path buys: the paper's
+# compaction row compares n=2 against the default n=inf. Read dynamically so
+# the ablation driver can set it per-arm without reimport.
+def _page_keep() -> int:
+    return int(os.environ.get("C_PAGE_KEEP", "0"))
+
+
+# No-partition knob (ablation arm C_no_partition, NOT part of the frozen
+# method — default off): C_NO_PARTITION=1 switches the manifest's partition
+# metadata off at read time — no chain pruning of the similarity pool and no
+# chain-index recall rescue (the index IS the partition being ablated) — so
+# retrieval reads the flat, similarity-ranked global pool, exactly what a log
+# without partitions serves. Store writes are untouched. This is the accuracy
+# side of the manifest's partition claim: tab:manifest prices the read-path
+# latency, this arm prices what pruning buys in answer quality. Read
+# dynamically so the ablation driver can set it per-arm without reimport.
+def _no_partition() -> bool:
+    return os.environ.get("C_NO_PARTITION", "0") == "1"
+
+
+# Raw fallback (frozen method v2, 2026-07-05): when every curated channel comes
+# up empty (critic approves nothing, no note survives the weak-lesson floor, or
+# the reworded variant drops the chain below the similarity floor), C injects
+# the RAW store's own entries under the SAME dose budget — it degrades to the
+# \patchmem baseline, never to no memory. Evidence from the first frozen sweep:
+# C skipped injection on 28-37% of opportunities (B: ~100%) and paid for the
+# silence exactly where memory helped most (gaia, C-skipped subset: B−A=+13.5pp,
+# C−B=−8.1pp); the dilution arithmetic reproduces the observed C−B to the
+# decimal. With the fallback, C−B ≥ 0 becomes structural on the read path.
+# C_RAW_FALLBACK=0 is the ablation arm (C_no_fallback).
+_C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
 
 
 def _critic_q(e) -> int:
@@ -154,60 +189,175 @@ def _concrete_approach(exp) -> str:
     return ""
 
 
-def _format_curated(successes: list, failures: list = ()) -> str:
-    """Inject concrete, relevance-gated, de-duplicated successful approaches plus
-    the refined lesson WHEN genuinely useful; and, for prior attempts that
-    FAILED on this chain, the refined avoidance note (what to not repeat) — so C
-    still guides the agent on a hard chain whose earlier iterations all failed,
-    instead of going silent. No empty fields, no [PLACEHOLDER] templates."""
-    blocks, seen = [], set()
+# Benchmarks scored on WHICH ACTIONS OCCURRED (gaia2 soft-recall over oracle
+# events, TB2 in-container tests, tau2 final-DB-state + action checks). Only
+# there is the action/tool sequence the payload worth displacing prose for.
+# gaia/locomo agents also log tool calls, but they are scored on ANSWER text —
+# v2.2's entry-has-actions heuristic fired on 96% of gaia blocks, dropped every
+# "What worked" prose line, truncated answers to 160ch, and turned C−B from −2.1
+# to −9.1pp. Scope by benchmark, never by entry shape.
+_ACTION_SCORED = {"gaia2", "terminal_bench_2", "tau2"}
+
+
+def _format_curated(successes: list, failures: list = (),
+                    current_tid: str = "", action_scored: bool = False) -> str:
+    """v2.5 LAYERED RENDERING. The replay layer (every prior attempt, verbatim)
+    is the guaranteed base; annotations (Lesson/Avoid) are a bonus layer added
+    only while the dose budget allows. v2.4 rendered one rich block that ate
+    the budget and squeezed the second attempt out: on gaia, 8 of C's 10
+    final-iteration losses to B were exactly "C shows 1 attempt, B shows 2".
+    The superset the paper claims must hold at the SET level first, so field
+    caps adapt to the number of attempts and annotations never displace an
+    attempt. No empty fields, no [PLACEHOLDER] templates."""
+    def _payload(e):
+        tax = e.failure_taxonomy or {}
+        return ((tax.get("verbatim_outcome") or "").strip(),
+                _concrete_approach(e))
+
+    n_est = sum(1 for e in list(successes) + list(failures)
+                if any(_payload(e)))
+    vcap = 400 if n_est <= 1 else (300 if n_est == 2 else 180)
+    tcap = 150 if n_est <= 1 else 90
+    pairs, seen, n_succ = [], set(), 0   # (lean_block, annotation) in order
     for e in successes:
-        concrete = _concrete_approach(e)
-        key = (concrete[:80] or _core_task(e.task_desc)[:80]).lower()
-        if not concrete or key in seen:
+        tax = e.failure_taxonomy or {}
+        outcome, concrete = _payload(e)
+        key = ((concrete[:80] or outcome[:80] or _core_task(e.task_desc)[:80])).lower()
+        if (not concrete and not outcome) or key in seen:
             continue
         seen.add(key)
         parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
                  f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
-                 f"Task: {_core_task(e.task_desc)[:200]}",
-                 f"What worked: {concrete}"]
-        lesson = ((e.failure_taxonomy or {}).get("causal_lesson") or "").strip()
-        if lesson and not _is_weak_lesson(lesson):
-            parts.append(f"Lesson: {lesson}")
-        blocks.append("\n".join(parts))
-    fail_blocks = []
+                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
+                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+            if action_scored else []
+        if action_scored:
+            # gaia2/TB2: scored on which actions occurred — action list is the
+            # payload, answer text secondary (v2.3, trend-positive on gaia2).
+            if outcome:
+                parts.append(f"Answer given then (unverified): {outcome[:160]}")
+            if acts:
+                parts.append("Actions used: " + " -> ".join(acts)[:200])
+            elif concrete:
+                parts.append(f"What worked: {concrete[:200]}")
+        elif outcome:
+            # Answer-scored QA: the raw attempt VERBATIM — the same resp head
+            # B replays, hedges and discrepancy notes intact (truncated only
+            # to share the dose budget across ALL attempts of the chain).
+            parts.append(f"As recorded: {outcome[:vcap]}")
+        elif concrete:
+            parts.append(f"What worked: {concrete[:vcap]}")
+        lesson = (tax.get("causal_lesson") or "").strip()
+        annot = (f"\nLesson: {lesson[:180]}"
+                 if lesson and not _is_weak_lesson(lesson) else "")
+        pairs.append(["\n".join(parts), annot])
+        n_succ += 1
     for e in failures:
         tax = e.failure_taxonomy or {}
         note = (tax.get("avoidance_note") or tax.get("causal_lesson") or "").strip()
-        if not note or _is_weak_lesson(note):
+        # Same-task entries carry their verbatim answer here too: self-
+        # assessment routes many gold-CORRECT attempts into this channel
+        # (LoCoMo: 66% false-failure rate), and dropping their answers is how
+        # C lost to a raw baseline that replays everything.
+        outcome = (tax.get("verbatim_outcome") or "").strip() \
+            if e.task_id == current_tid else ""
+        weak = not note or _is_weak_lesson(note)
+        if weak and not outcome:
             continue
-        key = ("avoid:" + note[:80]).lower()
+        # dedup by the actual PAYLOAD: outcome first (distinct attempts can
+        # share an identical weak note, which must not merge them)
+        key = ("avoid:" + (outcome or note)[:80]).lower()
         if key in seen:
             continue
         seen.add(key)
-        fail_blocks.append(f"[✗ Earlier attempt fell short]\n"
-                           f"Task: {_core_task(e.task_desc)[:200]}\nAvoid: {note}")
+        parts = [f"[✗ Earlier attempt fell short]",
+                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        if outcome:
+            parts.append("As recorded (self-assessed doubtful, verify before "
+                         f"reuse): {outcome[:min(150, vcap)]}")
+            annot = f"\nAvoid: {note[:180]}" if not weak else ""
+        else:
+            # no verbatim payload: the avoidance note IS the payload
+            parts.append(f"Avoid: {note[:180]}")
+            annot = ""
+        pairs.append(["\n".join(parts), annot])
+    if _C_INJECT_BUDGET > 0:
+        # layer 1: keep as many LEAN attempt blocks as fit (attempts first,
+        # annotations never displace an attempt)
+        kept, used = [], 0
+        for lean, annot in pairs:
+            if used + len(lean) > _C_INJECT_BUDGET:
+                break
+            kept.append([lean, annot]); used += len(lean)
+        if not kept and pairs:
+            # never let one oversized block silence the whole channel
+            kept = [[pairs[0][0][:_C_INJECT_BUDGET], ""]]
+            used = len(kept[0][0])
+        # layer 2: upgrade kept blocks with their annotations while budget lasts
+        for kb in kept:
+            if kb[1] and used + len(kb[1]) <= _C_INJECT_BUDGET:
+                kb[0] += kb[1]; used += len(kb[1])
+        rendered = [kb[0] for kb in kept]
+    else:
+        rendered = [lean + annot for lean, annot in pairs]
+    k_succ = min(n_succ, len(rendered))
+    blocks, fail_blocks = rendered[:k_succ], rendered[k_succ:]
+    if not blocks and not fail_blocks:
+        return ""
+    out = ""
+    if blocks:
+        # Header must not overclaim: self-assessment mislabels many entries
+        # (gaia: 56% of gold-wrong attempts self-assess >=0.5), so these are
+        # "prior attempts", not "solved tasks". TB2 transcript checks grep for
+        # the stable "## Curated prior attempts" marker.
+        out += "## Curated prior attempts (this task's chain)\n\n" + "\n\n".join(blocks)
+    if fail_blocks:
+        out += ("\n\n" if out else "") + "## What to avoid (from earlier attempts)\n\n" + "\n\n".join(fail_blocks)
+    return out
+
+
+def _format_raw(entries: list, action_scored: bool = False) -> str:
+    """Raw-fallback rendering: B-equivalent content under C's dose budget. No
+    curated field is required — the concrete approach (reasoning trace or
+    commands) always exists for any recorded attempt — so a chain that HAS
+    history is never rendered as silence. Honest tag: the agent sees these are
+    raw prior attempts, not curator-approved solutions."""
+    blocks, seen = [], set()
+    for e in entries:
+        concrete = _concrete_approach(e)
+        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
+                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+            if action_scored else []
+        if not concrete and not acts:
+            continue
+        key = (concrete or " ".join(acts))[:80].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        sc = getattr(e, "score", 0.0) or 0.0
+        head = "What was tried and seemed to work" if sc >= 0.5 else \
+               "What was tried and fell short"
+        parts = [f"[Prior attempt on this task — raw, self-assessed {sc:.0%}]",
+                 f"Task: {_core_task(e.task_desc)[:150]}"]
+        if acts:   # agentic: the action sequence is the payload (see curated)
+            parts.append("Actions used: " + " -> ".join(acts)[:200])
+            if concrete:
+                parts.append(f"{head}: {concrete[:200]}")
+        else:
+            parts.append(f"{head}: {concrete[:400]}")
+        blocks.append("\n".join(parts))
     if _C_INJECT_BUDGET > 0:
         kept, used = [], 0
         for b in blocks:
             if used + len(b) > _C_INJECT_BUDGET:
                 break
-            kept.append(b); used += len(b)
+            kept.append(b)
+            used += len(b)
         blocks = kept
-        kept, _budget = [], max(0, _C_INJECT_BUDGET - used)
-        for b in fail_blocks:
-            if len(b) > _budget:
-                break
-            kept.append(b); _budget -= len(b)
-        fail_blocks = kept
-    if not blocks and not fail_blocks:
+    if not blocks:
         return ""
-    out = ""
-    if blocks:
-        out += "## Relevant past solutions (curated from similar solved tasks)\n\n" + "\n\n".join(blocks)
-    if fail_blocks:
-        out += ("\n\n" if out else "") + "## What to avoid (from earlier attempts)\n\n" + "\n\n".join(fail_blocks)
-    return out
+    return "## Prior attempts on this task (raw memory)\n\n" + "\n\n".join(blocks)
 
 
 class BenchmarkMemory:
@@ -328,6 +478,13 @@ class CuratedMemory:
         self._served: dict[str, list[str]] = {}
         self._last_score: dict[str, float] = {}
         self._record_failures = 0
+        # Per-chain index of this bridge's own recorded experiences. inject()'s
+        # global retrieve_similar ranks against the WHOLE library, so a reworded
+        # variant can push this chain's entries out of the pool while other
+        # tasks' entries fill it — B never has this failure because it scopes
+        # retrieval to the chain at the store. The index guarantees C's recall
+        # of its own chain history is at least B's.
+        self._chain_entries: dict[str, list] = {}
 
     # Pickled by the harbor bridge between iterations: drop the LLM function
     # ref on dump (re-imported on load). If SkillForgeLatest's embedder turns
@@ -339,6 +496,7 @@ class CuratedMemory:
 
     def __setstate__(self, d):
         self.__dict__.update(d)
+        self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
         from scripts.latest.llm_client import llm_review_fn
         self._llm = llm_review_fn
 
@@ -352,27 +510,77 @@ class CuratedMemory:
         try:
             # No outcome filter here: we want both prior successes (to copy) and
             # prior failures (to avoid) from this chain.
-            cands = self._sf.library.retrieve_similar(core, top_k=self.top_k * 6)
+            pool = self._sf.library.retrieve_similar(core, top_k=self.top_k * 6)
         except Exception:
-            return ""
-        # CHAIN-SCOPED: keep only experiences from the SAME chain (this task's
-        # earlier iterations, or same LoCoMo session) — patch memory is not
-        # cross-task transfer. Then a relevance gate as extra hygiene within
-        # multi-task chains. On a single-pass independent-task run nothing is
-        # in-chain, so C honestly injects nothing (value appears under chains).
-        cands = [e for e in cands if self._chain_of.get(e.task_id) == chain]
-        cands = [e for e in cands
-                 if _content_overlap(core, _core_task(e.task_desc)) >= _C_SIM_FLOOR]
-        best = max((getattr(e, "score", 0.0) or 0.0 for e in cands), default=0.0)
-        succ = [e for e in cands
+            pool = []  # the chain index below still serves
+        _key = lambda e: (e.task_id, getattr(e, "version", 0),
+                          getattr(e, "timestamp", 0.0))
+        if _no_partition():
+            # No-partition foil (ablation only, see _no_partition): serve the
+            # flat similarity-ranked pool — no chain pruning, no chain-index
+            # rescue. Downstream (floor, same-task sort, channels, budget)
+            # is identical, so the arm isolates the partition metadata.
+            cands = list(pool)
+        else:
+            # CHAIN-SCOPED: keep only experiences from the SAME chain (this
+            # task's earlier iterations, or same LoCoMo session) — patch memory
+            # is not cross-task transfer. On a single-pass independent-task run
+            # nothing is in-chain, so C honestly injects nothing (value appears
+            # under chains).
+            ranked = [e for e in pool if self._chain_of.get(e.task_id) == chain]
+            # Recall rescue: append any in-chain entry the global pool missed
+            # (keeps retrieve_similar's sim x w_c order for what it DID
+            # surface).
+            _have = {_key(e) for e in ranked}
+            cands = ranked + [e for e in self._chain_entries.get(chain, [])
+                              if _key(e) not in _have]
+        _pk = _page_keep()
+        if _pk > 0:
+            # weak compaction (ablation only): page all but the newest n
+            # chain entries out of the read path; the store keeps everything
+            _allowed = {_key(e) for e in
+                        self._chain_entries.get(chain, [])[-_pk:]}
+            cands = [e for e in cands if _key(e) in _allowed]
+        # Similarity floor as HYGIENE only: within multi-task chains (LoCoMo
+        # sessions) it filters off-topic entries, but it must never zero out a
+        # chain that has history — on reworded variants the floor is exactly
+        # what silenced C (63-72% injection) while B kept injecting (~100%).
+        floored = [e for e in cands
+                   if _content_overlap(core, _core_task(e.task_desc)) >= _C_SIM_FLOOR]
+        if floored:
+            cands = floored
+        # SAME-TASK FIRST: in a session chain (LoCoMo: one chain = a whole
+        # session of questions) the current task's own prior iterations are the
+        # direct evidence; other questions' entries are auxiliary context.
+        # Stable sort keeps the sim x w_c order within each group, and the
+        # chain-best anchor uses own attempts when any exist, so another
+        # question's high self-score cannot evict this task's own attempt from
+        # the success channel — cross-question replay is precisely the raw
+        # baseline's measured failure mode on LoCoMo (B−A = −5.6pp).
+        tid_now = task.get("task_id", "")
+        cands.sort(key=lambda e: 0 if e.task_id == tid_now else 1)
+        own = [e for e in cands if e.task_id == tid_now]
+        pool = own if own else cands
+        best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
+        succ = [e for e in pool
                 if _critic_q(e) >= _CRITIC_GATE
                 and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
-        out = _format_curated(succ, fail)
+        _action_scored = self.benchmark in _ACTION_SCORED
+        out = _format_curated(succ, fail, current_tid=tid_now,
+                              action_scored=_action_scored)
+        served = succ + fail
+        if not out and cands and _C_RAW_FALLBACK:
+            # Curated channels rendered nothing -> degrade to the raw store
+            # under the same budget, never to no memory (see _C_RAW_FALLBACK).
+            # Same-task-first order makes the fallback replay this task's own
+            # attempts before any session-mate's.
+            served = cands[: self.top_k]
+            out = _format_raw(served, action_scored=_action_scored)
         if out:
             # remember what was actually served, for the effectiveness update
-            self._served[task.get("task_id", "")] = [e.task_id for e in succ + fail]
+            self._served[tid_now] = [e.task_id for e in served]
         return out
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
@@ -421,14 +629,40 @@ class CuratedMemory:
             # retrieval). Same-task iterations share a task_id; LoCoMo shares a
             # session chain_id.
             self._chain_of[task.get("task_id", "")] = _chain_id(task)
+            # Locate the experience just stored for THIS task (search by id, not
+            # experiences[-1]: concurrent records interleave) and index it on
+            # its chain for inject()'s recall rescue.
+            _exps = self._sf.library.experiences
+            _mine = next((e for e in reversed(_exps) if e.task_id == tid), None)
+            if _mine is not None:
+                # Stash the verbatim outcome BEFORE it is lost to refinement, so
+                # inject() can replay the exact answer alongside the curated
+                # lesson (the B-superset rendering; see _format_curated).
+                # UNCONDITIONAL on purpose: the stash key is the SELF-assessed
+                # score, and self-assessment is badly miscalibrated exactly
+                # where memory pays (LoCoMo: 66% of gold-correct attempts
+                # self-assess <0.5, so a success-only stash silently drops the
+                # answers B keeps). Measured replay effects justify keeping
+                # wrong-looking answers too: replaying a gold-wrong answer is
+                # ~neutral (gaia +3.4pp / locomo −1.1pp B−A) while replaying a
+                # gold-right one is the payoff (+7 / +13pp); the render tags
+                # low-self-score answers honestly instead of hiding them.
+                try:
+                    _mine.failure_taxonomy.setdefault("verbatim_outcome",
+                                                      resp[:400])
+                    if score is not None:
+                        _mine.failure_taxonomy.setdefault(
+                            "outcome_selfscore", float(score))
+                except Exception:
+                    pass
+                self._chain_entries.setdefault(chain, []).append(_mine)
             # w_c cold-start prior from the critic (deployable, no extra calls):
             # seed one pseudo-observation so a high-quality patch starts above
             # unit weight and a critic-rejected one below, instead of every
             # patch idling at w_c=1.0 until two real reuse deltas accumulate.
             try:
-                _exps = self._sf.library.experiences
-                if _exps:
-                    _q = _critic_q(_exps[-1])
+                if _mine is not None:
+                    _q = _critic_q(_mine)
                     self._sf.library.update_effectiveness(
                         tid, (_q - _CRITIC_GATE) / 10.0)
             except Exception:
