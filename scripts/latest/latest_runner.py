@@ -151,6 +151,14 @@ RESUME = os.environ.get("RESUME", "0") == "1"
 # Arm selection (used by the ablation driver): run only these arms of A/B/C.
 # Default runs all three — the main sweep is unchanged.
 _ARMS = set(os.environ.get("ARMS", "A,B,C").replace(" ", "").split(","))
+# Arm C's critic. Unset => the critic IS the backbone (self-curation), which is
+# what every result before 2026-07-15 used. CRITIC_MODEL=<id> points it at a
+# designated model and routes ONLY critic calls there.
+try:
+    from scripts.latest.llm_client import critic_model_id as _critic_model_id
+    _CRITIC_MODEL = _critic_model_id()
+except Exception:
+    _CRITIC_MODEL = os.environ.get("CRITIC_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
 
 _TRANSIENT_MARKERS = (
     "429", "rate_limit", "rate-limit", "timeout", "quota", "quota_exceeded",
@@ -839,6 +847,14 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "mutated": bool(ITER_MUTATE and _it >= 1 and cur_task is not task),
                                   "fb_score": fb, "fb_mode": ITER_FEEDBACK,
                                   "code_rev": _CODE_REV,
+                                  # Who judged arm C's entries. Self-curation
+                                  # (critic == backbone) and cross-curation
+                                  # (designated stronger critic) are different
+                                  # method configs and must never be pooled as
+                                  # one: on GAIA the false-endorsement rate runs
+                                  # 36% for DeepSeek-v4-pro vs 90% for
+                                  # Llama-3.3-70B, and C-B flips sign with it.
+                                  "critic_model": _CRITIC_MODEL,
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
                                   # flailed" from "agent never engaged".
@@ -882,7 +898,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "patch_injected": bool(_rs.get("_aug_prompt")),
                                    "aug_len": len(_rs.get("_aug_prompt") or ""),
                                    "fb_mode": ITER_FEEDBACK,
-                                   "code_rev": _CODE_REV})
+                                   "code_rev": _CODE_REV,
+                                   "critic_model": _CRITIC_MODEL})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
@@ -1121,7 +1138,8 @@ async def main():
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
     # at launch, not after 128 wasted solves, had this existed then.
     _knobs = {
-        "code_rev": _CODE_REV, "ARMS": ",".join(sorted(_ARMS)),
+        "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL,
+        "ARMS": ",".join(sorted(_ARMS)),
         "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),
         "ITER_FEEDBACK": os.environ.get("ITER_FEEDBACK", "gold"),
         "RESUME": int(RESUME), "TASK_LIMIT": _TASK_N,

@@ -464,9 +464,11 @@ class CuratedMemory:
         # Lazy imports: keep module import light (B doesn't need src.latest deps
         # or the LLM client / SDK). Resolved once, on first C construction.
         from src.latest import SkillForgeLatest
-        from scripts.latest.llm_client import llm_review_fn
+        from scripts.latest.llm_client import llm_review_fn, llm_critic_fn
         self._sf = SkillForgeLatest()
         self._llm = llm_review_fn
+        # The critic routes separately (CRITIC_MODEL); unset -> same as _llm.
+        self._critic_llm = llm_critic_fn
         # exp task_id -> its chain id, so retrieval can be scoped to the chain
         # (patch memory = same-task iterations, not cross-task transfer).
         self._chain_of: dict[str, str] = {}
@@ -492,13 +494,15 @@ class CuratedMemory:
     def __getstate__(self):
         d = dict(self.__dict__)
         d["_llm"] = None
+        d["_critic_llm"] = None
         return d
 
     def __setstate__(self, d):
         self.__dict__.update(d)
         self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
-        from scripts.latest.llm_client import llm_review_fn
+        from scripts.latest.llm_client import llm_review_fn, llm_critic_fn
         self._llm = llm_review_fn
+        self._critic_llm = llm_critic_fn
 
     def inject(self, task: dict) -> str:
         # Retrieve on the CLEANED question (boilerplate stripped) so similarity
@@ -622,7 +626,7 @@ class CuratedMemory:
                 reasoning_trace=rtrace,
                 score=(None if score is None else float(score)),
                 llm_reviewer=self._llm,
-                critic_fn=(self._llm if self.use_critic else None),
+                critic_fn=(self._critic_llm if self.use_critic else None),
                 enrich=self.use_enrich,
             )
             # Remember which chain this experience belongs to (for chain-scoped

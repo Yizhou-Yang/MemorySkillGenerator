@@ -168,23 +168,66 @@ def _record_openai_usage(resp) -> None:
         pass
 
 
-def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) -> dict:
-    """Single-turn OpenAI-compatible chat (no tools)."""
+def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
+                        model: str | None = None, base_url: str | None = None,
+                        api_key: str | None = None) -> dict:
+    """Single-turn OpenAI-compatible chat (no tools).
+
+    `model`/`base_url`/`api_key` override the backbone's endpoint. That override
+    exists for the critic: arm C instantiates the critic from the backbone
+    itself, so its endorsement channel is only as reliable as the backbone's
+    self-assessment. Measured on GAIA, 36% of DeepSeek-v4-pro's endorsements sit
+    on a chain whose previous iteration was wrong, but 90% of Llama-3.3-70B's do,
+    and curation flips from +6.0 EM to -3.0 with it. Pointing the critic at a
+    designated stronger model is what tests whether the gain follows curator
+    quality rather than the store.
+    """
     if not _HAS_OPENAI:
         return {"text": "", "error": "openai_package_not_installed"}
-    if not (_OPENAI_BASE_URL or _OPENAI_API_KEY):
+    url = base_url if base_url is not None else _OPENAI_BASE_URL
+    key = api_key if api_key is not None else _OPENAI_API_KEY
+    if not (url or key):
         return {"text": "", "error": "openai_endpoint_not_configured"}
     try:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
-        resp = _openai_client(timeout).chat.completions.create(
-            model=_OPENAI_MODEL, messages=messages, timeout=timeout, **_gen_kwargs())
+        client = (_openai_client(timeout) if base_url is None and api_key is None
+                  else _OpenAI(base_url=url or None, api_key=key or "EMPTY", timeout=timeout))
+        resp = client.chat.completions.create(
+            model=(model or _OPENAI_MODEL), messages=messages, timeout=timeout,
+            **_gen_kwargs())
         _record_openai_usage(resp)
         return {"text": _msg_text(resp.choices[0].message), "error": None}
     except Exception as e:
         return {"text": "", "error": str(e)[:200]}
+
+
+# ─── Designated critic routing ────────────────────────────────────────────
+# CRITIC_MODEL routes ONLY the critic elsewhere; every other call still goes to
+# the backbone, so a run stays a clean A/B/C on that backbone. Unset = the critic
+# is the backbone (self-curation), which is what every result so far used.
+CRITIC_MODEL = (os.environ.get("CRITIC_MODEL") or "").strip().lower() or None
+CRITIC_BASE_URL = (os.environ.get("CRITIC_BASE_URL") or "").strip() or None
+CRITIC_API_KEY = (os.environ.get("CRITIC_API_KEY") or "").strip() or None
+
+
+def critic_model_id() -> str:
+    """What the critic actually is — trace rows record this so a mixed sweep
+    can never be silently pooled with a self-curated one."""
+    return CRITIC_MODEL or _OPENAI_MODEL or MODEL
+
+
+def llm_critic_fn(prompt: str) -> str:
+    """Synchronous LLM call for the CRITIC only (cross_agent_evaluate_skill and
+    critic_refine_experience). Falls back to llm_review_fn when CRITIC_MODEL is
+    unset, so default behaviour is unchanged."""
+    if CRITIC_MODEL is None:
+        return llm_review_fn(prompt)
+    return _openai_notool_sync("", prompt, timeout=90, model=CRITIC_MODEL,
+                               base_url=CRITIC_BASE_URL,
+                               api_key=CRITIC_API_KEY).get("text", "")
 
 
 def _openai_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:

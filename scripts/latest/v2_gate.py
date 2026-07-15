@@ -107,6 +107,20 @@ def main() -> None:
                 print(f"  G4 ✗ arm {g} has MIXED code_rev {sorted(v)} — "
                       "audit which rows predate the fix")
                 hard_fail = True
+        # G5 critic identity. Self-curation (critic == backbone) and
+        # cross-curation (a designated stronger critic) are different method
+        # configurations, not a nuisance parameter: on GAIA the rate of
+        # endorsements landing on a wrong prior attempt is 36% for
+        # DeepSeek-v4-pro but 90% for Llama-3.3-70B, and C−B flips from +6.0 to
+        # −3.0 with it. Pooling both into one C arm answers no question.
+        crit = {str(r.get("critic_model") or "?") for r in rs
+                if r.get("group") == "curated_patch"}
+        if len(crit) > 1:
+            print(f"  G5 ✗ arm curated_patch has MIXED critic_model {sorted(crit)}"
+                  " — self- and cross-curated rows cannot be pooled; split them")
+            hard_fail = True
+        elif crit:
+            print(f"  G5 critic: {crit.pop()}")
         doses = {}
         for g in ["no_mem", "raw_patch", "curated_patch"]:
             grs = [r for r in rs if r.get("group") == g]
