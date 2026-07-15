@@ -34,16 +34,18 @@ LOG="${VLLM_LOG:-/tmp/vllm_${SERVED_NAME}.log}"
 #   llama-33 on GAIA2 hit exactly this: 460/511 answered rows were raw
 #   "<|python_tag|>Cabs__get_ride_history_length()" text and all 600 rows
 #   scored 0.0, because this script hardcoded llama3_json for every model.
-# Llama 3.1/3.2/3.3 emit the PYTHONIC form (<|python_tag|>f(a=1)) unless you
-# also pass the JSON chat template; llama3_json cannot read that form. Pick the
-# parser by model family, override with TOOL_PARSER=<name>, TOOL_PARSER=none to
-# serve without native tool calling.
+# EMPIRICAL (vLLM 0.8.5, 2026-07-15): Llama-3.3-70B-Instruct emits the JSON
+# tool-call form ({"type":"function","name":...,"parameters":...}) by default,
+# and the llama3_json parser parses it into a standard tool_calls field
+# correctly. The pythonic parser, by contrast, FAILS on this model (returns
+# tool_calls=[], leaks the JSON into content). So llama → llama3_json, NOT
+# pythonic. qwen → hermes; everything else (hy3) → llama3_json.
+# Override with TOOL_PARSER=<name>; TOOL_PARSER=none serves without native tools.
 TOOL_PARSER="${TOOL_PARSER:-}"
 if [ -z "$TOOL_PARSER" ]; then
   case "$(echo "${SERVED_NAME} ${MODEL_PATH}" | tr '[:upper:]' '[:lower:]')" in
-    *llama*|*nemotron*) TOOL_PARSER=pythonic ;;   # <|python_tag|>f(a=1)
-    *qwen*)             TOOL_PARSER=hermes ;;     # <tool_call>{...}</tool_call>
-    *)                  TOOL_PARSER=llama3_json ;;  # hy3 default, unchanged
+    *qwen*)   TOOL_PARSER=hermes ;;     # <tool_call>{...}</tool_call>
+    *llama*|*nemotron*|*) TOOL_PARSER=llama3_json ;;  # JSON form; works on 3.3
   esac
 fi
 TOOL_ARG=(--enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER")
