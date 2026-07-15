@@ -488,17 +488,17 @@ def load_gaia2_tasks_from_cli_dir(
         logger.warning("GAIA2 CLI directory not found: %s", base_dir)
         return []
 
-    task_dirs = sorted(base_dir.iterdir())
+    # Support both flat (<base>/<task>/environment/scenario.json) and
+    # split-grouped (<base>/<split>/<task>/environment/scenario.json) layouts.
+    # Recursively find every task by locating environment/scenario.json so the
+    # dataset loads regardless of how the CLI dir is organized.
+    scenario_paths = sorted(base_dir.rglob("environment/scenario.json"))
 
     # First pass: load ALL tasks grouped by config
     tasks_by_config: dict[str, list[dict]] = {}
 
-    for task_dir in task_dirs:
-        if not task_dir.is_dir():
-            continue
-
-        # Required files
-        scenario_path = task_dir / "environment" / "scenario.json"
+    for scenario_path in scenario_paths:
+        task_dir = scenario_path.parent.parent
         oracle_task_path = task_dir / "tests" / "oracle_task.txt"
         oracle_events_path = task_dir / "tests" / "oracle_events.json"
         oracle_answer_path = task_dir / "tests" / "oracle_answer.txt"

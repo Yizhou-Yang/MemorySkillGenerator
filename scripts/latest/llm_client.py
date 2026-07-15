@@ -68,18 +68,76 @@ _OPENAI_BASE_URL = (os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_
                     or os.environ.get("DEEPSEEK_BASE_URL"))
 _OPENAI_API_KEY = (os.environ.get("OPENAI_API_KEY")
                    or os.environ.get("DEEPSEEK_API_KEY") or "")
-_OPENAI_MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("DEEPSEEK_MODEL")
-                 or os.environ.get("CODEBUDDY_MODEL") or MODEL).lower()
+if (os.environ.get("LLM_PROVIDER") or "").lower() in ("vllm", "openrouter"):
+    # Self-host/OpenRouter: the endpoint serves CODEBUDDY_MODEL. A DEEPSEEK_MODEL
+    # left in .env (deepseek-chat) must not win here — it 404s against a vLLM
+    # that only serves the backbone (it did: judge calls on the llama-33 run).
+    _OPENAI_MODEL = (os.environ.get("OPENAI_MODEL")
+                     or os.environ.get("CODEBUDDY_MODEL") or MODEL).lower()
+else:
+    _OPENAI_MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("DEEPSEEK_MODEL")
+                     or os.environ.get("CODEBUDDY_MODEL") or MODEL).lower()
+
+# ─── OpenRouter (opt-in, OpenAI-compatible) ───────────────────────────────
+# Activated ONLY by LLM_PROVIDER=openrouter, so the default CodeBuddy SDK path is
+# untouched. The free models here are reasoning models: they stream a long chain
+# into `reasoning` and the answer into `content`, so we (a) give a generous
+# max_tokens and (b) fall back to `reasoning` when `content` comes back empty.
+# Set OPENROUTER_API_KEY (and optionally OPENROUTER_MODEL / a full "vendor/id").
+_OPENROUTER_ALIASES = {
+    "nemotron-super":   "nvidia/nemotron-3-super-120b-a12b:free",
+    "nemotron-3-super": "nvidia/nemotron-3-super-120b-a12b:free",
+    "hy3":              "tencent/hy3:free",
+    "hy3-preview":      "tencent/hy3:free",
+    # gpt-oss-120b / llama-3.3-70b / qwen3-next are strong but were persistently
+    # 429-throttled on the free tier at integration time; pass a full "vendor/x:free"
+    # id to try them off-peak. The two aliases above run cleanly today.
+}
+_MAX_TOKENS = int(os.environ.get("OPENAI_MAX_TOKENS", "0") or 0)
+
+
+def _openrouter_model(name: str) -> str:
+    n = (name or "").strip().lower()
+    if "/" in n:                      # already a full OpenRouter id
+        return name
+    return _OPENROUTER_ALIASES.get(n, name)
+
+
+if os.environ.get("LLM_PROVIDER", "").lower() == "openrouter":
+    _OPENAI_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    _OPENAI_API_KEY = os.environ.get("OPENROUTER_API_KEY") or _OPENAI_API_KEY
+    _OPENAI_MODEL = _openrouter_model(os.environ.get("OPENROUTER_MODEL")
+                                      or os.environ.get("CODEBUDDY_MODEL") or MODEL)
+    if _MAX_TOKENS <= 0:
+        _MAX_TOKENS = int(os.environ.get("OPENROUTER_MAX_TOKENS", "8192"))
+
+
+def _gen_kwargs() -> dict:
+    """Extra generation kwargs shared by the OpenAI-compatible calls. Only sets
+    max_tokens when configured, so existing DeepSeek/vLLM paths are unaffected."""
+    return {"max_tokens": _MAX_TOKENS} if _MAX_TOKENS > 0 else {}
+
+
+def _msg_text(msg) -> str:
+    """Final answer text from an OpenAI-compatible message. OpenRouter reasoning
+    models put the chain in `reasoning` and the answer in `content`; if `content`
+    came back empty (e.g. the budget was spent reasoning), fall back to the
+    reasoning text rather than returning nothing."""
+    txt = getattr(msg, "content", None)
+    if txt:
+        return txt
+    return getattr(msg, "reasoning", None) or ""
 
 
 def use_openai_backend() -> bool:
     """True when LLM calls should use the OpenAI-compatible endpoint.
 
     Triggered when the CodeBuddy SDK is unavailable (reviewer machine) or when
-    LLM_PROVIDER explicitly selects an OpenAI-compatible provider.
+    LLM_PROVIDER explicitly selects an OpenAI-compatible provider (openrouter
+    routes through this same path).
     """
     provider = os.environ.get("LLM_PROVIDER", "").lower()
-    if provider in ("openai", "openai_compatible", "vllm", "oai"):
+    if provider in ("openai", "openai_compatible", "vllm", "oai", "openrouter"):
         return True
     return not _HAS_CODEBUDDY
 
@@ -122,9 +180,9 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60)
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
         resp = _openai_client(timeout).chat.completions.create(
-            model=_OPENAI_MODEL, messages=messages, timeout=timeout)
+            model=_OPENAI_MODEL, messages=messages, timeout=timeout, **_gen_kwargs())
         _record_openai_usage(resp)
-        return {"text": resp.choices[0].message.content or "", "error": None}
+        return {"text": _msg_text(resp.choices[0].message), "error": None}
     except Exception as e:
         return {"text": "", "error": str(e)[:200]}
 
@@ -150,14 +208,15 @@ def openai_tool_chat(messages: list, tools: list | None,
     if not _HAS_OPENAI:
         return {"assistant_message": None, "tool_calls": [], "error": "openai_package_not_installed"}
     try:
-        req = {"model": model or _OPENAI_MODEL, "messages": messages, "timeout": timeout}
+        req = {"model": model or _OPENAI_MODEL, "messages": messages, "timeout": timeout,
+               **_gen_kwargs()}
         if tools:
             req["tools"] = tools
             req["tool_choice"] = "auto"
         resp = _openai_client(timeout).chat.completions.create(**req)
         _record_openai_usage(resp)
         msg = resp.choices[0].message
-        assistant = {"role": "assistant", "content": msg.content or ""}
+        assistant = {"role": "assistant", "content": _msg_text(msg)}
         parsed = []
         if getattr(msg, "tool_calls", None):
             assistant["tool_calls"] = [

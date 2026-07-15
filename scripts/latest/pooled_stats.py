@@ -29,25 +29,58 @@ import random
 import sys
 from pathlib import Path
 
+try:
+    from scripts.latest.arms import norm_group as _norm_group
+except ImportError:
+    _LEGACY_MAP = {"A_baseline": "no_mem", "B_evomem": "raw_patch", "C_gpr": "curated_patch"}
+    def _norm_group(g): return _LEGACY_MAP.get(g, g)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BASE = os.environ.get("BASE", "latest_evolving")
 BENCHES = [b.strip() for b in
            os.environ.get("POOL_BENCHMARKS", "gaia,gaia2,locomo").split(",") if b.strip()]
-PAIRS = [("C_gpr", "B_evomem"), ("C_gpr", "A_baseline"), ("B_evomem", "A_baseline")]
+PAIRS = [("curated_patch", "raw_patch"), ("curated_patch", "no_mem"), ("raw_patch", "no_mem")]
 N_PERM = int(os.environ.get("N_PERM", "10000"))
 N_BOOT = int(os.environ.get("N_BOOT", "4000"))
 USE_CUPED = os.environ.get("CUPED", "1") == "1"
+# Metric mapping. Primary endpoint = the continuous per-task `score` for every
+# benchmark (most powerful, disclosed as such). NATIVE_METRIC=1 reruns the same
+# test under each benchmark's *native* metric: strict exact-match for GAIA and
+# LoCoMo (the `em` field), and the continuous score for GAIA2 (soft recall) and
+# TB-2 (verified pass fraction). Reported as an honest robustness view.
+NATIVE_METRIC = os.environ.get("NATIVE_METRIC", "0") == "1"
+_EM_BENCH = {"gaia", "locomo"}
 random.seed(20260705)
+
+
+def _task_score(r: dict) -> float:
+    if NATIVE_METRIC and (r.get("benchmark", "") or "").lower() in _EM_BENCH \
+            and r.get("em") is not None:
+        return float(r.get("em") or 0.0)
+    return float(r.get("score") or 0.0)
 
 
 def _rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
-    out = []
+    out, dropped = [], 0
     for line in open(path):
         line = line.strip()
-        if line:
-            out.append(json.loads(line))
+        if not line:
+            continue
+        r = json.loads(line)
+        # Infra rows (endpoint down / timeout / empty agent loop) carry an error
+        # and no response; averaging their 0.0 as real scores poisons every mean
+        # and inflates memory deltas via a fake-zero baseline (llama-33 gaia had
+        # 770 such rows). Exclude them, loudly.
+        if str(r.get("error") or "").strip() and not str(r.get("response") or "").strip():
+            dropped += 1
+            continue
+        r["group"] = _norm_group(r.get("group",""))
+        out.append(r)
+    if dropped:
+        print(f"  [filter] {path.parent.parent.name}/{path.parent.name}: "
+              f"dropped {dropped} infra error-rows (error set, empty response)")
     return out
 
 
@@ -56,7 +89,7 @@ def _by_task_iter(rows: list[dict], group: str) -> dict:
     out = {}
     for r in rows:
         if r.get("group") == group:
-            out[(r.get("task_id"), int(r.get("iteration", 0) or 0))] = r.get("score") or 0.0
+            out[(r.get("task_id"), int(r.get("iteration", 0) or 0))] = _task_score(r)
     return out
 
 
@@ -120,7 +153,7 @@ def _pooled_test(strata: list[list[float]]) -> tuple[float, float, float, float,
 
 
 def main() -> None:
-    models = [m.lower() for m in sys.argv[1:]] or ["hy3-preview-ioa"]
+    models = [m.lower() for m in sys.argv[1:]] or ["hy3"]
     strata_rows: list[tuple[str, list[dict]]] = []
     for m in models:
         for b in BENCHES:
@@ -134,17 +167,29 @@ def main() -> None:
           f"{[s for s, r in strata_rows if r]}, CUPED={USE_CUPED}\n")
     print("| pair | pooled Δ | 95% CI | p (sign-flip) | n | per-stratum n |")
     print("|---|---|---|---|---|---|")
+    dead_warned = set()
     for g1, g2 in PAIRS:
         strata, names = [], []
         for name, rows in strata_rows:
             d_fin, d_zero = _stratum_deltas(rows, g1, g2)
             if not d_fin:
                 continue
+            # Dead-stratum guard: a benchmark whose scores are ALL zero in both
+            # arms (e.g. an infra-failed TB2 round) contributes only 0-deltas,
+            # dragging the pooled estimate toward 0 without carrying signal.
+            scores = [_task_score(r) for r in rows
+                      if r.get("group") in (g1, g2)]
+            if scores and not any(scores):
+                if name not in dead_warned:
+                    print(f"[!] stratum {name}: all scores 0 in both arms — "
+                          "excluded as infra-dead, investigate before final")
+                    dead_warned.add(name)
+                continue
             strata.append(_cuped(d_fin, d_zero) if USE_CUPED else d_fin)
             names.append(f"{name}:{len(d_fin)}")
         mean, lo, hi, p, n = _pooled_test(strata)
         tag = " **SIG**" if p < 0.05 else ""
-        print(f"| {g1[0]}−{g2[0]} | {mean:+.4f} | [{lo:+.4f}, {hi:+.4f}] "
+        print(f"| {g1}−{g2} | {mean:+.4f} | [{lo:+.4f}, {hi:+.4f}] "
               f"| {p:.4f}{tag} | {n} | {', '.join(names)} |")
     print("\nSecondary: per-benchmark deltas via scripts/latest/soft_stats.py; "
           "gate first with scripts/latest/check_run.sh <model>.")
