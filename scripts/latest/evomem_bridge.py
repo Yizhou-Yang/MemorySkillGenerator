@@ -112,6 +112,12 @@ _C_META = os.environ.get("C_META", "0") == "1"
 _SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
                      else os.environ.get("ITER_FEEDBACK", "gold"))
 _C_META_WC_MIN = float(os.environ.get("C_META_WC_MIN", "1.0"))
+# w_c accumulates the paired outcome delta an entry produced when served. That is
+# a measurement only when the delta came from the benchmark's scorer; under
+# ITER_FEEDBACK=self it came from the backbone grading its own attempt, and using
+# it then would launder an opinion as evidence — exactly what C_META exists to
+# stop. So w_c participates only when its provenance is grounded.
+_WC_IS_GROUNDED = _SCORE_PROVENANCE in ("gold", "env")
 # Injection-dose control — a FIRST-CLASS mechanism of the frozen method (v-final,
 # 2026-07-03): C's rendered block is capped at ~the raw baseline's measured dose
 # (B ≈ 900ch on gaia/gaia2), entries dropped whole from the tail. Evidence: on
@@ -633,13 +639,28 @@ class CuratedMemory:
         own = [e for e in cands if e.task_id == tid_now]
         pool = own if own else cands
         if _C_META:
-            # Rank by measured effectiveness, not by what the curator thinks of
-            # its own work. Entries at cold start (w_c == 1.0, fewer than two
-            # measured deltas) are kept rather than dropped: absence of evidence
-            # is not evidence of harm, and dropping them would silently shrink
-            # coverage on short chains where w_c never accumulates.
-            scored = sorted(pool, key=lambda e: -(_wc_of(e) or 1.0))
-            succ = [e for e in scored if (_wc_of(e) or 1.0) >= _C_META_WC_MIN][:self.top_k]
+            # Rank on grounded metadata only. Primary key is version lineage:
+            # the store recorded that a later version superseded an earlier one,
+            # and that record does not depend on anyone's opinion of either.
+            # Secondary key is execution evidence — a revision that changed the
+            # tool sequence did something; one that only reworded did not. w_c
+            # breaks remaining ties, but ONLY when its deltas came from the
+            # benchmark's scorer; under self-assessment it is an opinion wearing
+            # a number's clothing and is skipped rather than laundered. Nothing
+            # is dropped for lacking evidence: absence of evidence is not
+            # evidence of harm, and dropping would silently shrink coverage on
+            # short chains. Both keys survive deployment — neither needs an
+            # oracle or a gold score.
+            def _grounded_key(e):
+                ver = int(getattr(e, "version", 1) or 1)
+                hist = getattr(e, "patch_history", None) or []
+                moved = sum(len(h.get("new_steps") or [])
+                            + len(h.get("removed_steps") or []) for h in hist)
+                wc = (_wc_of(e) or 1.0) if _WC_IS_GROUNDED else 1.0
+                return (-ver, -moved, -wc)
+            scored = sorted(pool, key=_grounded_key)
+            succ = ([e for e in scored if (_wc_of(e) or 1.0) >= _C_META_WC_MIN]
+                    if _WC_IS_GROUNDED else scored)[:self.top_k]
         else:
             best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
             succ = [e for e in pool
