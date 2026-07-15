@@ -123,6 +123,25 @@ _C_META_WC_MIN = float(os.environ.get("C_META_WC_MIN", "1.0"))
 # it then would launder an opinion as evidence — exactly what C_META exists to
 # stop. So w_c participates only when its provenance is grounded.
 _WC_IS_GROUNDED = _SCORE_PROVENANCE in ("gold", "env")
+# C_POLICY picks how arm C decides what to endorse:
+#   judgment — legacy: critic's own score + actor self-assessment gate the ✓.
+#              Measured at 90% false endorsement on Llama-3.3-70B.
+#   meta     — selection/rendering use only store metadata; nothing endorsed.
+#   guarded  — judgment proposes, metadata disposes: the critic still writes
+#              refined content, but a ✓ needs a SECOND independent key — a
+#              grounded outcome score (provenance gold/env) or an EXTERNAL
+#              critic. Self-assessment alone can never endorse. Ungated entries
+#              render neutrally instead of being dropped, so coverage holds.
+_C_POLICY = (os.environ.get("C_POLICY")
+             or ("meta" if _C_META else "judgment")).strip().lower()
+if _C_POLICY not in ("judgment", "meta", "guarded"):
+    _C_POLICY = "judgment"
+_C_META = _C_POLICY == "meta"
+# External critic: CRITIC_MODEL set AND different from the acting backbone —
+# critic==actor is self-judgment wearing a second hat, not a second key.
+_CRITIC_RAW = (os.environ.get("CRITIC_MODEL") or "").strip().lower()
+_BACKBONE_ID = (os.environ.get("CODEBUDDY_MODEL") or "").strip().lower()
+_CRITIC_IS_EXTERNAL = bool(_CRITIC_RAW) and _CRITIC_RAW != _BACKBONE_ID
 # Injection-dose control — a FIRST-CLASS mechanism of the frozen method (v-final,
 # 2026-07-03): C's rendered block is capped at ~the raw baseline's measured dose
 # (B ≈ 900ch on gaia/gaia2), entries dropped whole from the tail. Evidence: on
@@ -223,6 +242,25 @@ def _wc_of(e):
         return None
 
 
+def _endorse_basis(e):
+    """Second key for an endorsement under C_POLICY=guarded, or None.
+
+    ("env", None): the entry's outcome score is grounded — provenance gold/env
+    means e.score came from the benchmark's scorer or executed environment
+    checks, so a high score is a measurement, not the actor's opinion.
+    ("critic", name): an EXTERNAL critic approved it. Self-assessment alone
+    never endorses; that single rule is what separates guarded from the
+    judgment policy measured at 90% false endorsement.
+    """
+    if _C_POLICY != "guarded":
+        return None
+    if _WC_IS_GROUNDED and float(getattr(e, "score", 0.0) or 0.0) >= 0.5:
+        return ("env", None)
+    if _CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE:
+        return ("critic", _CRITIC_RAW)
+    return None
+
+
 def _critic_q(e) -> int:
     try:
         return int((e.failure_taxonomy or {}).get("critic_quality", 5))
@@ -303,18 +341,27 @@ def _format_curated(successes: list, failures: list = (),
         if (not concrete and not outcome) or key in seen:
             continue
         seen.add(key)
-        if _C_META:
-            # Metadata only: no ✓, no critic score, no self-assessment. w_c is
-            # measured from real outcome deltas; the two dropped fields are the
-            # curator judging itself, which is what we are testing without.
-            _w = _wc_of(e)
-            parts = [f"[Prior attempt — measured effectiveness w_c={_w:.2f}]"
-                     if _w is not None else "[Prior attempt]",
-                     f"Task: {_core_task(e.task_desc)[:tcap]}"]
-        else:
+        if _C_POLICY == "judgment":
             parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
                      f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
                      f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        else:
+            # meta/guarded: never print the actor's self-assessment. A ✓ only
+            # appears under guarded with a second independent key, and the line
+            # SAYS which key, so the reader model knows whether it is looking
+            # at a measurement or a review.
+            _ver = int(getattr(e, "version", 1) or 1)
+            _basis = _endorse_basis(e)
+            if _basis is not None:
+                _src = ("environment-verified outcome" if _basis[0] == "env"
+                        else f"reviewed by {_basis[1]}")
+                head = f"[✓ Prior attempt v{_ver} — {_src}]"
+            else:
+                head = f"[Prior attempt — store version v{_ver}"
+                if _WC_IS_GROUNDED and (_w := _wc_of(e)) is not None:
+                    head += f", measured effectiveness {_w:.2f}"
+                head += "]"
+            parts = [head, f"Task: {_core_task(e.task_desc)[:tcap]}"]
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
                 or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
             if action_scored else []
@@ -335,8 +382,14 @@ def _format_curated(successes: list, failures: list = (),
         elif concrete:
             parts.append(f"What worked: {concrete[:vcap]}")
         lesson = (tax.get("causal_lesson") or "").strip()
+        # Asserted content follows the same rule as the ✓: under meta it never
+        # enters (pure store); under guarded only with a second key — an
+        # unchecked self-judge's lesson is the 48%-of-budget filler the dose
+        # analysis flagged.
+        _lesson_ok = (_C_POLICY == "judgment"
+                      or (_C_POLICY == "guarded" and _endorse_basis(e) is not None))
         annot = (f"\nLesson: {lesson[:180]}"
-                 if lesson and not _is_weak_lesson(lesson) else "")
+                 if _lesson_ok and lesson and not _is_weak_lesson(lesson) else "")
         pairs.append(["\n".join(parts), annot])
         n_succ += 1
     for e in failures:
@@ -657,7 +710,7 @@ class CuratedMemory:
         cands.sort(key=lambda e: 0 if e.task_id == tid_now else 1)
         own = [e for e in cands if e.task_id == tid_now]
         pool = own if own else cands
-        if _C_META:
+        if _C_POLICY != "judgment":
             # Rank on grounded metadata only. Primary key is version lineage:
             # the store recorded that a later version superseded an earlier one,
             # and that record does not depend on anyone's opinion of either.
@@ -677,7 +730,13 @@ class CuratedMemory:
                             + len(h.get("removed_steps") or []) for h in hist)
                 wc = (_wc_of(e) or 1.0) if _WC_IS_GROUNDED else 1.0
                 return (-ver, -moved, -wc)
-            scored = sorted(pool, key=_grounded_key)
+            if _C_POLICY == "guarded":
+                # Endorsed-first, then lineage: judgment proposes, but only
+                # entries holding a second key wear the ✓.
+                scored = sorted(pool, key=lambda e: (
+                    0 if _endorse_basis(e) is not None else 1,) + _grounded_key(e))
+            else:
+                scored = sorted(pool, key=_grounded_key)
             succ = ([e for e in scored if (_wc_of(e) or 1.0) >= _C_META_WC_MIN]
                     if _WC_IS_GROUNDED else scored)[:self.top_k]
         else:
@@ -690,7 +749,7 @@ class CuratedMemory:
         _action_scored = self.benchmark in _ACTION_SCORED
         out = _format_curated(succ, fail, current_tid=tid_now,
                               action_scored=_action_scored)
-        if _C_META and out:
+        if _C_POLICY != "judgment" and out:
             # Supersession from the version lineage. The judgment path picks one
             # attempt and endorses it; the manifest already records which version
             # replaced which, so conflicting attempts can be shown AS a chain and

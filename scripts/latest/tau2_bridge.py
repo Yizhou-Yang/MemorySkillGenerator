@@ -66,6 +66,10 @@ except Exception:
     _CRITIC_ID = (os.environ.get("CRITIC_MODEL")
                   or os.environ.get("CODEBUDDY_MODEL") or "?")
 _C_META_ON = os.environ.get("C_META", "0") == "1"
+_C_POLICY = (os.environ.get("C_POLICY")
+             or ("meta" if _C_META_ON else "judgment")).strip().lower()
+if _C_POLICY not in ("judgment", "meta", "guarded"):
+    _C_POLICY = "judgment"
 
 GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch"}  # canonical (arms.py)
 
@@ -353,6 +357,7 @@ def main() -> None:
                         # and that the score is env-grounded rather than
                         # self-assessed.
                         "critic_model": _CRITIC_ID, "c_meta": _C_META_ON,
+                        "c_policy": _C_POLICY,
                         "score_provenance": "env",
                         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     }) + "\n")

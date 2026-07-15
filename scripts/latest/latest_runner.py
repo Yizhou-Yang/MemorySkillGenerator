@@ -162,6 +162,10 @@ except Exception:
 # Which curation policy arm C ran: judgment (critic score + self-assessment) or
 # metadata (measured w_c + version lineage). Different methods, never poolable.
 _C_META = os.environ.get("C_META", "0") == "1"
+_C_POLICY = (os.environ.get("C_POLICY")
+             or ("meta" if _C_META else "judgment")).strip().lower()
+if _C_POLICY not in ("judgment", "meta", "guarded"):
+    _C_POLICY = "judgment"
 # Where a chain's feedback score comes from, and therefore whether everything
 # built on it (e.score, the ✓ gate, w_c) is grounded or asserted. "gold"/"env"
 # read the benchmark's own scorer; "self" asks the backbone to grade itself.
@@ -872,6 +876,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   # Llama-3.3-70B, and C-B flips sign with it.
                                   "critic_model": _CRITIC_MODEL,
                                   "c_meta": _C_META,
+                                  "c_policy": _C_POLICY,
                                   "score_provenance": _SCORE_PROVENANCE,
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
@@ -921,6 +926,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "code_rev": _CODE_REV,
                                    "critic_model": _CRITIC_MODEL,
                                    "c_meta": _C_META,
+                                   "c_policy": _C_POLICY,
                                    "score_provenance": _SCORE_PROVENANCE})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev

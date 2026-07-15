@@ -131,13 +131,14 @@ def main() -> None:
         # G6 curation policy. Judgment-guided (critic score + self-assessment)
         # and metadata-guided (measured w_c + version lineage) are different
         # methods; a C arm holding both answers nothing.
-        cm = {bool(r.get("c_meta")) for r in rs if r.get("group") == "curated_patch"}
-        if len(cm) > 1:
-            print("  G6 ✗ arm curated_patch mixes c_meta True/False — "
-                  "judgment- and metadata-guided rows cannot be pooled")
+        pol = {str(r.get("c_policy") or ("meta" if r.get("c_meta") else "judgment"))
+               for r in _c_rows}
+        if len(pol) > 1:
+            print(f"  G6 ✗ arm curated_patch mixes curation policies {sorted(pol)} — "
+                  "judgment / meta / guarded rows answer different questions; split them")
             hard_fail = True
-        elif cm:
-            print(f"  G6 curation: {'metadata-guided' if cm.pop() else 'judgment-guided'}")
+        elif pol:
+            print(f"  G6 curation policy: {pol.pop()}")
         # G7 score provenance. Everything arm C selects on — the ✓ gate, e.score,
         # w_c — is built from the chain's feedback score, so whether that score is
         # the benchmark's own (gold/env) or the backbone grading itself (self)
