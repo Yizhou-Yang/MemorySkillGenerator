@@ -840,6 +840,14 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "level": str(_meta.get("level") or _meta.get("difficulty") or ""),
                                   "patch_injected": bool(aug),
                                   "aug_len": len(aug or ""),
+                                  # w_c of the served entries. get_experience_weight
+                                  # cold-starts at 1.0 until an entry has >=2 measured
+                                  # deltas and a 3-iteration chain gives at most 2, so
+                                  # wc_active==0 here means the paper's
+                                  # effectiveness-weighted retrieval never actually
+                                  # fired and C was ranking on similarity alone.
+                                  **({k: v for k, v in (r.get("_wc") or {}).items()}
+                                     if isinstance(r.get("_wc"), dict) else {}),
                                   # iteration index along the chain + chain length,
                                   # for chain-level (all-iterations-correct) accuracy.
                                   "iteration": _it,
@@ -897,6 +905,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "sample_idx": _s,
                                    "patch_injected": bool(_rs.get("_aug_prompt")),
                                    "aug_len": len(_rs.get("_aug_prompt") or ""),
+                                   **({k: v for k, v in (_rs.get("_wc") or {}).items()}
+                                      if isinstance(_rs.get("_wc"), dict) else {}),
                                    "fb_mode": ITER_FEEDBACK,
                                    "code_rev": _CODE_REV,
                                    "critic_model": _CRITIC_MODEL})

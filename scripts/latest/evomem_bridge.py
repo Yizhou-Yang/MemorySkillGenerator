@@ -478,6 +478,7 @@ class CuratedMemory:
         # via library.update_effectiveness -> get_experience_weight. Without this
         # wiring w_c stays 1.0 forever and retrieval is pure similarity.
         self._served: dict[str, list[str]] = {}
+        self._last_wc: dict | None = None
         self._last_score: dict[str, float] = {}
         self._record_failures = 0
         # Per-chain index of this bridge's own recorded experiences. inject()'s
@@ -495,6 +496,7 @@ class CuratedMemory:
         d = dict(self.__dict__)
         d["_llm"] = None
         d["_critic_llm"] = None
+        d["_last_wc"] = None
         return d
 
     def __setstate__(self, d):
@@ -585,7 +587,32 @@ class CuratedMemory:
         if out:
             # remember what was actually served, for the effectiveness update
             self._served[tid_now] = [e.task_id for e in served]
+            # Observability for w_c (the paper's effectiveness weight). Until now
+            # w_c only ever moved retrieval ranking inside this object and was
+            # never written anywhere, so no trace could show whether it did
+            # anything at all. It cold-starts at 1.0 until an entry has >=2
+            # measured deltas, and a 3-iteration chain supplies at most 2, so
+            # "effectiveness-weighted retrieval" may be inert in practice. The
+            # runner copies this onto every row; see _wc_stats.
+            try:
+                lib = self._sf.library
+                ws = [float(lib.get_experience_weight(e.task_id)) for e in served]
+                self._last_wc = {
+                    "wc_served": [round(w, 3) for w in ws],
+                    "wc_mean": round(sum(ws) / len(ws), 3) if ws else None,
+                    "wc_active": sum(1 for w in ws if abs(w - 1.0) > 1e-9),
+                    "wc_n": len(ws),
+                }
+            except Exception:
+                self._last_wc = None
         return out
+
+    def pop_wc_stats(self) -> dict | None:
+        """w_c of the entries served by the last inject(), or None. Read-once so
+        a row can never inherit a previous task's weights."""
+        w = getattr(self, "_last_wc", None)
+        self._last_wc = None
+        return w
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
         tid = task.get("task_id", "")
@@ -703,4 +730,12 @@ async def solve_with_memory(run_fn, task: dict, mem, group: str) -> dict:
     r = await run_fn(task, injected, group)
     if isinstance(r, dict):
         r["_aug_prompt"] = injected
+        # Carry w_c of the entries just served, so the trace can show whether
+        # effectiveness weighting is live rather than nominally configured.
+        try:
+            w = mem.pop_wc_stats() if hasattr(mem, "pop_wc_stats") else None
+        except Exception:
+            w = None
+        if w:
+            r["_wc"] = w
     return r
