@@ -131,6 +131,22 @@ def main() -> None:
             hard_fail = True
         elif cm:
             print(f"  G6 curation: {'metadata-guided' if cm.pop() else 'judgment-guided'}")
+        # G7 score provenance. Everything arm C selects on — the ✓ gate, e.score,
+        # w_c — is built from the chain's feedback score, so whether that score is
+        # the benchmark's own (gold/env) or the backbone grading itself (self)
+        # decides whether the store's evidence is grounded or asserted. Mixing
+        # both in one arm pools measurements with opinions.
+        sp = {str(r.get("score_provenance") or "?") for r in rs
+              if r.get("group") == "curated_patch"}
+        if len(sp) > 1:
+            print(f"  G7 ✗ arm curated_patch mixes score_provenance {sorted(sp)} — "
+                  "grounded and self-assessed rows cannot be pooled")
+            hard_fail = True
+        elif sp:
+            v = sp.pop()
+            print(f"  G7 score provenance: {v}"
+                  + ("  ⚠ selection rests on the backbone's self-assessment"
+                     if v == "self_assessment" else ""))
         doses = {}
         for g in ["no_mem", "raw_patch", "curated_patch"]:
             grs = [r for r in rs if r.get("group") == g]

@@ -109,6 +109,8 @@ _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
 # drops the ✓/quality/self-assessed markers, so no unverified endorsement of a
 # wrong attempt reaches the model.
 _C_META = os.environ.get("C_META", "0") == "1"
+_SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
+                     else os.environ.get("ITER_FEEDBACK", "gold"))
 _C_META_WC_MIN = float(os.environ.get("C_META_WC_MIN", "1.0"))
 # Injection-dose control — a FIRST-CLASS mechanism of the frozen method (v-final,
 # 2026-07-03): C's rendered block is capped at ~the raw baseline's measured dose
@@ -733,6 +735,7 @@ class CuratedMemory:
                 llm_reviewer=self._llm,
                 critic_fn=(self._critic_llm if self.use_critic else None),
                 enrich=self.use_enrich,
+                score_provenance=_SCORE_PROVENANCE,
             )
             # Remember which chain this experience belongs to (for chain-scoped
             # retrieval). Same-task iterations share a task_id; LoCoMo shares a

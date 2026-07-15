@@ -162,6 +162,11 @@ except Exception:
 # Which curation policy arm C ran: judgment (critic score + self-assessment) or
 # metadata (measured w_c + version lineage). Different methods, never poolable.
 _C_META = os.environ.get("C_META", "0") == "1"
+# Where a chain's feedback score comes from, and therefore whether everything
+# built on it (e.score, the ✓ gate, w_c) is grounded or asserted. "gold"/"env"
+# read the benchmark's own scorer; "self" asks the backbone to grade itself.
+_SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
+                     else os.environ.get("ITER_FEEDBACK", "gold"))
 
 _TRANSIENT_MARKERS = (
     "429", "rate_limit", "rate-limit", "timeout", "quota", "quota_exceeded",
@@ -867,6 +872,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   # Llama-3.3-70B, and C-B flips sign with it.
                                   "critic_model": _CRITIC_MODEL,
                                   "c_meta": _C_META,
+                                  "score_provenance": _SCORE_PROVENANCE,
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
                                   # flailed" from "agent never engaged".
@@ -914,7 +920,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "fb_mode": ITER_FEEDBACK,
                                    "code_rev": _CODE_REV,
                                    "critic_model": _CRITIC_MODEL,
-                                   "c_meta": _C_META})
+                                   "c_meta": _C_META,
+                                   "score_provenance": _SCORE_PROVENANCE})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
@@ -1154,6 +1161,7 @@ async def main():
     # at launch, not after 128 wasted solves, had this existed then.
     _knobs = {
         "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
+        "score_provenance": _SCORE_PROVENANCE,
         "ARMS": ",".join(sorted(_ARMS)),
         "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),
         "ITER_FEEDBACK": os.environ.get("ITER_FEEDBACK", "gold"),

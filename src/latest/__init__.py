@@ -43,7 +43,8 @@ class SkillForgeLatest:
                           score: float | None = None,
                           llm_reviewer=None,
                           critic_fn=None, critic_threshold: int = 5,
-                          enrich: bool = True):
+                          enrich: bool = True,
+                          score_provenance: str = ""):
         exp = analyze_execution(task_id, task_desc, agent_actions, oracle_actions,
                                 token_cost=token_cost, time_cost=time_cost,
                                 augmentation_used=augmentation_used)
@@ -56,6 +57,17 @@ class SkillForgeLatest:
             exp.score = float(score)
             exp.outcome = ("success" if exp.score >= 0.8
                            else "partial" if exp.score >= 0.4 else "failure")
+        # Provenance of the score this entry carries — the store's one honest
+        # record of whether its own evidence is grounded or asserted. "gold"/"env"
+        # come from the benchmark's scorer or executed tests; "self_assessment" is
+        # the backbone grading its own attempt, which on a weak backbone endorses
+        # its own failures 90% of the time (Llama-3.3-70B on GAIA, vs 36% for
+        # DeepSeek-v4-pro). Without this field the store cannot tell the two apart
+        # and selection silently trusts an opinion as if it were a measurement.
+        # Falls back to the oracle-action overlap that analyze_execution computes.
+        exp.revision_trigger = (score_provenance
+                                or ("oracle_overlap" if score is None else "unknown"))
+        exp.is_error_patch = bool(exp.outcome == "failure")
         # Attach reasoning trace from response_filter (AI-evaluated valuable reasoning)
         if reasoning_trace:
             exp.reasoning_trace = reasoning_trace
