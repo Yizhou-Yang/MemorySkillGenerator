@@ -121,6 +121,16 @@ def main() -> None:
             hard_fail = True
         elif crit:
             print(f"  G5 critic: {crit.pop()}")
+        # G6 curation policy. Judgment-guided (critic score + self-assessment)
+        # and metadata-guided (measured w_c + version lineage) are different
+        # methods; a C arm holding both answers nothing.
+        cm = {bool(r.get("c_meta")) for r in rs if r.get("group") == "curated_patch"}
+        if len(cm) > 1:
+            print("  G6 ✗ arm curated_patch mixes c_meta True/False — "
+                  "judgment- and metadata-guided rows cannot be pooled")
+            hard_fail = True
+        elif cm:
+            print(f"  G6 curation: {'metadata-guided' if cm.pop() else 'judgment-guided'}")
         doses = {}
         for g in ["no_mem", "raw_patch", "curated_patch"]:
             grs = [r for r in rs if r.get("group") == g]

@@ -159,6 +159,9 @@ try:
     _CRITIC_MODEL = _critic_model_id()
 except Exception:
     _CRITIC_MODEL = os.environ.get("CRITIC_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
+# Which curation policy arm C ran: judgment (critic score + self-assessment) or
+# metadata (measured w_c + version lineage). Different methods, never poolable.
+_C_META = os.environ.get("C_META", "0") == "1"
 
 _TRANSIENT_MARKERS = (
     "429", "rate_limit", "rate-limit", "timeout", "quota", "quota_exceeded",
@@ -863,6 +866,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   # 36% for DeepSeek-v4-pro vs 90% for
                                   # Llama-3.3-70B, and C-B flips sign with it.
                                   "critic_model": _CRITIC_MODEL,
+                                  "c_meta": _C_META,
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
                                   # flailed" from "agent never engaged".
@@ -909,7 +913,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                       if isinstance(_rs.get("_wc"), dict) else {}),
                                    "fb_mode": ITER_FEEDBACK,
                                    "code_rev": _CODE_REV,
-                                   "critic_model": _CRITIC_MODEL})
+                                   "critic_model": _CRITIC_MODEL,
+                                   "c_meta": _C_META})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
@@ -1148,7 +1153,7 @@ async def main():
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
     # at launch, not after 128 wasted solves, had this existed then.
     _knobs = {
-        "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL,
+        "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
         "ARMS": ",".join(sorted(_ARMS)),
         "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),
         "ITER_FEEDBACK": os.environ.get("ITER_FEEDBACK", "gold"),

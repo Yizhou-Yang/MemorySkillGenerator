@@ -99,6 +99,17 @@ _C_SIM_FLOOR = 0.08
 #   avoidance channel= everything else with a usable note (worse-than-best
 #                      attempts and critic-rejected entries).
 _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
+# C_META=1 — metadata-guided curation. The ✓ channel normally gates on the
+# curator's own judgment (_critic_q >= gate AND self-assessed score >= best),
+# which is exactly where a weak backbone gets in: on GAIA, 90% of Llama-3.3-70B's
+# endorsements sit on a chain whose previous iteration was in fact wrong (36% for
+# DeepSeek-v4-pro), and C−B goes +6.0 -> -3.0 with it. Under C_META the channel
+# is selected by the store's MEASURED metadata instead — w_c, the effectiveness
+# weight accumulated from real within-chain score deltas — and the rendered block
+# drops the ✓/quality/self-assessed markers, so no unverified endorsement of a
+# wrong attempt reaches the model.
+_C_META = os.environ.get("C_META", "0") == "1"
+_C_META_WC_MIN = float(os.environ.get("C_META_WC_MIN", "1.0"))
 # Injection-dose control — a FIRST-CLASS mechanism of the frozen method (v-final,
 # 2026-07-03): C's rendered block is capped at ~the raw baseline's measured dose
 # (B ≈ 900ch on gaia/gaia2), entries dropped whole from the tail. Evidence: on
@@ -144,6 +155,45 @@ def _no_partition() -> bool:
 # decimal. With the fallback, C−B ≥ 0 becomes structural on the read path.
 # C_RAW_FALLBACK=0 is the ablation arm (C_no_fallback).
 _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
+
+
+_WC_LOOKUP = {"fn": None}          # set by CuratedPatchMemory once the library exists
+
+
+def _append_supersession(block: str, pool) -> str:
+    """Render 'v1 -> v2 superseded' lines from patch_history, newest last.
+
+    Only uses lineage already in the manifest — no LLM call, no judgment. Silent
+    when a chain has no recorded supersession, so it costs nothing on flat stores.
+    """
+    lines = []
+    for e in pool:
+        hist = getattr(e, "patch_history", None) or []
+        for h in hist:
+            fv, tv = h.get("from_version"), h.get("to_version")
+            if fv is None or tv is None:
+                continue
+            why = h.get("fixed_missing") or (
+                f"score {h.get('score_delta', 0):+.0%}" if h.get("score_delta") else "")
+            lines.append(f"  v{fv} -> v{tv}" + (f": {why}" if why else ""))
+    if not lines:
+        return block
+    seen, uniq = set(), []
+    for l in lines:
+        if l not in seen:
+            seen.add(l); uniq.append(l)
+    return block + "\n\nVersion lineage (later supersedes earlier):\n" + "\n".join(uniq[:6])
+
+
+def _wc_of(e):
+    """Measured effectiveness of an entry, or None before the library is wired."""
+    fn = _WC_LOOKUP.get("fn")
+    if fn is None:
+        return None
+    try:
+        return float(fn(e.task_id))
+    except Exception:
+        return None
 
 
 def _critic_q(e) -> int:
@@ -226,9 +276,18 @@ def _format_curated(successes: list, failures: list = (),
         if (not concrete and not outcome) or key in seen:
             continue
         seen.add(key)
-        parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
-                 f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
-                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        if _C_META:
+            # Metadata only: no ✓, no critic score, no self-assessment. w_c is
+            # measured from real outcome deltas; the two dropped fields are the
+            # curator judging itself, which is what we are testing without.
+            _w = _wc_of(e)
+            parts = [f"[Prior attempt — measured effectiveness w_c={_w:.2f}]"
+                     if _w is not None else "[Prior attempt]",
+                     f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        else:
+            parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
+                     f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
+                     f"Task: {_core_task(e.task_desc)[:tcap]}"]
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
                 or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
             if action_scored else []
@@ -479,6 +538,10 @@ class CuratedMemory:
         # wiring w_c stays 1.0 forever and retrieval is pure similarity.
         self._served: dict[str, list[str]] = {}
         self._last_wc: dict | None = None
+        try:
+            _WC_LOOKUP["fn"] = self._sf.library.get_experience_weight
+        except Exception:
+            pass
         self._last_score: dict[str, float] = {}
         self._record_failures = 0
         # Per-chain index of this bridge's own recorded experiences. inject()'s
@@ -567,15 +630,30 @@ class CuratedMemory:
         cands.sort(key=lambda e: 0 if e.task_id == tid_now else 1)
         own = [e for e in cands if e.task_id == tid_now]
         pool = own if own else cands
-        best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
-        succ = [e for e in pool
-                if _critic_q(e) >= _CRITIC_GATE
-                and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
+        if _C_META:
+            # Rank by measured effectiveness, not by what the curator thinks of
+            # its own work. Entries at cold start (w_c == 1.0, fewer than two
+            # measured deltas) are kept rather than dropped: absence of evidence
+            # is not evidence of harm, and dropping them would silently shrink
+            # coverage on short chains where w_c never accumulates.
+            scored = sorted(pool, key=lambda e: -(_wc_of(e) or 1.0))
+            succ = [e for e in scored if (_wc_of(e) or 1.0) >= _C_META_WC_MIN][:self.top_k]
+        else:
+            best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
+            succ = [e for e in pool
+                    if _critic_q(e) >= _CRITIC_GATE
+                    and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
         _action_scored = self.benchmark in _ACTION_SCORED
         out = _format_curated(succ, fail, current_tid=tid_now,
                               action_scored=_action_scored)
+        if _C_META and out:
+            # Supersession from the version lineage. The judgment path picks one
+            # attempt and endorses it; the manifest already records which version
+            # replaced which, so conflicting attempts can be shown AS a chain and
+            # the model adjudicates rather than trusting an unverified ✓.
+            out = _append_supersession(out, pool)
         served = succ + fail
         if not out and cands and _C_RAW_FALLBACK:
             # Curated channels rendered nothing -> degrade to the raw store
