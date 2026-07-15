@@ -46,11 +46,26 @@ import re
 import subprocess
 import sys
 import time
+
+# tau2's reward comes from environment checks (final DB state, action match),
+# not from the model grading itself — the one natively env-grounded benchmark.
+# Declare that BEFORE evomem_bridge is imported, or its provenance defaults to
+# whatever ITER_FEEDBACK happens to be in the shell.
+os.environ.setdefault("ITER_FEEDBACK", "env")
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+# Recorded on every trace row (mirrors latest_runner):
+try:
+    from scripts.latest.llm_client import critic_model_id as _cmid
+    _CRITIC_ID = _cmid()
+except Exception:
+    _CRITIC_ID = (os.environ.get("CRITIC_MODEL")
+                  or os.environ.get("CODEBUDDY_MODEL") or "?")
+_C_META_ON = os.environ.get("C_META", "0") == "1"
 
 GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch"}  # canonical (arms.py)
 
@@ -332,6 +347,13 @@ def main() -> None:
                         "error": "",
                         "iteration": it, "iter_total": args.iters,
                         "method": "tau2_llm_agent", "code_rev": rev,
+                        # Same policy/provenance fields the QA runner logs, so a
+                        # tau2 C arm is classifiable (and gate-able) too: which
+                        # model judged the entries, which curation policy ran,
+                        # and that the score is env-grounded rather than
+                        # self-assessed.
+                        "critic_model": _CRITIC_ID, "c_meta": _C_META_ON,
+                        "score_provenance": "env",
                         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     }) + "\n")
             print(f"[tau2] iter {it}: {len(rows)} sims, "

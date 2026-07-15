@@ -195,7 +195,21 @@ def _append_supersession(block: str, pool) -> str:
     for l in lines:
         if l not in seen:
             seen.add(l); uniq.append(l)
-    return block + "\n\nVersion lineage (later supersedes earlier):\n" + "\n".join(uniq[:6])
+    # Stay inside the dose budget. This section is appended AFTER
+    # _format_curated has already spent _C_INJECT_BUDGET, and the gate
+    # hard-fails any C block over BUDGET+130 slack — so an unbudgeted append
+    # here would get C_META's very first sweep rejected by its own gate.
+    # Reserve at most 100 chars of that slack and trim lines to fit.
+    header = "\n\nVersion lineage (later supersedes earlier):"
+    room = _C_INJECT_BUDGET + 100 - len(block) - len(header)
+    kept, used = [], 0
+    for l in uniq[:6]:
+        if used + len(l) + 1 > room:
+            break
+        kept.append(l); used += len(l) + 1
+    if not kept:
+        return block
+    return block + header + "\n" + "\n".join(kept)
 
 
 def _wc_of(e):

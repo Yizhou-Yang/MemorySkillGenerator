@@ -113,14 +113,21 @@ def main() -> None:
         # endorsements landing on a wrong prior attempt is 36% for
         # DeepSeek-v4-pro but 90% for Llama-3.3-70B, and C−B flips from +6.0 to
         # −3.0 with it. Pooling both into one C arm answers no question.
-        crit = {str(r.get("critic_model") or "?") for r in rs
-                if r.get("group") == "curated_patch"}
+        # Rows written before the field existed carry no critic_model at all.
+        # Missing is "unrecorded", not a policy of its own: a legacy trace
+        # legitimately RESUMEd after the fields landed would otherwise mix
+        # {"?", real} and hard-fail its own sanctioned continuation. Only two
+        # DIFFERENT recorded values prove a real policy mix.
+        _c_rows = [r for r in rs if r.get("group") == "curated_patch"]
+        crit = {str(r.get("critic_model")) for r in _c_rows if r.get("critic_model")}
+        n_unrec = sum(1 for r in _c_rows if not r.get("critic_model"))
         if len(crit) > 1:
             print(f"  G5 ✗ arm curated_patch has MIXED critic_model {sorted(crit)}"
                   " — self- and cross-curated rows cannot be pooled; split them")
             hard_fail = True
         elif crit:
-            print(f"  G5 critic: {crit.pop()}")
+            print(f"  G5 critic: {crit.pop()}"
+                  + (f"  ({n_unrec} legacy rows predate the field)" if n_unrec else ""))
         # G6 curation policy. Judgment-guided (critic score + self-assessment)
         # and metadata-guided (measured w_c + version lineage) are different
         # methods; a C arm holding both answers nothing.
@@ -136,8 +143,9 @@ def main() -> None:
         # the benchmark's own (gold/env) or the backbone grading itself (self)
         # decides whether the store's evidence is grounded or asserted. Mixing
         # both in one arm pools measurements with opinions.
-        sp = {str(r.get("score_provenance") or "?") for r in rs
-              if r.get("group") == "curated_patch"}
+        sp = {str(r.get("score_provenance")) for r in _c_rows
+              if r.get("score_provenance")}
+        n_unrec_sp = sum(1 for r in _c_rows if not r.get("score_provenance"))
         if len(sp) > 1:
             print(f"  G7 ✗ arm curated_patch mixes score_provenance {sorted(sp)} — "
                   "grounded and self-assessed rows cannot be pooled")
@@ -146,7 +154,8 @@ def main() -> None:
             v = sp.pop()
             print(f"  G7 score provenance: {v}"
                   + ("  ⚠ selection rests on the backbone's self-assessment"
-                     if v == "self_assessment" else ""))
+                     if v == "self_assessment" else "")
+                  + (f"  ({n_unrec_sp} legacy rows predate the field)" if n_unrec_sp else ""))
         doses = {}
         for g in ["no_mem", "raw_patch", "curated_patch"]:
             grs = [r for r in rs if r.get("group") == g]
