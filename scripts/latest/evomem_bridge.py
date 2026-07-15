@@ -99,15 +99,20 @@ _C_SIM_FLOOR = 0.08
 #   avoidance channel= everything else with a usable note (worse-than-best
 #                      attempts and critic-rejected entries).
 _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
-# C_META=1 — metadata-guided curation. The ✓ channel normally gates on the
-# curator's own judgment (_critic_q >= gate AND self-assessed score >= best),
-# which is exactly where a weak backbone gets in: on GAIA, 90% of Llama-3.3-70B's
-# endorsements sit on a chain whose previous iteration was in fact wrong (36% for
-# DeepSeek-v4-pro), and C−B goes +6.0 -> -3.0 with it. Under C_META the channel
-# is selected by the store's MEASURED metadata instead — w_c, the effectiveness
-# weight accumulated from real within-chain score deltas — and the rendered block
-# drops the ✓/quality/self-assessed markers, so no unverified endorsement of a
-# wrong attempt reaches the model.
+# C_META=1 — metadata-grounded curation. The ✓ channel normally gates on
+# _critic_q >= gate AND self-assessed score >= best. Both are the backbone
+# grading its own work, and under ITER_FEEDBACK=self so is w_c, since its deltas
+# come from that same self-assessment. That is the whole failure mode: on GAIA,
+# 90% of Llama-3.3-70B's endorsements sit on a chain whose previous iteration was
+# in fact wrong (36% for DeepSeek-v4-pro), and C−B tracks backbone strength
+# (+6.0 / -3.0 / -3.0 at no-memory 45.0 / 13.0 / 6.0).
+#
+# C_META selects on what the store knows WITHOUT asking any model, and that a
+# deployed agent still has (no oracle, no gold score): version lineage (a later
+# version superseded an earlier one) and the execution record (which tool calls
+# actually changed). w_c joins only when its provenance is grounded. The rendered
+# block drops the ✓/quality/self-assessed markers, so no unverified endorsement
+# of a wrong attempt reaches the model.
 _C_META = os.environ.get("C_META", "0") == "1"
 _SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
                      else os.environ.get("ITER_FEEDBACK", "gold"))
