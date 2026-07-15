@@ -116,7 +116,6 @@ _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
 _C_META = os.environ.get("C_META", "0") == "1"
 _SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
                      else os.environ.get("ITER_FEEDBACK", "gold"))
-_C_META_WC_MIN = float(os.environ.get("C_META_WC_MIN", "1.0"))
 # w_c accumulates the paired outcome delta an entry produced when served. That is
 # a measurement only when the delta came from the benchmark's scorer; under
 # ITER_FEEDBACK=self it came from the backbone grading its own attempt, and using
@@ -357,10 +356,7 @@ def _format_curated(successes: list, failures: list = (),
                         else f"reviewed by {_basis[1]}")
                 head = f"[✓ Prior attempt v{_ver} — {_src}]"
             else:
-                head = f"[Prior attempt — store version v{_ver}"
-                if _WC_IS_GROUNDED and (_w := _wc_of(e)) is not None:
-                    head += f", measured effectiveness {_w:.2f}"
-                head += "]"
+                head = f"[Prior attempt — store version v{_ver}]"
             parts = [head, f"Task: {_core_task(e.task_desc)[:tcap]}"]
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
                 or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
@@ -724,12 +720,17 @@ class CuratedMemory:
             # short chains. Both keys survive deployment — neither needs an
             # oracle or a gold score.
             def _grounded_key(e):
+                # w_c deliberately absent: under self-assessment it is opinion,
+                # and under this protocol (cold start needs >=2 measured deltas,
+                # ITER_CHAIN=3 supplies at most 2 with the second landing on the
+                # final iteration) it never influences a decision under gold
+                # either. The trace's wc_active field documents that inertness;
+                # ranking pretends nothing it cannot back.
                 ver = int(getattr(e, "version", 1) or 1)
                 hist = getattr(e, "patch_history", None) or []
                 moved = sum(len(h.get("new_steps") or [])
                             + len(h.get("removed_steps") or []) for h in hist)
-                wc = (_wc_of(e) or 1.0) if _WC_IS_GROUNDED else 1.0
-                return (-ver, -moved, -wc)
+                return (-ver, -moved)
             if _C_POLICY == "guarded":
                 # Endorsed-first, then lineage: judgment proposes, but only
                 # entries holding a second key wear the ✓.
@@ -737,8 +738,7 @@ class CuratedMemory:
                     0 if _endorse_basis(e) is not None else 1,) + _grounded_key(e))
             else:
                 scored = sorted(pool, key=_grounded_key)
-            succ = ([e for e in scored if (_wc_of(e) or 1.0) >= _C_META_WC_MIN]
-                    if _WC_IS_GROUNDED else scored)[:self.top_k]
+            succ = scored[:self.top_k]
         else:
             best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
             succ = [e for e in pool
