@@ -51,11 +51,13 @@ def main() -> None:
     model = (sys.argv[1] if len(sys.argv) > 1 else "hy3").lower()
     base = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BASE", "latest_evolving")
     hard_fail = False
+    gated_any = False
     for bench in ["gaia", "gaia2", "locomo"]:
         rs = rows(PROJECT_ROOT / "experiments_results" / base / model / bench / "trace.jsonl")
         if not rs:
             print(f"[{bench}] no trace — skipped")
             continue
+        gated_any = True
         # ── G0: infra health. Error rows (endpoint down / timeout) and
         # empty-response zero rows (agent loop never engaged) are not task
         # results; a run dominated by them is broken hardware, not a baseline
@@ -189,6 +191,13 @@ def main() -> None:
                     print(f"  G3 ✗ {bench} has no 'As recorded' verbatim lines "
                           "— v2.4 superset rendering missing")
                     hard_fail = True
+    # A model with no traces at all gated nothing. Printing PASS there reads as
+    # "this backbone is fine" when it has simply never run (hy3 after its data
+    # was archived) -- the same vacuous pass G1/G4 exist to prevent.
+    if not gated_any:
+        print(f"\n  ✗ no traces for '{model}' under {base} — nothing was gated; "
+              "this is not a pass")
+        hard_fail = True
     print("\n" + ("v2 GATE: FAIL — do not trust these numbers"
                   if hard_fail else "v2 GATE: PASS"))
     sys.exit(1 if hard_fail else 0)
