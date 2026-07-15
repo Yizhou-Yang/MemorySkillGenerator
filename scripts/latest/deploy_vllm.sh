@@ -27,7 +27,29 @@ MAX_LEN="${MAX_LEN:-32768}"           # cap context to save KV cache (benchmarks
 GPU_UTIL="${GPU_UTIL:-0.92}"
 LOG="${VLLM_LOG:-/tmp/vllm_${SERVED_NAME}.log}"
 
-echo "[deploy] model=$MODEL_PATH tp=$TP quant='${QUANT:-none}' name=$SERVED_NAME port=$PORT maxlen=$MAX_LEN"
+# The tool-call parser MUST match the format the model actually emits. If it
+# does not, vLLM leaves the call in `content` as raw text, the agent loop sees
+# no tool_calls, no tool ever runs, and every tool-using benchmark scores 0
+# while looking perfectly healthy (real responses, no errors).
+#   llama-33 on GAIA2 hit exactly this: 460/511 answered rows were raw
+#   "<|python_tag|>Cabs__get_ride_history_length()" text and all 600 rows
+#   scored 0.0, because this script hardcoded llama3_json for every model.
+# Llama 3.1/3.2/3.3 emit the PYTHONIC form (<|python_tag|>f(a=1)) unless you
+# also pass the JSON chat template; llama3_json cannot read that form. Pick the
+# parser by model family, override with TOOL_PARSER=<name>, TOOL_PARSER=none to
+# serve without native tool calling.
+TOOL_PARSER="${TOOL_PARSER:-}"
+if [ -z "$TOOL_PARSER" ]; then
+  case "$(echo "${SERVED_NAME} ${MODEL_PATH}" | tr '[:upper:]' '[:lower:]')" in
+    *llama*|*nemotron*) TOOL_PARSER=pythonic ;;   # <|python_tag|>f(a=1)
+    *qwen*)             TOOL_PARSER=hermes ;;     # <tool_call>{...}</tool_call>
+    *)                  TOOL_PARSER=llama3_json ;;  # hy3 default, unchanged
+  esac
+fi
+TOOL_ARG=(--enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER")
+[ "$TOOL_PARSER" = "none" ] && TOOL_ARG=()
+
+echo "[deploy] model=$MODEL_PATH tp=$TP quant='${QUANT:-none}' name=$SERVED_NAME port=$PORT maxlen=$MAX_LEN tool_parser=$TOOL_PARSER"
 command -v vllm >/dev/null || { echo "vllm not installed: pip install vllm"; exit 1; }
 [ -d "$MODEL_PATH" ] || { echo "MODEL_PATH not found (is ceph mounted?): $MODEL_PATH"; exit 1; }
 
@@ -42,7 +64,7 @@ setsid nohup vllm serve "$MODEL_PATH" \
   --max-model-len "$MAX_LEN" \
   --gpu-memory-utilization "$GPU_UTIL" \
   --trust-remote-code \
-  --enable-auto-tool-choice --tool-call-parser llama3_json \
+  "${TOOL_ARG[@]}" \
   --enforce-eager \
   --port "$PORT" >"$LOG" 2>&1 &
 echo "[deploy] vllm starting, pid=$!  log=$LOG"

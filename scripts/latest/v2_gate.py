@@ -27,6 +27,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
 SLACK = 130          # headers + section titles around the budgeted blocks
 COVERAGE_FLOOR = 0.95
+# A trace with no C arm cannot be gated (see G1 below). Only turn this off for a
+# sweep that is deliberately A/B-only.
+REQUIRE_C = os.environ.get("REQUIRE_C", "1") == "1"
 
 
 _LEGACY_MAP = {"A_baseline": "no_mem", "B_evomem": "raw_patch", "C_gpr": "curated_patch"}
@@ -77,6 +80,16 @@ def main() -> None:
         if not rs:
             print(f"[{bench}] all rows were infra failures — nothing to gate")
             continue
+        # G0b dead benchmark: rows that ANSWERED but every one scored 0. Not a
+        # baseline — a broken scorer or a harness that never executed the task.
+        # The infra-rate check above cannot see this (these rows carry a real
+        # response). llama-33 gaia2: 511 answered rows, all 0.0, because the
+        # model's <|python_tag|> tool calls leaked into content unparsed.
+        if not any(float(r.get("score") or 0.0) for r in rs):
+            print(f"  G0 ✗ every one of {len(rs)} answered rows scored 0.0 — "
+                  "the benchmark is dead (scorer or tool path broken), not a "
+                  "zero baseline; fix it before reading any delta here")
+            hard_fail = True
         kf = max(int(r.get("iter_total", 1) or 1) for r in rs) - 1
         # Rev uniformity is PER GROUP: keeping valid A/B rows from an earlier
         # rev while C reruns on the frozen rev is the sanctioned plan; only a
@@ -103,6 +116,18 @@ def main() -> None:
             cov = (len(inj) / len(late)) if late else 0.0
             print(f"  {g}: finished n={len(fin)}  inj@iter>=1 {len(inj)}/{len(late)}"
                   f" ({100*cov:.0f}%)  dose mean={doses[g]:.0f} max={max(lens) if lens else 0}")
+            # G4 arm completeness: an arm with rows but NONE at the final
+            # iteration started and died mid-sweep; its rows are a partial run,
+            # not a result. Every C gate below is conditional on C having late
+            # rows, so without this an aborted C arm silently skips G1/G2/G3
+            # and the trace reports PASS with the method never having run
+            # (llama-33: C had 16 iter0 rows on gaia, 0 finished, PASS).
+            if grs and not fin:
+                print(f"  G4 ✗ arm {g}: {len(grs)} rows but NONE finished at "
+                      f"iter {kf} — the arm started and died; partial run")
+                hard_fail = True
+            if not grs:
+                print(f"  G4 ! arm {g}: absent from this trace")
             if g == "curated_patch" and late:
                 if cov < COVERAGE_FLOOR:
                     print(f"  G1 ✗ C coverage {100*cov:.0f}% < {100*COVERAGE_FLOOR:.0f}%"
@@ -111,6 +136,17 @@ def main() -> None:
                 if lens and max(lens) > BUDGET + SLACK:
                     print(f"  G2 ✗ C max dose {max(lens)} > {BUDGET}+{SLACK}")
                     hard_fail = True
+        # This gate exists to prove the C read path is live IN THE DATA. With no
+        # C rows at iter>=1 there is nothing to prove, and a PASS here would be
+        # vacuous — the most dangerous output this script can produce, since it
+        # is the last thing between a broken sweep and the paper. Set
+        # REQUIRE_C=0 for a deliberate A/B-only baseline sweep.
+        if REQUIRE_C and not [r for r in rs if r.get("group") == "curated_patch"
+                              and (r.get("iteration", 0) or 0) >= 1]:
+            print("  G1 ✗ curated_patch has no rows at iter>=1 — the method arm "
+                  "never ran, so C coverage/dose/markers are unevaluable. This "
+                  "is NOT a pass (set REQUIRE_C=0 for an A/B-only sweep).")
+            hard_fail = True
         if doses.get("curated_patch") and doses.get("raw_patch") and \
                 doses["curated_patch"] > doses["raw_patch"] + 1:
             # The paper's below-B-dose claim is scoped to the AGENTIC

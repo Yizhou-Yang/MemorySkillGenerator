@@ -28,6 +28,12 @@ MAX_LEN="${MAX_LEN:-32768}"
 GPU_UTIL="${GPU_UTIL:-0.92}"
 PORT="${PORT:-8000}"
 VLLM_LOG="/tmp/vllm_${SERVED_NAME}.log"
+# Without a tool-call parser vLLM never turns the model's tool syntax into
+# tool_calls: it stays in `content` as raw text, no tool runs, and every
+# tool-using benchmark (GAIA2/tau2) scores 0 while looking healthy. This is what
+# killed the llama-33 GAIA2 sweep (all 600 rows 0.0). Qwen emits the Hermes
+# <tool_call>{...}</tool_call> form.
+TOOL_PARSER="${TOOL_PARSER:-hermes}"
 
 # ── 实验配置 ───────────────────────────────────────────────────────────────
 TASK_LIMIT="${TASK_LIMIT:-100}"
@@ -82,6 +88,7 @@ deploy_vllm() {
         --max-model-len "$MAX_LEN" \
         --gpu-memory-utilization "$GPU_UTIL" \
         --trust-remote-code \
+        --enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER" \
         --port "$PORT" \
         --dtype auto \
         > "$VLLM_LOG" 2>&1 &
