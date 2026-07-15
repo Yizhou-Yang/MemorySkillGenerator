@@ -288,68 +288,68 @@ def main() -> None:
     for domain in domains:
         for it in range(args.iters):
             save_to = out_root / f"tau2_{domain}_{args.arm}_iter{it}.json"
-        env = os.environ.copy()
-        env["TAU2_ARM"] = args.arm
-        env["TAU2_MEM_STATE"] = str(state)
-        # Make both our repo AND tau2-bench importable (launcher needs tau2.*,
-        # the custom agent needs our src). tau2-bench lives beside us in Ceph.
-        tau2_root = str(PROJECT_ROOT.parent / "tau2-bench")
-        extra_paths = [str(PROJECT_ROOT)]
-        if os.path.isdir(tau2_root):
-            extra_paths.append(tau2_root)
-        existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = os.pathsep.join(extra_paths +
-            ([existing] if existing else []))
-        cmd = _tau2_cmd(tau2_bin, args.arm, args.model, domain, args.n_tasks,
-                        args.num_trials, args.n_concurrent, save_to, args.task_ids,
-                        launcher_path)
-        print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
-        rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
-        if rc != 0:
-            print(f"[tau2] tau2 exited rc={rc} — stopping arm", flush=True)
-            break
-        rows = _parse_results(save_to)
-        _empty = sum(1 for r in rows if not r["response"]
-                     or r["response"].startswith("reward="))
-        if rows and _empty / len(rows) > 0.5:
-            print(f"[tau2] WARNING: {_empty}/{len(rows)} sims have no agent "
-                  "transcript — _transcript()/_parse_results() schema likely does "
-                  "not match this tau2 version; B/C patch content is degraded to "
-                  "one-line summaries (VERIFY marker)", flush=True)
-        with open(trace, "a") as f:
-            for r in rows:
-                f.write(json.dumps({
-                    "benchmark": "tau2", "group": GROUP_KEY[args.arm],
-                    "phase": "test", "task_id": r["task_id"],
-                    "task_desc": (r["instruction"] or r["task_name"])[:500],
-                    "score": r["reward"], "em": 1.0 if r["reward"] >= 1.0 else 0.0,
-                    "response": r["response"],
-                    # termination_reason straight from tau2: env-level deaths
-                    # (user-sim timeout, max-steps) must be visible per-arm so the
-                    # paired analysis can confirm all arms died on the SAME tasks.
-                    "failure_mode": r.get("failure_mode", ""),
-                    "fb_mode": "env",  # tau2 feedback = final DB-state / action checks
-                    "error": "",
-                    "iteration": it, "iter_total": args.iters,
-                    "method": "tau2_llm_agent", "code_rev": rev,
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                }) + "\n")
-        print(f"[tau2] iter {it}: {len(rows)} sims, "
-              f"mean reward {sum(r['reward'] for r in rows)/len(rows):.3f}", flush=True)
-        if mem is not None:
-            asyncio.run(_record_all(mem, rows))
-            with open(state, "wb") as f:
-                pickle.dump(mem, f)     # next iteration's agent injects this
-            try:
-                _n_entries = len(mem)
-                _sz = state.stat().st_size
-                print(f"[tau2] state saved: {_n_entries} entries, "
-                      f"{_sz/1e3:.0f} KB -> {state.name}", flush=True)
-                if it >= 1 and _n_entries == 0:
-                    print("[tau2] WARNING: store EMPTY after recording "
-                          f"iter {it} — memory arm is running blind", flush=True)
-            except Exception:
-                pass
+            env = os.environ.copy()
+            env["TAU2_ARM"] = args.arm
+            env["TAU2_MEM_STATE"] = str(state)
+            # Make both our repo AND tau2-bench importable (launcher needs tau2.*,
+            # the custom agent needs our src). tau2-bench lives beside us in Ceph.
+            tau2_root = str(PROJECT_ROOT.parent / "tau2-bench")
+            extra_paths = [str(PROJECT_ROOT)]
+            if os.path.isdir(tau2_root):
+                extra_paths.append(tau2_root)
+            existing = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = os.pathsep.join(extra_paths +
+                ([existing] if existing else []))
+            cmd = _tau2_cmd(tau2_bin, args.arm, args.model, domain, args.n_tasks,
+                            args.num_trials, args.n_concurrent, save_to, args.task_ids,
+                            launcher_path)
+            print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
+            rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
+            if rc != 0:
+                print(f"[tau2] tau2 exited rc={rc} — stopping arm", flush=True)
+                break
+            rows = _parse_results(save_to)
+            _empty = sum(1 for r in rows if not r["response"]
+                         or r["response"].startswith("reward="))
+            if rows and _empty / len(rows) > 0.5:
+                print(f"[tau2] WARNING: {_empty}/{len(rows)} sims have no agent "
+                      "transcript — _transcript()/_parse_results() schema likely does "
+                      "not match this tau2 version; B/C patch content is degraded to "
+                      "one-line summaries (VERIFY marker)", flush=True)
+            with open(trace, "a") as f:
+                for r in rows:
+                    f.write(json.dumps({
+                        "benchmark": "tau2", "group": GROUP_KEY[args.arm],
+                        "phase": "test", "task_id": r["task_id"],
+                        "task_desc": (r["instruction"] or r["task_name"])[:500],
+                        "score": r["reward"], "em": 1.0 if r["reward"] >= 1.0 else 0.0,
+                        "response": r["response"],
+                        # termination_reason straight from tau2: env-level deaths
+                        # (user-sim timeout, max-steps) must be visible per-arm so the
+                        # paired analysis can confirm all arms died on the SAME tasks.
+                        "failure_mode": r.get("failure_mode", ""),
+                        "fb_mode": "env",  # tau2 feedback = final DB-state / action checks
+                        "error": "",
+                        "iteration": it, "iter_total": args.iters,
+                        "method": "tau2_llm_agent", "code_rev": rev,
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    }) + "\n")
+            print(f"[tau2] iter {it}: {len(rows)} sims, "
+                  f"mean reward {sum(r['reward'] for r in rows)/len(rows):.3f}", flush=True)
+            if mem is not None:
+                asyncio.run(_record_all(mem, rows))
+                with open(state, "wb") as f:
+                    pickle.dump(mem, f)     # next iteration's agent injects this
+                try:
+                    _n_entries = len(mem)
+                    _sz = state.stat().st_size
+                    print(f"[tau2] state saved: {_n_entries} entries, "
+                          f"{_sz/1e3:.0f} KB -> {state.name}", flush=True)
+                    if it >= 1 and _n_entries == 0:
+                        print("[tau2] WARNING: store EMPTY after recording "
+                              f"iter {it} — memory arm is running blind", flush=True)
+                except Exception:
+                    pass
     print(f"[tau2] done. trace: {trace}", flush=True)
 
 
