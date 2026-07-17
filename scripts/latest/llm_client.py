@@ -114,8 +114,21 @@ if os.environ.get("LLM_PROVIDER", "").lower() == "openrouter":
 
 def _gen_kwargs() -> dict:
     """Extra generation kwargs shared by the OpenAI-compatible calls. Only sets
-    max_tokens when configured, so existing DeepSeek/vLLM paths are unaffected."""
-    return {"max_tokens": _MAX_TOKENS} if _MAX_TOKENS > 0 else {}
+    what is configured, so existing DeepSeek/vLLM paths are unaffected.
+
+    GEN_TEMPERATURE exists for the paired protocol: at the server default the
+    paired delta carries sampling luck on top of the treatment effect, and that
+    luck is most of the variance. GEN_TEMPERATURE=0 makes every arm greedy so a
+    task's delta is attributable to the injected context alone. Set it for ALL
+    arms of a run or none: pairing a greedy arm against a sampled one folds the
+    temperature difference into the treatment estimate."""
+    kw: dict = {}
+    if _MAX_TOKENS > 0:
+        kw["max_tokens"] = _MAX_TOKENS
+    t = os.environ.get("GEN_TEMPERATURE")
+    if t not in (None, ""):
+        kw["temperature"] = float(t)
+    return kw
 
 
 def _msg_text(msg) -> str:

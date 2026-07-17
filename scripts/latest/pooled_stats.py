@@ -43,6 +43,10 @@ PAIRS = [("curated_patch", "raw_patch"), ("curated_patch", "no_mem"), ("raw_patc
 N_PERM = int(os.environ.get("N_PERM", "10000"))
 N_BOOT = int(os.environ.get("N_BOOT", "4000"))
 USE_CUPED = os.environ.get("CUPED", "1") == "1"
+# ONE_SIDED=1: p = P(perm >= observed), for the pre-registered directional
+# confirmatory contrast (guarded C-B > 0), declared before any guarded data
+# existed. Two-sided stays the default and applies to everything historical.
+ONE_SIDED = os.environ.get("ONE_SIDED", "0") == "1"
 # Metric mapping. Primary endpoint = the continuous per-task `score` for every
 # benchmark (most powerful, disclosed as such). NATIVE_METRIC=1 reruns the same
 # test under each benchmark's *native* metric: strict exact-match for GAIA and
@@ -146,7 +150,10 @@ def _pooled_test(strata: list[list[float]]) -> tuple[float, float, float, float,
     hits = 0
     for _ in range(N_PERM):
         tot = sum(d if random.random() < 0.5 else -d for d in alld)
-        if abs(tot / n) >= abs(mean) - 1e-12:
+        if ONE_SIDED:
+            if tot / n >= mean - 1e-12:
+                hits += 1
+        elif abs(tot / n) >= abs(mean) - 1e-12:
             hits += 1
     p = (hits + 1) / (N_PERM + 1)
     return mean, lo, hi, p, n

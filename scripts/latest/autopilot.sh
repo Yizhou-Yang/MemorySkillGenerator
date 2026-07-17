@@ -47,8 +47,23 @@ cd "$REPO" || exit 1
 # 取代了哪一版)+ 执行记录(patch_history 里 tool_sequence 的增删)。不问任何
 # 模型,不需要 oracle/gold,部署时也拿得到。w_c 只在 provenance 是 gold/env 时
 # 才参与,ITER_FEEDBACK=self 下它是"自评穿了个数字的外衣",直接跳过。
-export C_POLICY=${C_POLICY:-meta}
+# 论文预注册的确认性对比是 guarded(判断出内容,metadata 把关背书;背书需要
+# grounded 分数或外部 critic 这第二把钥匙,自评永不背书)。没有外部 critic 时
+# guarded 依旧成立:QA 上没有条目会被背书(中性渲染),tau2 上 env 分数就是
+# 第二把钥匙 —— 那是它的主场。CRITIC_MODEL/CRITIC_BASE_URL/CRITIC_API_KEY
+# 若在环境里会被 llm_client 自动接走。
+export C_POLICY=${C_POLICY:-guarded}
 export ITER_FEEDBACK=${ITER_FEEDBACK:-self}
+# 确认性运行的方差控制:三臂统一贪心解码(GEN_TEMPERATURE=0)。配对检验的方差
+# 里一大块是采样运气;归零后 delta 只剩"注入内容不同"的差。这也是为什么新政策
+# 的 A/B 必须在同一 base 重跑 —— 拿旧的热采样 B 配对,温度效应会混进估计。
+export GEN_TEMPERATURE=${GEN_TEMPERATURE:-0}
+# 政策隔离:非 judgment 写自己的 RESULTS_BASE(G6 禁止同 trace 混政策)。
+# 变体文件指回主 sweep 的,新旧政策在同一批变异任务上可比、臂间严格配对。
+if [ "$C_POLICY" = judgment ]; then RUN_BASE=latest_evolving
+else RUN_BASE="${C_POLICY}_v1"
+     export MUTATIONS_PATH=$REPO/experiments_results/latest_evolving/mutations.json
+fi
 
 # ── 每个模型的部署参数(parser 钉死,别改)────────────────────────────────
 model_parser(){ case "$1" in llama-33) echo llama3_json;; gpt-oss) echo openai;; *) echo llama3_json;; esac; }
@@ -64,7 +79,9 @@ PORT=${AUTOPILOT_PORT:-8000}
 TP=${AUTOPILOT_TP:-$(echo "$CUDA" | tr ',' '\n' | grep -c .)}
 
 # tau2 三臂必须完全一致的参数
-TAU2_ARGS=(--iters 3 --domain airline,retail --n-tasks 30 --num-trials 2 --n-concurrent 8)
+# 三域全开(airline 上限 50 取 40,retail/telecom 各 40):stratum 60->120 题,
+# 配对 SE 缩 ~sqrt(2)。tau2 是唯一 env-grounded 的基准,guarded 的主场。
+TAU2_ARGS=(--iters 3 --domain airline,retail,telecom --n-tasks 40 --num-trials 2 --n-concurrent 8)
 
 # ── 队列:"模型:benchmark:臂" ────────────────────────────────────────────────
 # gaia/locomo 的 A/B 已有干净数据且新代码没动 A/B 的执行路径(diff 只加字段),
@@ -72,12 +89,16 @@ TAU2_ARGS=(--iters 3 --domain airline,retail --n-tasks 30 --num-trials 2 --n-con
 # llama-33 x gaia2 留在队列末尾:历史结论是"每个 parser x chat-template 都 0 分",
 # 但那些实验是在 pythonic(工具根本不执行)时代做的,值得用 llama3_json 复核一次;
 # 真跑出全 0,health() 会拦下来,不会污染 gate。
+# 全部整套 A/B/C:确认性协议是 temperature=0,旧 base 的 A/B 是热采样,拿来
+# 配对会把温度效应混进 delta,所以新 base 三臂全重跑、自成一体。
+# (旧队列"只补 C"还有第二个死因:is_done 不认政策,看到旧 judgment C 的
+# 100 个完成就跳过 —— 最关键的四格根本不会跑。)
 QUEUE=(
-  "llama-33:gaia:C"
-  "llama-33:locomo:C"
+  "llama-33:gaia:A,B,C"
+  "llama-33:locomo:A,B,C"
   "llama-33:tau2:A,B,C"
-  "gpt-oss:gaia:C"
-  "gpt-oss:locomo:C"
+  "gpt-oss:gaia:A,B,C"
+  "gpt-oss:locomo:A,B,C"
   "gpt-oss:tau2:A,B,C"
   "gpt-oss:gaia2:A,B,C"
   "llama-33:gaia2:A,B,C"
@@ -85,19 +106,22 @@ QUEUE=(
 MODELS=${AUTOPILOT_MODELS:-}
 
 # ── 判断一项是否已完成(幂等的关键)────────────────────────────────────────
-is_done(){  # $1=model $2=bench
-  $PY - "$1" "$2" <<'PY'
+is_done(){  # $1=model $2=bench  (在 RUN_BASE 里查;C 臂还要求政策匹配)
+  $PY - "$1" "$2" "$RUN_BASE" "$C_POLICY" <<'PY'
 import json, sys
 from pathlib import Path
-m, b = sys.argv[1], sys.argv[2]
-p = Path(f"experiments_results/latest_evolving/{m}/{b}/trace.jsonl")
+m, b, base, pol = sys.argv[1:5]
+p = Path(f"experiments_results/{base}/{m}/{b}/trace.jsonl")
 if not p.exists(): sys.exit(1)
 rows = [json.loads(l) for l in open(p) if l.strip()]
 if not rows: sys.exit(1)
 kf = max(int(r.get("iter_total", 1) or 1) for r in rows) - 1
+def row_pol(r):
+    return r.get("c_policy") or ("meta" if r.get("c_meta") else "judgment")
 for g in ("no_mem", "raw_patch", "curated_patch"):
     fin = {r.get("task_id") for r in rows
-           if r.get("group") == g and int(r.get("iteration", 0) or 0) == kf}
+           if r.get("group") == g and int(r.get("iteration", 0) or 0) == kf
+           and (g != "curated_patch" or row_pol(r) == pol)}
     if len(fin) < 50:
         sys.exit(1)
 sys.exit(0)
@@ -184,7 +208,10 @@ checkpoint(){  # $1=model $2=bench $3=arm
   #   2. commit-tree 以备份分支现有 tip 为父,造 commit —— 不碰任何分支引用
   #   3. 直接把这个 commit 推到备份分支
   #   4. reset 把 index 还原,好让之后真正的 gated commit 从干净状态开始
-  git add -A experiments_results/ 2>/dev/null
+  # 只圈本 worker 的地盘:两个 worker 共写一个 ceph 仓库,-A 全目录会把别的
+  # worker 跑到一半的行也扫进来。
+  git add -A "experiments_results/$RUN_BASE/$1" 2>/dev/null
+  git add "experiments_results/latest_evolving/mutations.json" 2>/dev/null || true
   git diff --cached --quiet 2>/dev/null && { log "    checkpoint: 无新数据"; return 0; }
   local tree parent commit
   tree=$(git write-tree 2>/dev/null) || { log "    ! checkpoint: write-tree 失败"; git reset -q; return 0; }
@@ -205,11 +232,11 @@ checkpoint(){  # $1=model $2=bench $3=arm
 
 # ── 数据健康检查:行数涨不代表数据有效 ────────────────────────────────────
 health(){  # $1=model $2=bench
-  $PY - "$1" "$2" <<'PY'
-import json, sys
+  RUN_BASE=$RUN_BASE $PY - "$1" "$2" <<'PY'
+import json, os, sys
 from pathlib import Path
 m, b = sys.argv[1], sys.argv[2]
-p = Path(f"experiments_results/latest_evolving/{m}/{b}/trace.jsonl")
+p = Path(f"experiments_results/{os.environ.get('RUN_BASE','latest_evolving')}/{m}/{b}/trace.jsonl")
 if not p.exists(): print("    健康检查: 无 trace"); sys.exit(1)
 rows = [json.loads(l) for l in open(p) if l.strip()]
 ans = [r for r in rows if str(r.get("response") or "").strip()]
@@ -247,17 +274,17 @@ for item in "${QUEUE[@]}"; do
     # tau2 CLI 带 --auto-resume:残留的 tau2_*_iter*.json 会被"续跑",上一轮
     # (可能是别的 env/parser/参数)的 sims 会被当成本次结果解析进 trace,而
     # code_rev 写的是现在的 —— 行会撒谎,任何 infra 门都发现不了。
-    if [ ! -f "experiments_results/latest_evolving/$MODEL/tau2/trace.jsonl" ]; then
-      n=$(ls -d experiments_results/latest_evolving/$MODEL/tau2_*_iter*.json 2>/dev/null | wc -l)
+    if [ ! -f "experiments_results/$RUN_BASE/$MODEL/tau2/trace.jsonl" ]; then
+      n=$(ls -d experiments_results/$RUN_BASE/$MODEL/tau2_*_iter*.json 2>/dev/null | wc -l)
       if [ "$n" -gt 0 ]; then
-        rm -rf experiments_results/latest_evolving/$MODEL/tau2_*_iter*.json
-        rm -f experiments_results/latest_evolving/$MODEL/tau2_mem_*.pkl
+        rm -rf experiments_results/$RUN_BASE/$MODEL/tau2_*_iter*.json
+        rm -f experiments_results/$RUN_BASE/$MODEL/tau2_mem_*.pkl
         log "  清掉 $n 个残留 tau2 artifact(全新开跑)"
       fi
     fi
     for arm in ${ARMS//,/ }; do
       OPENAI_API_BASE=http://localhost:$PORT/v1 OPENAI_API_KEY=dummy PYTHONPATH="$REPO" \
-      RESULTS_BASE=latest_evolving CODEBUDDY_MODEL="$MODEL" \
+      RESULTS_BASE=$RUN_BASE CODEBUDDY_MODEL="$MODEL" \
         $PY -u scripts/latest/tau2_bridge.py --arm "$arm" "${TAU2_ARGS[@]}" \
         --model "openai/$MODEL" >> "$REPO/run_${MODEL}_tau2_${arm}.log" 2>&1
       log "    arm $arm exit=$?"
@@ -268,7 +295,7 @@ for item in "${QUEUE[@]}"; do
     # 会静默加载 0 个任务然后打印 "ALL BENCHMARKS COMPLETE"(几分钟"跑完"= 什么都没跑)
     OPENAI_API_BASE=http://localhost:$PORT/v1 OPENAI_API_KEY=dummy CODEBUDDY_MODEL="$MODEL" \
     GAIA2_SCENARIO_DIR="$REPO/.datasets/gaia2-cli-loaded" \
-    RESULTS_BASE=latest_evolving BENCHMARKS="$BENCH" ITER_CHAIN=3 ITER_MUTATE=1 \
+    RESULTS_BASE=$RUN_BASE BENCHMARKS="$BENCH" ITER_CHAIN=3 ITER_MUTATE=1 \
     RESUME=1 TASK_CONCURRENCY=10 ARMS="$ARMS" TASK_LIMIT=100 \
       $PY -u scripts/latest/latest_runner.py >> "$REPO/run_${MODEL}_${BENCH}.log" 2>&1
     log "    sweep exit=$?"
@@ -278,13 +305,18 @@ for item in "${QUEUE[@]}"; do
   health "$MODEL" "$BENCH" || { log "  ✗ 数据不健康,不 gate 不 push,留待人工"; flock -u 8; continue; }
 
   log "  gate..."
-  REQUIRE_C=1 $PY scripts/latest/v2_gate.py "$MODEL" latest_evolving 2>&1 | tail -14
+  REQUIRE_C=1 $PY scripts/latest/v2_gate.py "$MODEL" "$RUN_BASE" 2>&1 | tail -14
   if [ "${PIPESTATUS[0]}" -eq 0 ]; then
-    git add experiments_results/ 2>/dev/null
+    # 仓库级 push 锁:两个 worker 并发 commit/rebase 会撞 index.lock;add 只圈
+    # 本项数据,别的 worker 未 gate 的行绝不搭车进 main。
+    exec 7>"$REPO/.locks/gitpush.lock"; flock 7
+    git add "experiments_results/$RUN_BASE/$MODEL/$BENCH" 2>/dev/null
+    git add "experiments_results/latest_evolving/mutations.json" 2>/dev/null || true
     git -c user.email=yizhouyang@tencent.com -c user.name=yizhouyang \
-      commit -q -m "experiment($MODEL): $BENCH $ARMS C_POLICY=$C_POLICY via autopilot" 2>&1 | tail -1
+      commit -q -m "experiment($MODEL): $BENCH $ARMS C_POLICY=$C_POLICY temp=${GEN_TEMPERATURE} via autopilot" 2>&1 | tail -1
     git pull --rebase -q origin main 2>&1 | tail -1
     git push origin main 2>&1 | tail -1
+    flock -u 7
     log "  ✅ gate 通过,已 push"
   else
     log "  ✗ gate FAIL — 不 push"
