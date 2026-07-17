@@ -52,6 +52,11 @@ import time
 # Declare that BEFORE evomem_bridge is imported, or its provenance defaults to
 # whatever ITER_FEEDBACK happens to be in the shell.
 os.environ.setdefault("ITER_FEEDBACK", "env")
+
+try:
+    from scripts.latest.atomic_io import atomic_pickle_dump as _atomic_pickle_dump
+except Exception:  # direct-script invocation without the package on sys.path
+    from atomic_io import atomic_pickle_dump as _atomic_pickle_dump
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -365,8 +370,10 @@ def main() -> None:
                   f"mean reward {sum(r['reward'] for r in rows)/len(rows):.3f}", flush=True)
             if mem is not None:
                 asyncio.run(_record_all(mem, rows))
-                with open(state, "wb") as f:
-                    pickle.dump(mem, f)     # next iteration's agent injects this
+                # Atomic: a reclaim mid-write would otherwise truncate the store
+                # to nothing and the next iteration would start from an empty
+                # memory while still reporting as arm B/C (see atomic_io).
+                _atomic_pickle_dump(mem, state)   # next iteration's agent injects this
                 try:
                     _n_entries = len(mem)
                     _sz = state.stat().st_size

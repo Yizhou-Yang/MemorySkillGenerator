@@ -172,6 +172,63 @@ if _C_POLICY not in ("judgment", "meta", "guarded"):
 # Where a chain's feedback score comes from, and therefore whether everything
 # built on it (e.score, the ✓ gate, w_c) is grounded or asserted. "gold"/"env"
 # read the benchmark's own scorer; "self" asks the backbone to grade itself.
+_PROTOCOL_CACHE: dict = {}
+
+
+def _protocol_dict() -> dict:
+    """Every knob that decides whether two rows are the same experiment.
+
+    Lazy: read when first needed, so it does not depend on definition order.
+    A knob belongs here if it changes what a row MEANS. RESULTS_BASE and RESUME
+    do not — they change where a row lands, and a resumed run must not read as a
+    different protocol.
+    """
+    return {
+        "code_rev": _CODE_REV,
+        "c_policy": _C_POLICY,
+        "critic_model": _CRITIC_MODEL,
+        "judge_model": _JUDGE_MODEL,
+        "score_provenance": _SCORE_PROVENANCE,
+        "iter_chain": ITER_CHAIN,
+        "iter_mutate": int(ITER_MUTATE),
+        "iter_feedback": os.environ.get("ITER_FEEDBACK", "gold"),
+        "temperature": os.environ.get("GEN_TEMPERATURE", "(server default)"),
+        "task_limit": os.environ.get("TASK_LIMIT", "100"),
+        "c_inject_budget_ch": os.environ.get("C_INJECT_BUDGET_CH", "900"),
+        "c_critic_gate": os.environ.get("C_CRITIC_GATE", "5"),
+        "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
+        "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
+        "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),
+        "c_no_partition": os.environ.get("C_NO_PARTITION", "0"),
+        "w_c_disabled": os.environ.get("W_C_DISABLED", "0"),
+        "reprompt_control": os.environ.get("REPROMPT_CONTROL", "0"),
+        "passk": os.environ.get("PASSK", "0"),
+        "external_mems": os.environ.get("EXTERNAL_MEMS", "(none)"),
+    }
+
+
+def _protocol_hash() -> str:
+    """One field standing for the whole configuration.
+
+    Each knob so far got its own gate (G4 code_rev, G5 critic, G6 policy, G7
+    provenance, G8 judge) — five hand-written checks doing one thing: this field
+    must be constant within an arm or the rows are not one experiment. That does
+    not scale, and it already leaked: GEN_TEMPERATURE has no gate at all, so
+    nothing stops greedy rows from being pooled with sampled ones, which is the
+    exact confound the pre-registration warns about. The hash covers every knob
+    at once, including the ones nobody remembered to gate, and every knob added
+    later for free. It says "different", not "how different" — protocol.json next
+    to the trace decodes it.
+    """
+    if "h" not in _PROTOCOL_CACHE:
+        import hashlib
+        d = _protocol_dict()
+        _PROTOCOL_CACHE["d"] = d
+        _PROTOCOL_CACHE["h"] = hashlib.sha256(
+            json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:12]
+    return _PROTOCOL_CACHE["h"]
+
+
 _SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
                      else os.environ.get("ITER_FEEDBACK", "gold"))
 
@@ -698,6 +755,18 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     os.makedirs(f"{RESULTS_DIR}/{benchmark}", exist_ok=True)
 
     trace_path = Path(RESULTS_DIR) / benchmark / "trace.jsonl"
+    # Sidecar decoding this run's protocol_hash back to the knobs behind it. The
+    # hash on each row proves rows belong to one experiment; this says WHICH.
+    # Written next to the trace on ceph because the launch banner lives in a log
+    # that dies with the container.
+    try:
+        _pp = trace_path.parent / "protocol.json"
+        _pp.parent.mkdir(parents=True, exist_ok=True)
+        _all = json.loads(_pp.read_text()) if _pp.exists() else {}
+        _all[_protocol_hash()] = _PROTOCOL_CACHE.get("d", {})
+        _pp.write_text(json.dumps(_all, indent=2, sort_keys=True, default=str))
+    except Exception as _e:
+        print(f"  [protocol] sidecar write failed (non-fatal): {_e}", flush=True)
     done_map: dict = {}
     if trace_path.exists():
         # A chain run (ITER_CHAIN>1) must not resume from a stale single-pass trace:
@@ -882,6 +951,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "c_policy": _C_POLICY,
                                   "score_provenance": _SCORE_PROVENANCE,
                                   "judge_model": _JUDGE_MODEL,
+                                  "protocol_hash": _protocol_hash(),
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
                                   # flailed" from "agent never engaged".
@@ -932,7 +1002,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "c_meta": _C_META,
                                    "c_policy": _C_POLICY,
                                    "score_provenance": _SCORE_PROVENANCE,
-                                   "judge_model": _JUDGE_MODEL})
+                                   "judge_model": _JUDGE_MODEL,
+                                   "protocol_hash": _protocol_hash()})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
@@ -1171,6 +1242,7 @@ async def main():
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
     # at launch, not after 128 wasted solves, had this existed then.
     _knobs = {
+        "protocol_hash": _protocol_hash(),
         "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
         "score_provenance": _SCORE_PROVENANCE,
         "ARMS": ",".join(sorted(_ARMS)),

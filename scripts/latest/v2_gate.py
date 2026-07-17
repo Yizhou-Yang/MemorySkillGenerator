@@ -174,6 +174,27 @@ def main() -> None:
                   + ("  ⚠ selection rests on the backbone's self-assessment"
                      if v == "self_assessment" else "")
                   + (f"  ({n_unrec_sp} legacy rows predate the field)" if n_unrec_sp else ""))
+        # G9 protocol hash — the catch-all. G4-G8 each police one field by
+        # hand, which does not scale and already leaked: GEN_TEMPERATURE has no
+        # gate of its own, so nothing stopped greedy rows from being pooled with
+        # sampled ones. protocol_hash folds every knob (temperature, iter_chain,
+        # dose budget, critic/judge/policy, ...) into one value, so a knob added
+        # later is covered without a new gate. Checked PER ARM, not per trace:
+        # G4 deliberately permits keeping valid A/B rows from an earlier rev
+        # while C reruns on the frozen one, and a per-trace check would forbid
+        # that sanctioned plan. protocol.json beside the trace decodes a hash.
+        by_proto = {}
+        for r in rs:
+            if r.get("protocol_hash"):
+                by_proto.setdefault(r.get("group", "?"), set()).add(str(r["protocol_hash"]))
+        for g, hs in sorted(by_proto.items()):
+            if len(hs) > 1:
+                print(f"  G9 ✗ arm {g} mixes protocol_hash {sorted(hs)} — one arm, "
+                      "two configurations; see protocol.json to decode which knob moved")
+                hard_fail = True
+        if by_proto:
+            print("  G9 protocol: "
+                  + " ".join(f"{g}={sorted(h)[0]}" for g, h in sorted(by_proto.items())))
         doses = {}
         for g in ["no_mem", "raw_patch", "curated_patch"]:
             grs = [r for r in rs if r.get("group") == g]
