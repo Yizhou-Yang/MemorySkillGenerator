@@ -156,9 +156,12 @@ _ARMS = set(os.environ.get("ARMS", "A,B,C").replace(" ", "").split(","))
 # designated model and routes ONLY critic calls there.
 try:
     from scripts.latest.llm_client import critic_model_id as _critic_model_id
+    from scripts.latest.llm_client import judge_model_id as _judge_model_id
     _CRITIC_MODEL = _critic_model_id()
+    _JUDGE_MODEL = _judge_model_id()
 except Exception:
     _CRITIC_MODEL = os.environ.get("CRITIC_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
+    _JUDGE_MODEL = os.environ.get("JUDGE_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
 # Which curation policy arm C ran: judgment (critic score + self-assessment) or
 # metadata (measured w_c + version lineage). Different methods, never poolable.
 _C_META = os.environ.get("C_META", "0") == "1"
@@ -878,6 +881,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "c_meta": _C_META,
                                   "c_policy": _C_POLICY,
                                   "score_provenance": _SCORE_PROVENANCE,
+                                  "judge_model": _JUDGE_MODEL,
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
                                   # flailed" from "agent never engaged".
@@ -927,7 +931,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "critic_model": _CRITIC_MODEL,
                                    "c_meta": _C_META,
                                    "c_policy": _C_POLICY,
-                                   "score_provenance": _SCORE_PROVENANCE})
+                                   "score_provenance": _SCORE_PROVENANCE,
+                                   "judge_model": _JUDGE_MODEL})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))

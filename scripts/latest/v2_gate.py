@@ -52,7 +52,12 @@ def main() -> None:
     base = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BASE", "latest_evolving")
     hard_fail = False
     gated_any = False
-    for bench in ["gaia", "gaia2", "locomo"]:
+    # tau2 has no injection telemetry (no patch_injected/aug_len/markers), so
+    # the injection gates G1/G2/G3 do not apply there — but the integrity and
+    # policy gates (G0/G0b/G4/G5/G6/G7/G8) absolutely do: tau2 once returned
+    # reward 1.0 for doing NOTHING (unexecuted tools left the DB unmutated and
+    # db_match passed), and it was the one benchmark no gate ever looked at.
+    for bench in ["gaia", "gaia2", "locomo", "tau2"]:
         rs = rows(PROJECT_ROOT / "experiments_results" / base / model / bench / "trace.jsonl")
         if not rs:
             print(f"[{bench}] no trace — skipped")
@@ -128,6 +133,18 @@ def main() -> None:
         elif crit:
             print(f"  G5 critic: {crit.pop()}"
                   + (f"  ({n_unrec} legacy rows predate the field)" if n_unrec else ""))
+        # G8 judge identity. The tie-break judge shapes the SCORE of every row
+        # in every arm, so two judges in one trace means two scoring functions
+        # pooled as one. Missing field = legacy rows (pre-field), warn only.
+        jm = {str(r.get("judge_model")) for r in rs if r.get("judge_model")}
+        n_unrec_jm = sum(1 for r in rs if not r.get("judge_model"))
+        if len(jm) > 1:
+            print(f"  G8 ✗ trace mixes judge_model {sorted(jm)} — two scoring "
+                  "functions cannot be pooled; rerun or split")
+            hard_fail = True
+        elif jm:
+            print(f"  G8 judge: {jm.pop()}"
+                  + (f"  ({n_unrec_jm} legacy rows predate the field)" if n_unrec_jm else ""))
         # G6 curation policy. Judgment-guided (critic score + self-assessment)
         # and metadata-guided (measured w_c + version lineage) are different
         # methods; a C arm holding both answers nothing.
@@ -180,7 +197,7 @@ def main() -> None:
                 hard_fail = True
             if not grs:
                 print(f"  G4 ! arm {g}: absent from this trace")
-            if g == "curated_patch" and late:
+            if g == "curated_patch" and late and bench != "tau2":
                 if cov < COVERAGE_FLOOR:
                     print(f"  G1 ✗ C coverage {100*cov:.0f}% < {100*COVERAGE_FLOOR:.0f}%"
                           " — chain-index/fallback not effective")
@@ -193,8 +210,9 @@ def main() -> None:
         # vacuous — the most dangerous output this script can produce, since it
         # is the last thing between a broken sweep and the paper. Set
         # REQUIRE_C=0 for a deliberate A/B-only baseline sweep.
-        if REQUIRE_C and not [r for r in rs if r.get("group") == "curated_patch"
-                              and (r.get("iteration", 0) or 0) >= 1]:
+        if REQUIRE_C and bench != "tau2" and not [
+                r for r in rs if r.get("group") == "curated_patch"
+                and (r.get("iteration", 0) or 0) >= 1]:
             print("  G1 ✗ curated_patch has no rows at iter>=1 — the method arm "
                   "never ran, so C coverage/dose/markers are unevaluable. This "
                   "is NOT a pass (set REQUIRE_C=0 for an A/B-only sweep).")

@@ -226,6 +226,26 @@ CRITIC_BASE_URL = (os.environ.get("CRITIC_BASE_URL") or "").strip() or None
 CRITIC_API_KEY = (os.environ.get("CRITIC_API_KEY") or "").strip() or None
 
 
+# ─── Designated judge routing ────────────────────────────────────────────
+# The continuous endpoint's tie-breaker (llm_judge_answer) otherwise runs on
+# the backbone itself under LLM_PROVIDER=vllm: the model being evaluated is
+# also the model deciding whether its answer counts. Symmetric across arms, so
+# the paired contrast stays unbiased in expectation, but a judge that favours
+# responses echoing the injected content's style is a judge x treatment
+# interaction nobody can rule out — and a weak backbone judge is pure noise on
+# top. JUDGE_MODEL pins the tie-breaker to one fixed external model for every
+# arm and backbone. Unset = current behaviour, so nothing historical changes.
+JUDGE_MODEL = (os.environ.get("JUDGE_MODEL") or "").strip().lower() or None
+JUDGE_BASE_URL = (os.environ.get("JUDGE_BASE_URL") or "").strip() or None
+JUDGE_API_KEY = (os.environ.get("JUDGE_API_KEY") or "").strip() or None
+
+
+def judge_model_id() -> str:
+    """What actually judged this run's tie-breaks — recorded on every trace row
+    so runs judged by different models can never be silently pooled."""
+    return JUDGE_MODEL or _OPENAI_MODEL or MODEL
+
+
 def critic_model_id() -> str:
     """What the critic actually is — trace rows record this so a mixed sweep
     can never be silently pooled with a self-curated one."""
@@ -719,7 +739,13 @@ async def llm_judge_answer(response: str, expected: str, question: str) -> float
         f"Model response: {response}\n\n"
         "Score (0.0=wrong, 0.5=partially, 1.0=fully correct). Output ONLY a number:"
     )
-    out = await _llm_short_call(prompt, max_turns=1, timeout=30)
+    if JUDGE_MODEL is not None:
+        r = await asyncio.to_thread(
+            _openai_notool_sync, "", prompt, 30,
+            JUDGE_MODEL, JUDGE_BASE_URL, JUDGE_API_KEY)
+        out = (r.get("text") or "").strip()
+    else:
+        out = await _llm_short_call(prompt, max_turns=1, timeout=30)
     m = re.search(r'(\d+\.?\d*)', out)
     if m:
         try:
