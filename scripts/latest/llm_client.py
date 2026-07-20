@@ -224,6 +224,14 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
 CRITIC_MODEL = (os.environ.get("CRITIC_MODEL") or "").strip().lower() or None
 CRITIC_BASE_URL = (os.environ.get("CRITIC_BASE_URL") or "").strip() or None
 CRITIC_API_KEY = (os.environ.get("CRITIC_API_KEY") or "").strip() or None
+# Route the critic through the CodeBuddy SDK, exactly like the judge, so the same
+# strong grader (deepseek-v4-pro) can score curation quality. Without this the
+# only critic route is an OpenAI URL, which deepseek-v4-pro (internal gateway,
+# no OpenAI endpoint) doesn't have — so the critic silently fell back to the
+# backbone grading its own patches, the one thing guarded exists to prevent.
+# Default on when a CRITIC_MODEL is named but no OpenAI URL/key is given.
+CRITIC_VIA_SDK = (os.environ.get("CRITIC_VIA_SDK", "").strip().lower() in ("1", "true", "yes")) or (
+    CRITIC_MODEL is not None and not (CRITIC_BASE_URL or CRITIC_API_KEY))
 
 
 # ─── Designated judge routing ────────────────────────────────────────────
@@ -265,6 +273,15 @@ def llm_critic_fn(prompt: str) -> str:
     unset, so default behaviour is unchanged."""
     if CRITIC_MODEL is None:
         return llm_review_fn(prompt)
+    if CRITIC_VIA_SDK and _HAS_CODEBUDDY:
+        # Same SDK path as the judge, model pinned to the critic. Sync wrapper:
+        # the critic is called from synchronous curation code, so drive the
+        # async one-shot to completion on a private loop.
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_sdk_judge_call(prompt, CRITIC_MODEL, timeout=90))
+        finally:
+            _shutdown_loop(loop)
     return _openai_notool_sync("", prompt, timeout=90, model=CRITIC_MODEL,
                                base_url=CRITIC_BASE_URL,
                                api_key=CRITIC_API_KEY).get("text", "")
@@ -747,13 +764,13 @@ async def _sdk_judge_call(prompt: str, judge_model: str, timeout: int = 30) -> s
     if not _HAS_CODEBUDDY:
         return ""
     _prof_add_tokens(0, 0, calls=1)
-    opt = CodeBuddyAgentOptions(
-        permission_mode="bypassPermissions", model=judge_model, max_turns=1, cwd="/tmp")
-    text = ""
-    gen = None
-    try:
-        async with asyncio.timeout(timeout):
-            gen = query(prompt=prompt, options=opt)
+
+    async def _drive():
+        opt = CodeBuddyAgentOptions(
+            permission_mode="bypassPermissions", model=judge_model, max_turns=1, cwd="/tmp")
+        text = ""
+        gen = query(prompt=prompt, options=opt)
+        try:
             async for msg in gen:
                 _record_usage(msg)
                 if isinstance(msg, AssistantMessage):
@@ -762,15 +779,20 @@ async def _sdk_judge_call(prompt: str, judge_model: str, timeout: int = 30) -> s
                             text += block.text
                     if text:
                         break
-    except Exception:
-        pass
-    finally:
-        if gen is not None:
+        finally:
             try:
                 await gen.aclose()
             except Exception:
                 pass
-    return text
+        return text
+
+    # asyncio.timeout is 3.11+; this pipeline runs on 3.10, where it raised
+    # AttributeError that the old bare except swallowed — so the judge returned
+    # "" and every score collapsed to 0. wait_for is the 3.10-safe equivalent.
+    try:
+        return await asyncio.wait_for(_drive(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return ""
 
 
 async def llm_judge_answer(response: str, expected: str, question: str) -> float:

@@ -48,12 +48,28 @@ cd "$REPO" || exit 1
 # 模型,不需要 oracle/gold,部署时也拿得到。w_c 只在 provenance 是 gold/env 时
 # 才参与,ITER_FEEDBACK=self 下它是"自评穿了个数字的外衣",直接跳过。
 # 论文预注册的确认性对比是 guarded(判断出内容,metadata 把关背书;背书需要
-# grounded 分数或外部 critic 这第二把钥匙,自评永不背书)。没有外部 critic 时
-# guarded 依旧成立:QA 上没有条目会被背书(中性渲染),tau2 上 env 分数就是
-# 第二把钥匙 —— 那是它的主场。CRITIC_MODEL/CRITIC_BASE_URL/CRITIC_API_KEY
-# 若在环境里会被 llm_client 自动接走。
+# grounded 分数或外部 critic 这第二把钥匙,自评永不背书)。
 export C_POLICY=${C_POLICY:-guarded}
 export ITER_FEEDBACK=${ITER_FEEDBACK:-self}
+# 公平性:judge 和 critic 都钉成 deepseek-v4-pro(手上最强的评分模型),对每个
+# backbone 一视同仁。弱评分模型两头错 —— 把对的判错、把错的给满分 —— 注入的噪声
+# 会不均匀地落在各臂各 backbone 上。deepseek 只在 CodeBuddy 内网,没有 OpenAI
+# endpoint,所以走 SDK(*_VIA_SDK=1)。不焊死的话,critic 会静默回落成 backbone
+# 自己评自己的 patch —— 正是 guarded 要消灭的假背书。judgment 历史政策不动。
+# 唯一重合的一层:backbone 本身就是 deepseek 时,critic 不再算"外部",那一层的
+# 背书改由 grounded 分数(benchmark 自己的 scorer,非模型意见)承担。
+if [ "$C_POLICY" != judgment ]; then
+  export JUDGE_MODEL=${JUDGE_MODEL:-deepseek-v4-pro}
+  export JUDGE_VIA_SDK=${JUDGE_VIA_SDK:-1}
+  # DEFER_CRITIC=1:critic 还没接(将走免费 HY3 的特殊 API,本周提供)。此模式下
+  # 不设 critic —— 只跑不碰 curation 的数据(A/B + passk),绝不让付费模型评审。
+  # C 臂 + 全部 ablation(8 臂都是 C 变体)一律等 HY3。judge 仍是 deepseek(每题
+  # 一次、约 500 token,是零头;真正的量级大头是每次 curation 两调的 critic)。
+  if [ "${DEFER_CRITIC:-0}" != 1 ]; then
+    export CRITIC_MODEL=${CRITIC_MODEL:-deepseek-v4-pro}
+    export CRITIC_VIA_SDK=${CRITIC_VIA_SDK:-1}
+  fi
+fi
 # 确认性运行的方差控制:三臂统一贪心解码(GEN_TEMPERATURE=0)。配对检验的方差
 # 里一大块是采样运气;归零后 delta 只剩"注入内容不同"的差。这也是为什么新政策
 # 的 A/B 必须在同一 base 重跑 —— 拿旧的热采样 B 配对,温度效应会混进估计。
@@ -104,6 +120,20 @@ QUEUE=(
   "llama-33:gaia2:A,B,C"
 )
 MODELS=${AUTOPILOT_MODELS:-}
+
+# DEFER_CRITIC:把每个队列项的 C 臂剥掉(只留 A/B),并跳过 ablation(全是 C 变体)。
+# A/B 不碰 store、不调 critic,数值与 critic 无关,是最终有效数据;等 HY3 到位再补 C。
+if [ "${DEFER_CRITIC:-0}" = 1 ]; then
+  export RUN_ABLATION=0
+  _q=()
+  for _it in "${QUEUE[@]}"; do
+    IFS=: read -r _m _b _a <<<"$_it"
+    _a=${_a//C/}; _a=${_a//,,/,}; _a=${_a%,}; _a=${_a#,}   # 去掉 C,清理逗号
+    [ -n "$_a" ] && _q+=("$_m:$_b:$_a")
+  done
+  QUEUE=("${_q[@]}")
+  log "DEFER_CRITIC=1 → 只跑 A/B + passk;C 臂与 ablation 等 HY3 critic"
+fi
 
 # ── 判断一项是否已完成(幂等的关键)────────────────────────────────────────
 is_done(){  # $1=model $2=bench  (在 RUN_BASE 里查;C 臂还要求政策匹配)
@@ -323,4 +353,40 @@ for item in "${QUEUE[@]}"; do
   fi
   flock -u 8
 done
-log "════ 队列跑完 ════"
+log "════ 主队列跑完 ════"
+
+# ── 补充实验(整晚跑满):ablation / external-mem / pass@k ─────────────────
+# 只在 RUN_ABLATION=1 时跑,且主 sweep 的对应 base 已就绪(它们复用主 sweep 的
+# A/B 与变体文件)。每个都写自己的 base,不污染主结果,gate 分开看。
+if [ "${RUN_ABLATION:-1}" = 1 ] && [ -n "$MODELS" ]; then
+  for M in ${MODELS//,/ }; do
+    ensure_vllm "$M" || { log "  补充实验跳过(vLLM 起不来 $M)"; continue; }
+
+    # 1) 组件消融:ablation_runner 参数化所有臂(refine/critic/enrich/dose/partition/fallback)
+    #    写 experiments_results/ablation/<arm>/;复用 $RUN_BASE 的主 sweep A/B + 变体
+    log "▶▶ [$M] ablation 组件消融 (locomo,gaia2)"
+    exec 8>"$REPO/.locks/${M}_ablation.lock"
+    if flock -n 8; then
+      OPENAI_API_BASE=http://localhost:$PORT/v1 OPENAI_API_KEY=dummy CODEBUDDY_MODEL="$M"       GAIA2_SCENARIO_DIR="$REPO/.datasets/gaia2-cli-loaded"       MAIN_RESULTS_BASE="$RUN_BASE" ABLATION_BENCHMARKS="locomo,gaia2"       ITER_MUTATE=1 ITER_FEEDBACK=self TASK_CONCURRENCY=10 TASK_LIMIT=100         $PY -u scripts/latest/ablation_runner.py >> "$REPO/run_${M}_ablation.log" 2>&1
+      log "  ablation exit=$?"; checkpoint "$M" "ablation" "all"
+      flock -u 8
+    else log "  ablation 已被别的 worker 占着,跳过"; fi
+
+    # 2) pass@k 重采样(方差控制,tab:passk):A 臂、单迭代、PASSK=3
+    log "▶▶ [$M] pass@k (locomo,gaia2)"
+    exec 8>"$REPO/.locks/${M}_passk.lock"
+    if flock -n 8; then
+      OPENAI_API_BASE=http://localhost:$PORT/v1 OPENAI_API_KEY=dummy CODEBUDDY_MODEL="$M"       GAIA2_SCENARIO_DIR="$REPO/.datasets/gaia2-cli-loaded"       RESULTS_BASE="passk_${M}" BENCHMARKS="locomo,gaia2" ITER_CHAIN=1 ARMS=A       PASSK=3 TASK_CONCURRENCY=10 TASK_LIMIT=100         $PY -u scripts/latest/latest_runner.py >> "$REPO/run_${M}_passk.log" 2>&1
+      log "  passk exit=$?"; checkpoint "$M" "passk" "A"
+      flock -u 8
+    else log "  passk 已被别的 worker 占着,跳过"; fi
+
+    # 3) external-mem(tab:external, vs A-Mem/Mem0/MemoryOS)：需要 EXTERNAL_MEMS,
+    #    autopilot 不自动跑（挂外部记忆系统依赖各自的 store，风险高，留手动）。
+    #    占位标记，人工按 SETUP_GUIDE 跑：
+    #    EXTERNAL_MEMS=amem,mem0,memoryos RESULTS_BASE=external_$M ... latest_runner.py
+    log "  [$M] external-mem(tab:external) 需手动跑,见 run 说明"
+  done
+fi
+
+log "════ 全部跑完 ════"
