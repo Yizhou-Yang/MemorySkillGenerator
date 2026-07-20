@@ -64,13 +64,25 @@ def _log_version(name: str, module) -> None:
 
 
 class Mem0Memory:
-    """Mem0 (mem0.ai OSS) as a baseline arm, using ITS OWN add/search."""
+    """Mem0 (mem0.ai OSS) as a baseline arm, using ITS OWN add/search.
+
+    Picklable by design: tau2 runs the agent in a subprocess that receives the
+    memory as a pickle (TAU2_MEM_STATE), so the live clients (qdrant holds a
+    file lock; the OpenAI client holds sockets) are built lazily on first use
+    and dropped from __getstate__. release() frees the on-disk qdrant lock so
+    the bridge process and the tau2 subprocess can take turns on one store.
+    """
+
+    # Local (embedded) qdrant is not safe under concurrent access from multiple
+    # threads of one client, and tau2 runs sims concurrently — serialize all
+    # store I/O. Class-level: locks are unpicklable, instances must not own one.
+    _IO_LOCK = __import__("threading").Lock()
 
     def __init__(self, benchmark: str, top_k: int = 3) -> None:
         self.benchmark = benchmark
         self.top_k = top_k
         try:
-            from mem0 import Memory
+            from mem0 import Memory  # noqa: F401 — fail fast before a sweep launches
         except ImportError as e:
             raise SystemExit(
                 "[baseline:mem0] pip install mem0ai (and ensure the OAI proxy "
@@ -93,8 +105,11 @@ class Mem0Memory:
             # embedding_model_dims MUST match the local embedder (all-MiniLM-L6-v2
             # is 384). Without it mem0 builds the qdrant collection at its OpenAI
             # default (1536) and every add fails "shapes (0,1536) and (384,)".
+            # Path is per-BENCHMARK: local qdrant file-locks its directory, and
+            # two benchmarks (or the tau2 bridge + its subprocess) each holding a
+            # client on one shared path would deadlock on that lock.
             "vector_store": {"provider": "qdrant",
-                             "config": {"path": str(_STORE_ROOT / "mem0"),
+                             "config": {"path": str(_STORE_ROOT / f"mem0_{benchmark}"),
                                         "on_disk": True,
                                         "embedding_model_dims": int(
                                             os.environ.get("MEM0_EMBED_DIMS", "384"))}},
@@ -103,13 +118,36 @@ class Mem0Memory:
         if override:
             import json
             cfg = json.loads(override)
-        self._m = Memory.from_config(cfg)
-        try:
-            import mem0 as _m0
-            _log_version("mem0ai", _m0)
-        except Exception:
-            pass
+        self._cfg = cfg
+        self._m = None                      # built lazily (see _mem)
         self._add_failures = 0
+
+    def _mem(self):
+        if self._m is None:
+            from mem0 import Memory
+            self._m = Memory.from_config(self._cfg)
+            try:
+                import mem0 as _m0
+                _log_version("mem0ai", _m0)
+            except Exception:
+                pass
+        return self._m
+
+    def release(self) -> None:
+        """Drop the live clients (frees the local-qdrant file lock) so another
+        process — the tau2 subprocess, or the bridge after it — can open the
+        same on-disk store. State lives on disk; nothing is lost."""
+        m, self._m = self._m, None
+        if m is not None:
+            try:
+                m.vector_store.client.close()   # qdrant releases the lock now,
+            except Exception:                   # not at some later GC
+                pass
+
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        d["_m"] = None                      # clients never cross a pickle
+        return d
 
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
@@ -117,8 +155,10 @@ class Mem0Memory:
             # mem0 >=2.x moved entity identity out of top-level kwargs: search()
             # takes filters={"user_id": ...}, not user_id=... (add() still takes
             # the top-level kwarg).
-            hits = self._m.search(query, filters={"user_id": _ns(self.benchmark, task)},
-                                  limit=self.top_k)
+            with self._IO_LOCK:
+                hits = self._mem().search(query,
+                                          filters={"user_id": _ns(self.benchmark, task)},
+                                          limit=self.top_k)
         except Exception as e:
             print(f"[baseline:mem0] search failed: {e}", flush=True)
             return ""
@@ -137,11 +177,13 @@ class Mem0Memory:
         try:
             # mem0.add runs its own LLM extraction — blocking; keep it off
             # the event loop or it throttles every concurrent task.
-            await asyncio.to_thread(
-                self._m.add,
-                [{"role": "user", "content": task.get("description", "")[:4000]},
-                 {"role": "assistant", "content": resp[:4000]}],
-                user_id=_ns(self.benchmark, task))
+            def _add():
+                with self._IO_LOCK:
+                    self._mem().add(
+                        [{"role": "user", "content": task.get("description", "")[:4000]},
+                         {"role": "assistant", "content": resp[:4000]}],
+                        user_id=_ns(self.benchmark, task))
+            await asyncio.to_thread(_add)
         except Exception as e:
             self._add_failures += 1
             if self._add_failures <= 3 or self._add_failures % 50 == 0:

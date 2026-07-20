@@ -76,7 +76,8 @@ _C_POLICY = (os.environ.get("C_POLICY")
 if _C_POLICY not in ("judgment", "meta", "guarded"):
     _C_POLICY = "judgment"
 
-GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch"}  # canonical (arms.py)
+GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch",  # canonical (arms.py)
+             "mem0": "mem0"}   # external framework baselines (tab:external)
 
 
 def _task_key(user_text: str) -> str:
@@ -98,6 +99,9 @@ def _code_rev() -> str:
 def _mk_memory(arm: str, benchmark: str = "tau2"):
     if arm == "A":
         return None
+    if arm in ("mem0",):   # external framework baselines, same interface as B/C
+        from scripts.latest.baseline_memories import make_external_memory
+        return make_external_memory(arm, benchmark)
     from scripts.latest.evomem_bridge import BenchmarkMemory, CuratedMemory
     return BenchmarkMemory(benchmark, "B") if arm == "B" else CuratedMemory(benchmark)
 
@@ -265,7 +269,7 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["A", "B", "C"], required=True)
+    ap.add_argument("--arm", choices=["A", "B", "C", "mem0"], required=True)
     ap.add_argument("--iters", type=int, default=int(os.environ.get("ITER_CHAIN", "3")))
     ap.add_argument("--model", default=os.environ.get("TAU2_MODEL", "openai/hy3"))
     ap.add_argument("--domain", default=os.environ.get("TAU2_DOMAIN", "airline"),
@@ -327,6 +331,11 @@ def main() -> None:
             cmd = _tau2_cmd(tau2_bin, args.arm, args.model, domain, args.n_tasks,
                             args.num_trials, args.n_concurrent, save_to, args.task_ids,
                             launcher_path)
+            # External-framework stores live on disk behind a client that file-locks
+            # its path (local qdrant): release ours so the tau2 subprocess — which
+            # unpickles the memory and opens the same path for inject() — can take it.
+            if mem is not None and hasattr(mem, "release"):
+                mem.release()
             print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
             rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
             if rc != 0:
