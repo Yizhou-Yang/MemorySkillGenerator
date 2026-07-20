@@ -8,7 +8,11 @@
 
 - **机器**:gpu3(2×H20),gpu1/2 已删。无 crontab,纯 autopilot + claude routine。
 - **后端模型**:这两天**只跑 gpt-oss-120b**(TP=2,parser=`openai`,mxfp4,shared ceph 权重)。
-- **判官**:deepseek-v4-pro,走 CodeBuddy SDK(`JUDGE_MODEL=deepseek-v4-pro JUDGE_VIA_SDK=1`)。只在 EM<1.0 打平时触发。
+- **判官 judge**:deepseek-v4-pro,走 CodeBuddy SDK。只在 EM<1.0 打平时触发。
+- **评审 critic**:deepseek-v4-pro,走 SDK(`CRITIC_MODEL=deepseek-v4-pro CRITIC_VIA_SDK=1`,已焊进 autopilot guarded 段)。**每次 curation 都触发**(比 judge 频繁一个量级)。判官和 critic 是两个独立 session,互相外部。
+  - 换 critic 的依据(自然实验):judge 恒定弱(gpt-oss 自判)时,只去掉 critic 的自我背书,gpt-oss/gaia C−B 从 **−4.8 翻到 +3.2** → **弱的是 critic,不是 judge**。所以 guarded 用外部强 critic。
+  - 旧的 critic=gpt-oss(自评)数据没丢,归档在 gpu3 `_ablation_selfcritic/gpt-oss-selfcritic-20260720/`,作"自评 critic vs 外部 critic"消融点。
+  - 新 protocol_hash = `c788e21de399`(gaia)。启动必须 `set -a; source .env; set +a` 拿 `CODEBUDDY_API_KEY`,否则 SDK 报 Authentication required、分数全 0。`.env` 的 `LLM_PROVIDER=vllm` 保 backbone 走 vLLM 不被劫持。
 - **政策**:`C_POLICY=guarded`(预注册确认臂;✓ 需两把钥匙 = grounded 分 OR 外部 critic,自评永不背书)。
 - **温度**:`GEN_TEMPERATURE=0`(确认协议锁定)。
 - **protocol_hash**:每个 arm 内必须恒定(G9 gate 拦)。改任一 knob → hash 变 → 旧行与新行不能混池 → **那个 base 必须清后重跑**。
