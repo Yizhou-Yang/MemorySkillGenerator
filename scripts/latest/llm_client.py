@@ -747,13 +747,13 @@ async def _sdk_judge_call(prompt: str, judge_model: str, timeout: int = 30) -> s
     if not _HAS_CODEBUDDY:
         return ""
     _prof_add_tokens(0, 0, calls=1)
-    opt = CodeBuddyAgentOptions(
-        permission_mode="bypassPermissions", model=judge_model, max_turns=1, cwd="/tmp")
-    text = ""
-    gen = None
-    try:
-        async with asyncio.timeout(timeout):
-            gen = query(prompt=prompt, options=opt)
+
+    async def _drive():
+        opt = CodeBuddyAgentOptions(
+            permission_mode="bypassPermissions", model=judge_model, max_turns=1, cwd="/tmp")
+        text = ""
+        gen = query(prompt=prompt, options=opt)
+        try:
             async for msg in gen:
                 _record_usage(msg)
                 if isinstance(msg, AssistantMessage):
@@ -762,15 +762,20 @@ async def _sdk_judge_call(prompt: str, judge_model: str, timeout: int = 30) -> s
                             text += block.text
                     if text:
                         break
-    except Exception:
-        pass
-    finally:
-        if gen is not None:
+        finally:
             try:
                 await gen.aclose()
             except Exception:
                 pass
-    return text
+        return text
+
+    # asyncio.timeout is 3.11+; this pipeline runs on 3.10, where it raised
+    # AttributeError that the old bare except swallowed — so the judge returned
+    # "" and every score collapsed to 0. wait_for is the 3.10-safe equivalent.
+    try:
+        return await asyncio.wait_for(_drive(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return ""
 
 
 async def llm_judge_answer(response: str, expected: str, question: str) -> float:
