@@ -90,9 +90,14 @@ class Mem0Memory:
                          "config": {"model": os.environ.get(
                              "MEM0_EMBED_MODEL",
                              "sentence-transformers/all-MiniLM-L6-v2")}},
+            # embedding_model_dims MUST match the local embedder (all-MiniLM-L6-v2
+            # is 384). Without it mem0 builds the qdrant collection at its OpenAI
+            # default (1536) and every add fails "shapes (0,1536) and (384,)".
             "vector_store": {"provider": "qdrant",
                              "config": {"path": str(_STORE_ROOT / "mem0"),
-                                        "on_disk": True}},
+                                        "on_disk": True,
+                                        "embedding_model_dims": int(
+                                            os.environ.get("MEM0_EMBED_DIMS", "384"))}},
         }
         override = os.environ.get("MEM0_CONFIG_JSON")
         if override:
@@ -109,7 +114,10 @@ class Mem0Memory:
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
         try:
-            hits = self._m.search(query, user_id=_ns(self.benchmark, task),
+            # mem0 >=2.x moved entity identity out of top-level kwargs: search()
+            # takes filters={"user_id": ...}, not user_id=... (add() still takes
+            # the top-level kwarg).
+            hits = self._m.search(query, filters={"user_id": _ns(self.benchmark, task)},
                                   limit=self.top_k)
         except Exception as e:
             print(f"[baseline:mem0] search failed: {e}", flush=True)

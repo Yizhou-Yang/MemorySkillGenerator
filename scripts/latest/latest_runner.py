@@ -1137,6 +1137,9 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     print(f"\n  Results ({benchmark}, model={MODEL}):")
     for _g, _r in report.items():
         print(f"    {_g:12s}: {metric_name}={_r[metric_field]:.1%}")
+    # Defined unconditionally: an EXTERNAL_MEMS-only run has no curated_patch arm,
+    # but full_report below still references these — leave them None when C is absent.
+    delta_ac = delta_bc = None
     if {"no_mem", "raw_patch", "curated_patch"} <= set(report):
         delta_ac = report['curated_patch'][metric_field] - report['no_mem'][metric_field]
         delta_bc = report['curated_patch'][metric_field] - report['raw_patch'][metric_field]
@@ -1193,7 +1196,9 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 }
         full_report["per_config"] = per_config_report
 
-    if benchmark == "gaia":
+    # The per-level breakdown assumes the [A,B,C] triple layout of all_evals; an
+    # EXTERNAL_MEMS-only run has no raw_patch/curated_patch arm, so skip it there.
+    if benchmark == "gaia" and {"no_mem", "raw_patch", "curated_patch"} <= set(report):
         level_scores = {}
         for i, task in enumerate(test_tasks):
             level = (task.get("metadata") or {}).get("level", "unknown")
