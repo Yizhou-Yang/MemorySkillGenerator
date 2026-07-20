@@ -323,4 +323,40 @@ for item in "${QUEUE[@]}"; do
   fi
   flock -u 8
 done
-log "════ 队列跑完 ════"
+log "════ 主队列跑完 ════"
+
+# ── 补充实验(整晚跑满):ablation / external-mem / pass@k ─────────────────
+# 只在 RUN_ABLATION=1 时跑,且主 sweep 的对应 base 已就绪(它们复用主 sweep 的
+# A/B 与变体文件)。每个都写自己的 base,不污染主结果,gate 分开看。
+if [ "${RUN_ABLATION:-1}" = 1 ] && [ -n "$MODELS" ]; then
+  for M in ${MODELS//,/ }; do
+    ensure_vllm "$M" || { log "  补充实验跳过(vLLM 起不来 $M)"; continue; }
+
+    # 1) 组件消融:ablation_runner 参数化所有臂(refine/critic/enrich/dose/partition/fallback)
+    #    写 experiments_results/ablation/<arm>/;复用 $RUN_BASE 的主 sweep A/B + 变体
+    log "▶▶ [$M] ablation 组件消融 (locomo,gaia2)"
+    exec 8>"$REPO/.locks/${M}_ablation.lock"
+    if flock -n 8; then
+      OPENAI_API_BASE=http://localhost:$PORT/v1 OPENAI_API_KEY=dummy CODEBUDDY_MODEL="$M"       GAIA2_SCENARIO_DIR="$REPO/.datasets/gaia2-cli-loaded"       MAIN_RESULTS_BASE="$RUN_BASE" ABLATION_BENCHMARKS="locomo,gaia2"       ITER_MUTATE=1 ITER_FEEDBACK=self TASK_CONCURRENCY=10 TASK_LIMIT=100         $PY -u scripts/latest/ablation_runner.py >> "$REPO/run_${M}_ablation.log" 2>&1
+      log "  ablation exit=$?"; checkpoint "$M" "ablation" "all"
+      flock -u 8
+    else log "  ablation 已被别的 worker 占着,跳过"; fi
+
+    # 2) pass@k 重采样(方差控制,tab:passk):A 臂、单迭代、PASSK=3
+    log "▶▶ [$M] pass@k (locomo,gaia2)"
+    exec 8>"$REPO/.locks/${M}_passk.lock"
+    if flock -n 8; then
+      OPENAI_API_BASE=http://localhost:$PORT/v1 OPENAI_API_KEY=dummy CODEBUDDY_MODEL="$M"       GAIA2_SCENARIO_DIR="$REPO/.datasets/gaia2-cli-loaded"       RESULTS_BASE="passk_${M}" BENCHMARKS="locomo,gaia2" ITER_CHAIN=1 ARMS=A       PASSK=3 TASK_CONCURRENCY=10 TASK_LIMIT=100         $PY -u scripts/latest/latest_runner.py >> "$REPO/run_${M}_passk.log" 2>&1
+      log "  passk exit=$?"; checkpoint "$M" "passk" "A"
+      flock -u 8
+    else log "  passk 已被别的 worker 占着,跳过"; fi
+
+    # 3) external-mem(tab:external, vs A-Mem/Mem0/MemoryOS)：需要 EXTERNAL_MEMS,
+    #    autopilot 不自动跑（挂外部记忆系统依赖各自的 store，风险高，留手动）。
+    #    占位标记，人工按 SETUP_GUIDE 跑：
+    #    EXTERNAL_MEMS=amem,mem0,memoryos RESULTS_BASE=external_$M ... latest_runner.py
+    log "  [$M] external-mem(tab:external) 需手动跑,见 run 说明"
+  done
+fi
+
+log "════ 全部跑完 ════"
