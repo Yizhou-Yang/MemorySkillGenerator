@@ -61,8 +61,14 @@ export ITER_FEEDBACK=${ITER_FEEDBACK:-self}
 if [ "$C_POLICY" != judgment ]; then
   export JUDGE_MODEL=${JUDGE_MODEL:-deepseek-v4-pro}
   export JUDGE_VIA_SDK=${JUDGE_VIA_SDK:-1}
-  export CRITIC_MODEL=${CRITIC_MODEL:-deepseek-v4-pro}
-  export CRITIC_VIA_SDK=${CRITIC_VIA_SDK:-1}
+  # DEFER_CRITIC=1:critic 还没接(将走免费 HY3 的特殊 API,本周提供)。此模式下
+  # 不设 critic —— 只跑不碰 curation 的数据(A/B + passk),绝不让付费模型评审。
+  # C 臂 + 全部 ablation(8 臂都是 C 变体)一律等 HY3。judge 仍是 deepseek(每题
+  # 一次、约 500 token,是零头;真正的量级大头是每次 curation 两调的 critic)。
+  if [ "${DEFER_CRITIC:-0}" != 1 ]; then
+    export CRITIC_MODEL=${CRITIC_MODEL:-deepseek-v4-pro}
+    export CRITIC_VIA_SDK=${CRITIC_VIA_SDK:-1}
+  fi
 fi
 # 确认性运行的方差控制:三臂统一贪心解码(GEN_TEMPERATURE=0)。配对检验的方差
 # 里一大块是采样运气;归零后 delta 只剩"注入内容不同"的差。这也是为什么新政策
@@ -114,6 +120,20 @@ QUEUE=(
   "llama-33:gaia2:A,B,C"
 )
 MODELS=${AUTOPILOT_MODELS:-}
+
+# DEFER_CRITIC:把每个队列项的 C 臂剥掉(只留 A/B),并跳过 ablation(全是 C 变体)。
+# A/B 不碰 store、不调 critic,数值与 critic 无关,是最终有效数据;等 HY3 到位再补 C。
+if [ "${DEFER_CRITIC:-0}" = 1 ]; then
+  export RUN_ABLATION=0
+  _q=()
+  for _it in "${QUEUE[@]}"; do
+    IFS=: read -r _m _b _a <<<"$_it"
+    _a=${_a//C/}; _a=${_a//,,/,}; _a=${_a%,}; _a=${_a#,}   # 去掉 C,清理逗号
+    [ -n "$_a" ] && _q+=("$_m:$_b:$_a")
+  done
+  QUEUE=("${_q[@]}")
+  log "DEFER_CRITIC=1 → 只跑 A/B + passk;C 臂与 ablation 等 HY3 critic"
+fi
 
 # ── 判断一项是否已完成(幂等的关键)────────────────────────────────────────
 is_done(){  # $1=model $2=bench  (在 RUN_BASE 里查;C 臂还要求政策匹配)
