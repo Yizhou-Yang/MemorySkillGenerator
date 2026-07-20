@@ -48,12 +48,22 @@ cd "$REPO" || exit 1
 # 模型,不需要 oracle/gold,部署时也拿得到。w_c 只在 provenance 是 gold/env 时
 # 才参与,ITER_FEEDBACK=self 下它是"自评穿了个数字的外衣",直接跳过。
 # 论文预注册的确认性对比是 guarded(判断出内容,metadata 把关背书;背书需要
-# grounded 分数或外部 critic 这第二把钥匙,自评永不背书)。没有外部 critic 时
-# guarded 依旧成立:QA 上没有条目会被背书(中性渲染),tau2 上 env 分数就是
-# 第二把钥匙 —— 那是它的主场。CRITIC_MODEL/CRITIC_BASE_URL/CRITIC_API_KEY
-# 若在环境里会被 llm_client 自动接走。
+# grounded 分数或外部 critic 这第二把钥匙,自评永不背书)。
 export C_POLICY=${C_POLICY:-guarded}
 export ITER_FEEDBACK=${ITER_FEEDBACK:-self}
+# 公平性:judge 和 critic 都钉成 deepseek-v4-pro(手上最强的评分模型),对每个
+# backbone 一视同仁。弱评分模型两头错 —— 把对的判错、把错的给满分 —— 注入的噪声
+# 会不均匀地落在各臂各 backbone 上。deepseek 只在 CodeBuddy 内网,没有 OpenAI
+# endpoint,所以走 SDK(*_VIA_SDK=1)。不焊死的话,critic 会静默回落成 backbone
+# 自己评自己的 patch —— 正是 guarded 要消灭的假背书。judgment 历史政策不动。
+# 唯一重合的一层:backbone 本身就是 deepseek 时,critic 不再算"外部",那一层的
+# 背书改由 grounded 分数(benchmark 自己的 scorer,非模型意见)承担。
+if [ "$C_POLICY" != judgment ]; then
+  export JUDGE_MODEL=${JUDGE_MODEL:-deepseek-v4-pro}
+  export JUDGE_VIA_SDK=${JUDGE_VIA_SDK:-1}
+  export CRITIC_MODEL=${CRITIC_MODEL:-deepseek-v4-pro}
+  export CRITIC_VIA_SDK=${CRITIC_VIA_SDK:-1}
+fi
 # 确认性运行的方差控制:三臂统一贪心解码(GEN_TEMPERATURE=0)。配对检验的方差
 # 里一大块是采样运气;归零后 delta 只剩"注入内容不同"的差。这也是为什么新政策
 # 的 A/B 必须在同一 base 重跑 —— 拿旧的热采样 B 配对,温度效应会混进估计。
