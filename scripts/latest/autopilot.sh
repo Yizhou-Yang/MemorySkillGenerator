@@ -137,6 +137,26 @@ if [ "${DEFER_CRITIC:-0}" = 1 ]; then
   log "DEFER_CRITIC=1 → A/B + passk + critic-free ablation($ABLATION_ARMS);C 臂与其余 ablation 等 HY3"
 fi
 
+# SKIP_BENCHES="gpt-oss:gaia2 ..." —— 跳过指定 model:bench(某 backbone 在某基准上
+# 全 0 且极慢时用,例如 gpt-oss 在 interactive gaia2 上真交互但太弱、~0/题 21min,
+# 会白烧几十小时并堵住后续。被跳过的 bench 同时从 ablation 基准里剔除。
+if [ -n "${SKIP_BENCHES:-}" ]; then
+  _q=()
+  for _it in "${QUEUE[@]}"; do
+    IFS=: read -r _m _b _a <<<"$_it"
+    skip=0; for s in $SKIP_BENCHES; do [ "$s" = "$_m:$_b" ] && skip=1; done
+    [ "$skip" = 0 ] && _q+=("$_it")
+  done
+  QUEUE=("${_q[@]}")
+  # 从 ablation 基准剔除被跳过的 bench(简单起见:只要任一 model 跳了该 bench 就剔)
+  for s in $SKIP_BENCHES; do
+    b=${s#*:}
+    ABLATION_BENCHMARKS=$(echo "${ABLATION_BENCHMARKS:-locomo,gaia2}" | tr ',' '\n' | grep -vx "$b" | paste -sd, -)
+  done
+  export ABLATION_BENCHMARKS
+  log "SKIP_BENCHES=$SKIP_BENCHES → 队列剔除,ablation 基准=$ABLATION_BENCHMARKS"
+fi
+
 # ── 判断一项是否已完成(幂等的关键)────────────────────────────────────────
 is_done(){  # $1=model $2=bench  (在 RUN_BASE 里查;C 臂还要求政策匹配)
   $PY - "$1" "$2" "$RUN_BASE" "$C_POLICY" <<'PY'
