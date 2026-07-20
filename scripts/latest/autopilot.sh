@@ -61,14 +61,12 @@ export ITER_FEEDBACK=${ITER_FEEDBACK:-self}
 if [ "$C_POLICY" != judgment ]; then
   export JUDGE_MODEL=${JUDGE_MODEL:-deepseek-v4-pro}
   export JUDGE_VIA_SDK=${JUDGE_VIA_SDK:-1}
-  # DEFER_CRITIC=1:critic 还没接(将走免费 HY3 的特殊 API,本周提供)。此模式下
-  # 不设 critic —— 只跑不碰 curation 的数据(A/B + passk),绝不让付费模型评审。
-  # C 臂 + 全部 ablation(8 臂都是 C 变体)一律等 HY3。judge 仍是 deepseek(每题
-  # 一次、约 500 token,是零头;真正的量级大头是每次 curation 两调的 critic)。
-  if [ "${DEFER_CRITIC:-0}" != 1 ]; then
-    export CRITIC_MODEL=${CRITIC_MODEL:-deepseek-v4-pro}
-    export CRITIC_VIA_SDK=${CRITIC_VIA_SDK:-1}
-  fi
+  # Critic 型号已在 llm_client 里写死 = HY3(统一 critic,绝不 self/native,不可比
+  # 的 per-backbone critic 也没了)。autopilot 不再设 CRITIC_MODEL。HY3 走特殊 API,
+  # 其 endpoint(HY3_BASE_URL/HY3_API_KEY 或 CRITIC_VIA_SDK)由 .env 在启动时给。
+  # DEFER_CRITIC=1:HY3 API 还没接好时的开关 —— 只跑不碰 curation 的 A/B + passk,
+  # C 臂 + 全部 ablation 等 HY3。HY3 免费,接好后去掉 DEFER_CRITIC 即可。
+  :
 fi
 # 确认性运行的方差控制:三臂统一贪心解码(GEN_TEMPERATURE=0)。配对检验的方差
 # 里一大块是采样运气;归零后 delta 只剩"注入内容不同"的差。这也是为什么新政策

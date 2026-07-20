@@ -14,16 +14,22 @@
   - **换 critic 的依据(自然实验)**:judge 恒定弱(gpt-oss 自判)时,只去掉 critic 的自我背书,gpt-oss/gaia C−B 从 **−4.8 翻到 +3.2** → **弱的是 critic 不是 judge**。所以要外部强 critic,只是先用免费的 HY3。
   - 短暂跑过的 critic=deepseek 数据已清;更早的 critic=gpt-oss(自评)归档在 gpu3 `_ablation_selfcritic/gpt-oss-selfcritic-20260720/`(自评 vs 外部 critic 消融点)。
 
-## 当前实际在跑(DEFER_CRITIC=1)
+## 当前实际在跑(DEFER_CRITIC=1,base=latest_evolving,最大化复用)
 
-只跑**不碰 critic 的数据**,用 gpt-oss backbone:
-- **主 sweep A/B**:gaia,locomo,tau2,gaia2 —— A(no_mem)、B(raw_patch),都不碰 store,数值与 critic 无关,是**最终有效数据**。protocol_hash=`3b7a62823378`(gaia)。
-- **pass@k**:A 臂,locomo/gaia2。
-- **judge=deepseek** 给 gaia/locomo 的 A/B 打分(gaia2 软召回、tau2 env,都不用 judge)。
+启动:`C_POLICY=judgment DEFER_CRITIC=1 JUDGE_MODEL=deepseek-v4-pro`(base=latest_evolving,好让 is_done 认出并**跳过**已完成的 gaia/locomo)。
 
-**等 HY3 到位再补**:主 sweep 的 **C 臂** + **全部 8 个 ablation 臂**(都是 C 变体,离不开 critic)。
-- HY3 接入步骤:给 critic 配 HY3 的特殊 API(可能需在 `llm_client` 加一条 critic 路由,类似现在的 `CRITIC_VIA_SDK`),autopilot 去掉 `DEFER_CRITIC`、`CRITIC_MODEL=<hy3>`,重跑 C + ablation。
-- ⚠ **A/B 的 protocol_hash 复用**:现在 A/B 印记 critic=gpt-oss(未设,回落 backbone,critic 从没被调)。HY3 的 C 印记不同 hash → G9 默认会拦 A/B↔C 配对。届时二选一:重跑 A/B(便宜,无 critic 只 backbone+judge),或让 gate 对 A/B 忽略 critic_model 字段。A/B **数值不会变**(与 critic 无关),只是 gate 印记问题。
+**复用,不重跑**(数据审查结论:A/B 与 critic 无关,已有的有效):
+- **gaia A/B**:复用 latest_evolving 现有(900 行,判官对 gaia 几乎零影响:0–4/300 行)。
+- **locomo A/B**:复用现有。⚠ 注意 locomo 判官影响 ~15%(44/300),现有是 gpt-oss 自判 —— 如需干净,后续对存好的答案用强判官重判(便宜,不重跑 backbone),暂按现状。
+
+**补缺口**(gpt-oss,零/极低花费):
+- **gaia2 A/B**:新跑(之前没有;软召回不用判官)。
+- **tau2 A/B**:补完(之前 57/58 部分;env 反馈不用判官)。
+- **critic-free ablation**:`C_refine`(纯精炼,`C_USE_CRITIC=0`)+ `ctrl_reprompt`(A 臂对照),benches locomo/gaia2。这两臂不调 critic,**是最终数据**。
+
+**等 HY3 再补**:主 sweep 的 **C 臂** + **其余 7 个 ablation 臂**(都带 critic)。
+- HY3 接入:给 critic 配 HY3 特殊 API(在 `llm_client` 加一条 critic 路由,类似 `CRITIC_VIA_SDK`);autopilot 去 `DEFER_CRITIC`、设 `CRITIC_MODEL=<hy3>`。
+- 届时会跑一个干净的 guarded 基底做 C;A/B 可复用现有或届时随 C 一起重跑对齐 protocol。
 - **政策**:`C_POLICY=guarded`(预注册确认臂;✓ 需两把钥匙 = grounded 分 OR 外部 critic,自评永不背书)。
 - **温度**:`GEN_TEMPERATURE=0`(确认协议锁定)。
 - **protocol_hash**:每个 arm 内必须恒定(G9 gate 拦)。改任一 knob → hash 变 → 旧行与新行不能混池 → **那个 base 必须清后重跑**。

@@ -217,21 +217,19 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
         return {"text": "", "error": str(e)[:200]}
 
 
-# ─── Designated critic routing ────────────────────────────────────────────
-# CRITIC_MODEL routes ONLY the critic elsewhere; every other call still goes to
-# the backbone, so a run stays a clean A/B/C on that backbone. Unset = the critic
-# is the backbone (self-curation), which is what every result so far used.
-CRITIC_MODEL = (os.environ.get("CRITIC_MODEL") or "").strip().lower() or None
-CRITIC_BASE_URL = (os.environ.get("CRITIC_BASE_URL") or "").strip() or None
-CRITIC_API_KEY = (os.environ.get("CRITIC_API_KEY") or "").strip() or None
-# Route the critic through the CodeBuddy SDK, exactly like the judge, so the same
-# strong grader (deepseek-v4-pro) can score curation quality. Without this the
-# only critic route is an OpenAI URL, which deepseek-v4-pro (internal gateway,
-# no OpenAI endpoint) doesn't have — so the critic silently fell back to the
-# backbone grading its own patches, the one thing guarded exists to prevent.
-# Default on when a CRITIC_MODEL is named but no OpenAI URL/key is given.
-CRITIC_VIA_SDK = (os.environ.get("CRITIC_VIA_SDK", "").strip().lower() in ("1", "true", "yes")) or (
-    CRITIC_MODEL is not None and not (CRITIC_BASE_URL or CRITIC_API_KEY))
+# ─── Unified critic routing (hardcoded HY3) ───────────────────────────────
+# The critic is ONE model, HY3, for every backbone and every framework baseline —
+# it is never the backbone itself. A self-critic inverts on weak backbones (the
+# false-endorsement failure: a model too weak to judge its own attempts approves
+# the wrong ones), and a per-backbone critic makes the sweep incomparable across
+# backbones and frameworks. So the model is hardcoded, not configurable to fall
+# back to the backbone. HY3 runs through its own API (HY3_BASE_URL/HY3_API_KEY),
+# or the CodeBuddy SDK if reachable there. Only the *endpoint* is configurable;
+# the model identity is fixed.
+CRITIC_MODEL = "hy3"
+CRITIC_BASE_URL = (os.environ.get("HY3_BASE_URL") or os.environ.get("CRITIC_BASE_URL") or "").strip() or None
+CRITIC_API_KEY = (os.environ.get("HY3_API_KEY") or os.environ.get("CRITIC_API_KEY") or "").strip() or None
+CRITIC_VIA_SDK = os.environ.get("CRITIC_VIA_SDK", "").strip().lower() in ("1", "true", "yes")
 
 
 # ─── Designated judge routing ────────────────────────────────────────────
@@ -262,17 +260,22 @@ def judge_model_id() -> str:
 
 
 def critic_model_id() -> str:
-    """What the critic actually is — trace rows record this so a mixed sweep
-    can never be silently pooled with a self-curated one."""
-    return CRITIC_MODEL or _OPENAI_MODEL or MODEL
+    """The critic is always HY3 — recorded on every trace row so the field is a
+    constant the gate can assert on."""
+    return CRITIC_MODEL
 
 
 def llm_critic_fn(prompt: str) -> str:
     """Synchronous LLM call for the CRITIC only (cross_agent_evaluate_skill and
-    critic_refine_experience). Falls back to llm_review_fn when CRITIC_MODEL is
-    unset, so default behaviour is unchanged."""
-    if CRITIC_MODEL is None:
-        return llm_review_fn(prompt)
+    critic_refine_experience). Always HY3 — never the backbone. If HY3's endpoint
+    is not configured we raise rather than silently grade with the backbone: a
+    self-critic is the failure this pins down, so falling back to it is worse than
+    failing loud."""
+    if not (CRITIC_VIA_SDK and _HAS_CODEBUDDY) and not (CRITIC_BASE_URL or CRITIC_API_KEY):
+        raise RuntimeError(
+            "critic (HY3) endpoint not configured: set HY3_BASE_URL/HY3_API_KEY "
+            "(or CRITIC_VIA_SDK=1). Refusing to fall back to the backbone as its "
+            "own critic. Until HY3's API is wired, run with DEFER_CRITIC=1 (A/B only).")
     if CRITIC_VIA_SDK and _HAS_CODEBUDDY:
         # Same SDK path as the judge, model pinned to the critic. Sync wrapper:
         # the critic is called from synchronous curation code, so drive the
