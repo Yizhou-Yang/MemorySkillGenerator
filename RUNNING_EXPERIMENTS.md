@@ -8,11 +8,22 @@
 
 - **机器**:gpu3(2×H20),gpu1/2 已删。无 crontab,纯 autopilot + claude routine。
 - **后端模型**:这两天**只跑 gpt-oss-120b**(TP=2,parser=`openai`,mxfp4,shared ceph 权重)。
-- **判官 judge**:deepseek-v4-pro,走 CodeBuddy SDK。只在 EM<1.0 打平时触发。
-- **评审 critic**:deepseek-v4-pro,走 SDK(`CRITIC_MODEL=deepseek-v4-pro CRITIC_VIA_SDK=1`,已焊进 autopilot guarded 段)。**每次 curation 都触发**(比 judge 频繁一个量级)。判官和 critic 是两个独立 session,互相外部。
-  - 换 critic 的依据(自然实验):judge 恒定弱(gpt-oss 自判)时,只去掉 critic 的自我背书,gpt-oss/gaia C−B 从 **−4.8 翻到 +3.2** → **弱的是 critic,不是 judge**。所以 guarded 用外部强 critic。
-  - 旧的 critic=gpt-oss(自评)数据没丢,归档在 gpu3 `_ablation_selfcritic/gpt-oss-selfcritic-20260720/`,作"自评 critic vs 外部 critic"消融点。
-  - 新 protocol_hash = `c788e21de399`(gaia)。启动必须 `set -a; source .env; set +a` 拿 `CODEBUDDY_API_KEY`,否则 SDK 报 Authentication required、分数全 0。`.env` 的 `LLM_PROVIDER=vllm` 保 backbone 走 vLLM 不被劫持。
+- **判官 judge**:deepseek-v4-pro,走 CodeBuddy SDK。只在 EM<1.0 打平时触发(~1K 次/全程,~500 token/次,可忽略)。启动必须 `set -a; source .env; set +a` 拿 `CODEBUDDY_API_KEY`,否则 SDK 报 Authentication required、分数全 0。`.env` 的 `LLM_PROVIDER=vllm` 保 backbone 走 vLLM 不被劫持。
+- **评审 critic**:⏸ **暂停,`DEFER_CRITIC=1`**。将改用**免费 HY3**(走特殊 API,用户本周内提供)。当前**完全不跑 critic**。
+  - **为什么停**:critic 每次 curation 调 **2 次** deepseek(cross_agent_evaluate + critic_refine),C 臂每题每轮都触发。主 C ~2400 次 + ablation 8 臂 ~9600 次 = **~1.2 万次 / 12–24M token** → 经费撑不住。judge(~1K 次)是零头。
+  - **换 critic 的依据(自然实验)**:judge 恒定弱(gpt-oss 自判)时,只去掉 critic 的自我背书,gpt-oss/gaia C−B 从 **−4.8 翻到 +3.2** → **弱的是 critic 不是 judge**。所以要外部强 critic,只是先用免费的 HY3。
+  - 短暂跑过的 critic=deepseek 数据已清;更早的 critic=gpt-oss(自评)归档在 gpu3 `_ablation_selfcritic/gpt-oss-selfcritic-20260720/`(自评 vs 外部 critic 消融点)。
+
+## 当前实际在跑(DEFER_CRITIC=1)
+
+只跑**不碰 critic 的数据**,用 gpt-oss backbone:
+- **主 sweep A/B**:gaia,locomo,tau2,gaia2 —— A(no_mem)、B(raw_patch),都不碰 store,数值与 critic 无关,是**最终有效数据**。protocol_hash=`3b7a62823378`(gaia)。
+- **pass@k**:A 臂,locomo/gaia2。
+- **judge=deepseek** 给 gaia/locomo 的 A/B 打分(gaia2 软召回、tau2 env,都不用 judge)。
+
+**等 HY3 到位再补**:主 sweep 的 **C 臂** + **全部 8 个 ablation 臂**(都是 C 变体,离不开 critic)。
+- HY3 接入步骤:给 critic 配 HY3 的特殊 API(可能需在 `llm_client` 加一条 critic 路由,类似现在的 `CRITIC_VIA_SDK`),autopilot 去掉 `DEFER_CRITIC`、`CRITIC_MODEL=<hy3>`,重跑 C + ablation。
+- ⚠ **A/B 的 protocol_hash 复用**:现在 A/B 印记 critic=gpt-oss(未设,回落 backbone,critic 从没被调)。HY3 的 C 印记不同 hash → G9 默认会拦 A/B↔C 配对。届时二选一:重跑 A/B(便宜,无 critic 只 backbone+judge),或让 gate 对 A/B 忽略 critic_model 字段。A/B **数值不会变**(与 critic 无关),只是 gate 印记问题。
 - **政策**:`C_POLICY=guarded`(预注册确认臂;✓ 需两把钥匙 = grounded 分 OR 外部 critic,自评永不背书)。
 - **温度**:`GEN_TEMPERATURE=0`(确认协议锁定)。
 - **protocol_hash**:每个 arm 内必须恒定(G9 gate 拦)。改任一 knob → hash 变 → 旧行与新行不能混池 → **那个 base 必须清后重跑**。
