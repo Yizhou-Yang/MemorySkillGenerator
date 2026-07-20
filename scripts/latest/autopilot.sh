@@ -124,7 +124,11 @@ MODELS=${AUTOPILOT_MODELS:-}
 # DEFER_CRITIC:把每个队列项的 C 臂剥掉(只留 A/B),并跳过 ablation(全是 C 变体)。
 # A/B 不碰 store、不调 critic,数值与 critic 无关,是最终有效数据;等 HY3 到位再补 C。
 if [ "${DEFER_CRITIC:-0}" = 1 ]; then
-  export RUN_ABLATION=0
+  # 主队列去掉 C 臂(只留 A/B);ablation 只跑 critic-free 的两臂(其余等 HY3)。
+  # C_refine(C_USE_CRITIC=0,纯精炼)和 ctrl_reprompt(A 臂 reprompt 对照)都不
+  # 调 critic,数值与 critic 无关,是最终数据;其余 7 臂全带 critic → 等 HY3。
+  export RUN_ABLATION=${RUN_ABLATION:-1}
+  export ABLATION_ARMS=${ABLATION_ARMS:-C_refine,ctrl_reprompt}
   _q=()
   for _it in "${QUEUE[@]}"; do
     IFS=: read -r _m _b _a <<<"$_it"
@@ -132,7 +136,7 @@ if [ "${DEFER_CRITIC:-0}" = 1 ]; then
     [ -n "$_a" ] && _q+=("$_m:$_b:$_a")
   done
   QUEUE=("${_q[@]}")
-  log "DEFER_CRITIC=1 → 只跑 A/B + passk;C 臂与 ablation 等 HY3 critic"
+  log "DEFER_CRITIC=1 → A/B + passk + critic-free ablation($ABLATION_ARMS);C 臂与其余 ablation 等 HY3"
 fi
 
 # ── 判断一项是否已完成(幂等的关键)────────────────────────────────────────

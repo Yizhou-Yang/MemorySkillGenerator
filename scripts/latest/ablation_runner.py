@@ -193,8 +193,13 @@ def report() -> None:
 
 def main() -> None:
     if "--report" not in sys.argv:
+        # ABLATION_ARMS filters to a subset — e.g. only the critic-free arms
+        # (C_refine, ctrl_reprompt) while a paid/unavailable critic is deferred.
+        only = [a.strip() for a in os.environ.get("ABLATION_ARMS", "").split(",") if a.strip()]
         failures = []
         for arm, (overrides, _slot, _g) in ARMS.items():
+            if only and arm not in only:
+                continue
             rc = _run_arm(arm, overrides)
             if rc != 0:
                 failures.append((arm, rc))
