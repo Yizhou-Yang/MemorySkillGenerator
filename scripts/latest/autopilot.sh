@@ -70,7 +70,7 @@ model_parser(){ case "$1" in llama-33) echo llama3_json;; gpt-oss) echo openai;;
 model_weights(){
   case "$1" in
     llama-33) echo /apdcephfs_hzlf/share_1227201/models/Llama-3.3-70B-Instruct-FP8;;
-    gpt-oss)  echo /apdcephfs/private_yizhouyang/GPT-OSS-120B;;
+    gpt-oss)  echo /apdcephfs_hzlf/share_1227201/models/GPT-OSS-120B;;   # 共享ceph(6.5GB/s),不是个人ceph(56MB/s)
   esac
 }
 # worker 自己的显卡/端口/TP

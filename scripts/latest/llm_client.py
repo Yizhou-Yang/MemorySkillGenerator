@@ -236,6 +236,13 @@ CRITIC_API_KEY = (os.environ.get("CRITIC_API_KEY") or "").strip() or None
 # top. JUDGE_MODEL pins the tie-breaker to one fixed external model for every
 # arm and backbone. Unset = current behaviour, so nothing historical changes.
 JUDGE_MODEL = (os.environ.get("JUDGE_MODEL") or "").strip().lower() or None
+# Route the judge through the CodeBuddy SDK (model=JUDGE_MODEL) rather than an
+# OpenAI-compatible endpoint. This is how deepseek-v4-pro is reachable — it lives
+# behind the internal gateway, not an OpenAI URL. Default: use the SDK whenever a
+# judge is named but no JUDGE_BASE_URL/JUDGE_API_KEY is given AND the SDK is present.
+JUDGE_VIA_SDK = (os.environ.get("JUDGE_VIA_SDK", "").strip().lower() in ("1", "true", "yes")) or (
+    JUDGE_MODEL is not None
+    and not (os.environ.get("JUDGE_BASE_URL") or os.environ.get("JUDGE_API_KEY")))
 JUDGE_BASE_URL = (os.environ.get("JUDGE_BASE_URL") or "").strip() or None
 JUDGE_API_KEY = (os.environ.get("JUDGE_API_KEY") or "").strip() or None
 
@@ -730,6 +737,42 @@ async def llm_extract_answer(response: str, question: str) -> str:
     return out or response
 
 
+async def _sdk_judge_call(prompt: str, judge_model: str, timeout: int = 30) -> str:
+    """One-shot CodeBuddy-SDK call whose model is the JUDGE, not the backbone.
+
+    The judge must be independent of the backbone under evaluation (a model that
+    grades whether its own answer counts is the confound G8 exists to stop). It
+    is a scoring call, so no tools: max_turns=1, empty system prompt.
+    """
+    if not _HAS_CODEBUDDY:
+        return ""
+    _prof_add_tokens(0, 0, calls=1)
+    opt = CodeBuddyAgentOptions(
+        permission_mode="bypassPermissions", model=judge_model, max_turns=1, cwd="/tmp")
+    text = ""
+    gen = None
+    try:
+        async with asyncio.timeout(timeout):
+            gen = query(prompt=prompt, options=opt)
+            async for msg in gen:
+                _record_usage(msg)
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if hasattr(block, "text") and block.text:
+                            text += block.text
+                    if text:
+                        break
+    except Exception:
+        pass
+    finally:
+        if gen is not None:
+            try:
+                await gen.aclose()
+            except Exception:
+                pass
+    return text
+
+
 async def llm_judge_answer(response: str, expected: str, question: str) -> float:
     if not response or not expected:
         return 0.0
@@ -739,7 +782,9 @@ async def llm_judge_answer(response: str, expected: str, question: str) -> float
         f"Model response: {response}\n\n"
         "Score (0.0=wrong, 0.5=partially, 1.0=fully correct). Output ONLY a number:"
     )
-    if JUDGE_MODEL is not None:
+    if JUDGE_MODEL is not None and JUDGE_VIA_SDK and _HAS_CODEBUDDY:
+        out = (await _sdk_judge_call(prompt, JUDGE_MODEL, timeout=30)).strip()
+    elif JUDGE_MODEL is not None:
         r = await asyncio.to_thread(
             _openai_notool_sync, "", prompt, 30,
             JUDGE_MODEL, JUDGE_BASE_URL, JUDGE_API_KEY)
