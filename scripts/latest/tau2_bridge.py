@@ -328,6 +328,16 @@ def main() -> None:
     for domain in domains:
         for it in range(args.iters):
             save_to = out_root / f"tau2_{domain}_{args.arm}_iter{it}.json"
+            # Purge stale artifacts BEFORE launching: tau2-bench 0.2.x prompts
+            # interactively ("overwrite? [y/N]") when its save file exists, and
+            # under nohup stdin is closed -> EOFError kills the whole arm. It
+            # writes to <save_to>.json (double suffix), so clear both spellings.
+            for _stale in (save_to, save_to.with_name(save_to.name + ".json")):
+                try:
+                    if _stale.exists() and _stale.is_file():
+                        _stale.unlink()
+                except Exception:
+                    pass
             env = os.environ.copy()
             env["TAU2_ARM"] = args.arm
             env["TAU2_MEM_STATE"] = str(state)
