@@ -1,7 +1,7 @@
 """Import shim for the VGR engine.
 
-Importing ``src.latest.vgr`` normally runs ``src/latest/__init__.py``, which
-eagerly pulls optional deps (rapidfuzz, sentence-transformers, ...). The engine
+The engine moved to ``memlayer.vgr``; importing it through the package runs
+``memlayer/__init__.py`` (deliberately light). The engine
 itself is pure stdlib. This shim returns the engine whether or not those deps
 are installed, so the tests and the simulation backend run anywhere. In a normal
 (deps-installed) environment it resolves to the real package module.
@@ -13,13 +13,13 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
 try:
-    from src.latest import vgr as _engine  # type: ignore
+    from memlayer import vgr as _engine  # type: ignore
 except Exception:
     if "latest_vgr_engine" in sys.modules:
         _engine = sys.modules["latest_vgr_engine"]
     else:
         _spec = importlib.util.spec_from_file_location(
-            "latest_vgr_engine", _ROOT / "src" / "latest" / "vgr.py")
+            "latest_vgr_engine", _ROOT / "memlayer" / "vgr.py")
         _engine = importlib.util.module_from_spec(_spec)
         sys.modules["latest_vgr_engine"] = _engine
         _spec.loader.exec_module(_engine)

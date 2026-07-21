@@ -24,10 +24,14 @@ What it guarantees that a compacting memory layer does not:
     chars, C_INJECT_BUDGET_CH) and degrades to raw entries rather than to
     silence when curated channels come up empty.
 
-This is a THIN facade over the experiment code (scripts/latest/
-evomem_bridge.CuratedMemory): same read/write paths the paper's arms run,
-no forked logic. Env knobs (C_INJECT_BUDGET_CH, C_CRITIC_GATE,
-C_RAW_FALLBACK, C_PAGE_KEEP, ...) apply unchanged.
+The implementation lives HERE (memlayer.bridge.CuratedMemory + memlayer.forge)
+— the research harness in this repo imports it through alias shims, so the SDK
+and the paper's arms run the very same read/write paths, no forked logic. Env
+knobs (C_INJECT_BUDGET_CH, C_CRITIC_GATE, C_RAW_FALLBACK, C_PAGE_KEEP,
+METADATA_AUTHOR, ...) apply unchanged.
+
+API stability: 0.x — the surface below is small on purpose (record / inject /
+search / manifest / time_travel / save / load) and iterating; pin a version.
 """
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 __all__ = ["MemoryLayer"]
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 
 def _task(chain_id: str, task: str, task_id: Optional[str]) -> dict:
@@ -52,18 +56,23 @@ class MemoryLayer:
                  critic: Optional[Callable] = None,
                  domain: str = "default", top_k: int = 3,
                  use_critic: bool = True, use_enrich: bool = True) -> None:
-        from scripts.latest.evomem_bridge import CuratedMemory
+        from .bridge import CuratedMemory
         self._mem = CuratedMemory(domain, top_k=top_k,
                                   use_critic=use_critic and critic is not None
                                   or use_critic and llm is not None,
                                   use_enrich=use_enrich)
-        # LLM backends are injectable: `llm` refines, `critic` reviews
-        # (defaults to `llm`). With neither, curation degrades to a pure
-        # append-only patch layer — recording and retrieval still work.
-        if llm is not None or critic is not None:
-            self._mem._llm = critic or llm
-        elif getattr(self._mem, "_llm", None) is None:
-            self._mem._llm = None
+        # LLM backends are injectable: `llm` holds the reviewer pen (narrative
+        # metadata), `critic` the critic's (scores + refinement). With neither,
+        # curation degrades to a pure append-only patch layer — recording and
+        # retrieval still work.
+        if llm is not None:
+            self._mem._llm = llm
+        elif critic is not None:
+            self._mem._llm = critic
+        if critic is not None:
+            self._mem._critic_llm = critic
+        elif llm is not None:
+            self._mem._critic_llm = llm
         self.domain = domain
 
     # ── write path ──────────────────────────────────────────────────────
@@ -131,7 +140,7 @@ class MemoryLayer:
         """Rendered context exactly as an agent would have seen it after the
         first `as_of` entries of the chain — immutable history makes this a
         query, not a reconstruction effort."""
-        from scripts.latest.evomem_bridge import _format_curated
+        from .bridge import _format_curated
         ents = self._mem._chain_entries.get(chain_id, [])[:as_of]
         return _format_curated(ents, [], current_tid=chain_id)
 
