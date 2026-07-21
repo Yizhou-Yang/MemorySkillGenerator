@@ -181,6 +181,75 @@ def _record_openai_usage(resp) -> None:
         pass
 
 
+# Some OpenAI-compatible proxies (e.g. the mxzzz gpt-5.x gateway) ONLY return SSE
+# and ignore stream=false: a non-streaming create() then receives a raw event
+# stream the SDK cannot parse ("'str' object has no attribute 'choices'"). Force
+# streaming for those and reassemble the response ourselves, accumulating both
+# content and tool-call deltas (fragments arrive split by .index).
+OPENAI_FORCE_STREAM = os.environ.get("OPENAI_FORCE_STREAM", "").strip().lower() in ("1", "true", "yes")
+
+
+class _StreamMsg:
+    """Minimal stand-in for a non-streaming message, built from SSE deltas."""
+    __slots__ = ("content", "tool_calls")
+
+    def __init__(self, content, tool_calls):
+        self.content = content
+        self.tool_calls = tool_calls or None
+
+
+class _TC:
+    __slots__ = ("id", "type", "function")
+
+    def __init__(self, id, name, arguments):
+        self.id = id
+        self.type = "function"
+        self.function = type("F", (), {"name": name, "arguments": arguments})()
+
+
+def _openai_stream_create(client, req: dict):
+    """Call create() with stream=True and collect content + tool_calls into an
+    object exposing `.choices[0].message` and `.usage`, like a normal response."""
+    req = {k: v for k, v in req.items() if k != "timeout"}
+    req["stream"] = True
+    try:
+        req["stream_options"] = {"include_usage": True}
+    except Exception:
+        pass
+    content = ""
+    tcs: dict = {}   # index -> {id, name, args}
+    finish = None
+    usage = None
+    for chunk in client.chat.completions.create(**req):
+        u = getattr(chunk, "usage", None)
+        if u is not None:
+            usage = u
+        for ch in (getattr(chunk, "choices", None) or []):
+            delta = getattr(ch, "delta", None)
+            if delta is None:
+                continue
+            if getattr(delta, "content", None):
+                content += delta.content
+            for tc in (getattr(delta, "tool_calls", None) or []):
+                idx = getattr(tc, "index", 0) or 0
+                slot = tcs.setdefault(idx, {"id": None, "name": None, "args": ""})
+                if getattr(tc, "id", None):
+                    slot["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["args"] += fn.arguments
+            if getattr(ch, "finish_reason", None):
+                finish = ch.finish_reason
+    tool_calls = [_TC(v["id"] or f"call_{i}", v["name"] or "", v["args"])
+                  for i, v in sorted(tcs.items())] or None
+    msg = _StreamMsg(content, tool_calls)
+    choice = type("C", (), {"message": msg, "finish_reason": finish})()
+    return type("R", (), {"choices": [choice], "usage": usage})()
+
+
 def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
                         model: str | None = None, base_url: str | None = None,
                         api_key: str | None = None) -> dict:
@@ -208,9 +277,10 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
         messages.append({"role": "user", "content": user_prompt})
         client = (_openai_client(timeout) if base_url is None and api_key is None
                   else _OpenAI(base_url=url or None, api_key=key or "EMPTY", timeout=timeout))
-        resp = client.chat.completions.create(
-            model=(model or _OPENAI_MODEL), messages=messages, timeout=timeout,
-            **_gen_kwargs())
+        req = {"model": (model or _OPENAI_MODEL), "messages": messages,
+               "timeout": timeout, **_gen_kwargs()}
+        resp = (_openai_stream_create(client, req) if OPENAI_FORCE_STREAM
+                else client.chat.completions.create(**req))
         _record_openai_usage(resp)
         return {"text": _msg_text(resp.choices[0].message), "error": None}
     except Exception as e:
@@ -316,7 +386,9 @@ def openai_tool_chat(messages: list, tools: list | None,
         if tools:
             req["tools"] = tools
             req["tool_choice"] = "auto"
-        resp = _openai_client(timeout).chat.completions.create(**req)
+        client = _openai_client(timeout)
+        resp = (_openai_stream_create(client, req) if OPENAI_FORCE_STREAM
+                else client.chat.completions.create(**req))
         _record_openai_usage(resp)
         msg = resp.choices[0].message
         assistant = {"role": "assistant", "content": _msg_text(msg)}
