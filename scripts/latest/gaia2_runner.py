@@ -376,6 +376,15 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
         ]
         texts = []
         timeout = int(os.environ.get("GAIA2_OPENAI_TIMEOUT", "120"))
+        # Loop-robustness parity with the SDK/MCP path (which drives the agent to
+        # completion): a bare assistant message with no tool calls must not end
+        # the episode if the task is visibly unfinished. Without this, a model
+        # that narrates a plan (or says "Done") without having delivered the
+        # final send_message_to_user quietly under-executes and the count gate
+        # zeroes the task — this, not ability, was most of gpt-5.5's gap.
+        nudges = 0
+        nudge_max = int(os.environ.get("GAIA2_NUDGE_MAX", "2"))
+        twist_nudged = False
 
         for _turn in range(max_turns):
             messages = _window_messages(messages)   # cap re-sent context per turn
@@ -389,7 +398,29 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
             messages.append(assistant)
             calls = r.get("tool_calls") or []
             if not calls:
-                break  # model produced a final answer with no tool calls
+                sent_final = any(
+                    a.get("tool") == "AgentUserInterface__send_message_to_user"
+                    for a in result["actions"])
+                got_notification = any(
+                    a.get("tool") == "wait_for_notification"
+                    and "notifications': []" not in str(a.get("result_preview", ""))
+                    for a in result["actions"])
+                if not sent_final and nudges < nudge_max:
+                    nudges += 1
+                    messages.append({"role": "user", "content":
+                        "You have not delivered a final answer to the user yet. "
+                        "Continue: finish every remaining part of the task with tool "
+                        "calls, then send the result via "
+                        "AgentUserInterface__send_message_to_user."})
+                    continue
+                if sent_final and has_twist and not got_notification and not twist_nudged:
+                    twist_nudged = True
+                    messages.append({"role": "user", "content":
+                        "The user may have sent a follow-up request. Call "
+                        "wait_for_notification with timeout_seconds=120, and if a "
+                        "new message arrived, handle it fully before finishing."})
+                    continue
+                break  # finished: final answer delivered (and twist checked)
             for tc in calls:
                 name = tc["name"]
                 args = tc["arguments"] if isinstance(tc.get("arguments"), dict) else {}

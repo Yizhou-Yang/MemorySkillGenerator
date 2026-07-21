@@ -258,8 +258,13 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
            "--user-llm", model,
            "--num-trials", str(num_trials),
            "--max-concurrency", str(concurrency),
-           "--auto-resume",
            "--save-to", str(save_to)]
+    # --auto-resume only exists on the pinned internal tau2 build; the PyPI
+    # tau2-bench (0.2.x) CLI rejects it with rc=2 before running anything.
+    # Opt in via TAU2_AUTO_RESUME=1 only where the flag is known to exist —
+    # and remember resume poisons reruns unless artifacts are purged first.
+    if os.environ.get("TAU2_AUTO_RESUME", "0") == "1":
+        cmd.insert(-2, "--auto-resume")
     if n_tasks:
         cmd += ["--num-tasks", str(n_tasks)]
     for t in (task_ids or []):
