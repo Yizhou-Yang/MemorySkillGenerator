@@ -89,3 +89,9 @@ ssh gpu3 'cd /apdcephfs/private_yizhouyang/MemorySkillGenerator
 
 ---
 _更新:2026-07-20 11:xx,HEAD b4ccbfb6。当前:老 runner(pid 20608)收尾 gaia,新 worker(162757)跑 locomo。判官=deepseek-v4-pro 已在 gaia/locomo 行确认。_
+
+## 论文命名映射(2026-07-21)
+
+- **实验里的 `gpt-5.5`(mxzzz API)= 论文里的 `GPT-5 (low)`**。填 tab:main 时,读 `latest_evolving/gpt-5.5/<bench>/` 的数据,填进 **GPT-5 (low)** 那一行(已在 GAIA/GAIA2/LoCoMo 三块的 HY3 之后加好,现为 dash)。
+- 依据:官方 Vanilla GAIA2 榜单 GPT-5 (low) pass@1 = 34.6;论文 app:anchors 已引用此锚点。我们的 gpt-5.5 经 loop 对齐后 gaia2 ~25%(核心 splits,比全榜难),gaia A ~35%,落点与 34.6 档一致。
+- GPT-5 (low) 是**新增的探索性 backbone**,不属于预注册冻结的三 backbone 确认集({deepseek, llama, gpt-oss});别改 §pre-reg 的"three backbones"表述。
