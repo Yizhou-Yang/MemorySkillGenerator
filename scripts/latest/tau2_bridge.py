@@ -159,6 +159,13 @@ def _parse_results(save_to: Path) -> list[dict]:
             raise RuntimeError(
                 f"{save_to} is a directory with no results.json — inspect layout")
         save_to = cands[0]
+    # tau2-bench 0.2.x appends ".json" to --save-to itself, so the file lands at
+    # "<save_to>.json" (i.e. foo.json.json when we pass foo.json). Read whichever
+    # exists.
+    if not save_to.exists():
+        _alt = save_to.with_name(save_to.name + ".json")
+        if _alt.exists():
+            save_to = _alt
     try:
         data = json.loads(save_to.read_text())
     except Exception as e:
