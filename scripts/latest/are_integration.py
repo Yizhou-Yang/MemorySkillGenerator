@@ -490,12 +490,18 @@ class ARESession:
     def _log_event(self, tool_name: str, args: dict, result: object) -> None:
         """Record tool call in event log."""
         method = tool_name.split("__", 1)[-1] if "__" in tool_name else tool_name
+        # ok=False for calls that raised / returned an error: they did not mutate
+        # state, so the scorer must not count them as write-actions (a failed
+        # attempt + its retry would otherwise double the count and trip the
+        # count gate to reward=0).
+        ok = not (isinstance(result, dict) and result.get("error"))
         entry = {
             "tool": tool_name,
             "method": method,
             "args": _smart_serialize(args),
             "result": _smart_serialize(result),
             "sim_time": self._env.time_manager.time(),
+            "ok": ok,
         }
         self._event_log.append(entry)
 

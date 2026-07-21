@@ -377,6 +377,15 @@ def extract_agent_actions(event_log: list[dict]) -> list[NormalizedAction]:
     for index, event in enumerate(event_log):
         if not isinstance(event, dict):
             continue
+        # Skip calls that errored (type mismatch, wrong args, unknown tool): they
+        # did not mutate state, so counting them as write-actions inflates the
+        # count and trips the count gate (reward=0). ok is set by ARESession's
+        # _log_event; fall back to inspecting the result for older logs.
+        if event.get("ok") is False:
+            continue
+        res = event.get("result")
+        if event.get("ok") is None and isinstance(res, dict) and res.get("error"):
+            continue
         canonical_tool = _canonicalize_tool_name(tool_name=event.get("tool"))
         if canonical_tool not in CANONICAL_WRITE_TOOLS:
             continue
