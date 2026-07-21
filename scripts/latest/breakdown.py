@@ -137,6 +137,43 @@ def report_benchmark(bench: str, rows):
               "memory did not fire (single-pass run of independent tasks has no "
               "in-chain history; use ITER_CHAIN>1, or check evomem_bridge).")
 
+    # ---- metadata-author contrast (the catalog prediction) ----
+    # Who wrote the store's narrative metadata: "backbone" (the acting model
+    # reviews its own attempt — legacy) vs "critic" (fixed external HY3).
+    # Pre-registered prediction: the C−B inversion on weak backbones is a
+    # property of backbone-authored metadata and disappears under critic-
+    # authored metadata. Rows predating the field are backbone-authored by
+    # construction (that WAS the mechanism), so missing → "backbone".
+    authors = sorted({str(r.get("metadata_author") or "backbone")
+                      for r in rows if GROUP.get(r.get("group", "")) == "C"})
+    if len(authors) >= 1 and any(GROUP.get(r.get("group", "")) == "C" for r in rows):
+        print("\n### C−B by metadata author (catalog prediction)")
+        print("| metadata_author | B final | C final | paired ΔC−B | n pairs |")
+        print("|---|---|---|---|---|")
+        for au in authors:
+            # B rows carry the same stamp (constant per run); legacy B rows
+            # (missing field) pair with legacy C rows under "backbone".
+            def _final(g):
+                chains = collections.defaultdict(dict)
+                for r in rows:
+                    if GROUP.get(r.get("group", "")) != g:
+                        continue
+                    if str(r.get("metadata_author") or "backbone") != au:
+                        continue
+                    chains[r.get("task_id")][int(r.get("iteration", 0) or 0)] = \
+                        r.get("score", 0.0)
+                return {t: it[max(it)] for t, it in chains.items() if it}
+            bf, cf = _final("B"), _final("C")
+            common = sorted(set(bf) & set(cf))
+            if not common:
+                print(f"| {au} | {_fmt(_mean(list(bf.values())))} | "
+                      f"{_fmt(_mean(list(cf.values())))} | -- (no pairs) | 0 |")
+                continue
+            d = _mean([cf[t] - bf[t] for t in common])
+            print(f"| {au} | {_fmt(_mean([bf[t] for t in common]))} | "
+                  f"{_fmt(_mean([cf[t] for t in common]))} | "
+                  f"{('%+.1f%%' % (d*100)) if d is not None else '--'} | {len(common)} |")
+
     # ---- chain-level (multi-iteration) accuracy (tab:chain) ----
     # A chain (one task_id) counts as correct only if EVERY iteration succeeded;
     # we also report the final-iteration accuracy (the main-table metric under

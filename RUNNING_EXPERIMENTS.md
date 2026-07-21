@@ -90,6 +90,14 @@ ssh gpu3 'cd /apdcephfs/private_yizhouyang/MemorySkillGenerator
 ---
 _更新:2026-07-20 11:xx,HEAD b4ccbfb6。当前:老 runner(pid 20608)收尾 gaia,新 worker(162757)跑 locomo。判官=deepseek-v4-pro 已在 gaia/locomo 行确认。_
 
+## 2026-07-21 机制升级:metadata catalog 三层化(critic 持笔)
+
+- **变了什么**:store metadata 按 DB-catalog 纪律分三层(system 测量 / critic 撰写 / backbone 自述)。核心:叙述性 metadata(causal_lesson 等)的**笔从 backbone 换到固定外部 critic(HY3)**,`METADATA_AUTHOR=critic` 为新默认(`backbone` 保留作对照臂);新增 `sys_stats`(inject_count + 带 provenance 的 reuse_deltas,`_grounded_key` 第三键只吃 env/gold)。
+- **协议影响**:`metadata_author` 已进 protocol_hash → **所有旧 C 行与新 C 不混池**(旧 C 全是 backbone-authored,breakdown 自动归为 backbone)。**A/B 完全不受影响**(不走 curation),已产出的 A/B 数据全部有效,继续复用。
+- **依赖**:METADATA_AUTHOR=critic 下 reviewer 走 llm_critic_fn,**HY3 端点未配则 fail-loud**——所以 C 臂继续暂停,等 HY3(用户明日提供 HY3_BASE_URL/HY3_API_KEY)。到位后 C 按新机制跑,不返工。
+- **可检验预言**:`breakdown.py` 新增 "C−B by metadata author" 表——critic-authored 下弱 backbone(gpt-oss)的 C−B 翻转应消失;backbone-authored 下应复现。跑对照臂用 `METADATA_AUTHOR=backbone`。
+- **backbone 阵容(最终)**:gpt-oss-120B(最弱)/ HY3(主, 兼统一 critic)/ DeepSeek-v4-pro / gpt-5.5(论文 GPT-5 (low))。Claude/llama 已从论文移除。
+
 ## 论文命名映射(2026-07-21)
 
 - **实验里的 `gpt-5.5`(mxzzz API)= 论文里的 `GPT-5 (low)`**。填 tab:main 时,读 `latest_evolving/gpt-5.5/<bench>/` 的数据,填进 **GPT-5 (low)** 那一行(已在 GAIA/GAIA2/LoCoMo 三块的 HY3 之后加好,现为 dash)。

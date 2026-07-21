@@ -599,9 +599,12 @@ class CuratedMemory:
         # Lazy imports: keep module import light (B doesn't need src.latest deps
         # or the LLM client / SDK). Resolved once, on first C construction.
         from src.latest import SkillForgeLatest
-        from scripts.latest.llm_client import llm_review_fn, llm_critic_fn
+        from scripts.latest.llm_client import llm_metadata_fn, llm_critic_fn
         self._sf = SkillForgeLatest()
-        self._llm = llm_review_fn
+        # The reviewer pen: HY3 under METADATA_AUTHOR=critic (default — the
+        # curated layer's narratives are authored by the fixed external critic,
+        # not by the backbone reviewing itself), backbone under =backbone.
+        self._llm = llm_metadata_fn
         # The critic routes separately (CRITIC_MODEL); unset -> same as _llm.
         self._critic_llm = llm_critic_fn
         # exp task_id -> its chain id, so retrieval can be scoped to the chain
@@ -613,6 +616,10 @@ class CuratedMemory:
         # via library.update_effectiveness -> get_experience_weight. Without this
         # wiring w_c stays 1.0 forever and retrieval is pure similarity.
         self._served: dict[str, list[str]] = {}
+        # (task_id, version) keys of the same served entries — sys_stats
+        # bookkeeping needs the exact version, _served's task_ids do not
+        # disambiguate between versions of one task.
+        self._served_keys: dict[str, list[tuple]] = {}
         self._last_wc: dict | None = None
         try:
             _WC_LOOKUP["fn"] = self._sf.library.get_experience_weight
@@ -641,8 +648,9 @@ class CuratedMemory:
     def __setstate__(self, d):
         self.__dict__.update(d)
         self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
-        from scripts.latest.llm_client import llm_review_fn, llm_critic_fn
-        self._llm = llm_review_fn
+        self.__dict__.setdefault("_served_keys", {})    # pre-sys_stats pickles
+        from scripts.latest.llm_client import llm_metadata_fn, llm_critic_fn
+        self._llm = llm_metadata_fn
         self._critic_llm = llm_critic_fn
 
     def inject(self, task: dict) -> str:
@@ -730,7 +738,16 @@ class CuratedMemory:
                 hist = getattr(e, "patch_history", None) or []
                 moved = sum(len(h.get("new_steps") or [])
                             + len(h.get("removed_steps") or []) for h in hist)
-                return (-ver, -moved)
+                # Tertiary: measured reuse effect, but ONLY deltas whose score
+                # came from the environment/gold scorer (sys_stats provenance
+                # filter) — the ANALYZE statistic replacing w_c's laundering
+                # problem. No grounded deltas -> 0.0: absence of evidence is
+                # not evidence of harm.
+                deltas = [d.get("delta", 0.0)
+                          for d in (getattr(e, "sys_stats", None) or {}).get("reuse_deltas", [])
+                          if d.get("provenance") in ("env", "gold")]
+                reuse = sum(deltas) / len(deltas) if deltas else 0.0
+                return (-ver, -moved, -reuse)
             if _C_POLICY == "guarded":
                 # Endorsed-first, then lineage: judgment proposes, but only
                 # entries holding a second key wear the ✓.
@@ -766,6 +783,20 @@ class CuratedMemory:
         if out:
             # remember what was actually served, for the effectiveness update
             self._served[tid_now] = [e.task_id for e in served]
+            self._served_keys[tid_now] = [
+                (e.task_id, int(getattr(e, "version", 1) or 1)) for e in served]
+            # system-layer usage statistic (the store's ANALYZE): how often this
+            # entry was actually served into a prompt. Measured by the harness,
+            # not asserted by any model — safe for ranking to read.
+            for e in served:
+                try:
+                    st = getattr(e, "sys_stats", None)
+                    if st is None:          # pre-sys_stats pickles
+                        st = {}
+                        setattr(e, "sys_stats", st)
+                    st["inject_count"] = int(st.get("inject_count", 0)) + 1
+                except Exception:
+                    pass
             # Observability for w_c (the paper's effectiveness weight). Until now
             # w_c only ever moved retrieval ranking inside this object and was
             # never written anywhere, so no trace could show whether it did
@@ -804,6 +835,7 @@ class CuratedMemory:
         # within-chain paired delta -- this iteration's score minus the previous
         # iteration's. Positive => they helped; negative => they hurt. Bounded
         # into weights by get_experience_weight (clip [0.3, 1.5]).
+        served_keys = self._served_keys.pop(tid, None) if hasattr(self, "_served_keys") else None
         if served and score is not None:
             prev = self._last_score.get(chain)
             if prev is not None:
@@ -811,6 +843,27 @@ class CuratedMemory:
                 for eid in served:
                     try:
                         self._sf.library.update_effectiveness(eid, delta)
+                    except Exception:
+                        pass
+                # system-layer reuse statistic, provenance-tagged: the same
+                # within-chain delta w_c consumes, but stored ON the entry with
+                # WHERE the score came from. Ranking later reads only env/gold
+                # deltas; self-assessed ones stay for audit (never trusted).
+                if served_keys:
+                    try:
+                        _by_key = {(e.task_id, int(getattr(e, "version", 1) or 1)): e
+                                   for e in self._sf.library.experiences}
+                        for k in served_keys:
+                            e = _by_key.get(k)
+                            if e is None:
+                                continue
+                            st = getattr(e, "sys_stats", None)
+                            if st is None:
+                                st = {}
+                                setattr(e, "sys_stats", st)
+                            st.setdefault("reuse_deltas", []).append(
+                                {"delta": round(delta, 4),
+                                 "provenance": _SCORE_PROVENANCE})
                     except Exception:
                         pass
         if score is not None:

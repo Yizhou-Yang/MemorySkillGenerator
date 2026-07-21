@@ -58,6 +58,19 @@ class IntermediateState:
 
 @dataclass
 class Experience:
+    # Metadata follows a database-catalog discipline: every field belongs to one
+    # of three provenance layers, and only the first is load-bearing on its own.
+    #   system   — measured by the harness, never by an LLM: version, patch_history
+    #              (lineage), timestamp, tool_sequence, and sys_stats (usage
+    #              statistics — the store's ANALYZE). Facts; ranking may trust them.
+    #   critic   — authored by the ONE fixed external critic (HY3): critic_quality
+    #              / critic_verdict and, under METADATA_AUTHOR=critic, the narrative
+    #              fields in failure_taxonomy (causal_lesson, avoidance_note, ...).
+    #              Opinions from a constant grader; they enter selection only
+    #              through the two-key endorsement, never alone.
+    #   backbone — self-reported by the acting model: reasoning_trace, self scores.
+    #              Rendered for the reader, never consulted by ranking. Which layer
+    #              wrote the narratives is recorded in meta_author.
     task_id: str
     task_desc: str
     tool_sequence: list[str]
@@ -78,6 +91,17 @@ class Experience:
     patch_history: list = field(default_factory=list)
     timestamp: float = 0.0
     intermediate_states: list[dict] = field(default_factory=list)  # EvoMem-style within-task patches
+    # system layer — usage statistics maintained by the harness (see class doc):
+    #   inject_count: times this entry was served into a prompt
+    #   reuse_deltas: [{"delta": float, "provenance": "env"|"gold"|"self_assessment"}]
+    #                 within-chain score change after an injection that served this
+    #                 entry, tagged with where the score came from. Ranking consumes
+    #                 only env/gold deltas; self-assessed ones are stored for audit
+    #                 but never trusted (same rule as w_c).
+    sys_stats: dict = field(default_factory=dict)
+    # who authored the narrative metadata in failure_taxonomy: "backbone" (legacy,
+    # the acting model reviews its own attempt) or "critic" (fixed external HY3)
+    meta_author: str = ""
 
 # ══════════════════════════════════════════════════════════════════════════
 #  Similarity: semantic embedding with TF-cosine fallback

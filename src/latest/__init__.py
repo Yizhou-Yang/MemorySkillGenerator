@@ -92,7 +92,15 @@ class SkillForgeLatest:
                 "new_missing": [s for s in exp.missing_steps if s not in latest.missing_steps],
             }]
 
-        # AI refinement
+        # AI refinement — the narrative metadata below is authored by whoever
+        # holds the reviewer pen (llm_metadata_fn: HY3 under METADATA_AUTHOR=
+        # critic, the backbone under =backbone). Stamp the author on the entry
+        # so a store mixing the two can never pass for one mechanism.
+        try:
+            from scripts.latest.llm_client import metadata_author_id
+            exp.meta_author = metadata_author_id()
+        except Exception:
+            exp.meta_author = "backbone"
         review = ai_review_experience(exp, llm_fn=llm_reviewer)
         exp.failure_taxonomy.update({
             "ai_refined": review.get("refined", False),

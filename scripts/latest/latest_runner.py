@@ -157,11 +157,14 @@ _ARMS = set(os.environ.get("ARMS", "A,B,C").replace(" ", "").split(","))
 try:
     from scripts.latest.llm_client import critic_model_id as _critic_model_id
     from scripts.latest.llm_client import judge_model_id as _judge_model_id
+    from scripts.latest.llm_client import metadata_author_id as _metadata_author_id
     _CRITIC_MODEL = _critic_model_id()
     _JUDGE_MODEL = _judge_model_id()
+    _METADATA_AUTHOR = _metadata_author_id()
 except Exception:
     _CRITIC_MODEL = os.environ.get("CRITIC_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
     _JUDGE_MODEL = os.environ.get("JUDGE_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
+    _METADATA_AUTHOR = os.environ.get("METADATA_AUTHOR", "critic")
 # Which curation policy arm C ran: judgment (critic score + self-assessment) or
 # metadata (measured w_c + version lineage). Different methods, never poolable.
 _C_META = os.environ.get("C_META", "0") == "1"
@@ -188,6 +191,7 @@ def _protocol_dict() -> dict:
         "c_policy": _C_POLICY,
         "critic_model": _CRITIC_MODEL,
         "judge_model": _JUDGE_MODEL,
+        "metadata_author": _METADATA_AUTHOR,
         "score_provenance": _SCORE_PROVENANCE,
         "iter_chain": ITER_CHAIN,
         "iter_mutate": int(ITER_MUTATE),
@@ -947,6 +951,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   # 36% for DeepSeek-v4-pro vs 90% for
                                   # Llama-3.3-70B, and C-B flips sign with it.
                                   "critic_model": _CRITIC_MODEL,
+                                  "metadata_author": _METADATA_AUTHOR,
                                   "c_meta": _C_META,
                                   "c_policy": _C_POLICY,
                                   "score_provenance": _SCORE_PROVENANCE,
@@ -999,6 +1004,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "fb_mode": ITER_FEEDBACK,
                                    "code_rev": _CODE_REV,
                                    "critic_model": _CRITIC_MODEL,
+                                   "metadata_author": _METADATA_AUTHOR,
                                    "c_meta": _C_META,
                                    "c_policy": _C_POLICY,
                                    "score_provenance": _SCORE_PROVENANCE,
@@ -1249,6 +1255,7 @@ async def main():
     _knobs = {
         "protocol_hash": _protocol_hash(),
         "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
+        "metadata_author": _METADATA_AUTHOR,
         "score_provenance": _SCORE_PROVENANCE,
         "ARMS": ",".join(sorted(_ARMS)),
         "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),

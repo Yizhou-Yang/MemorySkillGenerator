@@ -360,6 +360,42 @@ def llm_critic_fn(prompt: str) -> str:
                                api_key=CRITIC_API_KEY).get("text", "")
 
 
+# ─── Metadata authorship (who writes the curated layer's narratives) ───────
+# The store's narrative metadata (causal_lesson, avoidance_note, generalized_
+# steps, ...) was historically written by ai_review_experience running on the
+# BACKBONE — the workload writing its own catalog. On a weak backbone those
+# self-authored narratives are exactly the poisoned channel behind the C−B
+# inversion. METADATA_AUTHOR moves the pen:
+#   critic   (default) — the fixed external critic (HY3) authors the narratives,
+#              so metadata quality is a constant across backbones and a
+#              difference in ΔC−B can no longer come from who wrote the store.
+#              Fail-loud like the critic itself: no HY3 endpoint → raise, never
+#              silently fall back to the backbone.
+#   backbone — legacy behaviour, kept as the comparison arm. The testable
+#              prediction: under "critic" the ΔC−B inversion on weak backbones
+#              disappears; under "backbone" it reproduces.
+# Recorded in protocol_hash (mechanism change → new arm, old C rows not
+# poolable) and on every trace row / Experience (meta_author).
+METADATA_AUTHOR = (os.environ.get("METADATA_AUTHOR") or "critic").strip().lower()
+if METADATA_AUTHOR not in ("critic", "backbone"):
+    raise RuntimeError(f"METADATA_AUTHOR must be 'critic' or 'backbone', got {METADATA_AUTHOR!r}")
+
+
+def metadata_author_id() -> str:
+    """Who authors the curated layer's narrative metadata — constant per run,
+    stamped on trace rows and Experiences so arms with different authorship can
+    never be silently pooled."""
+    return METADATA_AUTHOR
+
+
+def llm_metadata_fn(prompt: str) -> str:
+    """The reviewer pen for ai_review_experience: HY3 under METADATA_AUTHOR=
+    critic (fail-loud if unconfigured), the backbone under =backbone."""
+    if METADATA_AUTHOR == "critic":
+        return llm_critic_fn(prompt)
+    return llm_review_fn(prompt)
+
+
 def _openai_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
     """OpenAI-compatible replacement for the CodeBuddy tool-agent path.
 
