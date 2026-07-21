@@ -6,21 +6,29 @@ per-arm soft means + paired bootstrap CIs for C-B / B-A / C-A.
 
 Usage: python scripts/latest/soft_stats.py experiments_results/latest/<model> [bench...]
 """
-import json
+import json, random, sys
 _LEGACY_MAP = {"A_baseline": "no_mem", "B_evomem": "raw_patch", "C_gpr": "curated_patch"}
-def _norm_group(g): return _LEGACY_MAP.get(g, g), random, sys
+def _norm_group(g): return _LEGACY_MAP.get(g, g)
 from pathlib import Path
 
 def final_rows(trace):
     last = {}
+    dropped = 0
     for line in open(trace):
         line = line.strip()
         if not line: continue
         r = json.loads(line); r["group"] = _norm_group(r.get("group",""))
+        # Infra rows (endpoint down / timeout / empty agent loop) carry an error
+        # and no response; averaging their 0.0 as real scores poisons every mean
+        # (llama-33 gaia had 770 such rows). Exclude them, loudly.
+        if str(r.get("error") or "").strip() and not str(r.get("response") or "").strip():
+            dropped += 1; continue
         k = (r["group"], r["task_id"])
         cur = last.get(k)
         if cur is None or int(r.get("iteration", 0) or 0) >= int(cur.get("iteration", 0) or 0):
             last[k] = r
+    if dropped:
+        print(f"  [filter] {trace}: dropped {dropped} infra error-rows (error set, empty response)")
     return last
 
 def boot_ci(deltas, n=5000, seed=0):

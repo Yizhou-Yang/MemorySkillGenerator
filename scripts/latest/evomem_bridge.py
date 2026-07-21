@@ -99,6 +99,48 @@ _C_SIM_FLOOR = 0.08
 #   avoidance channel= everything else with a usable note (worse-than-best
 #                      attempts and critic-rejected entries).
 _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
+# C_META=1 — metadata-grounded curation. The ✓ channel normally gates on
+# _critic_q >= gate AND self-assessed score >= best. Both are the backbone
+# grading its own work, and under ITER_FEEDBACK=self so is w_c, since its deltas
+# come from that same self-assessment. That is the whole failure mode: on GAIA,
+# 90% of Llama-3.3-70B's endorsements sit on a chain whose previous iteration was
+# in fact wrong (36% for DeepSeek-v4-pro), and C−B tracks backbone strength
+# (+6.0 / -3.0 / -3.0 at no-memory 45.0 / 13.0 / 6.0).
+#
+# C_META selects on what the store knows WITHOUT asking any model, and that a
+# deployed agent still has (no oracle, no gold score): version lineage (a later
+# version superseded an earlier one) and the execution record (which tool calls
+# actually changed). w_c joins only when its provenance is grounded. The rendered
+# block drops the ✓/quality/self-assessed markers, so no unverified endorsement
+# of a wrong attempt reaches the model.
+_C_META = os.environ.get("C_META", "0") == "1"
+_SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
+                     else os.environ.get("ITER_FEEDBACK", "gold"))
+# w_c accumulates the paired outcome delta an entry produced when served. That is
+# a measurement only when the delta came from the benchmark's scorer; under
+# ITER_FEEDBACK=self it came from the backbone grading its own attempt, and using
+# it then would launder an opinion as evidence — exactly what C_META exists to
+# stop. So w_c participates only when its provenance is grounded.
+_WC_IS_GROUNDED = _SCORE_PROVENANCE in ("gold", "env")
+# C_POLICY picks how arm C decides what to endorse:
+#   judgment — legacy: critic's own score + actor self-assessment gate the ✓.
+#              Measured at 90% false endorsement on Llama-3.3-70B.
+#   meta     — selection/rendering use only store metadata; nothing endorsed.
+#   guarded  — judgment proposes, metadata disposes: the critic still writes
+#              refined content, but a ✓ needs a SECOND independent key — a
+#              grounded outcome score (provenance gold/env) or an EXTERNAL
+#              critic. Self-assessment alone can never endorse. Ungated entries
+#              render neutrally instead of being dropped, so coverage holds.
+_C_POLICY = (os.environ.get("C_POLICY")
+             or ("meta" if _C_META else "judgment")).strip().lower()
+if _C_POLICY not in ("judgment", "meta", "guarded"):
+    _C_POLICY = "judgment"
+_C_META = _C_POLICY == "meta"
+# External critic: CRITIC_MODEL set AND different from the acting backbone —
+# critic==actor is self-judgment wearing a second hat, not a second key.
+_CRITIC_RAW = (os.environ.get("CRITIC_MODEL") or "").strip().lower()
+_BACKBONE_ID = (os.environ.get("CODEBUDDY_MODEL") or "").strip().lower()
+_CRITIC_IS_EXTERNAL = bool(_CRITIC_RAW) and _CRITIC_RAW != _BACKBONE_ID
 # Injection-dose control — a FIRST-CLASS mechanism of the frozen method (v-final,
 # 2026-07-03): C's rendered block is capped at ~the raw baseline's measured dose
 # (B ≈ 900ch on gaia/gaia2), entries dropped whole from the tail. Evidence: on
@@ -144,6 +186,78 @@ def _no_partition() -> bool:
 # decimal. With the fallback, C−B ≥ 0 becomes structural on the read path.
 # C_RAW_FALLBACK=0 is the ablation arm (C_no_fallback).
 _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
+
+
+_WC_LOOKUP = {"fn": None}          # set by CuratedPatchMemory once the library exists
+
+
+def _append_supersession(block: str, pool) -> str:
+    """Render 'v1 -> v2 superseded' lines from patch_history, newest last.
+
+    Only uses lineage already in the manifest — no LLM call, no judgment. Silent
+    when a chain has no recorded supersession, so it costs nothing on flat stores.
+    """
+    lines = []
+    for e in pool:
+        hist = getattr(e, "patch_history", None) or []
+        for h in hist:
+            fv, tv = h.get("from_version"), h.get("to_version")
+            if fv is None or tv is None:
+                continue
+            why = h.get("fixed_missing") or (
+                f"score {h.get('score_delta', 0):+.0%}" if h.get("score_delta") else "")
+            lines.append(f"  v{fv} -> v{tv}" + (f": {why}" if why else ""))
+    if not lines:
+        return block
+    seen, uniq = set(), []
+    for l in lines:
+        if l not in seen:
+            seen.add(l); uniq.append(l)
+    # Stay inside the dose budget. This section is appended AFTER
+    # _format_curated has already spent _C_INJECT_BUDGET, and the gate
+    # hard-fails any C block over BUDGET+130 slack — so an unbudgeted append
+    # here would get C_META's very first sweep rejected by its own gate.
+    # Reserve at most 100 chars of that slack and trim lines to fit.
+    header = "\n\nVersion lineage (later supersedes earlier):"
+    room = _C_INJECT_BUDGET + 100 - len(block) - len(header)
+    kept, used = [], 0
+    for l in uniq[:6]:
+        if used + len(l) + 1 > room:
+            break
+        kept.append(l); used += len(l) + 1
+    if not kept:
+        return block
+    return block + header + "\n" + "\n".join(kept)
+
+
+def _wc_of(e):
+    """Measured effectiveness of an entry, or None before the library is wired."""
+    fn = _WC_LOOKUP.get("fn")
+    if fn is None:
+        return None
+    try:
+        return float(fn(e.task_id))
+    except Exception:
+        return None
+
+
+def _endorse_basis(e):
+    """Second key for an endorsement under C_POLICY=guarded, or None.
+
+    ("env", None): the entry's outcome score is grounded — provenance gold/env
+    means e.score came from the benchmark's scorer or executed environment
+    checks, so a high score is a measurement, not the actor's opinion.
+    ("critic", name): an EXTERNAL critic approved it. Self-assessment alone
+    never endorses; that single rule is what separates guarded from the
+    judgment policy measured at 90% false endorsement.
+    """
+    if _C_POLICY != "guarded":
+        return None
+    if _WC_IS_GROUNDED and float(getattr(e, "score", 0.0) or 0.0) >= 0.5:
+        return ("env", None)
+    if _CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE:
+        return ("critic", _CRITIC_RAW)
+    return None
 
 
 def _critic_q(e) -> int:
@@ -226,9 +340,24 @@ def _format_curated(successes: list, failures: list = (),
         if (not concrete and not outcome) or key in seen:
             continue
         seen.add(key)
-        parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
-                 f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
-                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        if _C_POLICY == "judgment":
+            parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
+                     f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
+                     f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        else:
+            # meta/guarded: never print the actor's self-assessment. A ✓ only
+            # appears under guarded with a second independent key, and the line
+            # SAYS which key, so the reader model knows whether it is looking
+            # at a measurement or a review.
+            _ver = int(getattr(e, "version", 1) or 1)
+            _basis = _endorse_basis(e)
+            if _basis is not None:
+                _src = ("environment-verified outcome" if _basis[0] == "env"
+                        else f"reviewed by {_basis[1]}")
+                head = f"[✓ Prior attempt v{_ver} — {_src}]"
+            else:
+                head = f"[Prior attempt — store version v{_ver}]"
+            parts = [head, f"Task: {_core_task(e.task_desc)[:tcap]}"]
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
                 or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
             if action_scored else []
@@ -249,8 +378,14 @@ def _format_curated(successes: list, failures: list = (),
         elif concrete:
             parts.append(f"What worked: {concrete[:vcap]}")
         lesson = (tax.get("causal_lesson") or "").strip()
+        # Asserted content follows the same rule as the ✓: under meta it never
+        # enters (pure store); under guarded only with a second key — an
+        # unchecked self-judge's lesson is the 48%-of-budget filler the dose
+        # analysis flagged.
+        _lesson_ok = (_C_POLICY == "judgment"
+                      or (_C_POLICY == "guarded" and _endorse_basis(e) is not None))
         annot = (f"\nLesson: {lesson[:180]}"
-                 if lesson and not _is_weak_lesson(lesson) else "")
+                 if _lesson_ok and lesson and not _is_weak_lesson(lesson) else "")
         pairs.append(["\n".join(parts), annot])
         n_succ += 1
     for e in failures:
@@ -464,9 +599,11 @@ class CuratedMemory:
         # Lazy imports: keep module import light (B doesn't need src.latest deps
         # or the LLM client / SDK). Resolved once, on first C construction.
         from src.latest import SkillForgeLatest
-        from scripts.latest.llm_client import llm_review_fn
+        from scripts.latest.llm_client import llm_review_fn, llm_critic_fn
         self._sf = SkillForgeLatest()
         self._llm = llm_review_fn
+        # The critic routes separately (CRITIC_MODEL); unset -> same as _llm.
+        self._critic_llm = llm_critic_fn
         # exp task_id -> its chain id, so retrieval can be scoped to the chain
         # (patch memory = same-task iterations, not cross-task transfer).
         self._chain_of: dict[str, str] = {}
@@ -476,6 +613,11 @@ class CuratedMemory:
         # via library.update_effectiveness -> get_experience_weight. Without this
         # wiring w_c stays 1.0 forever and retrieval is pure similarity.
         self._served: dict[str, list[str]] = {}
+        self._last_wc: dict | None = None
+        try:
+            _WC_LOOKUP["fn"] = self._sf.library.get_experience_weight
+        except Exception:
+            pass
         self._last_score: dict[str, float] = {}
         self._record_failures = 0
         # Per-chain index of this bridge's own recorded experiences. inject()'s
@@ -492,13 +634,16 @@ class CuratedMemory:
     def __getstate__(self):
         d = dict(self.__dict__)
         d["_llm"] = None
+        d["_critic_llm"] = None
+        d["_last_wc"] = None
         return d
 
     def __setstate__(self, d):
         self.__dict__.update(d)
         self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
-        from scripts.latest.llm_client import llm_review_fn
+        from scripts.latest.llm_client import llm_review_fn, llm_critic_fn
         self._llm = llm_review_fn
+        self._critic_llm = llm_critic_fn
 
     def inject(self, task: dict) -> str:
         # Retrieve on the CLEANED question (boilerplate stripped) so similarity
@@ -561,15 +706,55 @@ class CuratedMemory:
         cands.sort(key=lambda e: 0 if e.task_id == tid_now else 1)
         own = [e for e in cands if e.task_id == tid_now]
         pool = own if own else cands
-        best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
-        succ = [e for e in pool
-                if _critic_q(e) >= _CRITIC_GATE
-                and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
+        if _C_POLICY != "judgment":
+            # Rank on grounded metadata only. Primary key is version lineage:
+            # the store recorded that a later version superseded an earlier one,
+            # and that record does not depend on anyone's opinion of either.
+            # Secondary key is execution evidence — a revision that changed the
+            # tool sequence did something; one that only reworded did not. w_c
+            # breaks remaining ties, but ONLY when its deltas came from the
+            # benchmark's scorer; under self-assessment it is an opinion wearing
+            # a number's clothing and is skipped rather than laundered. Nothing
+            # is dropped for lacking evidence: absence of evidence is not
+            # evidence of harm, and dropping would silently shrink coverage on
+            # short chains. Both keys survive deployment — neither needs an
+            # oracle or a gold score.
+            def _grounded_key(e):
+                # w_c deliberately absent: under self-assessment it is opinion,
+                # and under this protocol (cold start needs >=2 measured deltas,
+                # ITER_CHAIN=3 supplies at most 2 with the second landing on the
+                # final iteration) it never influences a decision under gold
+                # either. The trace's wc_active field documents that inertness;
+                # ranking pretends nothing it cannot back.
+                ver = int(getattr(e, "version", 1) or 1)
+                hist = getattr(e, "patch_history", None) or []
+                moved = sum(len(h.get("new_steps") or [])
+                            + len(h.get("removed_steps") or []) for h in hist)
+                return (-ver, -moved)
+            if _C_POLICY == "guarded":
+                # Endorsed-first, then lineage: judgment proposes, but only
+                # entries holding a second key wear the ✓.
+                scored = sorted(pool, key=lambda e: (
+                    0 if _endorse_basis(e) is not None else 1,) + _grounded_key(e))
+            else:
+                scored = sorted(pool, key=_grounded_key)
+            succ = scored[:self.top_k]
+        else:
+            best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
+            succ = [e for e in pool
+                    if _critic_q(e) >= _CRITIC_GATE
+                    and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
         _action_scored = self.benchmark in _ACTION_SCORED
         out = _format_curated(succ, fail, current_tid=tid_now,
                               action_scored=_action_scored)
+        if _C_POLICY != "judgment" and out:
+            # Supersession from the version lineage. The judgment path picks one
+            # attempt and endorses it; the manifest already records which version
+            # replaced which, so conflicting attempts can be shown AS a chain and
+            # the model adjudicates rather than trusting an unverified ✓.
+            out = _append_supersession(out, pool)
         served = succ + fail
         if not out and cands and _C_RAW_FALLBACK:
             # Curated channels rendered nothing -> degrade to the raw store
@@ -581,7 +766,32 @@ class CuratedMemory:
         if out:
             # remember what was actually served, for the effectiveness update
             self._served[tid_now] = [e.task_id for e in served]
+            # Observability for w_c (the paper's effectiveness weight). Until now
+            # w_c only ever moved retrieval ranking inside this object and was
+            # never written anywhere, so no trace could show whether it did
+            # anything at all. It cold-starts at 1.0 until an entry has >=2
+            # measured deltas, and a 3-iteration chain supplies at most 2, so
+            # "effectiveness-weighted retrieval" may be inert in practice. The
+            # runner copies this onto every row; see _wc_stats.
+            try:
+                lib = self._sf.library
+                ws = [float(lib.get_experience_weight(e.task_id)) for e in served]
+                self._last_wc = {
+                    "wc_served": [round(w, 3) for w in ws],
+                    "wc_mean": round(sum(ws) / len(ws), 3) if ws else None,
+                    "wc_active": sum(1 for w in ws if abs(w - 1.0) > 1e-9),
+                    "wc_n": len(ws),
+                }
+            except Exception:
+                self._last_wc = None
         return out
+
+    def pop_wc_stats(self) -> dict | None:
+        """w_c of the entries served by the last inject(), or None. Read-once so
+        a row can never inherit a previous task's weights."""
+        w = getattr(self, "_last_wc", None)
+        self._last_wc = None
+        return w
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
         tid = task.get("task_id", "")
@@ -622,8 +832,9 @@ class CuratedMemory:
                 reasoning_trace=rtrace,
                 score=(None if score is None else float(score)),
                 llm_reviewer=self._llm,
-                critic_fn=(self._llm if self.use_critic else None),
+                critic_fn=(self._critic_llm if self.use_critic else None),
                 enrich=self.use_enrich,
+                score_provenance=_SCORE_PROVENANCE,
             )
             # Remember which chain this experience belongs to (for chain-scoped
             # retrieval). Same-task iterations share a task_id; LoCoMo shares a
@@ -699,4 +910,12 @@ async def solve_with_memory(run_fn, task: dict, mem, group: str) -> dict:
     r = await run_fn(task, injected, group)
     if isinstance(r, dict):
         r["_aug_prompt"] = injected
+        # Carry w_c of the entries just served, so the trace can show whether
+        # effectiveness weighting is live rather than nominally configured.
+        try:
+            w = mem.pop_wc_stats() if hasattr(mem, "pop_wc_stats") else None
+        except Exception:
+            w = None
+        if w:
+            r["_wc"] = w
     return r

@@ -74,6 +74,25 @@ def _load_llmagent():
         "(`uv sync` in sierra-research/tau2-bench). Tried:\n  " + "\n  ".join(err))
 
 
+_MEM_CACHE: dict = {}   # single entry: {"key": (path, mtime), "mem": obj}
+
+
+def _load_mem(state: str):
+    """Unpickle the store once per (path, mtime), not once per inject call.
+
+    The pickle only changes between tau2 runs (the bridge records after the
+    subprocess exits), so within a run the cache always hits. For external
+    stores (mem0) this is correctness, not just speed: each unpickled copy
+    lazily opens its own client on a file-locked path (local qdrant), and a
+    second copy would deadlock against the first.
+    """
+    key = (state, os.path.getmtime(state))
+    if _MEM_CACHE.get("key") != key:
+        with open(state, "rb") as f:
+            _MEM_CACHE.update(key=key, mem=pickle.load(f))
+    return _MEM_CACHE["mem"]
+
+
 def _inject_block(user_text: str) -> str:
     """Arm-gated memory block for the current scenario (read-only on the store)."""
     arm = os.environ.get("TAU2_ARM", "A").upper()
@@ -81,8 +100,7 @@ def _inject_block(user_text: str) -> str:
     if arm == "A" or not state or not os.path.exists(state) or not user_text:
         return ""
     try:
-        with open(state, "rb") as f:
-            mem = pickle.load(f)          # BenchmarkMemory (B) or CuratedMemory (C)
+        mem = _load_mem(state)        # BenchmarkMemory (B) / CuratedMemory (C) / external (mem0)
         task = {"task_id": _task_key(user_text), "description": user_text,
                 "metadata": {"chain_id": _task_key(user_text)}}
         return mem.inject(task) or ""

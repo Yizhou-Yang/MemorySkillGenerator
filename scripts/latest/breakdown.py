@@ -34,12 +34,23 @@ GROUP = {
 
 
 def _rows(path: Path):
-    out = []
+    out, dropped = [], 0
     with open(path) as f:
         for line in f:
             line = line.strip()
-            if line:
-                out.append(json.loads(line))
+            if not line:
+                continue
+            r = json.loads(line)
+            # Infra rows (endpoint down / timeout / empty agent loop) carry an
+            # error and no response; counting their 0.0 as real scores poisons
+            # every breakdown mean. Exclude them, loudly.
+            if str(r.get("error") or "").strip() and not str(r.get("response") or "").strip():
+                dropped += 1
+                continue
+            out.append(r)
+    if dropped:
+        print(f"  [filter] {path.parent.name}: dropped {dropped} infra error-rows "
+              "(error set, empty response)")
     return out
 
 

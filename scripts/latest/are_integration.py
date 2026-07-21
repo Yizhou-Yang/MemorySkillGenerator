@@ -153,13 +153,19 @@ class ARESession:
             params = {"type": "object", "properties": {}, "required": []}
             for arg in tool.args:
                 prop: dict[str, Any] = {"description": arg.description or arg.name}
-                # Map ARE types to JSON schema types
-                if "int" in str(getattr(arg, "type", "")).lower():
-                    prop["type"] = "integer"
-                elif "float" in str(getattr(arg, "type", "")).lower():
-                    prop["type"] = "number"
-                elif "bool" in str(getattr(arg, "type", "")).lower():
+                # Map ARE types to JSON schema types. list/array MUST be mapped or
+                # the model is told to send a string for a list param (e.g.
+                # user_ids, recipients) and ARE's strict check then rejects it.
+                _t = str(getattr(arg, "type", "")).lower()
+                if "list" in _t or "array" in _t or "sequence" in _t or "tuple" in _t:
+                    prop["type"] = "array"
+                    prop["items"] = {"type": "string"}
+                elif "bool" in _t:
                     prop["type"] = "boolean"
+                elif "float" in _t or "number" in _t:
+                    prop["type"] = "number"
+                elif "int" in _t:
+                    prop["type"] = "integer"
                 else:
                     prop["type"] = "string"
                 params["properties"][arg.name] = prop
@@ -256,6 +262,39 @@ class ARESession:
         if isinstance(parsed, (list, dict)):
             return parsed
         return value
+
+    def _coerce_arg_types(self, tool_name: str, kwargs: dict) -> dict:
+        """Coerce string-valued args to the ARE tool's declared scalar/list types."""
+        tool = self._all_tools.get(tool_name)
+        if tool is None:
+            return kwargs
+        types = {arg.name: str(getattr(arg, "type", "")).lower()
+                 for arg in getattr(tool, "args", [])}
+        return {k: self._coerce_one(v, types.get(k, "")) for k, v in kwargs.items()}
+
+    @staticmethod
+    def _coerce_one(v: Any, t: str) -> Any:
+        if not isinstance(v, str) or not t:
+            return v
+        s = v.strip()
+        try:
+            if "list" in t or "array" in t or "sequence" in t or "tuple" in t:
+                try:
+                    p = json.loads(s)
+                    if isinstance(p, list):
+                        return p
+                except (TypeError, ValueError):
+                    pass
+                return [x.strip() for x in s.split(",") if x.strip()]
+            if "bool" in t:
+                return s.lower() in ("true", "1", "yes", "y")
+            if "float" in t or "number" in t:
+                return float(s)
+            if "int" in t:
+                return int(float(s))
+        except (TypeError, ValueError):
+            return v
+        return v
 
     def _complete_matching_oracle_event(self, tool_name: str) -> None:
         """Find and complete a matching OracleEvent to advance the dependency chain.
@@ -358,6 +397,12 @@ class ARESession:
         parsed_kwargs = {}
         for key, value in kwargs.items():
             parsed_kwargs[key] = self._maybe_parse_json_arg(value)
+        # Coerce to the tool's declared arg types. Models on the OpenAI tools=
+        # path routinely emit ints/bools/lists as strings ("3000", "True",
+        # "a,b"); ARE's signature check is strict and rejects them, so the action
+        # never fires and the oracle event goes unmatched. The MCP path types
+        # args natively — this makes the OpenAI path behave the same.
+        parsed_kwargs = self._coerce_arg_types(tool_name, parsed_kwargs)
 
         self._advance_clock()
         try:
@@ -445,12 +490,18 @@ class ARESession:
     def _log_event(self, tool_name: str, args: dict, result: object) -> None:
         """Record tool call in event log."""
         method = tool_name.split("__", 1)[-1] if "__" in tool_name else tool_name
+        # ok=False for calls that raised / returned an error: they did not mutate
+        # state, so the scorer must not count them as write-actions (a failed
+        # attempt + its retry would otherwise double the count and trip the
+        # count gate to reward=0).
+        ok = not (isinstance(result, dict) and result.get("error"))
         entry = {
             "tool": tool_name,
             "method": method,
             "args": _smart_serialize(args),
             "result": _smart_serialize(result),
             "sim_time": self._env.time_manager.time(),
+            "ok": ok,
         }
         self._event_log.append(entry)
 

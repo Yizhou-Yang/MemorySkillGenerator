@@ -46,13 +46,38 @@ import re
 import subprocess
 import sys
 import time
+
+# tau2's reward comes from environment checks (final DB state, action match),
+# not from the model grading itself — the one natively env-grounded benchmark.
+# Declare that BEFORE evomem_bridge is imported, or its provenance defaults to
+# whatever ITER_FEEDBACK happens to be in the shell.
+os.environ.setdefault("ITER_FEEDBACK", "env")
+
+try:
+    from scripts.latest.atomic_io import atomic_pickle_dump as _atomic_pickle_dump
+except Exception:  # direct-script invocation without the package on sys.path
+    from atomic_io import atomic_pickle_dump as _atomic_pickle_dump
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch"}  # canonical (arms.py)
+# Recorded on every trace row (mirrors latest_runner):
+try:
+    from scripts.latest.llm_client import critic_model_id as _cmid
+    _CRITIC_ID = _cmid()
+except Exception:
+    _CRITIC_ID = (os.environ.get("CRITIC_MODEL")
+                  or os.environ.get("CODEBUDDY_MODEL") or "?")
+_C_META_ON = os.environ.get("C_META", "0") == "1"
+_C_POLICY = (os.environ.get("C_POLICY")
+             or ("meta" if _C_META_ON else "judgment")).strip().lower()
+if _C_POLICY not in ("judgment", "meta", "guarded"):
+    _C_POLICY = "judgment"
+
+GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch",  # canonical (arms.py)
+             "mem0": "mem0"}   # external framework baselines (tab:external)
 
 
 def _task_key(user_text: str) -> str:
@@ -74,6 +99,9 @@ def _code_rev() -> str:
 def _mk_memory(arm: str, benchmark: str = "tau2"):
     if arm == "A":
         return None
+    if arm in ("mem0",):   # external framework baselines, same interface as B/C
+        from scripts.latest.baseline_memories import make_external_memory
+        return make_external_memory(arm, benchmark)
     from scripts.latest.evomem_bridge import BenchmarkMemory, CuratedMemory
     return BenchmarkMemory(benchmark, "B") if arm == "B" else CuratedMemory(benchmark)
 
@@ -241,7 +269,7 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["A", "B", "C"], required=True)
+    ap.add_argument("--arm", choices=["A", "B", "C", "mem0"], required=True)
     ap.add_argument("--iters", type=int, default=int(os.environ.get("ITER_CHAIN", "3")))
     ap.add_argument("--model", default=os.environ.get("TAU2_MODEL", "openai/hy3"))
     ap.add_argument("--domain", default=os.environ.get("TAU2_DOMAIN", "airline"),
@@ -288,68 +316,83 @@ def main() -> None:
     for domain in domains:
         for it in range(args.iters):
             save_to = out_root / f"tau2_{domain}_{args.arm}_iter{it}.json"
-        env = os.environ.copy()
-        env["TAU2_ARM"] = args.arm
-        env["TAU2_MEM_STATE"] = str(state)
-        # Make both our repo AND tau2-bench importable (launcher needs tau2.*,
-        # the custom agent needs our src). tau2-bench lives beside us in Ceph.
-        tau2_root = str(PROJECT_ROOT.parent / "tau2-bench")
-        extra_paths = [str(PROJECT_ROOT)]
-        if os.path.isdir(tau2_root):
-            extra_paths.append(tau2_root)
-        existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = os.pathsep.join(extra_paths +
-            ([existing] if existing else []))
-        cmd = _tau2_cmd(tau2_bin, args.arm, args.model, domain, args.n_tasks,
-                        args.num_trials, args.n_concurrent, save_to, args.task_ids,
-                        launcher_path)
-        print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
-        rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
-        if rc != 0:
-            print(f"[tau2] tau2 exited rc={rc} — stopping arm", flush=True)
-            break
-        rows = _parse_results(save_to)
-        _empty = sum(1 for r in rows if not r["response"]
-                     or r["response"].startswith("reward="))
-        if rows and _empty / len(rows) > 0.5:
-            print(f"[tau2] WARNING: {_empty}/{len(rows)} sims have no agent "
-                  "transcript — _transcript()/_parse_results() schema likely does "
-                  "not match this tau2 version; B/C patch content is degraded to "
-                  "one-line summaries (VERIFY marker)", flush=True)
-        with open(trace, "a") as f:
-            for r in rows:
-                f.write(json.dumps({
-                    "benchmark": "tau2", "group": GROUP_KEY[args.arm],
-                    "phase": "test", "task_id": r["task_id"],
-                    "task_desc": (r["instruction"] or r["task_name"])[:500],
-                    "score": r["reward"], "em": 1.0 if r["reward"] >= 1.0 else 0.0,
-                    "response": r["response"],
-                    # termination_reason straight from tau2: env-level deaths
-                    # (user-sim timeout, max-steps) must be visible per-arm so the
-                    # paired analysis can confirm all arms died on the SAME tasks.
-                    "failure_mode": r.get("failure_mode", ""),
-                    "fb_mode": "env",  # tau2 feedback = final DB-state / action checks
-                    "error": "",
-                    "iteration": it, "iter_total": args.iters,
-                    "method": "tau2_llm_agent", "code_rev": rev,
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                }) + "\n")
-        print(f"[tau2] iter {it}: {len(rows)} sims, "
-              f"mean reward {sum(r['reward'] for r in rows)/len(rows):.3f}", flush=True)
-        if mem is not None:
-            asyncio.run(_record_all(mem, rows))
-            with open(state, "wb") as f:
-                pickle.dump(mem, f)     # next iteration's agent injects this
-            try:
-                _n_entries = len(mem)
-                _sz = state.stat().st_size
-                print(f"[tau2] state saved: {_n_entries} entries, "
-                      f"{_sz/1e3:.0f} KB -> {state.name}", flush=True)
-                if it >= 1 and _n_entries == 0:
-                    print("[tau2] WARNING: store EMPTY after recording "
-                          f"iter {it} — memory arm is running blind", flush=True)
-            except Exception:
-                pass
+            env = os.environ.copy()
+            env["TAU2_ARM"] = args.arm
+            env["TAU2_MEM_STATE"] = str(state)
+            # Make both our repo AND tau2-bench importable (launcher needs tau2.*,
+            # the custom agent needs our src). tau2-bench lives beside us in Ceph.
+            tau2_root = str(PROJECT_ROOT.parent / "tau2-bench")
+            extra_paths = [str(PROJECT_ROOT)]
+            if os.path.isdir(tau2_root):
+                extra_paths.append(tau2_root)
+            existing = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = os.pathsep.join(extra_paths +
+                ([existing] if existing else []))
+            cmd = _tau2_cmd(tau2_bin, args.arm, args.model, domain, args.n_tasks,
+                            args.num_trials, args.n_concurrent, save_to, args.task_ids,
+                            launcher_path)
+            # External-framework stores live on disk behind a client that file-locks
+            # its path (local qdrant): release ours so the tau2 subprocess — which
+            # unpickles the memory and opens the same path for inject() — can take it.
+            if mem is not None and hasattr(mem, "release"):
+                mem.release()
+            print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
+            rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
+            if rc != 0:
+                print(f"[tau2] tau2 exited rc={rc} — stopping arm", flush=True)
+                break
+            rows = _parse_results(save_to)
+            _empty = sum(1 for r in rows if not r["response"]
+                         or r["response"].startswith("reward="))
+            if rows and _empty / len(rows) > 0.5:
+                print(f"[tau2] WARNING: {_empty}/{len(rows)} sims have no agent "
+                      "transcript — _transcript()/_parse_results() schema likely does "
+                      "not match this tau2 version; B/C patch content is degraded to "
+                      "one-line summaries (VERIFY marker)", flush=True)
+            with open(trace, "a") as f:
+                for r in rows:
+                    f.write(json.dumps({
+                        "benchmark": "tau2", "group": GROUP_KEY[args.arm],
+                        "phase": "test", "task_id": r["task_id"],
+                        "task_desc": (r["instruction"] or r["task_name"])[:500],
+                        "score": r["reward"], "em": 1.0 if r["reward"] >= 1.0 else 0.0,
+                        "response": r["response"],
+                        # termination_reason straight from tau2: env-level deaths
+                        # (user-sim timeout, max-steps) must be visible per-arm so the
+                        # paired analysis can confirm all arms died on the SAME tasks.
+                        "failure_mode": r.get("failure_mode", ""),
+                        "fb_mode": "env",  # tau2 feedback = final DB-state / action checks
+                        "error": "",
+                        "iteration": it, "iter_total": args.iters,
+                        "method": "tau2_llm_agent", "code_rev": rev,
+                        # Same policy/provenance fields the QA runner logs, so a
+                        # tau2 C arm is classifiable (and gate-able) too: which
+                        # model judged the entries, which curation policy ran,
+                        # and that the score is env-grounded rather than
+                        # self-assessed.
+                        "critic_model": _CRITIC_ID, "c_meta": _C_META_ON,
+                        "c_policy": _C_POLICY,
+                        "score_provenance": "env",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    }) + "\n")
+            print(f"[tau2] iter {it}: {len(rows)} sims, "
+                  f"mean reward {sum(r['reward'] for r in rows)/len(rows):.3f}", flush=True)
+            if mem is not None:
+                asyncio.run(_record_all(mem, rows))
+                # Atomic: a reclaim mid-write would otherwise truncate the store
+                # to nothing and the next iteration would start from an empty
+                # memory while still reporting as arm B/C (see atomic_io).
+                _atomic_pickle_dump(mem, state)   # next iteration's agent injects this
+                try:
+                    _n_entries = len(mem)
+                    _sz = state.stat().st_size
+                    print(f"[tau2] state saved: {_n_entries} entries, "
+                          f"{_sz/1e3:.0f} KB -> {state.name}", flush=True)
+                    if it >= 1 and _n_entries == 0:
+                        print("[tau2] WARNING: store EMPTY after recording "
+                              f"iter {it} — memory arm is running blind", flush=True)
+                except Exception:
+                    pass
     print(f"[tau2] done. trace: {trace}", flush=True)
 
 
