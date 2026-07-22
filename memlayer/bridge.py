@@ -679,8 +679,8 @@ class CuratedMemory:
         self.__dict__.update(d)
         self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
         self.__dict__.setdefault("_served_keys", {})    # pre-sys_stats pickles
-        self.__dict__.setdefault("_ab_stats", {})       # pre-AB-seeding pickles
-        self.__dict__.setdefault("_ab_wc_seeded", set())
+        self.__dict__.setdefault("_a_ref", {})          # pre-A-ref pickles
+        self.__dict__.setdefault("_chain_iter", {})
         try:
             from scripts.latest.llm_client import llm_metadata_fn, llm_critic_fn
         except ImportError:
@@ -863,16 +863,15 @@ class CuratedMemory:
         self._last_wc = None
         return w
 
-    def seed_ab_stats(self, ab_map: dict) -> None:
-        """Attach A/B-measured reuse deltas (task_id -> [{delta, iter,
-        provenance, source}...]) computed from the paired no-mem / raw-patch
-        arms. Curation happens ONCE per entry; these are the grounded
-        statistics available at that moment, so endorsement, demotion, and
-        w_c start informed instead of idling until online observations a
-        short chain cannot supply. In deployment the same map is the fleet's
-        observed outcomes when raw experience was served."""
-        self._ab_stats = dict(ab_map or {})
-        self._ab_wc_seeded = set()
+    def seed_no_mem_ref(self, ref: dict) -> None:
+        """Attach the paired no-memory reference (task_id -> {iteration ->
+        score_A}) measured by arm A. At each curation moment the store computes
+        grounded deltas of its OWN outcomes against this reference
+        (score_C − score_A, same variant, both harness-graded); the raw-patch
+        arm (B) is never consulted — it stays a standalone baseline. In
+        deployment the reference is the fleet's observed no-memory outcome."""
+        self._a_ref = {t: {int(k): float(v) for k, v in (m or {}).items()}
+                       for t, m in (ref or {}).items()}
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
         tid = task.get("task_id", "")
@@ -886,6 +885,38 @@ class CuratedMemory:
         # iteration's. Positive => they helped; negative => they hurt. Bounded
         # into weights by get_experience_weight (clip [0.3, 1.5]).
         served_keys = self._served_keys.pop(tid, None) if hasattr(self, "_served_keys") else None
+        # Iteration index of this record within its chain (0-based) — used to
+        # pair against the no-memory reference at the same variant.
+        _kk = int(self.__dict__.setdefault("_chain_iter", {}).get(chain, 0))
+        # Grounded reuse statistic vs arm A (score_C − score_A, same variant,
+        # both harness-graded → provenance gold). Only A is consulted; the
+        # raw-patch baseline (B) stays standalone. This is what endorsement,
+        # demotion, and w_c consume.
+        _base = ((getattr(self, "_a_ref", None) or {}).get(tid) or {}).get(_kk)
+        if served and score is not None and _base is not None:
+            _g = float(score) - float(_base)
+            for eid in served:
+                try:
+                    self._sf.library.update_effectiveness(eid, _g)
+                except Exception:
+                    pass
+            if served_keys:
+                try:
+                    _by_key_g = {(e.task_id, int(getattr(e, "version", 1) or 1)): e
+                                 for e in self._sf.library.experiences}
+                    for _k2 in served_keys:
+                        e2 = _by_key_g.get(_k2)
+                        if e2 is None:
+                            continue
+                        st2 = getattr(e2, "sys_stats", None)
+                        if st2 is None:
+                            st2 = {}
+                            setattr(e2, "sys_stats", st2)
+                        st2.setdefault("reuse_deltas", []).append(
+                            {"delta": round(_g, 4), "provenance": "gold",
+                             "source": "vs_no_mem", "iter": _kk})
+                except Exception:
+                    pass
         if served and score is not None:
             prev = self._last_score.get(chain)
             if prev is not None:
@@ -918,6 +949,7 @@ class CuratedMemory:
                         pass
         if score is not None:
             self._last_score[chain] = float(score)
+        self.__dict__.setdefault("_chain_iter", {})[chain] = _kk + 1
         actions = _actions_from_result(result)
         oracle = _oracle_from_task(task)
         rtrace = result.get("reasoning_trace") or [resp[:1000]]
@@ -970,27 +1002,18 @@ class CuratedMemory:
                 except Exception:
                     pass
                 self._chain_entries.setdefault(chain, []).append(_mine)
-            # A/B-measured statistics, attached at the single curation moment:
-            # the paired arms already measured what replaying this chain's raw
-            # memory did (score_B − score_A per variant, harness-graded), so
-            # grounded reuse evidence exists BEFORE any online reuse. Every
-            # version-entry of the chain carries the deltas (demotion reads the
-            # rendered entry's own sys_stats); w_c is bumped once per chain.
+            # Measured attempt value vs the paired no-memory reference (A),
+            # stamped on the new entry at its single curation moment: did this
+            # attempt beat doing nothing? Gold-graded on both sides; B is
+            # never read — the raw-patch arm stays a standalone baseline.
             try:
-                _ab = (getattr(self, "_ab_stats", None) or {}).get(tid) or []
-                if _ab and _mine is not None:
+                if _base is not None and _mine is not None and score is not None:
                     _st = getattr(_mine, "sys_stats", None)
                     if _st is None:
                         _st = {}
                         setattr(_mine, "sys_stats", _st)
-                    if not _st.get("ab_seeded"):
-                        _st.setdefault("reuse_deltas", []).extend(_ab)
-                        _st["ab_seeded"] = True
-                    if tid not in getattr(self, "_ab_wc_seeded", set()):
-                        self.__dict__.setdefault("_ab_wc_seeded", set()).add(tid)
-                        for _d in _ab:
-                            self._sf.library.update_effectiveness(
-                                tid, float(_d.get("delta", 0.0) or 0.0))
+                    _st["baseline_delta"] = round(float(score) - float(_base), 4)
+                    _st["baseline_provenance"] = "gold"
             except Exception:
                 pass
             # w_c cold-start prior from the critic (deployable, no extra calls):

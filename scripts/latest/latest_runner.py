@@ -572,20 +572,17 @@ def _load_done_map(trace_path: Path) -> dict:
     return done
 
 
-def _ab_stats_from_trace(benchmark: str) -> dict:
-    """Paired A/B-measured reuse deltas for C's curation-time statistics.
-
-    For every task and iteration k>=1 where the raw-patch arm actually injected,
-    delta = score_B(t,k) − score_A(t,k): the same variant by construction (shared
-    mutation file), both scores harness-graded → provenance 'gold'. Curation
-    happens ONCE per entry; this is the grounded evidence available at that
-    moment — no online accumulation required (which a 3-iteration chain could
-    never supply anyway)."""
+def _a_ref_from_trace(benchmark: str) -> dict:
+    """No-memory reference for C's curation-time statistics: task_id ->
+    {iteration -> score_A} from this run dir's completed arm-A rows
+    (harness-graded → provenance gold). Only A is read: the raw-patch arm (B)
+    is a standalone baseline and is never consulted by C. At each curation
+    moment the store computes score_C(t,k) − score_A(t,k) — its own measured
+    outcome against the paired no-memory reference at the same variant."""
     path = Path(RESULTS_DIR) / benchmark / "trace.jsonl"
     if not path.exists():
         return {}
-    A: dict = {}
-    B: dict = {}
+    out: dict = {}
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -598,27 +595,16 @@ def _ab_stats_from_trace(benchmark: str) -> dict:
             if str(r.get("error") or "").strip() \
                     and not str(r.get("response") or "").strip():
                 continue
-            g = norm_group(r.get("group", ""))
-            t = r.get("task_id", "")
-            k = int(r.get("iteration", 0) or 0)
+            if norm_group(r.get("group", "")) != "no_mem":
+                continue
             s = r.get("score")
             if s is None:
                 continue
-            if g == "no_mem":
-                A.setdefault(t, {})[k] = float(s)
-            elif g == "raw_patch" and (k == 0 or r.get("patch_injected")):
-                B.setdefault(t, {})[k] = float(s)
+            out.setdefault(r.get("task_id", ""), {})[
+                int(r.get("iteration", 0) or 0)] = float(s)
     except Exception:
         return {}
-    out: dict = {}
-    for t, bk in B.items():
-        ak = A.get(t) or {}
-        ds = [{"delta": round(bk[k] - ak[k], 4), "iter": k,
-               "provenance": "gold", "source": "ab"}
-              for k in sorted(bk) if k >= 1 and k in ak]
-        if ds:
-            out[t] = ds
-    return out
+    return {t: m for t, m in out.items() if m}
 
 
 def _trace_iter_total(trace_path: Path) -> int:
@@ -1091,14 +1077,14 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     mem_b = BenchmarkMemory(benchmark, "B") if "B" in _ARMS else None
     mem_c = CuratedMemory(benchmark) if "C" in _ARMS else None
     if mem_c is not None:
-        # One-shot curation consumes the A/B arms' measured outcomes: seed the
-        # grounded reuse statistics the store's gate/demotion/w_c machinery
-        # reads, computed from this run dir's existing paired trace.
-        _ab = _ab_stats_from_trace(benchmark)
-        if _ab:
-            mem_c.seed_ab_stats(_ab)
-            print(f"    [C] A/B-measured stats seeded for {len(_ab)} chains "
-                  f"({sum(len(v) for v in _ab.values())} deltas, provenance=gold)")
+        # One-shot curation measures its outcomes against the no-memory
+        # reference (arm A) — B stays a standalone baseline, never read by C.
+        _aref = _a_ref_from_trace(benchmark)
+        if _aref:
+            mem_c.seed_no_mem_ref(_aref)
+            print(f"    [C] no-mem reference seeded for {len(_aref)} chains "
+                  f"({sum(len(m) for m in _aref.values())} scored variants, "
+                  f"provenance=gold)")
 
     # Equal-budget control (ablation `ctrl_reprompt` arm): wrap the no-memory
     # baseline with m extra self-refinement calls so the A slot spends the same
