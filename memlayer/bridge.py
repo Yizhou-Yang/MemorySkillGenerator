@@ -679,6 +679,8 @@ class CuratedMemory:
         self.__dict__.update(d)
         self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
         self.__dict__.setdefault("_served_keys", {})    # pre-sys_stats pickles
+        self.__dict__.setdefault("_ab_stats", {})       # pre-AB-seeding pickles
+        self.__dict__.setdefault("_ab_wc_seeded", set())
         try:
             from scripts.latest.llm_client import llm_metadata_fn, llm_critic_fn
         except ImportError:
@@ -861,6 +863,17 @@ class CuratedMemory:
         self._last_wc = None
         return w
 
+    def seed_ab_stats(self, ab_map: dict) -> None:
+        """Attach A/B-measured reuse deltas (task_id -> [{delta, iter,
+        provenance, source}...]) computed from the paired no-mem / raw-patch
+        arms. Curation happens ONCE per entry; these are the grounded
+        statistics available at that moment, so endorsement, demotion, and
+        w_c start informed instead of idling until online observations a
+        short chain cannot supply. In deployment the same map is the fleet's
+        observed outcomes when raw experience was served."""
+        self._ab_stats = dict(ab_map or {})
+        self._ab_wc_seeded = set()
+
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
         tid = task.get("task_id", "")
         chain = _chain_id(task)
@@ -957,6 +970,29 @@ class CuratedMemory:
                 except Exception:
                     pass
                 self._chain_entries.setdefault(chain, []).append(_mine)
+            # A/B-measured statistics, attached at the single curation moment:
+            # the paired arms already measured what replaying this chain's raw
+            # memory did (score_B − score_A per variant, harness-graded), so
+            # grounded reuse evidence exists BEFORE any online reuse. Every
+            # version-entry of the chain carries the deltas (demotion reads the
+            # rendered entry's own sys_stats); w_c is bumped once per chain.
+            try:
+                _ab = (getattr(self, "_ab_stats", None) or {}).get(tid) or []
+                if _ab and _mine is not None:
+                    _st = getattr(_mine, "sys_stats", None)
+                    if _st is None:
+                        _st = {}
+                        setattr(_mine, "sys_stats", _st)
+                    if not _st.get("ab_seeded"):
+                        _st.setdefault("reuse_deltas", []).extend(_ab)
+                        _st["ab_seeded"] = True
+                    if tid not in getattr(self, "_ab_wc_seeded", set()):
+                        self.__dict__.setdefault("_ab_wc_seeded", set()).add(tid)
+                        for _d in _ab:
+                            self._sf.library.update_effectiveness(
+                                tid, float(_d.get("delta", 0.0) or 0.0))
+            except Exception:
+                pass
             # w_c cold-start prior from the critic (deployable, no extra calls):
             # seed one pseudo-observation so a high-quality patch starts above
             # unit weight and a critic-rejected one below, instead of every
