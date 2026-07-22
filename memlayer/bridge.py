@@ -186,6 +186,12 @@ def _no_partition() -> bool:
 # decimal. With the fallback, C−B ≥ 0 becomes structural on the read path.
 # C_RAW_FALLBACK=0 is the ablation arm (C_no_fallback).
 _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
+# Curation-as-repair: only failing chains get the curated treatment; chains
+# whose previous attempt passed the protocol's feedback threshold are served
+# B's raw rendering untouched. Default off — flipped per-sweep, recorded in
+# the protocol dict.
+_C_REPAIR_MODE = os.environ.get("C_REPAIR_MODE", "0") == "1"
+_C_REPAIR_THRESH = float(os.environ.get("C_REPAIR_THRESH", "0.6"))
 
 
 _WC_LOOKUP = {"fn": None}          # set by CuratedPatchMemory once the library exists
@@ -365,9 +371,14 @@ def _format_curated(successes: list, failures: list = (),
             continue
         seen.add(key)
         if _C_POLICY == "judgment":
-            parts = [f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
-                     f"self-assessed {getattr(e, 'score', 0.0):.0%}]",
-                     f"Task: {_core_task(e.task_desc)[:tcap]}"]
+            # Under repair mode the actor's self-assessment is dropped from the
+            # header: showing "self-assessed 2%" under a ✓ is two contradictory
+            # signals in one line, and the number is the actor grading itself.
+            head = (f"[✓ Prior attempt — curator quality {_critic_q(e)}/10]"
+                    if _C_REPAIR_MODE else
+                    f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
+                    f"self-assessed {getattr(e, 'score', 0.0):.0%}]")
+            parts = [head, f"Task: {_core_task(e.task_desc)[:tcap]}"]
         else:
             # meta/guarded: never print the actor's self-assessment. A ✓ only
             # appears under guarded with a second independent key, and the line
@@ -803,15 +814,32 @@ class CuratedMemory:
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
         _action_scored = self.benchmark in _ACTION_SCORED
-        out = _format_curated(succ, fail, current_tid=tid_now,
-                              action_scored=_action_scored)
-        if _C_POLICY != "judgment" and out:
-            # Supersession from the version lineage. The judgment path picks one
-            # attempt and endorses it; the manifest already records which version
-            # replaced which, so conflicting attempts can be shown AS a chain and
-            # the model adjudicates rather than trusting an unverified ✓.
-            out = _append_supersession(out, pool)
-        served = succ + fail
+        # Curation as REPAIR, not default (C_REPAIR_MODE=1): when the chain's
+        # previous attempt looks successful under the protocol's feedback
+        # (>= C_REPAIR_THRESH), serve EXACTLY what B would serve — verbatim
+        # raw, no ✓, no lesson, no numbers — and keep the curated treatment
+        # for failing chains. Flip evidence across both backbones: every C
+        # loss vs B came from disturbing a chain B had already solved
+        # (spoiled 7/4/4 vs rescued 7/10/3); not touching succeeding chains
+        # removes the spoilage channel by construction.
+        _repair_raw = False
+        if _C_REPAIR_MODE and cands:
+            _prev = self._last_score.get(_chain_id(task))
+            _repair_raw = _prev is not None and float(_prev) >= _C_REPAIR_THRESH
+        if _repair_raw:
+            served = cands[: self.top_k]
+            out = _format_raw(served, action_scored=_action_scored)
+        else:
+            out = _format_curated(succ, fail, current_tid=tid_now,
+                                  action_scored=_action_scored)
+            if _C_POLICY != "judgment" and out:
+                # Supersession from the version lineage. The judgment path picks
+                # one attempt and endorses it; the manifest already records which
+                # version replaced which, so conflicting attempts can be shown AS
+                # a chain and the model adjudicates rather than trusting an
+                # unverified ✓.
+                out = _append_supersession(out, pool)
+            served = succ + fail
         if not out and cands and _C_RAW_FALLBACK:
             # Curated channels rendered nothing -> degrade to the raw store
             # under the same budget, never to no memory (see _C_RAW_FALLBACK).

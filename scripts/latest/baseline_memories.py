@@ -210,20 +210,32 @@ class AMemMemory:
         except ImportError:
             try:
                 from memory_system import AgenticMemorySystem  # repo root layout
-            except ImportError as e:
-                raise SystemExit(
-                    "[baseline:amem] A-Mem module not importable — pip install "
-                    "-e the WujiangXu/AgenticMemory repo or set AMEM_PATH: "
-                    f"{e}")
+            except ImportError:
+                try:
+                    # 2025-07 WujiangXu/AgenticMemory layout: the class lives
+                    # in memory_layer.py at the repo root.
+                    from memory_layer import AgenticMemorySystem
+                except ImportError as e:
+                    raise SystemExit(
+                        "[baseline:amem] A-Mem module not importable — pip install "
+                        "-e the WujiangXu/AgenticMemory repo or set AMEM_PATH: "
+                        f"{e}")
         model = os.environ.get("CODEBUDDY_MODEL", "hy3").lower()
         # A-Mem's ctor signature varies across revisions; try the documented
         # form first, degrade to defaults rather than guessing kwargs.
         try:
             self._sys = AgenticMemorySystem(
                 model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                llm_backend="openai", llm_model=model)
+                llm_backend="openai", llm_model=model,
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                api_base=os.environ.get("OPENAI_API_BASE"))
         except TypeError:
-            self._sys = AgenticMemorySystem()
+            try:
+                self._sys = AgenticMemorySystem(
+                    model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
+                    llm_backend="openai", llm_model=model)
+            except TypeError:
+                self._sys = AgenticMemorySystem()
         try:
             import agentic_memory as _am
             _log_version("agentic-memory", _am)
