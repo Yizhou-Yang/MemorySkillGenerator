@@ -250,6 +250,12 @@ def _openai_stream_create(client, req: dict):
     return type("R", (), {"choices": [choice], "usage": usage})()
 
 
+# Private tool-call markup leaking into a no-tools completion (HY3-style
+# "<tool_calls:hash>" / "<tool_call:hash>" tags). Presence means the model
+# tried to call tools that do not exist on this path.
+_TOOL_LEAK_RE = re.compile(r"<tool_calls?[:>]", re.I)
+
+
 def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
                         model: str | None = None, base_url: str | None = None,
                         api_key: str | None = None) -> dict:
@@ -282,7 +288,28 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
         resp = (_openai_stream_create(client, req) if OPENAI_FORCE_STREAM
                 else client.chat.completions.create(**req))
         _record_openai_usage(resp)
-        return {"text": _msg_text(resp.choices[0].message), "error": None}
+        txt = _msg_text(resp.choices[0].message)
+        if txt and _TOOL_LEAK_RE.search(txt):
+            # Agentic backbones (HY3) emit PRIVATE tool-call markup on this
+            # no-tools path — the whole answer is markup, scored 0 while the
+            # run looks healthy (hy3/gaia: median response was pure
+            # "<tool_calls:...>" and B scored 0.099). Retry ONCE with an
+            # explicit no-tools instruction. Fires only when markup is
+            # detected, so well-behaved backbones never see the extra turn
+            # and their transcripts are bit-identical.
+            retry_msgs = [{"role": "system", "content":
+                           "No tools are available in this environment. Do not "
+                           "emit tool-call markup. Answer directly, reasoning "
+                           "in plain text, and end with the final answer."}] \
+                + [m for m in messages if m["role"] != "system"]
+            resp = (_openai_stream_create(client, {**req, "messages": retry_msgs})
+                    if OPENAI_FORCE_STREAM
+                    else client.chat.completions.create(**{**req, "messages": retry_msgs}))
+            _record_openai_usage(resp)
+            txt2 = _msg_text(resp.choices[0].message)
+            if txt2 and not _TOOL_LEAK_RE.search(txt2):
+                txt = txt2
+        return {"text": txt, "error": None}
     except Exception as e:
         return {"text": "", "error": str(e)[:200]}
 
