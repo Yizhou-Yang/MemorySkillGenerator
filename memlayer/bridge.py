@@ -679,8 +679,8 @@ class CuratedMemory:
         self.__dict__.update(d)
         self.__dict__.setdefault("_chain_entries", {})  # pre-fallback pickles
         self.__dict__.setdefault("_served_keys", {})    # pre-sys_stats pickles
-        self.__dict__.setdefault("_a_ref", {})          # pre-A-ref pickles
-        self.__dict__.setdefault("_chain_iter", {})
+        self.__dict__.setdefault("_chain_iter", {})     # pre-iter0-ref pickles
+        self.__dict__.setdefault("_chain_base", {})
         try:
             from scripts.latest.llm_client import llm_metadata_fn, llm_critic_fn
         except ImportError:
@@ -863,15 +863,6 @@ class CuratedMemory:
         self._last_wc = None
         return w
 
-    def seed_no_mem_ref(self, ref: dict) -> None:
-        """Attach the paired no-memory reference (task_id -> {iteration ->
-        score_A}) measured by arm A. At each curation moment the store computes
-        grounded deltas of its OWN outcomes against this reference
-        (score_C − score_A, same variant, both harness-graded); the raw-patch
-        arm (B) is never consulted — it stays a standalone baseline. In
-        deployment the reference is the fleet's observed no-memory outcome."""
-        self._a_ref = {t: {int(k): float(v) for k, v in (m or {}).items()}
-                       for t, m in (ref or {}).items()}
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
         tid = task.get("task_id", "")
@@ -885,15 +876,19 @@ class CuratedMemory:
         # iteration's. Positive => they helped; negative => they hurt. Bounded
         # into weights by get_experience_weight (clip [0.3, 1.5]).
         served_keys = self._served_keys.pop(tid, None) if hasattr(self, "_served_keys") else None
-        # Iteration index of this record within its chain (0-based) — used to
-        # pair against the no-memory reference at the same variant.
+        # Iteration index of this record within its chain (0-based).
         _kk = int(self.__dict__.setdefault("_chain_iter", {}).get(chain, 0))
-        # Grounded reuse statistic vs arm A (score_C − score_A, same variant,
-        # both harness-graded → provenance gold). Only A is consulted; the
-        # raw-patch baseline (B) stays standalone. This is what endorsement,
-        # demotion, and w_c consume.
-        _base = ((getattr(self, "_a_ref", None) or {}).get(tid) or {}).get(_kk)
-        if served and score is not None and _base is not None:
+        # The chain's own first, memory-free attempt is the reference: iter0
+        # ran before anything could be injected, in the same run window, so
+        # score(k) − score(0) needs no other arm (A and B stay standalone; in
+        # deployment iter0 is simply the first attempt before memory exists).
+        # The delta inherits the protocol's score provenance — under
+        # self-assessment it is recorded for audit but can neither endorse nor
+        # demote; under env/gold feedback (tau2, guarded) it carries weight.
+        if _kk == 0 and score is not None:
+            self.__dict__.setdefault("_chain_base", {})[chain] = float(score)
+        _base = (getattr(self, "_chain_base", None) or {}).get(chain)
+        if served and score is not None and _base is not None and _kk >= 1:
             _g = float(score) - float(_base)
             for eid in served:
                 try:
@@ -913,8 +908,9 @@ class CuratedMemory:
                             st2 = {}
                             setattr(e2, "sys_stats", st2)
                         st2.setdefault("reuse_deltas", []).append(
-                            {"delta": round(_g, 4), "provenance": "gold",
-                             "source": "vs_no_mem", "iter": _kk})
+                            {"delta": round(_g, 4),
+                             "provenance": _SCORE_PROVENANCE,
+                             "source": "vs_iter0", "iter": _kk})
                 except Exception:
                     pass
         if served and score is not None:
@@ -1002,18 +998,18 @@ class CuratedMemory:
                 except Exception:
                     pass
                 self._chain_entries.setdefault(chain, []).append(_mine)
-            # Measured attempt value vs the paired no-memory reference (A),
+            # Attempt value vs the chain's own memory-free first attempt,
             # stamped on the new entry at its single curation moment: did this
-            # attempt beat doing nothing? Gold-graded on both sides; B is
-            # never read — the raw-patch arm stays a standalone baseline.
+            # attempt beat iteration 0? Same run window, no other arm read.
             try:
-                if _base is not None and _mine is not None and score is not None:
+                if _base is not None and _mine is not None and score is not None \
+                        and _kk >= 1:
                     _st = getattr(_mine, "sys_stats", None)
                     if _st is None:
                         _st = {}
                         setattr(_mine, "sys_stats", _st)
                     _st["baseline_delta"] = round(float(score) - float(_base), 4)
-                    _st["baseline_provenance"] = "gold"
+                    _st["baseline_provenance"] = _SCORE_PROVENANCE
             except Exception:
                 pass
             # w_c cold-start prior from the critic (deployable, no extra calls):
