@@ -200,6 +200,7 @@ def _protocol_dict() -> dict:
         "task_limit": os.environ.get("TASK_LIMIT", "100"),
         "c_inject_budget_ch": os.environ.get("C_INJECT_BUDGET_CH", "900"),
         "c_critic_gate": os.environ.get("C_CRITIC_GATE", "5"),
+        "c_endorse_demote_k": os.environ.get("C_ENDORSE_DEMOTE_K", "2"),
         "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
         "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
         "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),

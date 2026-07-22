@@ -296,7 +296,7 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
 # back to the backbone. HY3 runs through its own API (HY3_BASE_URL/HY3_API_KEY),
 # or the CodeBuddy SDK if reachable there. Only the *endpoint* is configurable;
 # the model identity is fixed.
-CRITIC_MODEL = "hy3"
+CRITIC_MODEL = (os.environ.get("CRITIC_MODEL_ID") or "hy3").strip()
 CRITIC_BASE_URL = (os.environ.get("HY3_BASE_URL") or os.environ.get("CRITIC_BASE_URL") or "").strip() or None
 CRITIC_API_KEY = (os.environ.get("HY3_API_KEY") or os.environ.get("CRITIC_API_KEY") or "").strip() or None
 CRITIC_VIA_SDK = os.environ.get("CRITIC_VIA_SDK", "").strip().lower() in ("1", "true", "yes")

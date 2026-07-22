@@ -241,6 +241,26 @@ def _wc_of(e):
         return None
 
 
+_DEMOTE_K = int(os.environ.get("C_ENDORSE_DEMOTE_K", "2") or 2)
+
+
+def _grounded_demoted(e) -> bool:
+    """Statistics can revoke an assertion (endorsement demotion). If the K most
+    recent GROUNDED reuse deltas (sys_stats, provenance env/gold only) are all
+    negative, a critic endorsement stands falsified by measurement and the
+    entry is served neutrally instead. Self-assessed deltas can neither endorse
+    nor demote — the same provenance rule on both sides of the assertion.
+    K = C_ENDORSE_DEMOTE_K (default 2); 0 disables."""
+    if _DEMOTE_K <= 0:
+        return False
+    ds = [float(d.get("delta", 0.0) or 0.0)
+          for d in (getattr(e, "sys_stats", None) or {}).get("reuse_deltas", [])
+          if d.get("provenance") in ("env", "gold")]
+    if len(ds) < _DEMOTE_K:
+        return False
+    return all(d < 0.0 for d in ds[-_DEMOTE_K:])
+
+
 def _endorse_basis(e):
     """Second key for an endorsement under C_POLICY=guarded, or None.
 
@@ -249,13 +269,17 @@ def _endorse_basis(e):
     checks, so a high score is a measurement, not the actor's opinion.
     ("critic", name): an EXTERNAL critic approved it. Self-assessment alone
     never endorses; that single rule is what separates guarded from the
-    judgment policy measured at 90% false endorsement.
+    judgment policy measured at 90% false endorsement. A critic key is also
+    revocable: once grounded reuse deltas falsify it (_grounded_demoted), the
+    assertion loses the ✓ — judgment proposes, evidence disposes, and evidence
+    can also revoke.
     """
     if _C_POLICY != "guarded":
         return None
     if _WC_IS_GROUNDED and float(getattr(e, "score", 0.0) or 0.0) >= 0.5:
         return ("env", None)
-    if _CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE:
+    if _CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE \
+            and not _grounded_demoted(e):
         return ("critic", _CRITIC_RAW)
     return None
 
@@ -767,8 +791,12 @@ class CuratedMemory:
             succ = scored[:self.top_k]
         else:
             best = max((getattr(e, "score", 0.0) or 0.0 for e in pool), default=0.0)
+            # Endorsement demotion applies here too: a critic-approved entry
+            # whose grounded reuse deltas turned negative drops out of the
+            # primary channel (it still renders neutrally / as avoidance).
             succ = [e for e in pool
                     if _critic_q(e) >= _CRITIC_GATE
+                    and not _grounded_demoted(e)
                     and (getattr(e, "score", 0.0) or 0.0) >= best - 1e-9][:self.top_k]
         fail = [e for e in cands if e not in succ]
         fail = fail[:max(1, self.top_k - 1)]
