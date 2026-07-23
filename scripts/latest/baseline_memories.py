@@ -302,43 +302,28 @@ class AMemMemory:
         ns = _ns(self.benchmark, task)
         try:
             _sys = self._system()
-            if hasattr(_sys, "search_agentic"):
-                hits = _sys.search_agentic(query, k=self.top_k * 4)
-            elif hasattr(_sys, "retriever") and hasattr(_sys, "memories"):
-                # 2025-07 layout: find_related_memories* return concatenated
-                # STRINGS (note ids lost, chain scoping impossible) — go
-                # straight to the retriever for indices and return the
-                # MemoryNote objects themselves.
-                try:
-                    _idx = _sys.retriever.search(query, self.top_k * 4)
-                except Exception:
-                    _idx = []
-                _all = list(_sys.memories.values())
-                hits = [_all[int(i)] for i in (_idx or [])
-                        if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(_all)]
-            elif hasattr(_sys, "search"):
-                hits = _sys.search(query, k=self.top_k * 4)
-            else:
-                hits = []
         except Exception as e:
-            print(f"[baseline:amem] search failed: {e}", flush=True)
+            print(f"[baseline:amem] system unavailable: {e}", flush=True)
             return ""
+        mems = getattr(_sys, "memories", {}) or {}
+        chain_ids = self._per_chain.get(ns, [])
+        # Chain scoping (same discipline as B/C): serve THIS chain's own A-Mem
+        # notes. A-Mem still authored each note (keyword/context/link/evolution
+        # generation ran at record time); retrieval here is chain-local, so the
+        # comparison to B/C is on note QUALITY, not on a different candidate set.
+        # Fall back to global embedding retrieval only when the chain is empty.
+        notes = [mems[i] for i in chain_ids if i in mems]
+        if not notes and mems:
+            try:
+                idx = _sys.retriever.search(query, self.top_k * 4)
+                allm = list(mems.values())
+                notes = [allm[int(i)] for i in (idx or [])
+                         if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
+            except Exception:
+                notes = []
         lines = []
-        chain_ids = set(self._per_chain.get(ns, []))
-        for h in hits or []:
-            if isinstance(h, dict):
-                hid = h.get("id")
-                text = h.get("content") or h.get("context") or ""
-            elif hasattr(h, "content"):        # MemoryNote object (2025-07 layout)
-                hid = getattr(h, "id", None)
-                text = getattr(h, "content", "") or ""
-            else:
-                hid, text = None, str(h)
-            # chain scoping: A-Mem's store is global; keep the protocol equal
-            # to B/C by serving only this chain's notes.
-            if chain_ids and hid is not None and hid not in chain_ids:
-                continue
-            text = text.strip()
+        for n in notes[-self.top_k:][::-1]:      # most recent first
+            text = (getattr(n, "content", "") or "").strip()
             if text:
                 lines.append(f"- {text[:400]}")
             if len(lines) >= self.top_k:
