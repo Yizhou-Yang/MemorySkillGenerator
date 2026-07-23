@@ -95,10 +95,20 @@ class Mem0Memory:
         # fact-extraction LLM (it can't parse the reasoning stream). Pass the
         # endpoint's off-switch through mem0's openai config so its own LLM
         # calls behave as plain chat.
-        _llm_cfg = {"model": model, "api_key": key, "openai_base_url": base}
-        _re = os.environ.get("OPENAI_REASONING_EFFORT")
-        if _re:
-            _llm_cfg["reasoning_effort"] = _re
+        # mem0's INTERNAL fact-extraction LLM. It must be a plain completion
+        # model: mem0 2.x ignores reasoning_effort, so a reasoning endpoint
+        # (HY3/taiji) hangs it in a retry storm. Default to the same standard
+        # model used for curation (grok via MEM_INTERNAL_*/CRITIC_*), which is
+        # how mem0/A-Mem are designed to run (their papers use gpt-4o-class
+        # internals). Only the task-solving BACKBONE is held fixed across arms.
+        _int_base = (os.environ.get("MEM_INTERNAL_BASE")
+                     or os.environ.get("CRITIC_BASE_URL") or base)
+        _int_key = (os.environ.get("MEM_INTERNAL_KEY")
+                    or os.environ.get("CRITIC_API_KEY") or key)
+        _int_model = (os.environ.get("MEM_INTERNAL_MODEL")
+                      or os.environ.get("CRITIC_MODEL_ID") or model)
+        _llm_cfg = {"model": _int_model, "api_key": _int_key,
+                    "openai_base_url": _int_base}
         cfg = {
             "llm": {"provider": "openai", "config": _llm_cfg},
             # LOCAL embedder by default: the chat proxy does not serve
@@ -245,20 +255,30 @@ class AMemMemory:
                         "[baseline:amem] A-Mem module not importable — pip install "
                         "-e the WujiangXu/AgenticMemory repo or set AMEM_PATH: "
                         f"{e}")
-        model = os.environ.get("CODEBUDDY_MODEL", "hy3").lower()
+        # A-Mem's INTERNAL note-construction LLM: same standard-model rule as
+        # mem0 (a reasoning endpoint hangs it). Default to grok via
+        # MEM_INTERNAL_*/CRITIC_*; the task-solving backbone stays fixed.
+        _int_model = (os.environ.get("MEM_INTERNAL_MODEL")
+                      or os.environ.get("CRITIC_MODEL_ID")
+                      or os.environ.get("CODEBUDDY_MODEL", "hy3")).lower()
+        _int_key = (os.environ.get("MEM_INTERNAL_KEY")
+                    or os.environ.get("CRITIC_API_KEY")
+                    or os.environ.get("OPENAI_API_KEY"))
+        _int_base = (os.environ.get("MEM_INTERNAL_BASE")
+                     or os.environ.get("CRITIC_BASE_URL")
+                     or os.environ.get("OPENAI_API_BASE"))
         # A-Mem's ctor signature varies across revisions; try the documented
         # form first, degrade to defaults rather than guessing kwargs.
         try:
             return AgenticMemorySystem(
                 model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                llm_backend="openai", llm_model=model,
-                api_key=os.environ.get("OPENAI_API_KEY"),
-                api_base=os.environ.get("OPENAI_API_BASE"))
+                llm_backend="openai", llm_model=_int_model,
+                api_key=_int_key, api_base=_int_base)
         except TypeError:
             try:
                 return AgenticMemorySystem(
                     model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                    llm_backend="openai", llm_model=model)
+                    llm_backend="openai", llm_model=_int_model)
             except TypeError:
                 return AgenticMemorySystem()
 
