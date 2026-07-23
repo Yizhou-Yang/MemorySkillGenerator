@@ -192,10 +192,25 @@ _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
 # the protocol dict.
 _C_REPAIR_MODE = os.environ.get("C_REPAIR_MODE", "0") == "1"
 _C_REPAIR_THRESH = float(os.environ.get("C_REPAIR_THRESH", "0.6"))
-# What decides "the chain is succeeding": "verdict" (external critic's
-# outcome_verdict on the latest entry — default) or "self" (actor
-# self-assessment; failed, kept as the ablation arm).
-_C_REPAIR_GATE = (os.environ.get("C_REPAIR_GATE") or "verdict").strip().lower()
+# What decides "the chain is succeeding":
+#   stability (default) — META-DRIVEN, zero LLM: the chain's last two attempts
+#              gave the same normalized answer. A self-consistent chain is not
+#              disturbed; a drifting chain gets the curated treatment. The
+#              store measures this itself, so the gate works with a weak
+#              critic, or none at all — the method's floor never depends on
+#              anyone's judgment.
+#   verdict  — the external critic's outcome_verdict (critic-enhanced arm).
+#   self     — actor self-assessment (failed; kept as the ablation arm).
+_C_REPAIR_GATE = (os.environ.get("C_REPAIR_GATE") or "stability").strip().lower()
+
+
+def _norm_answer(s: str) -> str:
+    """Normalize an answer for stability comparison: case, punctuation and
+    whitespace collapse — a measurement, not a judgment."""
+    s = (s or "").strip().lower()
+    s = re.sub(r"[^a-z0-9. ]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:200]
 
 
 _WC_LOOKUP = {"fn": None}          # set by CuratedPatchMemory once the library exists
@@ -828,7 +843,21 @@ class CuratedMemory:
         # removes the spoilage channel by construction.
         _repair_raw = False
         if _C_REPAIR_MODE and cands:
-            if _C_REPAIR_GATE == "verdict":
+            if _C_REPAIR_GATE == "stability":
+                # Meta-driven gate: answer stability across the chain's last
+                # two attempts (string-level, zero model calls). One attempt =
+                # no drift evidence yet -> serve raw (B-identical); intervene
+                # only once instability is MEASURED.
+                _ents = self._chain_entries.get(_chain_id(task)) or []
+                if len(_ents) >= 2:
+                    _a1 = _norm_answer((_ents[-1].failure_taxonomy or {})
+                                       .get("verbatim_outcome"))
+                    _a0 = _norm_answer((_ents[-2].failure_taxonomy or {})
+                                       .get("verbatim_outcome"))
+                    _repair_raw = bool(_a1) and _a1 == _a0
+                else:
+                    _repair_raw = True
+            elif _C_REPAIR_GATE == "verdict":
                 # Gate on the EXTERNAL critic's outcome verdict for the chain's
                 # latest entry — never on the actor's self-assessment. The self
                 # gate was tried and failed exactly as the provenance principle

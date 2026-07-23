@@ -203,7 +203,7 @@ def _protocol_dict() -> dict:
         "c_endorse_demote_k": os.environ.get("C_ENDORSE_DEMOTE_K", "2"),
         "c_repair_mode": os.environ.get("C_REPAIR_MODE", "0"),
         "c_repair_thresh": os.environ.get("C_REPAIR_THRESH", "0.6"),
-        "c_repair_gate": os.environ.get("C_REPAIR_GATE", "verdict"),
+        "c_repair_gate": os.environ.get("C_REPAIR_GATE", "stability"),
         "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
         "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
         "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),
