@@ -302,18 +302,27 @@ class AMemMemory:
         ns = _ns(self.benchmark, task)
         try:
             _sys = self._system()
-            hits = _sys.search_agentic(query, k=self.top_k * 4) \
-                if hasattr(_sys, "search_agentic") \
-                else _sys.search(query, k=self.top_k * 4)
+            for _meth in ("search_agentic", "search",
+                          "find_related_memories_raw", "find_related_memories"):
+                if hasattr(_sys, _meth):
+                    hits = getattr(_sys, _meth)(query, k=self.top_k * 4)
+                    break
+            else:
+                hits = []
         except Exception as e:
             print(f"[baseline:amem] search failed: {e}", flush=True)
             return ""
         lines = []
         chain_ids = set(self._per_chain.get(ns, []))
         for h in hits or []:
-            hid = h.get("id") if isinstance(h, dict) else None
-            text = (h.get("content") or h.get("context") or "") \
-                if isinstance(h, dict) else str(h)
+            if isinstance(h, dict):
+                hid = h.get("id")
+                text = h.get("content") or h.get("context") or ""
+            elif hasattr(h, "content"):        # MemoryNote object (2025-07 layout)
+                hid = getattr(h, "id", None)
+                text = getattr(h, "content", "") or ""
+            else:
+                hid, text = None, str(h)
             # chain scoping: A-Mem's store is global; keep the protocol equal
             # to B/C by serving only this chain's notes.
             if chain_ids and hid is not None and hid not in chain_ids:
