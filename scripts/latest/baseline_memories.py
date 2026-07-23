@@ -302,11 +302,22 @@ class AMemMemory:
         ns = _ns(self.benchmark, task)
         try:
             _sys = self._system()
-            for _meth in ("search_agentic", "search",
-                          "find_related_memories_raw", "find_related_memories"):
-                if hasattr(_sys, _meth):
-                    hits = getattr(_sys, _meth)(query, k=self.top_k * 4)
-                    break
+            if hasattr(_sys, "search_agentic"):
+                hits = _sys.search_agentic(query, k=self.top_k * 4)
+            elif hasattr(_sys, "retriever") and hasattr(_sys, "memories"):
+                # 2025-07 layout: find_related_memories* return concatenated
+                # STRINGS (note ids lost, chain scoping impossible) — go
+                # straight to the retriever for indices and return the
+                # MemoryNote objects themselves.
+                try:
+                    _idx = _sys.retriever.search(query, self.top_k * 4)
+                except Exception:
+                    _idx = []
+                _all = list(_sys.memories.values())
+                hits = [_all[int(i)] for i in (_idx or [])
+                        if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(_all)]
+            elif hasattr(_sys, "search"):
+                hits = _sys.search(query, k=self.top_k * 4)
             else:
                 hits = []
         except Exception as e:
