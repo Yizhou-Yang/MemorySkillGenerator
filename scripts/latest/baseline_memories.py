@@ -91,10 +91,16 @@ class Mem0Memory:
         base = os.environ.get("OPENAI_API_BASE", "http://localhost:8741/v1")
         key = os.environ.get("OPENAI_API_KEY", "dummy")
         model = os.environ.get("CODEBUDDY_MODEL", "hy3").lower()
+        # Reasoning-model endpoints (HY3/taiji) hang mem0's internal
+        # fact-extraction LLM (it can't parse the reasoning stream). Pass the
+        # endpoint's off-switch through mem0's openai config so its own LLM
+        # calls behave as plain chat.
+        _llm_cfg = {"model": model, "api_key": key, "openai_base_url": base}
+        _re = os.environ.get("OPENAI_REASONING_EFFORT")
+        if _re:
+            _llm_cfg["reasoning_effort"] = _re
         cfg = {
-            "llm": {"provider": "openai",
-                    "config": {"model": model, "api_key": key,
-                               "openai_base_url": base}},
+            "llm": {"provider": "openai", "config": _llm_cfg},
             # LOCAL embedder by default: the chat proxy does not serve
             # /embeddings, and this matches the embedding stack the B/C arms
             # use, so no arm gets a better encoder.

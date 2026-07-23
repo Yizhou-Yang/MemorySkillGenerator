@@ -128,6 +128,14 @@ def _gen_kwargs() -> dict:
     t = os.environ.get("GEN_TEMPERATURE")
     if t not in (None, ""):
         kw["temperature"] = float(t)
+    # Reasoning models (HY3 via taiji) otherwise stream a long chain into
+    # `reasoning_content` and often leave `content` empty / emit private
+    # tool-call markup — which third-party libraries (mem0's fact-extraction
+    # LLM) cannot parse, hanging in a retry storm. reasoning_effort=no_think
+    # turns the chain off so the endpoint behaves as a plain chat model.
+    re = os.environ.get("OPENAI_REASONING_EFFORT")
+    if re:
+        kw["reasoning_effort"] = re
     return kw
 
 
