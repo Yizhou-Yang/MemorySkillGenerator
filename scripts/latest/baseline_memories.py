@@ -201,10 +201,22 @@ class AMemMemory:
     def __init__(self, benchmark: str, top_k: int = 3) -> None:
         self.benchmark = benchmark
         self.top_k = top_k
+        self._sys = self._build_sys()
+        try:
+            import agentic_memory as _am
+            _log_version("agentic-memory", _am)
+        except Exception:
+            print("[baseline:amem] version=repo (pin the commit hash in the "
+                  "appendix)", flush=True)
+        self._per_chain: dict[str, list[str]] = {}
+
+    @staticmethod
+    def _build_sys():
         amem_path = os.environ.get("AMEM_PATH")
         if amem_path:
             import sys
-            sys.path.insert(0, amem_path)
+            if amem_path not in sys.path:
+                sys.path.insert(0, amem_path)
         try:
             from agentic_memory.memory_system import AgenticMemorySystem
         except ImportError:
@@ -224,33 +236,75 @@ class AMemMemory:
         # A-Mem's ctor signature varies across revisions; try the documented
         # form first, degrade to defaults rather than guessing kwargs.
         try:
-            self._sys = AgenticMemorySystem(
+            return AgenticMemorySystem(
                 model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
                 llm_backend="openai", llm_model=model,
                 api_key=os.environ.get("OPENAI_API_KEY"),
                 api_base=os.environ.get("OPENAI_API_BASE"))
         except TypeError:
             try:
-                self._sys = AgenticMemorySystem(
+                return AgenticMemorySystem(
                     model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
                     llm_backend="openai", llm_model=model)
             except TypeError:
-                self._sys = AgenticMemorySystem()
-        try:
-            import agentic_memory as _am
-            _log_version("agentic-memory", _am)
-        except Exception:
-            print("[baseline:amem] version=repo (pin the commit hash in the "
-                  "appendix)", flush=True)
-        self._per_chain: dict[str, list[str]] = {}
+                return AgenticMemorySystem()
+
+    # ── pickle support (tau2 bridge hands the store between processes) ──
+    # The live system holds a SentenceTransformer + an LLM client (both
+    # unpicklable). Dehydrate to the raw MemoryNote fields; rehydrate lazily
+    # by rebuilding the system, re-inserting the notes with ALL fields set
+    # (skips A-Mem's LLM analysis) and one consolidate_memories() pass
+    # (local re-embedding only — zero LLM calls).
+    _NOTE_FIELDS = ("content", "id", "keywords", "links", "importance_score",
+                    "retrieval_count", "timestamp", "last_accessed", "context",
+                    "evolution_history", "category", "tags")
+
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        sys_ = d.pop("_sys", None)
+        notes = []
+        for n in (getattr(sys_, "memories", {}) or {}).values():
+            notes.append({f: getattr(n, f, None) for f in self._NOTE_FIELDS})
+        d["_dehydrated_notes"] = notes
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        self._sys = None            # rebuilt lazily by _system()
+
+    def _system(self):
+        if getattr(self, "_sys", None) is None:
+            self._sys = self._build_sys()
+            notes = getattr(self, "_dehydrated_notes", None) or []
+            if notes:
+                try:
+                    from memory_layer import MemoryNote
+                except ImportError:
+                    MemoryNote = None
+                for f in notes:
+                    try:
+                        if MemoryNote is None:
+                            break
+                        kw = {k: v for k, v in f.items() if v is not None}
+                        n = MemoryNote(**kw)   # all fields given -> no LLM
+                        self._sys.memories[n.id] = n
+                    except Exception:
+                        pass
+                try:
+                    self._sys.consolidate_memories()
+                except Exception:
+                    pass
+                self._dehydrated_notes = []
+        return self._sys
 
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
         ns = _ns(self.benchmark, task)
         try:
-            hits = self._sys.search_agentic(query, k=self.top_k * 4) \
-                if hasattr(self._sys, "search_agentic") \
-                else self._sys.search(query, k=self.top_k * 4)
+            _sys = self._system()
+            hits = _sys.search_agentic(query, k=self.top_k * 4) \
+                if hasattr(_sys, "search_agentic") \
+                else _sys.search(query, k=self.top_k * 4)
         except Exception as e:
             print(f"[baseline:amem] search failed: {e}", flush=True)
             return ""
@@ -281,8 +335,9 @@ class AMemMemory:
         try:
             note = (f"Task: {task.get('description', '')[:1500]}\n"
                     f"Attempt: {resp[:2500]}")
-            _fn = self._sys.add_note if hasattr(self._sys, "add_note") \
-                else self._sys.create_memory
+            _sys = self._system()
+            _fn = _sys.add_note if hasattr(_sys, "add_note") \
+                else _sys.create_memory
             nid = await asyncio.to_thread(_fn, note)   # LLM link-gen inside
             self._per_chain.setdefault(ns, []).append(nid)
         except Exception as e:
