@@ -175,13 +175,19 @@ class Mem0Memory:
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
         try:
+            # Build OUTSIDE the lock: _mem() takes _IO_LOCK itself, and
+            # threading.Lock is non-reentrant, so `with lock: self._mem()`
+            # self-deadlocks on the first (lazy-build) call — which is exactly
+            # every arm's first inject. Resolve the client first, then hold the
+            # lock only for the search.
+            m = self._mem()
             # mem0 >=2.x moved entity identity out of top-level kwargs: search()
             # takes filters={"user_id": ...}, not user_id=... (add() still takes
             # the top-level kwarg).
             with self._IO_LOCK:
-                hits = self._mem().search(query,
-                                          filters={"user_id": _ns(self.benchmark, task)},
-                                          limit=self.top_k)
+                hits = m.search(query,
+                                filters={"user_id": _ns(self.benchmark, task)},
+                                limit=self.top_k)
         except Exception as e:
             print(f"[baseline:mem0] search failed: {e}", flush=True)
             return ""
@@ -199,10 +205,13 @@ class Mem0Memory:
             return
         try:
             # mem0.add runs its own LLM extraction — blocking; keep it off
-            # the event loop or it throttles every concurrent task.
+            # the event loop or it throttles every concurrent task. Build the
+            # client BEFORE taking the lock (non-reentrant _IO_LOCK, same
+            # deadlock as inject).
             def _add():
+                m = self._mem()
                 with self._IO_LOCK:
-                    self._mem().add(
+                    m.add(
                         [{"role": "user", "content": task.get("description", "")[:4000]},
                          {"role": "assistant", "content": resp[:4000]}],
                         user_id=_ns(self.benchmark, task))
