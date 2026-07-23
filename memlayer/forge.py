@@ -126,6 +126,11 @@ class SkillForgeLatest:
             from .refine import cross_agent_evaluate_skill, critic_refine_experience
             verdict = cross_agent_evaluate_skill(exp, llm_fn=critic_fn)
             exp.failure_taxonomy["critic_quality"] = verdict.get("total", 5)
+            # External critic's judgment of the OUTCOME itself (correct/wrong/
+            # unsure, no reference answer). The repair gate reads this instead
+            # of the actor's self-assessment — self never carries weight.
+            exp.failure_taxonomy["critic_outcome_verdict"] = \
+                str(verdict.get("outcome_verdict", "unsure")).lower()
             exp.failure_taxonomy["critic_verdict"] = verdict.get("verdict", "inject")
 
             # Low quality OR noise/info-loss detected → forced refine/expand (never discard).

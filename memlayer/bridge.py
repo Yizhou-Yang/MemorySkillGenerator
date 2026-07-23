@@ -192,6 +192,10 @@ _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
 # the protocol dict.
 _C_REPAIR_MODE = os.environ.get("C_REPAIR_MODE", "0") == "1"
 _C_REPAIR_THRESH = float(os.environ.get("C_REPAIR_THRESH", "0.6"))
+# What decides "the chain is succeeding": "verdict" (external critic's
+# outcome_verdict on the latest entry — default) or "self" (actor
+# self-assessment; failed, kept as the ablation arm).
+_C_REPAIR_GATE = (os.environ.get("C_REPAIR_GATE") or "verdict").strip().lower()
 
 
 _WC_LOOKUP = {"fn": None}          # set by CuratedPatchMemory once the library exists
@@ -824,8 +828,22 @@ class CuratedMemory:
         # removes the spoilage channel by construction.
         _repair_raw = False
         if _C_REPAIR_MODE and cands:
-            _prev = self._last_score.get(_chain_id(task))
-            _repair_raw = _prev is not None and float(_prev) >= _C_REPAIR_THRESH
+            if _C_REPAIR_GATE == "verdict":
+                # Gate on the EXTERNAL critic's outcome verdict for the chain's
+                # latest entry — never on the actor's self-assessment. The self
+                # gate was tried and failed exactly as the provenance principle
+                # predicts: hy3's self-assessment passed 75% of chains as
+                # "succeeding" where only ~20% were actually correct, so real
+                # failures were replayed verbatim and repair never engaged.
+                _ents = self._chain_entries.get(_chain_id(task)) or []
+                _v = ""
+                if _ents:
+                    _v = str((_ents[-1].failure_taxonomy or {})
+                             .get("critic_outcome_verdict", "")).lower()
+                _repair_raw = _v == "correct"
+            else:  # legacy self gate (ablation only)
+                _prev = self._last_score.get(_chain_id(task))
+                _repair_raw = _prev is not None and float(_prev) >= _C_REPAIR_THRESH
         if _repair_raw:
             served = cands[: self.top_k]
             out = _format_raw(served, action_scored=_action_scored)

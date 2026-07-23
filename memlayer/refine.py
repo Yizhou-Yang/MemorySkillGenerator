@@ -151,6 +151,12 @@ Generalized steps: {generalized_steps}
 
 If ANY disqualifying issue is found, verdict MUST be "low_confidence" (triggers forced re-refinement).
 
+## Separately: judge the OUTCOME itself
+Independent of the record's quality, judge whether the attempt's final
+answer/result is likely CORRECT for the task, using only the task and the
+approach shown (no reference answer). Be strict: "correct" only when you
+would bet on this answer; when in doubt say "unsure".
+
 ## Response (JSON only)
 {{
   "actionability": 0-3,
@@ -159,6 +165,7 @@ If ANY disqualifying issue is found, verdict MUST be "low_confidence" (triggers 
   "novelty": 0-2,
   "total": 0-10,
   "verdict": "inject" | "skip" | "low_confidence",
+  "outcome_verdict": "correct" | "wrong" | "unsure",
   "reason": "one sentence justification",
   "noise_detected": true/false,
   "info_loss_detected": true/false
@@ -321,6 +328,7 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     critic_refine_experience (forced enrichment, never discard).
     """
     default = {"total": 5, "verdict": "inject", "reason": "no evaluator available",
+               "outcome_verdict": "unsure",
                "actionability": 2, "generalizability": 2, "correctness": 1, "novelty": 0}
 
     if llm_fn is None:
@@ -351,10 +359,12 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
         repaired = repair_json(response, return_objects=True)
         if isinstance(repaired, dict):
             repaired.setdefault("verdict", "inject" if repaired.get("total", 0) >= 5 else "skip")
+            repaired.setdefault("outcome_verdict", "unsure")
             return repaired
         if isinstance(repaired, list) and repaired and isinstance(repaired[0], dict):
             result = repaired[0]
             result.setdefault("verdict", "inject" if result.get("total", 0) >= 5 else "skip")
+            result.setdefault("outcome_verdict", "unsure")
             return result
     except Exception:
         pass
