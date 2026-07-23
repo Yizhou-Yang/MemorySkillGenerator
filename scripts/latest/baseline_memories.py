@@ -123,14 +123,21 @@ class Mem0Memory:
         self._add_failures = 0
 
     def _mem(self):
+        # Build under the SAME lock that serializes reads/writes: concurrent
+        # first-touch from two workers raced to open the local qdrant dir
+        # ("Storage folder ... already accessed by another instance"), the
+        # loser's add() failed forever, and the arm silently degraded to
+        # no-memory (hy3 sweep: 1089 failed adds, injection rate 0-7/200).
         if self._m is None:
-            from mem0 import Memory
-            self._m = Memory.from_config(self._cfg)
-            try:
-                import mem0 as _m0
-                _log_version("mem0ai", _m0)
-            except Exception:
-                pass
+            with self._IO_LOCK:
+                if self._m is None:
+                    from mem0 import Memory
+                    self._m = Memory.from_config(self._cfg)
+                    try:
+                        import mem0 as _m0
+                        _log_version("mem0ai", _m0)
+                    except Exception:
+                        pass
         return self._m
 
     def release(self) -> None:
