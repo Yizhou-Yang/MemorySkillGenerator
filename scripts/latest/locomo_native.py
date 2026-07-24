@@ -131,10 +131,19 @@ class _AMemQA(QAMemory):
     def recall(self, query):
         sysm = self.a._system()
         try:
+            # retriever.search returns a NUMPY ndarray of positional indices
+            # into list(memories.values()). Do NOT write `idx or []`: on a
+            # multi-element ndarray that raises "truth value ambiguous", which
+            # the except then swallows, and recall silently returns nothing
+            # (whole arm scored ~0 with all answers "I don't know"). Iterate the
+            # array element-wise instead.
             idx = sysm.retriever.search(query, TOPK)
             allm = list(sysm.memories.values())
-            outs = [allm[int(i)].content for i in (idx or [])
-                    if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
+            outs = []
+            for i in ([] if idx is None else list(idx)):
+                ii = int(i)
+                if 0 <= ii < len(allm):
+                    outs.append(allm[ii].content)
         except Exception:
             outs = []
         return "\n".join(f"- {o}" for o in outs[:TOPK])
