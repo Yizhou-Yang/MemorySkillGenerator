@@ -63,7 +63,12 @@ def _install_nothink_patch() -> None:
     """
     if os.environ.get("BASELINE_NOTHINK", "1") != "1":
         return
-    effort = os.environ.get("OPENAI_REASONING_EFFORT", "no_think")
+    # Deliberately NOT OPENAI_REASONING_EFFORT: that one is the backbone's
+    # knob, and sharing it means "make mem0 parseable" silently also means
+    # "answer every task with reasoning off", which weakens the backbone and
+    # makes arms run days apart incomparable (measured: hy3 GAIA 21 -> 10 EM).
+    # The baselines' internal LLM always runs plain; the backbone is untouched.
+    effort = os.environ.get("BASELINE_REASONING_EFFORT", "no_think")
     models = tuple(m for m in os.environ.get(
         "NOTHINK_MODELS", "hy3").lower().split(",") if m)
     try:
