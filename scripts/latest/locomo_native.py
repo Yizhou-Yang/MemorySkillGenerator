@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""LoCoMo under the memory systems' OWN protocol (Mem0 / A-Mem paper setup),
+not our iterative A/B/C framework.
+
+Why this exists: LoCoMo is Mem0/A-Mem's flagship benchmark, and its task is
+cross-session conversational QA — ingest a whole multi-session dialogue into
+memory, then answer questions that require recalling facts from earlier
+sessions. Forcing it into our "re-attempt the same task" loop makes memory of
+prior *answers* irrelevant and scores the baselines as if they had no memory
+(see the paper). So here every system runs the way its authors intended:
+
+  ingest:  add each session's dialogue to the store, session by session
+  answer:  for each question, retrieve top-k memories and let the LLM answer
+           using ONLY the retrieved memories (no full transcript)
+  score:   LLM-as-a-Judge (J, 0/1 correctness by an external judge) + token-F1
+
+Systems compared behind one interface (make_qa_memory):
+  mem0, amem  — their own add()/search()
+  ours        — CuratorMem's store used purely as a memory layer
+  full        — upper bound: whole transcript in context (no retrieval)
+  nomem       — lower bound: answer with no memory
+
+Run:
+  BENCH_N=3 QA_MODEL=hy3 JUDGE_MODEL=grok-4.5 \
+    python scripts/latest/locomo_native.py --systems mem0,amem,ours,nomem
+"""
+from __future__ import annotations
+import argparse, json, os, re, sys, time, collections, asyncio
+from pathlib import Path
+
+sys.path.insert(0, os.getcwd())
+sys.path.insert(0, os.path.join(os.getcwd(), "src"))
+
+TOPK = int(os.environ.get("LOCOMO_TOPK", "10"))   # Mem0 uses s=10
+OUT = Path(os.environ.get("LOCOMO_OUT",
+           "experiments_results/locomo_native/hy3/results.jsonl"))
+
+
+# ---- dataset -----------------------------------------------------------------
+def load_conversations(n: int):
+    os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+    from datasets import load_dataset
+    ds = load_dataset("KhangPTT373/locomo_preprocess", split="test")
+    convs = []
+    for i in range(min(n, len(ds))):
+        r = ds[i]
+        def parse(x):
+            if isinstance(x, str):
+                try: return json.loads(x)
+                except Exception: return x
+            return x
+        sessions = parse(r.get("sessions")) or []
+        qs = parse(r.get("questions")) or []
+        ans = parse(r.get("answers")) or []
+        cats = parse(r.get("category")) or []
+        qa = []
+        for j, q in enumerate(qs):
+            qa.append({"question": q,
+                       "answer": str(ans[j]) if j < len(ans) else "",
+                       "category": str(cats[j]) if j < len(cats) else ""})
+        convs.append({"conv_id": f"locomo_{i}", "sessions": sessions, "qa": qa})
+    return convs
+
+
+# ---- memory systems behind one QA interface ---------------------------------
+class QAMemory:
+    """add(text) to store a dialogue chunk; recall(query)->str for the block
+    of top-k memories to hand the answerer. namespace = one conversation."""
+    def add(self, text: str): ...
+    def recall(self, query: str) -> str: ...
+
+
+def make_qa_memory(system: str, conv_id: str) -> QAMemory:
+    if system == "mem0":
+        return _Mem0QA(conv_id)
+    if system == "amem":
+        return _AMemQA(conv_id)
+    if system == "ours":
+        return _OursQA(conv_id)
+    raise ValueError(system)
+
+
+class _Mem0QA(QAMemory):
+    def __init__(self, conv_id):
+        from scripts.latest.baseline_memories import Mem0Memory
+        self.m = Mem0Memory("locomo_native")
+        self.ns = f"locomo_native:{conv_id}"
+    def add(self, text):
+        m = self.m._mem_for(self.ns)
+        m.add([{"role": "user", "content": text[:6000]}], user_id=self.ns)
+    def recall(self, query):
+        m = self.m._mem_for(self.ns)
+        hits = m.search(query, filters={"user_id": self.ns}, limit=TOPK)
+        items = hits.get("results", hits) if isinstance(hits, dict) else hits
+        return "\n".join(f"- {h.get('memory') or h.get('text') or ''}"
+                         for h in (items or []) if isinstance(h, dict))
+
+
+class _AMemQA(QAMemory):
+    def __init__(self, conv_id):
+        from scripts.latest.baseline_memories import AMemMemory
+        self.a = AMemMemory("locomo_native")
+    def add(self, text):
+        sysm = self.a._system()
+        fn = getattr(sysm, "add_note", None) or getattr(sysm, "create_memory")
+        fn(text[:6000])
+    def recall(self, query):
+        sysm = self.a._system()
+        try:
+            idx = sysm.retriever.search(query, TOPK)
+            allm = list(sysm.memories.values())
+            outs = [allm[int(i)].content for i in (idx or [])
+                    if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
+        except Exception:
+            outs = []
+        return "\n".join(f"- {o}" for o in outs[:TOPK])
+
+
+class _OursQA(QAMemory):
+    """CuratorMem as a plain memory layer: store each dialogue chunk as a
+    patch, retrieve by relevance. No iteration chain, no critic — the store
+    and its retrieval, used the way a memory layer would be."""
+    def __init__(self, conv_id):
+        from memlayer.vgr import Patch, PatchMemory
+        self.mem = PatchMemory()
+        self.ns = conv_id
+        self._i = 0
+    def add(self, text):
+        from memlayer.vgr import Patch
+        self._i += 1
+        self.mem.add(Patch(patch_id=f"{self.ns}#{self._i}", chain_id=self.ns,
+                           version=self._i, key="dialogue", summary=text[:400],
+                           content_before="", content_after=text[:6000],
+                           rationale="", evidence=""))
+    def recall(self, query):
+        got = self.mem.retrieve(query, top_k=TOPK)
+        lines = []
+        for p in (got or [])[:TOPK]:
+            s = getattr(p, "content_after", None) or getattr(p, "summary", "")
+            if s: lines.append(f"- {s}")
+        return "\n".join(lines)
+
+
+# ---- LLM calls ---------------------------------------------------------------
+def _chat(model, base, key, system, user, max_tokens=400):
+    from openai import OpenAI
+    cli = OpenAI(base_url=base, api_key=key or "x", timeout=180)
+    msgs = ([{"role": "system", "content": system}] if system else []) + \
+           [{"role": "user", "content": user}]
+    req = {"model": model, "messages": msgs, "max_tokens": max_tokens}
+    if os.environ.get("QA_REASONING_EFFORT"):
+        req["reasoning_effort"] = os.environ["QA_REASONING_EFFORT"]
+    r = cli.chat.completions.create(**req)
+    m = r.choices[0].message
+    return (m.content or "").strip() or (getattr(m, "reasoning_content", "") or "").strip()
+
+
+ANSWER_SYS = ("Answer the question using ONLY the memories below. Be concise — "
+              "a short phrase or sentence. If the memories don't contain the "
+              "answer, say you don't know.")
+JUDGE_SYS = ("You are a strict grader. Given a question, the gold answer, and a "
+             "candidate answer, output 1 if the candidate is correct (same "
+             "meaning as gold), else 0. Output ONLY 0 or 1.")
+
+
+def f1(pred, gold):
+    def toks(s): return re.findall(r"[a-z0-9]+", s.lower())
+    p, g = toks(pred), toks(gold)
+    if not p or not g: return 0.0
+    common = collections.Counter(p) & collections.Counter(g)
+    ov = sum(common.values())
+    if ov == 0: return 0.0
+    prec, rec = ov/len(p), ov/len(g)
+    return 2*prec*rec/(prec+rec)
+
+
+def judge(model, base, key, q, gold, pred):
+    try:
+        out = _chat(model, base, key, JUDGE_SYS,
+                    f"Question: {q}\nGold: {gold}\nCandidate: {pred}\nScore:",
+                    max_tokens=4)
+        m = re.search(r"[01]", out)
+        return int(m.group()) if m else 0
+    except Exception:
+        return 0
+
+
+# ---- main --------------------------------------------------------------------
+def run():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--systems", default="mem0,amem,ours,nomem")
+    args = ap.parse_args()
+    n = int(os.environ.get("BENCH_N", "3"))
+    qa_model = os.environ.get("QA_MODEL", "hy3")
+    qa_base = os.environ.get("OPENAI_API_BASE")
+    qa_key = os.environ.get("OPENAI_API_KEY")
+    j_model = os.environ.get("JUDGE_MODEL", "grok-4.5")
+    j_base = os.environ.get("JUDGE_BASE_URL", os.environ.get("CRITIC_BASE_URL"))
+    j_key = os.environ.get("JUDGE_API_KEY", os.environ.get("CRITIC_API_KEY"))
+
+    convs = load_conversations(n)
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    fout = open(OUT, "a")
+    agg = collections.defaultdict(lambda: {"J": 0, "F1": 0.0, "n": 0})
+
+    for system in [s.strip() for s in args.systems.split(",") if s.strip()]:
+        for conv in convs:
+            memory = None if system in ("nomem", "full") else make_qa_memory(system, conv["conv_id"])
+            # ingest
+            transcript = []
+            for sess in conv["sessions"]:
+                txt = sess if isinstance(sess, str) else json.dumps(sess)
+                transcript.append(txt)
+                if memory is not None:
+                    try: memory.add(txt)
+                    except Exception as e:
+                        print(f"[{system}] add skip: {str(e)[:80]}", flush=True)
+            full_ctx = "\n\n".join(transcript)
+            # answer each question
+            for qa in conv["qa"]:
+                q, gold = qa["question"], qa["answer"]
+                if system == "nomem":
+                    ctx = "(no memory available)"
+                elif system == "full":
+                    ctx = full_ctx[:24000]
+                else:
+                    try: ctx = memory.recall(q)
+                    except Exception as e:
+                        ctx = ""; print(f"[{system}] recall skip: {str(e)[:80]}", flush=True)
+                try:
+                    pred = _chat(qa_model, qa_base, qa_key, ANSWER_SYS,
+                                 f"Memories:\n{ctx or '(none)'}\n\nQuestion: {q}\nAnswer:")
+                except Exception as e:
+                    pred = ""; print(f"[{system}] answer err: {str(e)[:80]}", flush=True)
+                J = judge(j_model, j_base, j_key, q, gold, pred)
+                F = f1(pred, gold)
+                a = agg[system]; a["J"] += J; a["F1"] += F; a["n"] += 1
+                fout.write(json.dumps({"system": system, "conv": conv["conv_id"],
+                    "category": qa["category"], "q": q, "gold": gold,
+                    "pred": pred[:300], "J": J, "F1": round(F, 3)},
+                    ensure_ascii=False) + "\n")
+                fout.flush()
+        a = agg[system]
+        print(f"=== {system}: J={a['J']/max(1,a['n'])*100:.1f} "
+              f"F1={a['F1']/max(1,a['n'])*100:.1f} (n={a['n']}) ===", flush=True)
+    fout.close()
+    print("\n=== SUMMARY (LoCoMo native protocol) ===")
+    for system, a in agg.items():
+        print(f"  {system:6s}: J={a['J']/max(1,a['n'])*100:.1f} "
+              f"F1={a['F1']/max(1,a['n'])*100:.1f} (n={a['n']})")
+
+
+if __name__ == "__main__":
+    run()
