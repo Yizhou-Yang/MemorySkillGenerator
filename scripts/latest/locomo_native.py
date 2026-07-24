@@ -116,29 +116,84 @@ class _AMemQA(QAMemory):
         return "\n".join(f"- {o}" for o in outs[:TOPK])
 
 
+_EXTRACT_SYS = (
+    "Extract atomic facts from this dialogue excerpt. For each fact output one "
+    "JSON object on its own line: {\"entity\": <who/what the fact is about>, "
+    "\"key\": <short slug of the aspect, e.g. relationship_status, job, location>, "
+    "\"fact\": <the fact as a full sentence, include the date if stated>}. "
+    "One line per fact, no prose, no array. Skip greetings/small-talk.")
+
+
 class _OursQA(QAMemory):
-    """CuratorMem as a plain memory layer: store each dialogue chunk as a
-    patch, retrieve by relevance. No iteration chain, no critic — the store
-    and its retrieval, used the way a memory layer would be."""
+    """CuratorMem in its NATIVE structure, mapped onto conversation memory.
+
+    A dialogue is not a bag of text: facts about one entity EVOLVE across
+    sessions ("May: Caroline is single" -> "Aug: Caroline is dating"). That is
+    exactly a patch version chain. So we (1) let the critic extract atomic
+    facts (like mem0's extraction), (2) key each fact's chain on (entity,key)
+    so a later fact about the same aspect SUPERSEDES the earlier one as a new
+    version — lineage preserved, not destructively overwritten, (3) stamp the
+    dialogue timestamp as grounded provenance, (4) retrieve chain-scoped and
+    lineage-ordered (latest version first, older versions available for
+    temporal questions). Mechanisms that need an execution loop (w_c reuse
+    weight, avoidance-of-failed-attempts) have no analogue in static dialogue
+    and are simply inactive here — stated as such."""
     def __init__(self, conv_id):
-        from memlayer.vgr import Patch, PatchMemory
+        from memlayer.vgr import PatchMemory
         self.mem = PatchMemory()
         self.ns = conv_id
-        self._i = 0
+        self._ver = collections.defaultdict(int)   # (entity,key) -> latest version
+        self.model = os.environ.get("QA_MODEL", "hy3")
+        self.base = os.environ.get("OPENAI_API_BASE")
+        self.key = os.environ.get("OPENAI_API_KEY")
+
     def add(self, text):
         from memlayer.vgr import Patch
-        self._i += 1
-        self.mem.add(Patch(patch_id=f"{self.ns}#{self._i}", chain_id=self.ns,
-                           version=self._i, key="dialogue", summary=text[:400],
-                           content_before="", content_after=text[:6000],
-                           rationale="", evidence=""))
+        ts = ""
+        m = re.match(r"\s*([0-9].*?[0-9]{4})", text)   # LoCoMo sessions start with a date line
+        if m: ts = m.group(1)
+        try:
+            raw = _chat(self.model, self.base, self.key, _EXTRACT_SYS, text[:6000],
+                        max_tokens=600)
+        except Exception as e:
+            print(f"[ours] extract skip: {str(e)[:60]}", flush=True); return
+        for line in raw.splitlines():
+            line = line.strip().strip("`")
+            if not line.startswith("{"): continue
+            try: f = json.loads(line)
+            except Exception: continue
+            ent = str(f.get("entity", "")).strip().lower()
+            key = str(f.get("key", "misc")).strip().lower()
+            fact = str(f.get("fact", "")).strip()
+            if not fact: continue
+            chain = f"{self.ns}:{ent}:{key}"     # same aspect of same entity = one chain
+            self._ver[chain] += 1
+            v = self._ver[chain]
+            prev = "" if v == 1 else "(supersedes earlier version)"
+            self.mem.add(Patch(patch_id=f"{chain}#v{v}", chain_id=chain, version=v,
+                               key=key, summary=f"{ent}: {fact}",
+                               content_before=prev, content_after=fact,
+                               rationale=ent, evidence=ts))   # ts = grounded provenance
+
     def recall(self, query):
-        got = self.mem.retrieve(query, top_k=TOPK)
+        got = self.mem.retrieve(query, top_k=TOPK * 3)   # over-fetch, then dedupe by chain
+        seen = {}
+        for p in got or []:
+            c = getattr(p, "chain_id", "")
+            # lineage: keep the LATEST version per chain as the current answer,
+            # but if an older version exists it means the fact changed — surface
+            # both so temporal questions can reason about the evolution.
+            seen.setdefault(c, []).append(p)
         lines = []
-        for p in (got or [])[:TOPK]:
-            s = getattr(p, "content_after", None) or getattr(p, "summary", "")
-            if s: lines.append(f"- {s}")
-        return "\n".join(lines)
+        for c, ps in list(seen.items())[:TOPK]:
+            ps.sort(key=lambda p: getattr(p, "version", 1), reverse=True)
+            cur = ps[0]
+            ts = getattr(cur, "evidence", "")
+            lines.append(f"- {getattr(cur,'content_after','')}" + (f" [{ts}]" if ts else ""))
+            for old in ps[1:2]:   # one prior version if the fact evolved
+                lines.append(f"    (earlier: {getattr(old,'content_after','')}"
+                             + (f" [{getattr(old,'evidence','')}]" if getattr(old,'evidence','') else "") + ")")
+        return "\n".join(lines[:TOPK * 2])
 
 
 # ---- LLM calls ---------------------------------------------------------------
