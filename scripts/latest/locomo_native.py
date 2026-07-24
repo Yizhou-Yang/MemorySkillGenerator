@@ -328,13 +328,22 @@ def run():
             fout.flush()
 
     for system in systems:
-        # ingest all conversations for this system in parallel (each is an
-        # independent store), then answer all questions in parallel.
-        with ThreadPoolExecutor(max_workers=min(CONC, len(convs))) as ex:
-            built = list(ex.map(lambda c: (c, *ingest(system, c)), convs))
-        jobs = [(system, c, mem, ctx, qa) for c, mem, ctx in built for qa in c["qa"]]
-        with ThreadPoolExecutor(max_workers=CONC) as ex:
-            list(ex.map(lambda j: answer_one(*j), jobs))
+        # Isolate each system: a store that fails to even import (A-Mem raises
+        # SystemExit — a BaseException — when its repo isn't on the path) must
+        # not take down the systems that follow it in the list. Their rows are
+        # already flushed to disk; skip the broken one and keep going.
+        try:
+            # ingest all conversations for this system in parallel (each is an
+            # independent store), then answer all questions in parallel.
+            with ThreadPoolExecutor(max_workers=min(CONC, len(convs))) as ex:
+                built = list(ex.map(lambda c: (c, *ingest(system, c)), convs))
+            jobs = [(system, c, mem, ctx, qa) for c, mem, ctx in built for qa in c["qa"]]
+            with ThreadPoolExecutor(max_workers=CONC) as ex:
+                list(ex.map(lambda j: answer_one(*j), jobs))
+        except BaseException as e:
+            print(f"=== {system} FAILED: {type(e).__name__}: {str(e)[:200]} "
+                  f"— skipping ===", flush=True)
+            continue
         a = agg[system]
         print(f"=== {system}: J={a['J']/max(1,a['n'])*100:.1f} "
               f"F1={a['F1']/max(1,a['n'])*100:.1f} (n={a['n']}) ===", flush=True)
