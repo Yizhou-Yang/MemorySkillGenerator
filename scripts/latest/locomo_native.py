@@ -157,6 +157,30 @@ _EXTRACT_SYS = (
     "One line per fact, no prose, no array. Skip greetings/small-talk.")
 
 
+_EMBEDDER = None
+_EMB_LK = threading.Lock()
+
+
+def _embedder():
+    """The SAME sentence-encoder mem0/A-Mem retrieve with (all-MiniLM-L6-v2).
+
+    CuratorMem's SDK store ranks patches lexically — fine for its agent-task
+    setting, but on conversational QA that is a keyword handicap against the
+    baselines' semantic search (a query 'relationship status' never lexically
+    matches the fact 'Caroline is single'). For an apples-to-apples memory-layer
+    comparison the retrieval encoder must be identical, so the adapter does its
+    own semantic top-k over the extracted facts with this shared model."""
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        with _EMB_LK:
+            if _EMBEDDER is None:
+                from sentence_transformers import SentenceTransformer
+                _EMBEDDER = SentenceTransformer(os.environ.get(
+                    "MEM0_EMBED_MODEL",
+                    "sentence-transformers/all-MiniLM-L6-v2"))
+    return _EMBEDDER
+
+
 class _OursQA(QAMemory):
     """CuratorMem in its NATIVE structure, mapped onto conversation memory.
 
@@ -173,9 +197,12 @@ class _OursQA(QAMemory):
     and are simply inactive here — stated as such."""
     def __init__(self, conv_id):
         from memlayer.vgr import PatchMemory
-        self.mem = PatchMemory()
+        self.mem = PatchMemory()     # keeps the version-chain structure
         self.ns = conv_id
         self._ver = collections.defaultdict(int)   # (entity,key) -> latest version
+        self._facts = []             # semantic index, parallel to self._emb rows
+        self._emb = None             # np matrix, normalized; built lazily
+        self._lk = threading.Lock()
         # Extraction is CURATION — authored by the external critic (grok),
         # same author rule as the main method; the backbone only answers.
         self.model = os.environ.get("CRITIC_MODEL_ID",
@@ -217,30 +244,48 @@ class _OursQA(QAMemory):
                                key=key, summary=f"{ent}: {fact}",
                                content_before=prev, content_after=fact,
                                rationale=ent, evidence=ts))   # ts = grounded provenance
+            # mirror into the semantic index (fact text is what we retrieve on)
+            self._facts.append({"fact": fact, "ent": ent, "chain": chain,
+                                "version": v, "ts": ts})
+            self._emb = None   # invalidate; rebuilt on next recall
+
+    def _ensure_emb(self):
+        if self._emb is not None or not self._facts:
+            return
+        with self._lk:
+            if self._emb is not None or not self._facts:
+                return
+            import numpy as np
+            vecs = _embedder().encode([f["fact"] for f in self._facts],
+                                      normalize_embeddings=True,
+                                      show_progress_bar=False)
+            self._emb = np.asarray(vecs, dtype="float32")
 
     def recall(self, query):
-        got = self.mem.retrieve(query, top_k=TOPK * 3)   # over-fetch, then dedupe by chain
-        seen = {}
-        for p in got or []:
-            c = getattr(p, "chain_id", "")
-            # lineage: keep the LATEST version per chain as the current answer,
-            # but if an older version exists it means the fact changed — surface
-            # both so temporal questions can reason about the evolution.
-            seen.setdefault(c, []).append(p)
+        # Semantic top-k over the extracted facts (same encoder as the
+        # baselines), then layer CuratorMem's structure on top: mark facts that
+        # a later version superseded, and attach the dialogue timestamp as
+        # grounded provenance so temporal questions can reason about the date.
+        self._ensure_emb()
+        if self._emb is None or not self._facts:
+            return ""
+        import numpy as np
+        qv = _embedder().encode([query], normalize_embeddings=True,
+                                show_progress_bar=False)[0]
+        sims = self._emb @ np.asarray(qv, dtype="float32")
+        order = np.argsort(-sims)[:TOPK]
+        latest = {}
+        for f in self._facts:
+            latest[f["chain"]] = max(latest.get(f["chain"], 0), f["version"])
         lines = []
-        for c, ps in list(seen.items())[:TOPK]:
-            ps.sort(key=lambda p: getattr(p, "version", 1), reverse=True)
-            cur = ps[0]
-            ts = getattr(cur, "evidence", "")
-            # Endorsement: only facts carrying an explicit dialogue timestamp
-            # (objective provenance) wear the checkmark; undated ones render
-            # neutrally — same two-key discipline as the main method.
-            mark = "[OK] " if ts else ""
-            lines.append(f"- {mark}{getattr(cur,'content_after','')}" + (f" [{ts}]" if ts else ""))
-            for old in ps[1:2]:   # one prior version if the fact evolved
-                lines.append(f"    (earlier: {getattr(old,'content_after','')}"
-                             + (f" [{getattr(old,'evidence','')}]" if getattr(old,'evidence','') else "") + ")")
-        return "\n".join(lines[:TOPK * 2])
+        for i in order:
+            f = self._facts[int(i)]
+            ts = f["ts"]
+            mark = "[OK] " if ts else ""     # endorsed = carries dialogue-time provenance
+            note = " (this was updated in a later session)" \
+                   if f["version"] < latest.get(f["chain"], f["version"]) else ""
+            lines.append(f"- {mark}{f['fact']}{note}" + (f" [{ts}]" if ts else ""))
+        return "\n".join(lines)
 
 
 # ---- LLM calls ---------------------------------------------------------------
