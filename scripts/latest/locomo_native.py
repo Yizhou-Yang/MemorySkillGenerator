@@ -198,48 +198,55 @@ def run():
     j_base = os.environ.get("JUDGE_BASE_URL", os.environ.get("CRITIC_BASE_URL"))
     j_key = os.environ.get("JUDGE_API_KEY", os.environ.get("CRITIC_API_KEY"))
 
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    CONC = int(os.environ.get("LOCOMO_CONC", "16"))
     convs = load_conversations(n)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    fout = open(OUT, "a")
+    fout = open(OUT, "a"); wlock = threading.Lock()
     agg = collections.defaultdict(lambda: {"J": 0, "F1": 0.0, "n": 0})
+    systems = [s.strip() for s in args.systems.split(",") if s.strip()]
 
-    for system in [s.strip() for s in args.systems.split(",") if s.strip()]:
-        for conv in convs:
-            memory = None if system in ("nomem", "full") else make_qa_memory(system, conv["conv_id"])
-            # ingest
-            transcript = []
-            for sess in conv["sessions"]:
-                txt = sess if isinstance(sess, str) else json.dumps(sess)
-                transcript.append(txt)
-                if memory is not None:
-                    try: memory.add(txt)
-                    except Exception as e:
-                        print(f"[{system}] add skip: {str(e)[:80]}", flush=True)
-            full_ctx = "\n\n".join(transcript)
-            # answer each question
-            for qa in conv["qa"]:
-                q, gold = qa["question"], qa["answer"]
-                if system == "nomem":
-                    ctx = "(no memory available)"
-                elif system == "full":
-                    ctx = full_ctx[:24000]
-                else:
-                    try: ctx = memory.recall(q)
-                    except Exception as e:
-                        ctx = ""; print(f"[{system}] recall skip: {str(e)[:80]}", flush=True)
-                try:
-                    pred = _chat(qa_model, qa_base, qa_key, ANSWER_SYS,
-                                 f"Memories:\n{ctx or '(none)'}\n\nQuestion: {q}\nAnswer:")
-                except Exception as e:
-                    pred = ""; print(f"[{system}] answer err: {str(e)[:80]}", flush=True)
-                J = judge(j_model, j_base, j_key, q, gold, pred)
-                F = f1(pred, gold)
-                a = agg[system]; a["J"] += J; a["F1"] += F; a["n"] += 1
-                fout.write(json.dumps({"system": system, "conv": conv["conv_id"],
-                    "category": qa["category"], "q": q, "gold": gold,
-                    "pred": pred[:300], "J": J, "F1": round(F, 3)},
-                    ensure_ascii=False) + "\n")
-                fout.flush()
+    def ingest(system, conv):
+        memory = None if system in ("nomem", "full") else make_qa_memory(system, conv["conv_id"])
+        transcript = []
+        # sessions of ONE conversation stay ordered (later memory builds on
+        # earlier); different (system, conv) units run in parallel below.
+        for sess in conv["sessions"]:
+            txt = sess if isinstance(sess, str) else json.dumps(sess)
+            transcript.append(txt)
+            if memory is not None:
+                try: memory.add(txt)
+                except Exception as e: print(f"[{system}] add skip: {str(e)[:80]}", flush=True)
+        return memory, "\n\n".join(transcript)
+
+    def answer_one(system, conv, memory, full_ctx, qa):
+        q, gold = qa["question"], qa["answer"]
+        if system == "nomem":      ctx = "(no memory available)"
+        elif system == "full":     ctx = full_ctx[:24000]
+        else:
+            try: ctx = memory.recall(q)
+            except Exception: ctx = ""
+        try:
+            pred = _chat(qa_model, qa_base, qa_key, ANSWER_SYS,
+                         f"Memories:\n{ctx or '(none)'}\n\nQuestion: {q}\nAnswer:")
+        except Exception: pred = ""
+        J = judge(j_model, j_base, j_key, q, gold, pred); F = f1(pred, gold)
+        with wlock:
+            a = agg[system]; a["J"] += J; a["F1"] += F; a["n"] += 1
+            fout.write(json.dumps({"system": system, "conv": conv["conv_id"],
+                "category": qa["category"], "q": q, "gold": gold,
+                "pred": pred[:300], "J": J, "F1": round(F, 3)}, ensure_ascii=False) + "\n")
+            fout.flush()
+
+    for system in systems:
+        # ingest all conversations for this system in parallel (each is an
+        # independent store), then answer all questions in parallel.
+        with ThreadPoolExecutor(max_workers=min(CONC, len(convs))) as ex:
+            built = list(ex.map(lambda c: (c, *ingest(system, c)), convs))
+        jobs = [(system, c, mem, ctx, qa) for c, mem, ctx in built for qa in c["qa"]]
+        with ThreadPoolExecutor(max_workers=CONC) as ex:
+            list(ex.map(lambda j: answer_one(*j), jobs))
         a = agg[system]
         print(f"=== {system}: J={a['J']/max(1,a['n'])*100:.1f} "
               f"F1={a['F1']/max(1,a['n'])*100:.1f} (n={a['n']}) ===", flush=True)
