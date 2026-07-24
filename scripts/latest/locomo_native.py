@@ -25,7 +25,7 @@ Run:
     python scripts/latest/locomo_native.py --systems mem0,amem,ours,nomem
 """
 from __future__ import annotations
-import argparse, json, os, re, sys, time, collections, asyncio
+import argparse, json, os, re, sys, time, collections, asyncio, threading
 from pathlib import Path
 
 sys.path.insert(0, os.getcwd())
@@ -80,17 +80,41 @@ def make_qa_memory(system: str, conv_id: str) -> QAMemory:
     raise ValueError(system)
 
 
+# One Mem0 store for the whole run, conversations separated by user_id — this
+# IS mem0's native LoCoMo protocol (one Memory, per-conversation user_id). It
+# also sidesteps mem0's fixed-path internal stores: mem0 opens a SECOND local
+# qdrant at $MEM0_DIR/migrations_qdrant (plus history.db) regardless of the
+# vector_store path we set, and a per-conversation Memory would make N builds
+# race for that one directory ("Storage folder ... already accessed by another
+# instance") and store nothing. A single Memory opens it exactly once. Set a
+# unique MEM0_DIR for the run to also isolate it from any concurrent mem0
+# process (e.g. the agent-framework sweep's external-baseline arm).
+_MEM0_SHARED = None
+_MEM0_LOCK = threading.Lock()   # embedded qdrant is one instance; serialize ops
+
+
+def _mem0_store():
+    global _MEM0_SHARED
+    if _MEM0_SHARED is None:
+        with _MEM0_LOCK:
+            if _MEM0_SHARED is None:
+                from scripts.latest.baseline_memories import Mem0Memory
+                _MEM0_SHARED = Mem0Memory("locomo_native")
+    return _MEM0_SHARED
+
+
 class _Mem0QA(QAMemory):
     def __init__(self, conv_id):
-        from scripts.latest.baseline_memories import Mem0Memory
-        self.m = Mem0Memory("locomo_native")
+        self.m = _mem0_store()
         self.ns = f"locomo_native:{conv_id}"
     def add(self, text):
-        m = self.m._mem_for(self.ns)
-        m.add([{"role": "user", "content": text[:6000]}], user_id=self.ns)
+        with _MEM0_LOCK:
+            self.m._mem().add([{"role": "user", "content": text[:6000]}],
+                              user_id=self.ns)
     def recall(self, query):
-        m = self.m._mem_for(self.ns)
-        hits = m.search(query, filters={"user_id": self.ns}, limit=TOPK)
+        with _MEM0_LOCK:
+            hits = self.m._mem().search(query, filters={"user_id": self.ns},
+                                        limit=TOPK)
         items = hits.get("results", hits) if isinstance(hits, dict) else hits
         return "\n".join(f"- {h.get('memory') or h.get('text') or ''}"
                          for h in (items or []) if isinstance(h, dict))
