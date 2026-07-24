@@ -49,6 +49,45 @@ def _ns(benchmark: str, task: dict) -> str:
     return f"{benchmark}:{_chain_id(task)}"
 
 
+def _install_nothink_patch() -> None:
+    """Make third-party memory libraries usable against a reasoning endpoint.
+
+    mem0 2.x and A-Mem build their own OpenAI clients and DROP unknown config
+    fields, so `reasoning_effort` cannot be passed through configuration. On
+    HY3/taiji that leaves `content` empty (the answer goes to the reasoning
+    stream): mem0's fact extraction returns nothing and A-Mem's controller
+    raises `cannot access local variable 'response'`. Patch the SDK call site
+    once so every request for a reasoning model carries the off-switch. Only
+    the task-solving backbone identity matters for fairness; this changes how
+    the endpoint is *called*, not which model answers.
+    """
+    if os.environ.get("BASELINE_NOTHINK", "1") != "1":
+        return
+    effort = os.environ.get("OPENAI_REASONING_EFFORT", "no_think")
+    models = tuple(m for m in os.environ.get(
+        "NOTHINK_MODELS", "hy3").lower().split(",") if m)
+    try:
+        from openai.resources.chat import completions as _c
+    except Exception:
+        return
+    if getattr(_c.Completions.create, "_nothink", False):
+        return
+    _orig = _c.Completions.create
+
+    def create(self, *a, **kw):
+        m = str(kw.get("model", "")).lower()
+        if any(t in m for t in models) and "reasoning_effort" not in kw:
+            kw["reasoning_effort"] = effort
+        return _orig(self, *a, **kw)
+
+    create._nothink = True
+    _c.Completions.create = create
+    print(f"[baseline] no_think patch installed for {models}", flush=True)
+
+
+_install_nothink_patch()
+
+
 def _log_version(name: str, module) -> None:
     """Print AND persist the baseline module's version — the paper pins
     versions in the appendix, and this file is where those pins come from
