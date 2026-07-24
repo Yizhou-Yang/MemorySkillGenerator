@@ -143,9 +143,14 @@ class _OursQA(QAMemory):
         self.mem = PatchMemory()
         self.ns = conv_id
         self._ver = collections.defaultdict(int)   # (entity,key) -> latest version
-        self.model = os.environ.get("QA_MODEL", "hy3")
-        self.base = os.environ.get("OPENAI_API_BASE")
-        self.key = os.environ.get("OPENAI_API_KEY")
+        # Extraction is CURATION — authored by the external critic (grok),
+        # same author rule as the main method; the backbone only answers.
+        self.model = os.environ.get("CRITIC_MODEL_ID",
+                     os.environ.get("JUDGE_MODEL", "grok-4.5"))
+        self.base = os.environ.get("CRITIC_BASE_URL",
+                    os.environ.get("JUDGE_BASE_URL"))
+        self.key = os.environ.get("CRITIC_API_KEY",
+                   os.environ.get("JUDGE_API_KEY"))
 
     def add(self, text):
         from memlayer.vgr import Patch
@@ -189,7 +194,11 @@ class _OursQA(QAMemory):
             ps.sort(key=lambda p: getattr(p, "version", 1), reverse=True)
             cur = ps[0]
             ts = getattr(cur, "evidence", "")
-            lines.append(f"- {getattr(cur,'content_after','')}" + (f" [{ts}]" if ts else ""))
+            # Endorsement: only facts carrying an explicit dialogue timestamp
+            # (objective provenance) wear the checkmark; undated ones render
+            # neutrally — same two-key discipline as the main method.
+            mark = "[OK] " if ts else ""
+            lines.append(f"- {mark}{getattr(cur,'content_after','')}" + (f" [{ts}]" if ts else ""))
             for old in ps[1:2]:   # one prior version if the fact evolved
                 lines.append(f"    (earlier: {getattr(old,'content_after','')}"
                              + (f" [{getattr(old,'evidence','')}]" if getattr(old,'evidence','') else "") + ")")
