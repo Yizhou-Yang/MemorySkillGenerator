@@ -90,10 +90,12 @@ class BenchmarkLoader:
         logger.info(
             f"Loaded benchmark '{self.benchmark_name}': {len(tasks)} tasks"
         )
-        # Session scoping is structural, so this can only trip if the code
-        # above is edited: a per-question LoCoMo run looks healthy while
-        # measuring the wrong thing, so refuse to hand back such tasks.
-        if tasks and not (tasks[0].get("metadata") or {}).get("chain_id"):
+        # LoCoMo ONLY: session scoping is structural there, so this can trip
+        # solely if _load_locomo is edited. A per-question LoCoMo run looks
+        # healthy while measuring the wrong thing, so refuse such tasks. Other
+        # benchmarks are independent tasks — no chain_id is correct for them.
+        if self.benchmark_name == "locomo" and tasks \
+                and not (tasks[0].get("metadata") or {}).get("chain_id"):
             raise RuntimeError(
                 "LoCoMo tasks carry no session chain_id — memory would be "
                 "scoped per question, which is not what LoCoMo measures.")
