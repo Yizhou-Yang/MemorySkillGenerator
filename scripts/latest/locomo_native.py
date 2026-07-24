@@ -191,8 +191,13 @@ class _OursQA(QAMemory):
         m = re.match(r"\s*([0-9].*?[0-9]{4})", text)   # LoCoMo sessions start with a date line
         if m: ts = m.group(1)
         try:
-            raw = _chat(self.model, self.base, self.key, _EXTRACT_SYS, text[:6000],
-                        max_tokens=600)
+            # LoCoMo sessions are long dialogues; a stingy budget would extract
+            # only the first few facts and leave the rest unrecalled at QA time.
+            # These are our own extractor's parameters (mem0/A-Mem extract with
+            # their own internal budgets), so a fair, non-truncating setting.
+            raw = _chat(self.model, self.base, self.key, _EXTRACT_SYS,
+                        text[:int(os.environ.get("OURS_EXTRACT_CHARS", "10000"))],
+                        max_tokens=int(os.environ.get("OURS_EXTRACT_TOKENS", "1800")))
         except Exception as e:
             print(f"[ours] extract skip: {str(e)[:60]}", flush=True); return
         for line in raw.splitlines():
@@ -253,8 +258,13 @@ def _chat(model, base, key, system, user, max_tokens=400):
 
 
 ANSWER_SYS = ("Answer the question using ONLY the memories below. Be concise — "
-              "a short phrase or sentence. If the memories don't contain the "
-              "answer, say you don't know.")
+              "a short phrase, matching the form of the question. "
+              "For 'when' questions give an ABSOLUTE date or time (e.g. '7 May "
+              "2023', 'June 2023', '2022'); resolve relative references such as "
+              "'yesterday', 'last week', 'last year' against the dated memories "
+              "rather than answering with the relative phrase. Answer whenever "
+              "the memories let you infer it; only say you don't know if the "
+              "memories truly lack the information.")
 JUDGE_SYS = ("You are a strict grader. Given a question, the gold answer, and a "
              "candidate answer, output 1 if the candidate is correct (same "
              "meaning as gold), else 0. Output ONLY 0 or 1.")
@@ -320,7 +330,7 @@ def run():
     def answer_one(system, conv, memory, full_ctx, qa):
         q, gold = qa["question"], qa["answer"]
         if system == "nomem":      ctx = "(no memory available)"
-        elif system == "full":     ctx = full_ctx[:24000]
+        elif system == "full":     ctx = full_ctx[:int(os.environ.get("FULL_CHARS", "60000"))]
         else:
             try: ctx = memory.recall(q)
             except Exception: ctx = ""
