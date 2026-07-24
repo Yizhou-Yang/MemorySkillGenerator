@@ -175,7 +175,40 @@ class Mem0Memory:
             cfg = json.loads(override)
         self._cfg = cfg
         self._m = None                      # built lazily (see _mem)
+        self._mems: dict = {}               # ns -> per-chain Memory
         self._add_failures = 0
+
+    def _mem_for(self, ns: str):
+        """One qdrant store PER CHAIN.
+
+        Local (embedded) qdrant serialises every operation behind a directory
+        lock, so a single shared store turns N concurrent workers into a queue:
+        measured 40s per record at conc 24, i.e. raising concurrency bought
+        nothing. Chains never share memories (user_id already scopes them), so
+        each chain gets its own store directory — different chains then run
+        truly in parallel and only same-chain iterations serialise, which the
+        runner already orders anyway.
+        """
+        m = self._mems.get(ns)
+        if m is None:
+            with self._IO_LOCK:                 # guards dict + build only
+                m = self._mems.get(ns)
+                if m is None:
+                    import copy
+                    from mem0 import Memory
+                    cfg = copy.deepcopy(self._cfg)
+                    slug = re.sub(r"[^A-Za-z0-9_.-]", "_", ns)[:80]
+                    cfg["vector_store"]["config"]["path"] = str(
+                        _STORE_ROOT / f"mem0_{slug}")
+                    m = Memory.from_config(cfg)
+                    if not self._mems:
+                        try:
+                            import mem0 as _m0
+                            _log_version("mem0ai", _m0)
+                        except Exception:
+                            pass
+                    self._mems[ns] = m
+        return m
 
     def _mem(self):
         # Build under the SAME lock that serializes reads/writes: concurrent
@@ -199,8 +232,11 @@ class Mem0Memory:
         """Drop the live clients (frees the local-qdrant file lock) so another
         process — the tau2 subprocess, or the bridge after it — can open the
         same on-disk store. State lives on disk; nothing is lost."""
-        m, self._m = self._m, None
-        if m is not None:
+        live = [self._m] + list(self._mems.values())
+        self._m, self._mems = None, {}
+        for m in live:
+            if m is None:
+                continue
             try:
                 m.vector_store.client.close()   # qdrant releases the lock now,
             except Exception:                   # not at some later GC
@@ -209,7 +245,12 @@ class Mem0Memory:
     def __getstate__(self):
         d = dict(self.__dict__)
         d["_m"] = None                      # clients never cross a pickle
+        d["_mems"] = {}
         return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        self.__dict__.setdefault("_mems", {})
 
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
@@ -219,14 +260,11 @@ class Mem0Memory:
             # self-deadlocks on the first (lazy-build) call — which is exactly
             # every arm's first inject. Resolve the client first, then hold the
             # lock only for the search.
-            m = self._mem()
-            # mem0 >=2.x moved entity identity out of top-level kwargs: search()
-            # takes filters={"user_id": ...}, not user_id=... (add() still takes
-            # the top-level kwarg).
-            with self._IO_LOCK:
-                hits = m.search(query,
-                                filters={"user_id": _ns(self.benchmark, task)},
-                                limit=self.top_k)
+            ns = _ns(self.benchmark, task)
+            # per-chain store => no cross-chain lock contention; mem0 >=2.x
+            # moved entity identity out of top-level kwargs for search().
+            hits = self._mem_for(ns).search(
+                query, filters={"user_id": ns}, limit=self.top_k)
         except Exception as e:
             print(f"[baseline:mem0] search failed: {e}", flush=True)
             return ""
@@ -247,13 +285,14 @@ class Mem0Memory:
             # the event loop or it throttles every concurrent task. Build the
             # client BEFORE taking the lock (non-reentrant _IO_LOCK, same
             # deadlock as inject).
+            ns = _ns(self.benchmark, task)
+
             def _add():
-                m = self._mem()
-                with self._IO_LOCK:
-                    m.add(
-                        [{"role": "user", "content": task.get("description", "")[:4000]},
-                         {"role": "assistant", "content": resp[:4000]}],
-                        user_id=_ns(self.benchmark, task))
+                # per-chain store: concurrent chains no longer serialise
+                self._mem_for(ns).add(
+                    [{"role": "user", "content": task.get("description", "")[:4000]},
+                     {"role": "assistant", "content": resp[:4000]}],
+                    user_id=ns)
             await asyncio.to_thread(_add)
         except Exception as e:
             self._add_failures += 1
