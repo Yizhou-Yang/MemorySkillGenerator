@@ -315,6 +315,16 @@ class AMemMemory:
         _int_base = (os.environ.get("MEM_INTERNAL_BASE")
                      or os.environ.get("CRITIC_BASE_URL")
                      or os.environ.get("OPENAI_API_BASE"))
+        # A-Mem's OpenAIController takes ONLY api_key — it constructs
+        # OpenAI(api_key=...) with no base_url, so any api_base we pass is
+        # dropped and it dials api.openai.com, fails, and leaves `response`
+        # unbound ("cannot access local variable 'response'"). The SDK reads
+        # OPENAI_BASE_URL from the environment, so set it here to point the
+        # library's own client at our endpoint.
+        if _int_base:
+            os.environ.setdefault("OPENAI_BASE_URL", _int_base)
+        if _int_key:
+            os.environ.setdefault("OPENAI_API_KEY", _int_key)
         # A-Mem's ctor signature varies across revisions; try the documented
         # form first, degrade to defaults rather than guessing kwargs.
         try:
