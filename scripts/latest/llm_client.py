@@ -114,8 +114,29 @@ if os.environ.get("LLM_PROVIDER", "").lower() == "openrouter":
 
 def _gen_kwargs() -> dict:
     """Extra generation kwargs shared by the OpenAI-compatible calls. Only sets
-    max_tokens when configured, so existing DeepSeek/vLLM paths are unaffected."""
-    return {"max_tokens": _MAX_TOKENS} if _MAX_TOKENS > 0 else {}
+    what is configured, so existing DeepSeek/vLLM paths are unaffected.
+
+    GEN_TEMPERATURE exists for the paired protocol: at the server default the
+    paired delta carries sampling luck on top of the treatment effect, and that
+    luck is most of the variance. GEN_TEMPERATURE=0 makes every arm greedy so a
+    task's delta is attributable to the injected context alone. Set it for ALL
+    arms of a run or none: pairing a greedy arm against a sampled one folds the
+    temperature difference into the treatment estimate."""
+    kw: dict = {}
+    if _MAX_TOKENS > 0:
+        kw["max_tokens"] = _MAX_TOKENS
+    t = os.environ.get("GEN_TEMPERATURE")
+    if t not in (None, ""):
+        kw["temperature"] = float(t)
+    # Reasoning models (HY3 via taiji) otherwise stream a long chain into
+    # `reasoning_content` and often leave `content` empty / emit private
+    # tool-call markup — which third-party libraries (mem0's fact-extraction
+    # LLM) cannot parse, hanging in a retry storm. reasoning_effort=no_think
+    # turns the chain off so the endpoint behaves as a plain chat model.
+    re = os.environ.get("OPENAI_REASONING_EFFORT")
+    if re:
+        kw["reasoning_effort"] = re
+    return kw
 
 
 def _msg_text(msg) -> str:
@@ -168,23 +189,246 @@ def _record_openai_usage(resp) -> None:
         pass
 
 
-def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60) -> dict:
-    """Single-turn OpenAI-compatible chat (no tools)."""
+# Some OpenAI-compatible proxies (e.g. the mxzzz gpt-5.x gateway) ONLY return SSE
+# and ignore stream=false: a non-streaming create() then receives a raw event
+# stream the SDK cannot parse ("'str' object has no attribute 'choices'"). Force
+# streaming for those and reassemble the response ourselves, accumulating both
+# content and tool-call deltas (fragments arrive split by .index).
+OPENAI_FORCE_STREAM = os.environ.get("OPENAI_FORCE_STREAM", "").strip().lower() in ("1", "true", "yes")
+
+
+class _StreamMsg:
+    """Minimal stand-in for a non-streaming message, built from SSE deltas."""
+    __slots__ = ("content", "tool_calls")
+
+    def __init__(self, content, tool_calls):
+        self.content = content
+        self.tool_calls = tool_calls or None
+
+
+class _TC:
+    __slots__ = ("id", "type", "function")
+
+    def __init__(self, id, name, arguments):
+        self.id = id
+        self.type = "function"
+        self.function = type("F", (), {"name": name, "arguments": arguments})()
+
+
+def _openai_stream_create(client, req: dict):
+    """Call create() with stream=True and collect content + tool_calls into an
+    object exposing `.choices[0].message` and `.usage`, like a normal response."""
+    req = {k: v for k, v in req.items() if k != "timeout"}
+    req["stream"] = True
+    try:
+        req["stream_options"] = {"include_usage": True}
+    except Exception:
+        pass
+    content = ""
+    tcs: dict = {}   # index -> {id, name, args}
+    finish = None
+    usage = None
+    for chunk in client.chat.completions.create(**req):
+        u = getattr(chunk, "usage", None)
+        if u is not None:
+            usage = u
+        for ch in (getattr(chunk, "choices", None) or []):
+            delta = getattr(ch, "delta", None)
+            if delta is None:
+                continue
+            if getattr(delta, "content", None):
+                content += delta.content
+            for tc in (getattr(delta, "tool_calls", None) or []):
+                idx = getattr(tc, "index", 0) or 0
+                slot = tcs.setdefault(idx, {"id": None, "name": None, "args": ""})
+                if getattr(tc, "id", None):
+                    slot["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["args"] += fn.arguments
+            if getattr(ch, "finish_reason", None):
+                finish = ch.finish_reason
+    tool_calls = [_TC(v["id"] or f"call_{i}", v["name"] or "", v["args"])
+                  for i, v in sorted(tcs.items())] or None
+    msg = _StreamMsg(content, tool_calls)
+    choice = type("C", (), {"message": msg, "finish_reason": finish})()
+    return type("R", (), {"choices": [choice], "usage": usage})()
+
+
+# Private tool-call markup leaking into a no-tools completion (HY3-style
+# "<tool_calls:hash>" / "<tool_call:hash>" tags). Presence means the model
+# tried to call tools that do not exist on this path.
+_TOOL_LEAK_RE = re.compile(r"<tool_calls?[:>]", re.I)
+
+
+def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
+                        model: str | None = None, base_url: str | None = None,
+                        api_key: str | None = None) -> dict:
+    """Single-turn OpenAI-compatible chat (no tools).
+
+    `model`/`base_url`/`api_key` override the backbone's endpoint. That override
+    exists for the critic: arm C instantiates the critic from the backbone
+    itself, so its endorsement channel is only as reliable as the backbone's
+    self-assessment. Measured on GAIA, 36% of DeepSeek-v4-pro's endorsements sit
+    on a chain whose previous iteration was wrong, but 90% of Llama-3.3-70B's do,
+    and curation flips from +6.0 EM to -3.0 with it. Pointing the critic at a
+    designated stronger model is what tests whether the gain follows curator
+    quality rather than the store.
+    """
     if not _HAS_OPENAI:
         return {"text": "", "error": "openai_package_not_installed"}
-    if not (_OPENAI_BASE_URL or _OPENAI_API_KEY):
+    url = base_url if base_url is not None else _OPENAI_BASE_URL
+    key = api_key if api_key is not None else _OPENAI_API_KEY
+    if not (url or key):
         return {"text": "", "error": "openai_endpoint_not_configured"}
     try:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
-        resp = _openai_client(timeout).chat.completions.create(
-            model=_OPENAI_MODEL, messages=messages, timeout=timeout, **_gen_kwargs())
+        client = (_openai_client(timeout) if base_url is None and api_key is None
+                  else _OpenAI(base_url=url or None, api_key=key or "EMPTY", timeout=timeout))
+        req = {"model": (model or _OPENAI_MODEL), "messages": messages,
+               "timeout": timeout, **_gen_kwargs()}
+        resp = (_openai_stream_create(client, req) if OPENAI_FORCE_STREAM
+                else client.chat.completions.create(**req))
         _record_openai_usage(resp)
-        return {"text": _msg_text(resp.choices[0].message), "error": None}
+        txt = _msg_text(resp.choices[0].message)
+        if txt and _TOOL_LEAK_RE.search(txt):
+            # Agentic backbones (HY3) emit PRIVATE tool-call markup on this
+            # no-tools path — the whole answer is markup, scored 0 while the
+            # run looks healthy (hy3/gaia: median response was pure
+            # "<tool_calls:...>" and B scored 0.099). Retry ONCE with an
+            # explicit no-tools instruction. Fires only when markup is
+            # detected, so well-behaved backbones never see the extra turn
+            # and their transcripts are bit-identical.
+            retry_msgs = [{"role": "system", "content":
+                           "No tools are available in this environment. Do not "
+                           "emit tool-call markup. Answer directly, reasoning "
+                           "in plain text, and end with the final answer."}] \
+                + [m for m in messages if m["role"] != "system"]
+            resp = (_openai_stream_create(client, {**req, "messages": retry_msgs})
+                    if OPENAI_FORCE_STREAM
+                    else client.chat.completions.create(**{**req, "messages": retry_msgs}))
+            _record_openai_usage(resp)
+            txt2 = _msg_text(resp.choices[0].message)
+            if txt2 and not _TOOL_LEAK_RE.search(txt2):
+                txt = txt2
+        return {"text": txt, "error": None}
     except Exception as e:
         return {"text": "", "error": str(e)[:200]}
+
+
+# ─── Unified critic routing (hardcoded HY3) ───────────────────────────────
+# The critic is ONE model, HY3, for every backbone and every framework baseline —
+# it is never the backbone itself. A self-critic inverts on weak backbones (the
+# false-endorsement failure: a model too weak to judge its own attempts approves
+# the wrong ones), and a per-backbone critic makes the sweep incomparable across
+# backbones and frameworks. So the model is hardcoded, not configurable to fall
+# back to the backbone. HY3 runs through its own API (HY3_BASE_URL/HY3_API_KEY),
+# or the CodeBuddy SDK if reachable there. Only the *endpoint* is configurable;
+# the model identity is fixed.
+CRITIC_MODEL = (os.environ.get("CRITIC_MODEL_ID") or "hy3").strip()
+CRITIC_BASE_URL = (os.environ.get("HY3_BASE_URL") or os.environ.get("CRITIC_BASE_URL") or "").strip() or None
+CRITIC_API_KEY = (os.environ.get("HY3_API_KEY") or os.environ.get("CRITIC_API_KEY") or "").strip() or None
+CRITIC_VIA_SDK = os.environ.get("CRITIC_VIA_SDK", "").strip().lower() in ("1", "true", "yes")
+
+
+# ─── Designated judge routing ────────────────────────────────────────────
+# The continuous endpoint's tie-breaker (llm_judge_answer) otherwise runs on
+# the backbone itself under LLM_PROVIDER=vllm: the model being evaluated is
+# also the model deciding whether its answer counts. Symmetric across arms, so
+# the paired contrast stays unbiased in expectation, but a judge that favours
+# responses echoing the injected content's style is a judge x treatment
+# interaction nobody can rule out — and a weak backbone judge is pure noise on
+# top. JUDGE_MODEL pins the tie-breaker to one fixed external model for every
+# arm and backbone. Unset = current behaviour, so nothing historical changes.
+JUDGE_MODEL = (os.environ.get("JUDGE_MODEL") or "").strip().lower() or None
+# Route the judge through the CodeBuddy SDK (model=JUDGE_MODEL) rather than an
+# OpenAI-compatible endpoint. This is how deepseek-v4-pro is reachable — it lives
+# behind the internal gateway, not an OpenAI URL. Default: use the SDK whenever a
+# judge is named but no JUDGE_BASE_URL/JUDGE_API_KEY is given AND the SDK is present.
+JUDGE_VIA_SDK = (os.environ.get("JUDGE_VIA_SDK", "").strip().lower() in ("1", "true", "yes")) or (
+    JUDGE_MODEL is not None
+    and not (os.environ.get("JUDGE_BASE_URL") or os.environ.get("JUDGE_API_KEY")))
+JUDGE_BASE_URL = (os.environ.get("JUDGE_BASE_URL") or "").strip() or None
+JUDGE_API_KEY = (os.environ.get("JUDGE_API_KEY") or "").strip() or None
+
+
+def judge_model_id() -> str:
+    """What actually judged this run's tie-breaks — recorded on every trace row
+    so runs judged by different models can never be silently pooled."""
+    return JUDGE_MODEL or _OPENAI_MODEL or MODEL
+
+
+def critic_model_id() -> str:
+    """The critic is always HY3 — recorded on every trace row so the field is a
+    constant the gate can assert on."""
+    return CRITIC_MODEL
+
+
+def llm_critic_fn(prompt: str) -> str:
+    """Synchronous LLM call for the CRITIC only (cross_agent_evaluate_skill and
+    critic_refine_experience). Always HY3 — never the backbone. If HY3's endpoint
+    is not configured we raise rather than silently grade with the backbone: a
+    self-critic is the failure this pins down, so falling back to it is worse than
+    failing loud."""
+    if not (CRITIC_VIA_SDK and _HAS_CODEBUDDY) and not (CRITIC_BASE_URL or CRITIC_API_KEY):
+        raise RuntimeError(
+            "critic (HY3) endpoint not configured: set HY3_BASE_URL/HY3_API_KEY "
+            "(or CRITIC_VIA_SDK=1). Refusing to fall back to the backbone as its "
+            "own critic. Until HY3's API is wired, run with DEFER_CRITIC=1 (A/B only).")
+    if CRITIC_VIA_SDK and _HAS_CODEBUDDY:
+        # Same SDK path as the judge, model pinned to the critic. Sync wrapper:
+        # the critic is called from synchronous curation code, so drive the
+        # async one-shot to completion on a private loop.
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_sdk_judge_call(prompt, CRITIC_MODEL, timeout=90))
+        finally:
+            _shutdown_loop(loop)
+    return _openai_notool_sync("", prompt, timeout=90, model=CRITIC_MODEL,
+                               base_url=CRITIC_BASE_URL,
+                               api_key=CRITIC_API_KEY).get("text", "")
+
+
+# ─── Metadata authorship (who writes the curated layer's narratives) ───────
+# The store's narrative metadata (causal_lesson, avoidance_note, generalized_
+# steps, ...) was historically written by ai_review_experience running on the
+# BACKBONE — the workload writing its own catalog. On a weak backbone those
+# self-authored narratives are exactly the poisoned channel behind the C−B
+# inversion. METADATA_AUTHOR moves the pen:
+#   critic   (default) — the fixed external critic (HY3) authors the narratives,
+#              so metadata quality is a constant across backbones and a
+#              difference in ΔC−B can no longer come from who wrote the store.
+#              Fail-loud like the critic itself: no HY3 endpoint → raise, never
+#              silently fall back to the backbone.
+#   backbone — legacy behaviour, kept as the comparison arm. The testable
+#              prediction: under "critic" the ΔC−B inversion on weak backbones
+#              disappears; under "backbone" it reproduces.
+# Recorded in protocol_hash (mechanism change → new arm, old C rows not
+# poolable) and on every trace row / Experience (meta_author).
+METADATA_AUTHOR = (os.environ.get("METADATA_AUTHOR") or "critic").strip().lower()
+if METADATA_AUTHOR not in ("critic", "backbone"):
+    raise RuntimeError(f"METADATA_AUTHOR must be 'critic' or 'backbone', got {METADATA_AUTHOR!r}")
+
+
+def metadata_author_id() -> str:
+    """Who authors the curated layer's narrative metadata — constant per run,
+    stamped on trace rows and Experiences so arms with different authorship can
+    never be silently pooled."""
+    return METADATA_AUTHOR
+
+
+def llm_metadata_fn(prompt: str) -> str:
+    """The reviewer pen for ai_review_experience: HY3 under METADATA_AUTHOR=
+    critic (fail-loud if unconfigured), the backbone under =backbone."""
+    if METADATA_AUTHOR == "critic":
+        return llm_critic_fn(prompt)
+    return llm_review_fn(prompt)
 
 
 def _openai_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
@@ -213,7 +457,9 @@ def openai_tool_chat(messages: list, tools: list | None,
         if tools:
             req["tools"] = tools
             req["tool_choice"] = "auto"
-        resp = _openai_client(timeout).chat.completions.create(**req)
+        client = _openai_client(timeout)
+        resp = (_openai_stream_create(client, req) if OPENAI_FORCE_STREAM
+                else client.chat.completions.create(**req))
         _record_openai_usage(resp)
         msg = resp.choices[0].message
         assistant = {"role": "assistant", "content": _msg_text(msg)}
@@ -654,6 +900,47 @@ async def llm_extract_answer(response: str, question: str) -> str:
     return out or response
 
 
+async def _sdk_judge_call(prompt: str, judge_model: str, timeout: int = 30) -> str:
+    """One-shot CodeBuddy-SDK call whose model is the JUDGE, not the backbone.
+
+    The judge must be independent of the backbone under evaluation (a model that
+    grades whether its own answer counts is the confound G8 exists to stop). It
+    is a scoring call, so no tools: max_turns=1, empty system prompt.
+    """
+    if not _HAS_CODEBUDDY:
+        return ""
+    _prof_add_tokens(0, 0, calls=1)
+
+    async def _drive():
+        opt = CodeBuddyAgentOptions(
+            permission_mode="bypassPermissions", model=judge_model, max_turns=1, cwd="/tmp")
+        text = ""
+        gen = query(prompt=prompt, options=opt)
+        try:
+            async for msg in gen:
+                _record_usage(msg)
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if hasattr(block, "text") and block.text:
+                            text += block.text
+                    if text:
+                        break
+        finally:
+            try:
+                await gen.aclose()
+            except Exception:
+                pass
+        return text
+
+    # asyncio.timeout is 3.11+; this pipeline runs on 3.10, where it raised
+    # AttributeError that the old bare except swallowed — so the judge returned
+    # "" and every score collapsed to 0. wait_for is the 3.10-safe equivalent.
+    try:
+        return await asyncio.wait_for(_drive(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return ""
+
+
 async def llm_judge_answer(response: str, expected: str, question: str) -> float:
     if not response or not expected:
         return 0.0
@@ -663,7 +950,15 @@ async def llm_judge_answer(response: str, expected: str, question: str) -> float
         f"Model response: {response}\n\n"
         "Score (0.0=wrong, 0.5=partially, 1.0=fully correct). Output ONLY a number:"
     )
-    out = await _llm_short_call(prompt, max_turns=1, timeout=30)
+    if JUDGE_MODEL is not None and JUDGE_VIA_SDK and _HAS_CODEBUDDY:
+        out = (await _sdk_judge_call(prompt, JUDGE_MODEL, timeout=30)).strip()
+    elif JUDGE_MODEL is not None:
+        r = await asyncio.to_thread(
+            _openai_notool_sync, "", prompt, 30,
+            JUDGE_MODEL, JUDGE_BASE_URL, JUDGE_API_KEY)
+        out = (r.get("text") or "").strip()
+    else:
+        out = await _llm_short_call(prompt, max_turns=1, timeout=30)
     m = re.search(r'(\d+\.?\d*)', out)
     if m:
         try:

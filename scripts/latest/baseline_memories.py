@@ -49,6 +49,45 @@ def _ns(benchmark: str, task: dict) -> str:
     return f"{benchmark}:{_chain_id(task)}"
 
 
+def _install_nothink_patch() -> None:
+    """Make third-party memory libraries usable against a reasoning endpoint.
+
+    mem0 2.x and A-Mem build their own OpenAI clients and DROP unknown config
+    fields, so `reasoning_effort` cannot be passed through configuration. On
+    HY3/taiji that leaves `content` empty (the answer goes to the reasoning
+    stream): mem0's fact extraction returns nothing and A-Mem's controller
+    raises `cannot access local variable 'response'`. Patch the SDK call site
+    once so every request for a reasoning model carries the off-switch. Only
+    the task-solving backbone identity matters for fairness; this changes how
+    the endpoint is *called*, not which model answers.
+    """
+    if os.environ.get("BASELINE_NOTHINK", "1") != "1":
+        return
+    effort = os.environ.get("OPENAI_REASONING_EFFORT", "no_think")
+    models = tuple(m for m in os.environ.get(
+        "NOTHINK_MODELS", "hy3").lower().split(",") if m)
+    try:
+        from openai.resources.chat import completions as _c
+    except Exception:
+        return
+    if getattr(_c.Completions.create, "_nothink", False):
+        return
+    _orig = _c.Completions.create
+
+    def create(self, *a, **kw):
+        m = str(kw.get("model", "")).lower()
+        if any(t in m for t in models) and "reasoning_effort" not in kw:
+            kw["reasoning_effort"] = effort
+        return _orig(self, *a, **kw)
+
+    create._nothink = True
+    _c.Completions.create = create
+    print(f"[baseline] no_think patch installed for {models}", flush=True)
+
+
+_install_nothink_patch()
+
+
 def _log_version(name: str, module) -> None:
     """Print AND persist the baseline module's version — the paper pins
     versions in the appendix, and this file is where those pins come from
@@ -64,13 +103,25 @@ def _log_version(name: str, module) -> None:
 
 
 class Mem0Memory:
-    """Mem0 (mem0.ai OSS) as a baseline arm, using ITS OWN add/search."""
+    """Mem0 (mem0.ai OSS) as a baseline arm, using ITS OWN add/search.
+
+    Picklable by design: tau2 runs the agent in a subprocess that receives the
+    memory as a pickle (TAU2_MEM_STATE), so the live clients (qdrant holds a
+    file lock; the OpenAI client holds sockets) are built lazily on first use
+    and dropped from __getstate__. release() frees the on-disk qdrant lock so
+    the bridge process and the tau2 subprocess can take turns on one store.
+    """
+
+    # Local (embedded) qdrant is not safe under concurrent access from multiple
+    # threads of one client, and tau2 runs sims concurrently — serialize all
+    # store I/O. Class-level: locks are unpicklable, instances must not own one.
+    _IO_LOCK = __import__("threading").Lock()
 
     def __init__(self, benchmark: str, top_k: int = 3) -> None:
         self.benchmark = benchmark
         self.top_k = top_k
         try:
-            from mem0 import Memory
+            from mem0 import Memory  # noqa: F401 — fail fast before a sweep launches
         except ImportError as e:
             raise SystemExit(
                 "[baseline:mem0] pip install mem0ai (and ensure the OAI proxy "
@@ -79,10 +130,26 @@ class Mem0Memory:
         base = os.environ.get("OPENAI_API_BASE", "http://localhost:8741/v1")
         key = os.environ.get("OPENAI_API_KEY", "dummy")
         model = os.environ.get("CODEBUDDY_MODEL", "hy3").lower()
+        # Reasoning-model endpoints (HY3/taiji) hang mem0's internal
+        # fact-extraction LLM (it can't parse the reasoning stream). Pass the
+        # endpoint's off-switch through mem0's openai config so its own LLM
+        # calls behave as plain chat.
+        # mem0's INTERNAL fact-extraction LLM. It must be a plain completion
+        # model: mem0 2.x ignores reasoning_effort, so a reasoning endpoint
+        # (HY3/taiji) hangs it in a retry storm. Default to the same standard
+        # model used for curation (grok via MEM_INTERNAL_*/CRITIC_*), which is
+        # how mem0/A-Mem are designed to run (their papers use gpt-4o-class
+        # internals). Only the task-solving BACKBONE is held fixed across arms.
+        _int_base = (os.environ.get("MEM_INTERNAL_BASE")
+                     or os.environ.get("CRITIC_BASE_URL") or base)
+        _int_key = (os.environ.get("MEM_INTERNAL_KEY")
+                    or os.environ.get("CRITIC_API_KEY") or key)
+        _int_model = (os.environ.get("MEM_INTERNAL_MODEL")
+                      or os.environ.get("CRITIC_MODEL_ID") or model)
+        _llm_cfg = {"model": _int_model, "api_key": _int_key,
+                    "openai_base_url": _int_base}
         cfg = {
-            "llm": {"provider": "openai",
-                    "config": {"model": model, "api_key": key,
-                               "openai_base_url": base}},
+            "llm": {"provider": "openai", "config": _llm_cfg},
             # LOCAL embedder by default: the chat proxy does not serve
             # /embeddings, and this matches the embedding stack the B/C arms
             # use, so no arm gets a better encoder.
@@ -90,27 +157,76 @@ class Mem0Memory:
                          "config": {"model": os.environ.get(
                              "MEM0_EMBED_MODEL",
                              "sentence-transformers/all-MiniLM-L6-v2")}},
+            # embedding_model_dims MUST match the local embedder (all-MiniLM-L6-v2
+            # is 384). Without it mem0 builds the qdrant collection at its OpenAI
+            # default (1536) and every add fails "shapes (0,1536) and (384,)".
+            # Path is per-BENCHMARK: local qdrant file-locks its directory, and
+            # two benchmarks (or the tau2 bridge + its subprocess) each holding a
+            # client on one shared path would deadlock on that lock.
             "vector_store": {"provider": "qdrant",
-                             "config": {"path": str(_STORE_ROOT / "mem0"),
-                                        "on_disk": True}},
+                             "config": {"path": str(_STORE_ROOT / f"mem0_{benchmark}"),
+                                        "on_disk": True,
+                                        "embedding_model_dims": int(
+                                            os.environ.get("MEM0_EMBED_DIMS", "384"))}},
         }
         override = os.environ.get("MEM0_CONFIG_JSON")
         if override:
             import json
             cfg = json.loads(override)
-        self._m = Memory.from_config(cfg)
-        try:
-            import mem0 as _m0
-            _log_version("mem0ai", _m0)
-        except Exception:
-            pass
+        self._cfg = cfg
+        self._m = None                      # built lazily (see _mem)
         self._add_failures = 0
+
+    def _mem(self):
+        # Build under the SAME lock that serializes reads/writes: concurrent
+        # first-touch from two workers raced to open the local qdrant dir
+        # ("Storage folder ... already accessed by another instance"), the
+        # loser's add() failed forever, and the arm silently degraded to
+        # no-memory (hy3 sweep: 1089 failed adds, injection rate 0-7/200).
+        if self._m is None:
+            with self._IO_LOCK:
+                if self._m is None:
+                    from mem0 import Memory
+                    self._m = Memory.from_config(self._cfg)
+                    try:
+                        import mem0 as _m0
+                        _log_version("mem0ai", _m0)
+                    except Exception:
+                        pass
+        return self._m
+
+    def release(self) -> None:
+        """Drop the live clients (frees the local-qdrant file lock) so another
+        process — the tau2 subprocess, or the bridge after it — can open the
+        same on-disk store. State lives on disk; nothing is lost."""
+        m, self._m = self._m, None
+        if m is not None:
+            try:
+                m.vector_store.client.close()   # qdrant releases the lock now,
+            except Exception:                   # not at some later GC
+                pass
+
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        d["_m"] = None                      # clients never cross a pickle
+        return d
 
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
         try:
-            hits = self._m.search(query, user_id=_ns(self.benchmark, task),
-                                  limit=self.top_k)
+            # Build OUTSIDE the lock: _mem() takes _IO_LOCK itself, and
+            # threading.Lock is non-reentrant, so `with lock: self._mem()`
+            # self-deadlocks on the first (lazy-build) call — which is exactly
+            # every arm's first inject. Resolve the client first, then hold the
+            # lock only for the search.
+            m = self._mem()
+            # mem0 >=2.x moved entity identity out of top-level kwargs: search()
+            # takes filters={"user_id": ...}, not user_id=... (add() still takes
+            # the top-level kwarg).
+            with self._IO_LOCK:
+                hits = m.search(query,
+                                filters={"user_id": _ns(self.benchmark, task)},
+                                limit=self.top_k)
         except Exception as e:
             print(f"[baseline:mem0] search failed: {e}", flush=True)
             return ""
@@ -128,12 +244,17 @@ class Mem0Memory:
             return
         try:
             # mem0.add runs its own LLM extraction — blocking; keep it off
-            # the event loop or it throttles every concurrent task.
-            await asyncio.to_thread(
-                self._m.add,
-                [{"role": "user", "content": task.get("description", "")[:4000]},
-                 {"role": "assistant", "content": resp[:4000]}],
-                user_id=_ns(self.benchmark, task))
+            # the event loop or it throttles every concurrent task. Build the
+            # client BEFORE taking the lock (non-reentrant _IO_LOCK, same
+            # deadlock as inject).
+            def _add():
+                m = self._mem()
+                with self._IO_LOCK:
+                    m.add(
+                        [{"role": "user", "content": task.get("description", "")[:4000]},
+                         {"role": "assistant", "content": resp[:4000]}],
+                        user_id=_ns(self.benchmark, task))
+            await asyncio.to_thread(_add)
         except Exception as e:
             self._add_failures += 1
             if self._add_failures <= 3 or self._add_failures % 50 == 0:
@@ -151,29 +272,7 @@ class AMemMemory:
     def __init__(self, benchmark: str, top_k: int = 3) -> None:
         self.benchmark = benchmark
         self.top_k = top_k
-        amem_path = os.environ.get("AMEM_PATH")
-        if amem_path:
-            import sys
-            sys.path.insert(0, amem_path)
-        try:
-            from agentic_memory.memory_system import AgenticMemorySystem
-        except ImportError:
-            try:
-                from memory_system import AgenticMemorySystem  # repo root layout
-            except ImportError as e:
-                raise SystemExit(
-                    "[baseline:amem] A-Mem module not importable — pip install "
-                    "-e the WujiangXu/AgenticMemory repo or set AMEM_PATH: "
-                    f"{e}")
-        model = os.environ.get("CODEBUDDY_MODEL", "hy3").lower()
-        # A-Mem's ctor signature varies across revisions; try the documented
-        # form first, degrade to defaults rather than guessing kwargs.
-        try:
-            self._sys = AgenticMemorySystem(
-                model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                llm_backend="openai", llm_model=model)
-        except TypeError:
-            self._sys = AgenticMemorySystem()
+        self._sys = self._build_sys()
         try:
             import agentic_memory as _am
             _log_version("agentic-memory", _am)
@@ -182,27 +281,140 @@ class AMemMemory:
                   "appendix)", flush=True)
         self._per_chain: dict[str, list[str]] = {}
 
+    @staticmethod
+    def _build_sys():
+        amem_path = os.environ.get("AMEM_PATH")
+        if amem_path:
+            import sys
+            if amem_path not in sys.path:
+                sys.path.insert(0, amem_path)
+        try:
+            from agentic_memory.memory_system import AgenticMemorySystem
+        except ImportError:
+            try:
+                from memory_system import AgenticMemorySystem  # repo root layout
+            except ImportError:
+                try:
+                    # 2025-07 WujiangXu/AgenticMemory layout: the class lives
+                    # in memory_layer.py at the repo root.
+                    from memory_layer import AgenticMemorySystem
+                except ImportError as e:
+                    raise SystemExit(
+                        "[baseline:amem] A-Mem module not importable — pip install "
+                        "-e the WujiangXu/AgenticMemory repo or set AMEM_PATH: "
+                        f"{e}")
+        # A-Mem's INTERNAL note-construction LLM: same standard-model rule as
+        # mem0 (a reasoning endpoint hangs it). Default to grok via
+        # MEM_INTERNAL_*/CRITIC_*; the task-solving backbone stays fixed.
+        _int_model = (os.environ.get("MEM_INTERNAL_MODEL")
+                      or os.environ.get("CRITIC_MODEL_ID")
+                      or os.environ.get("CODEBUDDY_MODEL", "hy3")).lower()
+        _int_key = (os.environ.get("MEM_INTERNAL_KEY")
+                    or os.environ.get("CRITIC_API_KEY")
+                    or os.environ.get("OPENAI_API_KEY"))
+        _int_base = (os.environ.get("MEM_INTERNAL_BASE")
+                     or os.environ.get("CRITIC_BASE_URL")
+                     or os.environ.get("OPENAI_API_BASE"))
+        # A-Mem's OpenAIController takes ONLY api_key — it constructs
+        # OpenAI(api_key=...) with no base_url, so any api_base we pass is
+        # dropped and it dials api.openai.com, fails, and leaves `response`
+        # unbound ("cannot access local variable 'response'"). The SDK reads
+        # OPENAI_BASE_URL from the environment, so set it here to point the
+        # library's own client at our endpoint.
+        if _int_base:
+            os.environ.setdefault("OPENAI_BASE_URL", _int_base)
+        if _int_key:
+            os.environ.setdefault("OPENAI_API_KEY", _int_key)
+        # A-Mem's ctor signature varies across revisions; try the documented
+        # form first, degrade to defaults rather than guessing kwargs.
+        try:
+            return AgenticMemorySystem(
+                model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
+                llm_backend="openai", llm_model=_int_model,
+                api_key=_int_key, api_base=_int_base)
+        except TypeError:
+            try:
+                return AgenticMemorySystem(
+                    model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
+                    llm_backend="openai", llm_model=_int_model)
+            except TypeError:
+                return AgenticMemorySystem()
+
+    # ── pickle support (tau2 bridge hands the store between processes) ──
+    # The live system holds a SentenceTransformer + an LLM client (both
+    # unpicklable). Dehydrate to the raw MemoryNote fields; rehydrate lazily
+    # by rebuilding the system, re-inserting the notes with ALL fields set
+    # (skips A-Mem's LLM analysis) and one consolidate_memories() pass
+    # (local re-embedding only — zero LLM calls).
+    _NOTE_FIELDS = ("content", "id", "keywords", "links", "importance_score",
+                    "retrieval_count", "timestamp", "last_accessed", "context",
+                    "evolution_history", "category", "tags")
+
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        sys_ = d.pop("_sys", None)
+        notes = []
+        for n in (getattr(sys_, "memories", {}) or {}).values():
+            notes.append({f: getattr(n, f, None) for f in self._NOTE_FIELDS})
+        d["_dehydrated_notes"] = notes
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        self._sys = None            # rebuilt lazily by _system()
+
+    def _system(self):
+        if getattr(self, "_sys", None) is None:
+            self._sys = self._build_sys()
+            notes = getattr(self, "_dehydrated_notes", None) or []
+            if notes:
+                try:
+                    from memory_layer import MemoryNote
+                except ImportError:
+                    MemoryNote = None
+                for f in notes:
+                    try:
+                        if MemoryNote is None:
+                            break
+                        kw = {k: v for k, v in f.items() if v is not None}
+                        n = MemoryNote(**kw)   # all fields given -> no LLM
+                        self._sys.memories[n.id] = n
+                    except Exception:
+                        pass
+                try:
+                    self._sys.consolidate_memories()
+                except Exception:
+                    pass
+                self._dehydrated_notes = []
+        return self._sys
+
     def inject(self, task: dict) -> str:
         query = task.get("description", "")[:2000]
         ns = _ns(self.benchmark, task)
         try:
-            hits = self._sys.search_agentic(query, k=self.top_k * 4) \
-                if hasattr(self._sys, "search_agentic") \
-                else self._sys.search(query, k=self.top_k * 4)
+            _sys = self._system()
         except Exception as e:
-            print(f"[baseline:amem] search failed: {e}", flush=True)
+            print(f"[baseline:amem] system unavailable: {e}", flush=True)
             return ""
+        mems = getattr(_sys, "memories", {}) or {}
+        chain_ids = self._per_chain.get(ns, [])
+        # Chain scoping (same discipline as B/C): serve THIS chain's own A-Mem
+        # notes. A-Mem still authored each note (keyword/context/link/evolution
+        # generation ran at record time); retrieval here is chain-local, so the
+        # comparison to B/C is on note QUALITY, not on a different candidate set.
+        # Fall back to global embedding retrieval only when the chain is empty.
+        notes = [mems[i] for i in chain_ids if i in mems]
+        if not notes and mems:
+            try:
+                idx = _sys.retriever.search(query, self.top_k * 4)
+                allm = list(mems.values())
+                notes = [allm[int(i)] for i in (idx or [])
+                         if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
+            except Exception:
+                notes = []
         lines = []
-        chain_ids = set(self._per_chain.get(ns, []))
-        for h in hits or []:
-            hid = h.get("id") if isinstance(h, dict) else None
-            text = (h.get("content") or h.get("context") or "") \
-                if isinstance(h, dict) else str(h)
-            # chain scoping: A-Mem's store is global; keep the protocol equal
-            # to B/C by serving only this chain's notes.
-            if chain_ids and hid is not None and hid not in chain_ids:
-                continue
-            text = text.strip()
+        for n in notes[-self.top_k:][::-1]:      # most recent first
+            text = (getattr(n, "content", "") or "").strip()
             if text:
                 lines.append(f"- {text[:400]}")
             if len(lines) >= self.top_k:
@@ -219,8 +431,9 @@ class AMemMemory:
         try:
             note = (f"Task: {task.get('description', '')[:1500]}\n"
                     f"Attempt: {resp[:2500]}")
-            _fn = self._sys.add_note if hasattr(self._sys, "add_note") \
-                else self._sys.create_memory
+            _sys = self._system()
+            _fn = _sys.add_note if hasattr(_sys, "add_note") \
+                else _sys.create_memory
             nid = await asyncio.to_thread(_fn, note)   # LLM link-gen inside
             self._per_chain.setdefault(ns, []).append(nid)
         except Exception as e:

@@ -342,28 +342,39 @@ def _mode_for_config(config: str) -> str:
 def extract_oracle_actions(oracle_events: list[dict]) -> list[NormalizedAction]:
     """Extract and normalize oracle write actions from oracle_events.json data."""
     actions: list[NormalizedAction] = []
-    for index, action in enumerate(oracle_events):
-        if not isinstance(action, dict):
+    for index, event in enumerate(oracle_events):
+        if not isinstance(event, dict):
             continue
+        # oracle_events.json stores each event as {event_type, event_id,
+        # dependencies, action:{app,function,args}, ...} — the app/function are
+        # NESTED under "action", and only event_type AGENT events are the agent's
+        # expected write-actions. Reading app/function at the top level (the old
+        # code) always yielded None, so extract_oracle_actions returned [], the
+        # count gate compared agent-N vs oracle-0, and EVERY action-mode task
+        # scored 0. Support the nested layout and a flat one for older callers.
+        if event.get("event_type") not in (None, "AGENT", "agent"):
+            continue
+        act = event.get("action") if isinstance(event.get("action"), dict) else event
         canonical_tool = _canonicalize_tool_name(
-            tool_name=action.get("tool"),
-            app_name=action.get("app"),
-            function_name=action.get("function"),
+            tool_name=act.get("tool") or event.get("tool"),
+            app_name=act.get("app"),
+            function_name=act.get("function"),
         )
         if canonical_tool not in CANONICAL_WRITE_TOOLS:
             continue
         parent_event_ids = tuple(
-            str(item) for item in action.get("parent_event_ids", []) or []
+            str(item) for item in
+            (event.get("parent_event_ids") or event.get("dependencies") or []) or []
         )
         actions.append(
             NormalizedAction(
                 canonical_tool=canonical_tool,
-                original_tool=str(action.get("function") or action.get("tool") or ""),
-                args=_normalize_action_args(action.get("args")),
+                original_tool=str(act.get("function") or act.get("tool") or ""),
+                args=_normalize_action_args(act.get("args")),
                 index=index,
-                sim_time=action.get("event_time"),
-                event_id=str(action.get("event_id"))
-                if action.get("event_id") is not None
+                sim_time=event.get("event_time"),
+                event_id=str(event.get("event_id"))
+                if event.get("event_id") is not None
                 else None,
                 parent_event_ids=parent_event_ids,
             )
@@ -376,6 +387,15 @@ def extract_agent_actions(event_log: list[dict]) -> list[NormalizedAction]:
     actions: list[NormalizedAction] = []
     for index, event in enumerate(event_log):
         if not isinstance(event, dict):
+            continue
+        # Skip calls that errored (type mismatch, wrong args, unknown tool): they
+        # did not mutate state, so counting them as write-actions inflates the
+        # count and trips the count gate (reward=0). ok is set by ARESession's
+        # _log_event; fall back to inspecting the result for older logs.
+        if event.get("ok") is False:
+            continue
+        res = event.get("result")
+        if event.get("ok") is None and isinstance(res, dict) and res.get("error"):
             continue
         canonical_tool = _canonicalize_tool_name(tool_name=event.get("tool"))
         if canonical_tool not in CANONICAL_WRITE_TOOLS:

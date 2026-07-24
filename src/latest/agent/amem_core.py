@@ -52,6 +52,17 @@ def get_embedding_model(model_name: str = "all-MiniLM-L6-v2") -> SentenceTransfo
 from transformers import AutoModel, AutoTokenizer
 from nltk.tokenize import word_tokenize
 import pickle
+
+try:  # crash-safe store writes; see scripts/latest/atomic_io
+    from scripts.latest.atomic_io import atomic_pickle_dump as _atomic_pickle_dump
+except Exception:
+    def _atomic_pickle_dump(obj, path, protocol=None):
+        import os as _os
+        _tmp = f"{path}.tmp.{_os.getpid()}"
+        with open(_tmp, "wb") as _f:
+            pickle.dump(obj, _f, protocol or pickle.HIGHEST_PROTOCOL)
+            _f.flush(); _os.fsync(_f.fileno())
+        _os.replace(_tmp, path)
 from pathlib import Path
 from litellm import completion
 import requests
@@ -627,9 +638,8 @@ class HybridRetriever:
         except (AttributeError, KeyError):
             pass
             
-        with open(retriever_cache_file, 'wb') as f:
-            pickle.dump(state, f)
-            
+        _atomic_pickle_dump(state, retriever_cache_file)
+
     @classmethod
     def load(cls, retriever_cache_file: str, retriever_cache_embeddings_file: str):
         """Load retriever state from disk"""
@@ -807,9 +817,8 @@ class SimpleEmbeddingRetriever:
             'corpus': self.corpus,
             'document_ids': self.document_ids
         }
-        with open(retriever_cache_file, 'wb') as f:
-            pickle.dump(state, f)
-    
+        _atomic_pickle_dump(state, retriever_cache_file)
+
     def load(self, retriever_cache_file: str, retriever_cache_embeddings_file: str):
         """Load retriever state from disk"""
         print(f"Loading retriever from {retriever_cache_file} and {retriever_cache_embeddings_file}")

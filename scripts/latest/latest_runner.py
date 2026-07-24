@@ -151,6 +151,94 @@ RESUME = os.environ.get("RESUME", "0") == "1"
 # Arm selection (used by the ablation driver): run only these arms of A/B/C.
 # Default runs all three — the main sweep is unchanged.
 _ARMS = set(os.environ.get("ARMS", "A,B,C").replace(" ", "").split(","))
+# Arm C's critic. Unset => the critic IS the backbone (self-curation), which is
+# what every result before 2026-07-15 used. CRITIC_MODEL=<id> points it at a
+# designated model and routes ONLY critic calls there.
+try:
+    from scripts.latest.llm_client import critic_model_id as _critic_model_id
+    from scripts.latest.llm_client import judge_model_id as _judge_model_id
+    from scripts.latest.llm_client import metadata_author_id as _metadata_author_id
+    _CRITIC_MODEL = _critic_model_id()
+    _JUDGE_MODEL = _judge_model_id()
+    _METADATA_AUTHOR = _metadata_author_id()
+except Exception:
+    _CRITIC_MODEL = os.environ.get("CRITIC_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
+    _JUDGE_MODEL = os.environ.get("JUDGE_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
+    _METADATA_AUTHOR = os.environ.get("METADATA_AUTHOR", "critic")
+# Which curation policy arm C ran: judgment (critic score + self-assessment) or
+# metadata (measured w_c + version lineage). Different methods, never poolable.
+_C_META = os.environ.get("C_META", "0") == "1"
+_C_POLICY = (os.environ.get("C_POLICY")
+             or ("meta" if _C_META else "judgment")).strip().lower()
+if _C_POLICY not in ("judgment", "meta", "guarded"):
+    _C_POLICY = "judgment"
+# Where a chain's feedback score comes from, and therefore whether everything
+# built on it (e.score, the ✓ gate, w_c) is grounded or asserted. "gold"/"env"
+# read the benchmark's own scorer; "self" asks the backbone to grade itself.
+_PROTOCOL_CACHE: dict = {}
+
+
+def _protocol_dict() -> dict:
+    """Every knob that decides whether two rows are the same experiment.
+
+    Lazy: read when first needed, so it does not depend on definition order.
+    A knob belongs here if it changes what a row MEANS. RESULTS_BASE and RESUME
+    do not — they change where a row lands, and a resumed run must not read as a
+    different protocol.
+    """
+    return {
+        "code_rev": _CODE_REV,
+        "c_policy": _C_POLICY,
+        "critic_model": _CRITIC_MODEL,
+        "judge_model": _JUDGE_MODEL,
+        "metadata_author": _METADATA_AUTHOR,
+        "score_provenance": _SCORE_PROVENANCE,
+        "iter_chain": ITER_CHAIN,
+        "iter_mutate": int(ITER_MUTATE),
+        "iter_feedback": os.environ.get("ITER_FEEDBACK", "gold"),
+        "temperature": os.environ.get("GEN_TEMPERATURE", "(server default)"),
+        "task_limit": os.environ.get("TASK_LIMIT", "100"),
+        "c_inject_budget_ch": os.environ.get("C_INJECT_BUDGET_CH", "900"),
+        "c_critic_gate": os.environ.get("C_CRITIC_GATE", "5"),
+        "c_endorse_demote_k": os.environ.get("C_ENDORSE_DEMOTE_K", "2"),
+        "c_repair_mode": os.environ.get("C_REPAIR_MODE", "0"),
+        "c_repair_thresh": os.environ.get("C_REPAIR_THRESH", "0.6"),
+        "c_repair_gate": os.environ.get("C_REPAIR_GATE", "stability"),
+        "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
+        "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
+        "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),
+        "c_no_partition": os.environ.get("C_NO_PARTITION", "0"),
+        "w_c_disabled": os.environ.get("W_C_DISABLED", "0"),
+        "reprompt_control": os.environ.get("REPROMPT_CONTROL", "0"),
+        "passk": os.environ.get("PASSK", "0"),
+        "external_mems": os.environ.get("EXTERNAL_MEMS", "(none)"),
+    }
+
+
+def _protocol_hash() -> str:
+    """One field standing for the whole configuration.
+
+    Each knob so far got its own gate (G4 code_rev, G5 critic, G6 policy, G7
+    provenance, G8 judge) — five hand-written checks doing one thing: this field
+    must be constant within an arm or the rows are not one experiment. That does
+    not scale, and it already leaked: GEN_TEMPERATURE has no gate at all, so
+    nothing stops greedy rows from being pooled with sampled ones, which is the
+    exact confound the pre-registration warns about. The hash covers every knob
+    at once, including the ones nobody remembered to gate, and every knob added
+    later for free. It says "different", not "how different" — protocol.json next
+    to the trace decodes it.
+    """
+    if "h" not in _PROTOCOL_CACHE:
+        import hashlib
+        d = _protocol_dict()
+        _PROTOCOL_CACHE["d"] = d
+        _PROTOCOL_CACHE["h"] = hashlib.sha256(
+            json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:12]
+    return _PROTOCOL_CACHE["h"]
+
+
+_SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
+                     else os.environ.get("ITER_FEEDBACK", "gold"))
 
 _TRANSIENT_MARKERS = (
     "429", "rate_limit", "rate-limit", "timeout", "quota", "quota_exceeded",
@@ -675,6 +763,18 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     os.makedirs(f"{RESULTS_DIR}/{benchmark}", exist_ok=True)
 
     trace_path = Path(RESULTS_DIR) / benchmark / "trace.jsonl"
+    # Sidecar decoding this run's protocol_hash back to the knobs behind it. The
+    # hash on each row proves rows belong to one experiment; this says WHICH.
+    # Written next to the trace on ceph because the launch banner lives in a log
+    # that dies with the container.
+    try:
+        _pp = trace_path.parent / "protocol.json"
+        _pp.parent.mkdir(parents=True, exist_ok=True)
+        _all = json.loads(_pp.read_text()) if _pp.exists() else {}
+        _all[_protocol_hash()] = _PROTOCOL_CACHE.get("d", {})
+        _pp.write_text(json.dumps(_all, indent=2, sort_keys=True, default=str))
+    except Exception as _e:
+        print(f"  [protocol] sidecar write failed (non-fatal): {_e}", flush=True)
     done_map: dict = {}
     if trace_path.exists():
         # A chain run (ITER_CHAIN>1) must not resume from a stale single-pass trace:
@@ -832,6 +932,14 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "level": str(_meta.get("level") or _meta.get("difficulty") or ""),
                                   "patch_injected": bool(aug),
                                   "aug_len": len(aug or ""),
+                                  # w_c of the served entries. get_experience_weight
+                                  # cold-starts at 1.0 until an entry has >=2 measured
+                                  # deltas and a 3-iteration chain gives at most 2, so
+                                  # wc_active==0 here means the paper's
+                                  # effectiveness-weighted retrieval never actually
+                                  # fired and C was ranking on similarity alone.
+                                  **({k: v for k, v in (r.get("_wc") or {}).items()}
+                                     if isinstance(r.get("_wc"), dict) else {}),
                                   # iteration index along the chain + chain length,
                                   # for chain-level (all-iterations-correct) accuracy.
                                   "iteration": _it,
@@ -839,6 +947,20 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "mutated": bool(ITER_MUTATE and _it >= 1 and cur_task is not task),
                                   "fb_score": fb, "fb_mode": ITER_FEEDBACK,
                                   "code_rev": _CODE_REV,
+                                  # Who judged arm C's entries. Self-curation
+                                  # (critic == backbone) and cross-curation
+                                  # (designated stronger critic) are different
+                                  # method configs and must never be pooled as
+                                  # one: on GAIA the false-endorsement rate runs
+                                  # 36% for DeepSeek-v4-pro vs 90% for
+                                  # Llama-3.3-70B, and C-B flips sign with it.
+                                  "critic_model": _CRITIC_MODEL,
+                                  "metadata_author": _METADATA_AUTHOR,
+                                  "c_meta": _C_META,
+                                  "c_policy": _C_POLICY,
+                                  "score_provenance": _SCORE_PROVENANCE,
+                                  "judge_model": _JUDGE_MODEL,
+                                  "protocol_hash": _protocol_hash(),
                                   # TB2 loop visibility: how far the agent loop
                                   # got and why it ended — distinguishes "agent
                                   # flailed" from "agent never engaged".
@@ -881,8 +1003,17 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "sample_idx": _s,
                                    "patch_injected": bool(_rs.get("_aug_prompt")),
                                    "aug_len": len(_rs.get("_aug_prompt") or ""),
+                                   **({k: v for k, v in (_rs.get("_wc") or {}).items()}
+                                      if isinstance(_rs.get("_wc"), dict) else {}),
                                    "fb_mode": ITER_FEEDBACK,
-                                   "code_rev": _CODE_REV})
+                                   "code_rev": _CODE_REV,
+                                   "critic_model": _CRITIC_MODEL,
+                                   "metadata_author": _METADATA_AUTHOR,
+                                   "c_meta": _C_META,
+                                   "c_policy": _C_POLICY,
+                                   "score_provenance": _SCORE_PROVENANCE,
+                                   "judge_model": _JUDGE_MODEL,
+                                   "protocol_hash": _protocol_hash()})
                 last_r, last_ev = r, ev
             r, ev = last_r, last_ev
             tag = r.get("task_id", str(i))
@@ -913,6 +1044,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     # B and C each keep their own cross-task memory; A keeps none.
     mem_b = BenchmarkMemory(benchmark, "B") if "B" in _ARMS else None
     mem_c = CuratedMemory(benchmark) if "C" in _ARMS else None
+    # C's curation-time statistics reference the chain's OWN iteration-0
+    # attempt (memory-free, same run window) — no other arm is read.
 
     # Equal-budget control (ablation `ctrl_reprompt` arm): wrap the no-memory
     # baseline with m extra self-refinement calls so the A slot spends the same
@@ -1016,6 +1149,9 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     print(f"\n  Results ({benchmark}, model={MODEL}):")
     for _g, _r in report.items():
         print(f"    {_g:12s}: {metric_name}={_r[metric_field]:.1%}")
+    # Defined unconditionally: an EXTERNAL_MEMS-only run has no curated_patch arm,
+    # but full_report below still references these — leave them None when C is absent.
+    delta_ac = delta_bc = None
     if {"no_mem", "raw_patch", "curated_patch"} <= set(report):
         delta_ac = report['curated_patch'][metric_field] - report['no_mem'][metric_field]
         delta_bc = report['curated_patch'][metric_field] - report['raw_patch'][metric_field]
@@ -1072,7 +1208,9 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 }
         full_report["per_config"] = per_config_report
 
-    if benchmark == "gaia":
+    # The per-level breakdown assumes the [A,B,C] triple layout of all_evals; an
+    # EXTERNAL_MEMS-only run has no raw_patch/curated_patch arm, so skip it there.
+    if benchmark == "gaia" and {"no_mem", "raw_patch", "curated_patch"} <= set(report):
         level_scores = {}
         for i, task in enumerate(test_tasks):
             level = (task.get("metadata") or {}).get("level", "unknown")
@@ -1121,7 +1259,11 @@ async def main():
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
     # at launch, not after 128 wasted solves, had this existed then.
     _knobs = {
-        "code_rev": _CODE_REV, "ARMS": ",".join(sorted(_ARMS)),
+        "protocol_hash": _protocol_hash(),
+        "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
+        "metadata_author": _METADATA_AUTHOR,
+        "score_provenance": _SCORE_PROVENANCE,
+        "ARMS": ",".join(sorted(_ARMS)),
         "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),
         "ITER_FEEDBACK": os.environ.get("ITER_FEEDBACK", "gold"),
         "RESUME": int(RESUME), "TASK_LIMIT": _TASK_N,

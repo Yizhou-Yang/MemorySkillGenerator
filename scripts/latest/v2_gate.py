@@ -52,7 +52,12 @@ def main() -> None:
     base = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BASE", "latest_evolving")
     hard_fail = False
     gated_any = False
-    for bench in ["gaia", "gaia2", "locomo"]:
+    # tau2 has no injection telemetry (no patch_injected/aug_len/markers), so
+    # the injection gates G1/G2/G3 do not apply there — but the integrity and
+    # policy gates (G0/G0b/G4/G5/G6/G7/G8) absolutely do: tau2 once returned
+    # reward 1.0 for doing NOTHING (unexecuted tools left the DB unmutated and
+    # db_match passed), and it was the one benchmark no gate ever looked at.
+    for bench in ["gaia", "gaia2", "locomo", "tau2"]:
         rs = rows(PROJECT_ROOT / "experiments_results" / base / model / bench / "trace.jsonl")
         if not rs:
             print(f"[{bench}] no trace — skipped")
@@ -107,6 +112,89 @@ def main() -> None:
                 print(f"  G4 ✗ arm {g} has MIXED code_rev {sorted(v)} — "
                       "audit which rows predate the fix")
                 hard_fail = True
+        # G5 critic identity. Self-curation (critic == backbone) and
+        # cross-curation (a designated stronger critic) are different method
+        # configurations, not a nuisance parameter: on GAIA the rate of
+        # endorsements landing on a wrong prior attempt is 36% for
+        # DeepSeek-v4-pro but 90% for Llama-3.3-70B, and C−B flips from +6.0 to
+        # −3.0 with it. Pooling both into one C arm answers no question.
+        # Rows written before the field existed carry no critic_model at all.
+        # Missing is "unrecorded", not a policy of its own: a legacy trace
+        # legitimately RESUMEd after the fields landed would otherwise mix
+        # {"?", real} and hard-fail its own sanctioned continuation. Only two
+        # DIFFERENT recorded values prove a real policy mix.
+        _c_rows = [r for r in rs if r.get("group") == "curated_patch"]
+        crit = {str(r.get("critic_model")) for r in _c_rows if r.get("critic_model")}
+        n_unrec = sum(1 for r in _c_rows if not r.get("critic_model"))
+        if len(crit) > 1:
+            print(f"  G5 ✗ arm curated_patch has MIXED critic_model {sorted(crit)}"
+                  " — self- and cross-curated rows cannot be pooled; split them")
+            hard_fail = True
+        elif crit:
+            print(f"  G5 critic: {crit.pop()}"
+                  + (f"  ({n_unrec} legacy rows predate the field)" if n_unrec else ""))
+        # G8 judge identity. The tie-break judge shapes the SCORE of every row
+        # in every arm, so two judges in one trace means two scoring functions
+        # pooled as one. Missing field = legacy rows (pre-field), warn only.
+        jm = {str(r.get("judge_model")) for r in rs if r.get("judge_model")}
+        n_unrec_jm = sum(1 for r in rs if not r.get("judge_model"))
+        if len(jm) > 1:
+            print(f"  G8 ✗ trace mixes judge_model {sorted(jm)} — two scoring "
+                  "functions cannot be pooled; rerun or split")
+            hard_fail = True
+        elif jm:
+            print(f"  G8 judge: {jm.pop()}"
+                  + (f"  ({n_unrec_jm} legacy rows predate the field)" if n_unrec_jm else ""))
+        # G6 curation policy. Judgment-guided (critic score + self-assessment)
+        # and metadata-guided (measured w_c + version lineage) are different
+        # methods; a C arm holding both answers nothing.
+        pol = {str(r.get("c_policy") or ("meta" if r.get("c_meta") else "judgment"))
+               for r in _c_rows}
+        if len(pol) > 1:
+            print(f"  G6 ✗ arm curated_patch mixes curation policies {sorted(pol)} — "
+                  "judgment / meta / guarded rows answer different questions; split them")
+            hard_fail = True
+        elif pol:
+            print(f"  G6 curation policy: {pol.pop()}")
+        # G7 score provenance. Everything arm C selects on — the ✓ gate, e.score,
+        # w_c — is built from the chain's feedback score, so whether that score is
+        # the benchmark's own (gold/env) or the backbone grading itself (self)
+        # decides whether the store's evidence is grounded or asserted. Mixing
+        # both in one arm pools measurements with opinions.
+        sp = {str(r.get("score_provenance")) for r in _c_rows
+              if r.get("score_provenance")}
+        n_unrec_sp = sum(1 for r in _c_rows if not r.get("score_provenance"))
+        if len(sp) > 1:
+            print(f"  G7 ✗ arm curated_patch mixes score_provenance {sorted(sp)} — "
+                  "grounded and self-assessed rows cannot be pooled")
+            hard_fail = True
+        elif sp:
+            v = sp.pop()
+            print(f"  G7 score provenance: {v}"
+                  + ("  ⚠ selection rests on the backbone's self-assessment"
+                     if v == "self_assessment" else "")
+                  + (f"  ({n_unrec_sp} legacy rows predate the field)" if n_unrec_sp else ""))
+        # G9 protocol hash — the catch-all. G4-G8 each police one field by
+        # hand, which does not scale and already leaked: GEN_TEMPERATURE has no
+        # gate of its own, so nothing stopped greedy rows from being pooled with
+        # sampled ones. protocol_hash folds every knob (temperature, iter_chain,
+        # dose budget, critic/judge/policy, ...) into one value, so a knob added
+        # later is covered without a new gate. Checked PER ARM, not per trace:
+        # G4 deliberately permits keeping valid A/B rows from an earlier rev
+        # while C reruns on the frozen one, and a per-trace check would forbid
+        # that sanctioned plan. protocol.json beside the trace decodes a hash.
+        by_proto = {}
+        for r in rs:
+            if r.get("protocol_hash"):
+                by_proto.setdefault(r.get("group", "?"), set()).add(str(r["protocol_hash"]))
+        for g, hs in sorted(by_proto.items()):
+            if len(hs) > 1:
+                print(f"  G9 ✗ arm {g} mixes protocol_hash {sorted(hs)} — one arm, "
+                      "two configurations; see protocol.json to decode which knob moved")
+                hard_fail = True
+        if by_proto:
+            print("  G9 protocol: "
+                  + " ".join(f"{g}={sorted(h)[0]}" for g, h in sorted(by_proto.items())))
         doses = {}
         for g in ["no_mem", "raw_patch", "curated_patch"]:
             grs = [r for r in rs if r.get("group") == g]
@@ -130,7 +218,7 @@ def main() -> None:
                 hard_fail = True
             if not grs:
                 print(f"  G4 ! arm {g}: absent from this trace")
-            if g == "curated_patch" and late:
+            if g == "curated_patch" and late and bench != "tau2":
                 if cov < COVERAGE_FLOOR:
                     print(f"  G1 ✗ C coverage {100*cov:.0f}% < {100*COVERAGE_FLOOR:.0f}%"
                           " — chain-index/fallback not effective")
@@ -143,8 +231,9 @@ def main() -> None:
         # vacuous — the most dangerous output this script can produce, since it
         # is the last thing between a broken sweep and the paper. Set
         # REQUIRE_C=0 for a deliberate A/B-only baseline sweep.
-        if REQUIRE_C and not [r for r in rs if r.get("group") == "curated_patch"
-                              and (r.get("iteration", 0) or 0) >= 1]:
+        if REQUIRE_C and bench != "tau2" and not [
+                r for r in rs if r.get("group") == "curated_patch"
+                and (r.get("iteration", 0) or 0) >= 1]:
             print("  G1 ✗ curated_patch has no rows at iter>=1 — the method arm "
                   "never ran, so C coverage/dose/markers are unevaluable. This "
                   "is NOT a pass (set REQUIRE_C=0 for an A/B-only sweep).")

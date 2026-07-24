@@ -37,12 +37,19 @@ except ImportError:
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BASE = os.environ.get("BASE", "latest_evolving")
+# tau2 is in the default: it is a pre-registered stratum, and a default that
+# silently omits it is exactly the kind of quiet divergence this repo keeps
+# paying for. Strata with no trace are skipped loudly downstream.
 BENCHES = [b.strip() for b in
-           os.environ.get("POOL_BENCHMARKS", "gaia,gaia2,locomo").split(",") if b.strip()]
+           os.environ.get("POOL_BENCHMARKS", "gaia,gaia2,locomo,tau2").split(",") if b.strip()]
 PAIRS = [("curated_patch", "raw_patch"), ("curated_patch", "no_mem"), ("raw_patch", "no_mem")]
 N_PERM = int(os.environ.get("N_PERM", "10000"))
 N_BOOT = int(os.environ.get("N_BOOT", "4000"))
 USE_CUPED = os.environ.get("CUPED", "1") == "1"
+# ONE_SIDED=1: p = P(perm >= observed), for the pre-registered directional
+# confirmatory contrast (guarded C-B > 0), declared before any guarded data
+# existed. Two-sided stays the default and applies to everything historical.
+ONE_SIDED = os.environ.get("ONE_SIDED", "0") == "1"
 # Metric mapping. Primary endpoint = the continuous per-task `score` for every
 # benchmark (most powerful, disclosed as such). NATIVE_METRIC=1 reruns the same
 # test under each benchmark's *native* metric: strict exact-match for GAIA and
@@ -81,6 +88,31 @@ def _rows(path: Path) -> list[dict]:
     if dropped:
         print(f"  [filter] {path.parent.parent.name}/{path.parent.name}: "
               f"dropped {dropped} infra error-rows (error set, empty response)")
+    return out
+
+
+def _collapse_tau2_trials(rows: list[dict]) -> list[dict]:
+    """Average tau2 trials into one row per (group, task, iteration).
+
+    tau2_bridge writes task_id as "<task>#<trial>". Pairing on that raw id
+    counts each trial as an independent pair, but trials of one task share the
+    task and are correlated — the pre-registered unit is the TASK, "two trials
+    averaged per task". Collapsing here keeps every downstream consumer honest
+    without touching the traces.
+    """
+    agg: dict = {}
+    for r in rows:
+        base = str(r.get("task_id") or "").rsplit("#", 1)[0]
+        k = (r.get("group"), base, int(r.get("iteration", 0) or 0))
+        agg.setdefault(k, []).append(r)
+    out = []
+    for (g, base, it), rs in agg.items():
+        first = dict(rs[0])
+        first["task_id"] = base
+        first["score"] = sum(float(x.get("score") or 0) for x in rs) / len(rs)
+        if any(x.get("em") is not None for x in rs):
+            first["em"] = sum(float(x.get("em") or 0) for x in rs) / len(rs)
+        out.append(first)
     return out
 
 
@@ -146,7 +178,10 @@ def _pooled_test(strata: list[list[float]]) -> tuple[float, float, float, float,
     hits = 0
     for _ in range(N_PERM):
         tot = sum(d if random.random() < 0.5 else -d for d in alld)
-        if abs(tot / n) >= abs(mean) - 1e-12:
+        if ONE_SIDED:
+            if tot / n >= mean - 1e-12:
+                hits += 1
+        elif abs(tot / n) >= abs(mean) - 1e-12:
             hits += 1
     p = (hits + 1) / (N_PERM + 1)
     return mean, lo, hi, p, n
@@ -157,8 +192,10 @@ def main() -> None:
     strata_rows: list[tuple[str, list[dict]]] = []
     for m in models:
         for b in BENCHES:
-            strata_rows.append((f"{m}/{b}",
-                                _rows(PROJECT_ROOT / "experiments_results" / BASE / m / b / "trace.jsonl")))
+            rows = _rows(PROJECT_ROOT / "experiments_results" / BASE / m / b / "trace.jsonl")
+            if b == "tau2" and rows:
+                rows = _collapse_tau2_trials(rows)
+            strata_rows.append((f"{m}/{b}", rows))
         tb2 = PROJECT_ROOT / "experiments_results/harbor_tb2" / m / "terminal_bench_2/trace.jsonl"
         if tb2.exists():
             strata_rows.append((f"{m}/tb2", _rows(tb2)))

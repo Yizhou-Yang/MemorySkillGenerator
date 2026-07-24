@@ -182,24 +182,47 @@ def _build_are_mcp_server(session, result: dict):
     return server_cfg, allowed
 
 
-def _build_native_system_prompt(experience_section: str, has_twist: bool) -> str:
+def _build_native_system_prompt(experience_section: str, has_twist: bool,
+                                sim_time: float | None = None) -> str:
     lines = [
         "You are an autonomous agent that operates a user's applications (email, "
         "calendar, contacts, messaging, files, and others) through function calls.",
         "Complete the user's request by calling the available tools. Read each tool "
         "result before choosing the next call.",
+    ]
+    # The official ARE agent surfaces the simulation clock; without it every
+    # relative time in the task ("today", "at 4pm", "next Tuesday") is a guess.
+    if sim_time:
+        import datetime as _dt
+        ts = _dt.datetime.utcfromtimestamp(sim_time).strftime("%A, %Y-%m-%d %H:%M:%S")
+        lines.append(f"Current simulated date/time: {ts} (UTC). All relative dates "
+                     "and times in the task refer to this clock, not real time. Use "
+                     "get_time to re-check after waiting.")
+    lines += [
         "Guidelines:",
+        "- First enumerate every sub-request in the task; a task often bundles "
+        "several actions (e.g. remove N items AND notify someone AND send an "
+        "email). Track them and complete ALL of them before finishing.",
         "- Actually perform the requested actions with tools; do not just describe them.",
         "- Inspect state (list, search, read) before you create, modify, or send, so "
-        "you act on real ids and values instead of guesses.",
+        "you act on real ids and values instead of guesses. If a filter/search "
+        "returns nothing, list all items and filter yourself rather than assuming "
+        "there is nothing to do.",
         "- Do only what the task asks. Do not add extra messages or events.",
+        "- New user messages and environment replies arrive as NOTIFICATIONS: they "
+        "show up in tool results, or via wait_for_notification. If the task "
+        "expects a reply or confirmation, wait for it (timeout_seconds 60-300) "
+        "and then handle it.",
         "- Deliver your final answer with the appropriate send-message-to-user tool.",
     ]
     if has_twist:
         lines.append(
-            "- The user may send a follow-up. After you reply, call "
-            "wait_for_notification to receive it, then handle it before you finish.")
-    lines.append("- Once the task is fully handled, stop calling tools.")
+            "- The user WILL likely send a follow-up that changes or extends the "
+            "task. After you reply, call wait_for_notification (timeout_seconds "
+            "120 or more), and fully handle whatever arrives before you finish.")
+    lines.append("- Before stopping, re-read the original task and verify every "
+                 "sub-request is done. Once the task is fully handled, stop "
+                 "calling tools.")
     prompt = "\n".join(lines)
     if experience_section:
         prompt += "\n\n" + experience_section.strip()
@@ -280,7 +303,13 @@ def _gaia2_native_sync(scenario_path, task_desc, experience_section, base_result
             result["_native_failed"] = True
             return result
 
-        system_prompt = _build_native_system_prompt(experience_section, has_twist)
+        _st = None
+        try:
+            _st = (session.get_time() or {}).get("sim_time")
+        except Exception:
+            pass
+        system_prompt = _build_native_system_prompt(experience_section, has_twist,
+                                                    sim_time=_st)
         user_prompt = (
             f"TASK: {task_content}\n\n"
             "Complete this task using the available tools. When it is fully done, stop."
@@ -310,7 +339,7 @@ def _window_messages(messages, keep_recent=None):
     start the tail on an orphan tool result (OpenAI requires each tool message to
     follow its assistant tool_call), so back up to the owning assistant turn."""
     if keep_recent is None:
-        keep_recent = int(os.environ.get("GAIA2_HISTORY_KEEP", "24"))
+        keep_recent = int(os.environ.get("GAIA2_HISTORY_KEEP", "36"))
     if len(messages) <= keep_recent + 2:
         return messages
     head = messages[:2]                      # system + first user (the task)
@@ -367,7 +396,13 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
             "description": "Return the current simulation time.",
             "parameters": {"type": "object", "properties": {}, "required": []}}})
 
-        system_prompt = _build_native_system_prompt(experience_section, has_twist)
+        _st = None
+        try:
+            _st = (session.get_time() or {}).get("sim_time")
+        except Exception:
+            pass
+        system_prompt = _build_native_system_prompt(experience_section, has_twist,
+                                                    sim_time=_st)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content":
@@ -376,6 +411,15 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
         ]
         texts = []
         timeout = int(os.environ.get("GAIA2_OPENAI_TIMEOUT", "120"))
+        # Loop-robustness parity with the SDK/MCP path (which drives the agent to
+        # completion): a bare assistant message with no tool calls must not end
+        # the episode if the task is visibly unfinished. Without this, a model
+        # that narrates a plan (or says "Done") without having delivered the
+        # final send_message_to_user quietly under-executes and the count gate
+        # zeroes the task — this, not ability, was most of gpt-5.5's gap.
+        nudges = 0
+        nudge_max = int(os.environ.get("GAIA2_NUDGE_MAX", "2"))
+        twist_nudged = False
 
         for _turn in range(max_turns):
             messages = _window_messages(messages)   # cap re-sent context per turn
@@ -389,7 +433,29 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
             messages.append(assistant)
             calls = r.get("tool_calls") or []
             if not calls:
-                break  # model produced a final answer with no tool calls
+                sent_final = any(
+                    a.get("tool") == "AgentUserInterface__send_message_to_user"
+                    for a in result["actions"])
+                got_notification = any(
+                    a.get("tool") == "wait_for_notification"
+                    and "notifications': []" not in str(a.get("result_preview", ""))
+                    for a in result["actions"])
+                if not sent_final and nudges < nudge_max:
+                    nudges += 1
+                    messages.append({"role": "user", "content":
+                        "You have not delivered a final answer to the user yet. "
+                        "Continue: finish every remaining part of the task with tool "
+                        "calls, then send the result via "
+                        "AgentUserInterface__send_message_to_user."})
+                    continue
+                if sent_final and has_twist and not got_notification and not twist_nudged:
+                    twist_nudged = True
+                    messages.append({"role": "user", "content":
+                        "The user may have sent a follow-up request. Call "
+                        "wait_for_notification with timeout_seconds=120, and if a "
+                        "new message arrived, handle it fully before finishing."})
+                    continue
+                break  # finished: final answer delivered (and twist checked)
             for tc in calls:
                 name = tc["name"]
                 args = tc["arguments"] if isinstance(tc.get("arguments"), dict) else {}
@@ -481,7 +547,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             # (run_in_executor does not copy the context by itself).
             import contextvars as _cv
             _ctx = _cv.copy_context()
-            _max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "20"))
+            _max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "40"))
             native = await loop.run_in_executor(
                 None, lambda: _ctx.run(
                     worker, scenario_path, task_desc, experience_section,
@@ -558,7 +624,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
         # exploration and a twist follow-up, and the BudgetTracker's own thresholds
         # (75,50,30,15,5) assume a larger budget -- at 25 the "URGENT/FINAL" hints fire
         # in the first half and the agent quits mid-task. Env-tunable.
-        max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "20"))
+        max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "40"))
         all_responses = []
         reasoning_trace = []  # Collect AI-filtered valuable reasoning across turns
 
