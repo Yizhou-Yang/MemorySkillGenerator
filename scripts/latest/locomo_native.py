@@ -331,6 +331,10 @@ ANSWER_SYS = ("Answer the question using ONLY the memories below. Be concise —
               "likely ...?'), COMMIT to the most probable answer supported by "
               "the memories (e.g. 'Likely no'), never refuse. Only say you "
               "don't know when the memories contain nothing relevant at all.")
+# NOTE: ANSWER_SYS is SHARED by mem0/amem/ours/full, so every arm compared in one
+# table must be scored under the SAME wording. This run therefore reruns all five
+# arms — staged (ours+nomem first for a fast read, baselines right after) rather
+# than reusing the previous run's baseline rows, which predate this wording.
 # The no-memory arm must be a GUESSING lower bound, not a muzzled one: under
 # ANSWER_SYS ('answer ONLY from the memories') an empty context forces 'I don't
 # know' on every question and the arm reads 0 by construction, which is an
