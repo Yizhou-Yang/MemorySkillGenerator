@@ -159,7 +159,16 @@ _EXTRACT_SYS = (
     "symbolizes), activities and hobbies, places, opinions and realizations, "
     "plans, names of things, who made/owns what, yes/no facts. A question may "
     "hinge on any small detail. If a fact does not fit a clean aspect, still "
-    "emit it with key \"detail\". Only greetings themselves may be skipped.")
+    "emit it with key \"detail\". Only greetings themselves may be skipped. "
+    "DATES: the excerpt starts with the session date. When a speaker uses a "
+    "relative time ('yesterday', 'last Friday', 'last week', 'a few years ago'), "
+    "RESOLVE it against the session date and state the EVENT's own date in the "
+    "fact (e.g. session dated 8 May 2023 + 'I went yesterday' -> 'on 7 May "
+    "2023'). Never stamp the session date onto an event that happened earlier. "
+    "WORDING: for subjective content (feelings, realizations, symbolism, "
+    "reasons, aspirations) keep the speaker's OWN key words in the fact rather "
+    "than abstracting them away ('a safe and inviting place for people to "
+    "grow', not 'a sanctuary').")
 
 
 _EMBEDDER = None
@@ -317,9 +326,11 @@ ANSWER_SYS = ("Answer the question using ONLY the memories below. Be concise —
               "For 'when' questions give an ABSOLUTE date or time (e.g. '7 May "
               "2023', 'June 2023', '2022'); resolve relative references such as "
               "'yesterday', 'last week', 'last year' against the dated memories "
-              "rather than answering with the relative phrase. Answer whenever "
-              "the memories let you infer it; only say you don't know if the "
-              "memories truly lack the information.")
+              "rather than answering with the relative phrase. "
+              "For hypothetical or judgment questions ('Would X ...?', 'Is X "
+              "likely ...?'), COMMIT to the most probable answer supported by "
+              "the memories (e.g. 'Likely no'), never refuse. Only say you "
+              "don't know when the memories contain nothing relevant at all.")
 # The no-memory arm must be a GUESSING lower bound, not a muzzled one: under
 # ANSWER_SYS ('answer ONLY from the memories') an empty context forces 'I don't
 # know' on every question and the arm reads 0 by construction, which is an
