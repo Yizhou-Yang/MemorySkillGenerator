@@ -154,7 +154,12 @@ _EXTRACT_SYS = (
     "JSON object on its own line: {\"entity\": <who/what the fact is about>, "
     "\"key\": <short slug of the aspect, e.g. relationship_status, job, location>, "
     "\"fact\": <the fact as a full sentence, include the date if stated>}. "
-    "One line per fact, no prose, no array. Skip greetings/small-talk.")
+    "One line per fact, no prose, no array. Be EXHAUSTIVE: cover every concrete "
+    "detail, however minor — objects and gifts (who gave what, what it "
+    "symbolizes), activities and hobbies, places, opinions and realizations, "
+    "plans, names of things, who made/owns what, yes/no facts. A question may "
+    "hinge on any small detail. If a fact does not fit a clean aspect, still "
+    "emit it with key \"detail\". Only greetings themselves may be skipped.")
 
 
 _EMBEDDER = None
@@ -224,7 +229,7 @@ class _OursQA(QAMemory):
             # their own internal budgets), so a fair, non-truncating setting.
             raw = _chat(self.model, self.base, self.key, _EXTRACT_SYS,
                         text[:int(os.environ.get("OURS_EXTRACT_CHARS", "10000"))],
-                        max_tokens=int(os.environ.get("OURS_EXTRACT_TOKENS", "1800")))
+                        max_tokens=int(os.environ.get("OURS_EXTRACT_TOKENS", "2600")))
         except Exception as e:
             print(f"[ours] extract skip: {str(e)[:60]}", flush=True); return
         for line in raw.splitlines():
@@ -277,7 +282,7 @@ class _OursQA(QAMemory):
         # consolidated multi-fact statement — so k of ours carries less than k
         # of theirs. Retrieve more atomic facts to match the information budget,
         # not the item count (multi-hop especially needs several facts at once).
-        rk = int(os.environ.get("OURS_RECALL_K", str(TOPK + 8)))
+        rk = int(os.environ.get("OURS_RECALL_K", str(TOPK * 2)))
         order = np.argsort(-sims)[:rk]
         latest = {}
         for f in self._facts:
@@ -315,6 +320,15 @@ ANSWER_SYS = ("Answer the question using ONLY the memories below. Be concise —
               "rather than answering with the relative phrase. Answer whenever "
               "the memories let you infer it; only say you don't know if the "
               "memories truly lack the information.")
+# The no-memory arm must be a GUESSING lower bound, not a muzzled one: under
+# ANSWER_SYS ('answer ONLY from the memories') an empty context forces 'I don't
+# know' on every question and the arm reads 0 by construction, which is an
+# artifact of the prompt rather than a measurement. Mem0's paper lets the
+# no-memory baseline answer from the question alone; match that.
+NOMEM_SYS = ("You have NO memory of this conversation. Answer the question with "
+             "your single best guess from the question itself and common sense. "
+             "Be concise — a short phrase. Never say you don't know; always "
+             "commit to a guess.")
 JUDGE_SYS = ("You are a strict grader. Given a question, the gold answer, and a "
              "candidate answer, output 1 if the candidate is correct (same "
              "meaning as gold), else 0. Output ONLY 0 or 1.")
@@ -385,8 +399,12 @@ def run():
             try: ctx = memory.recall(q)
             except Exception: ctx = ""
         try:
-            pred = _chat(qa_model, qa_base, qa_key, ANSWER_SYS,
-                         f"Memories:\n{ctx or '(none)'}\n\nQuestion: {q}\nAnswer:")
+            if system == "nomem":
+                pred = _chat(qa_model, qa_base, qa_key, NOMEM_SYS,
+                             f"Question: {q}\nAnswer:")
+            else:
+                pred = _chat(qa_model, qa_base, qa_key, ANSWER_SYS,
+                             f"Memories:\n{ctx or '(none)'}\n\nQuestion: {q}\nAnswer:")
         except Exception: pred = ""
         J = judge(j_model, j_base, j_key, q, gold, pred); F = f1(pred, gold)
         with wlock:
