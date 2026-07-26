@@ -327,10 +327,11 @@ ANSWER_SYS = ("Answer the question using ONLY the memories below. Be concise —
               "2023', 'June 2023', '2022'); resolve relative references such as "
               "'yesterday', 'last week', 'last year' against the dated memories "
               "rather than answering with the relative phrase. "
-              "For hypothetical or judgment questions ('Would X ...?', 'Is X "
-              "likely ...?'), COMMIT to the most probable answer supported by "
-              "the memories (e.g. 'Likely no'), never refuse. Only say you "
-              "don't know when the memories contain nothing relevant at all.")
+              "NEVER say you don't know and never refuse: scoring gives no "
+              "credit for abstaining, so always commit to the single most "
+              "probable answer the memories support — for hypothetical or "
+              "judgment questions ('Would X ...?') answer e.g. 'Likely no', and "
+              "if the memories are thin, give your best guess anyway.")
 # NOTE: ANSWER_SYS is SHARED by mem0/amem/ours/full, so every arm compared in one
 # table must be scored under the SAME wording. This run therefore reruns all five
 # arms — staged (ours+nomem first for a fast read, baselines right after) rather
