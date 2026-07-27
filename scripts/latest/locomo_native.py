@@ -60,6 +60,8 @@ def make_qa_memory(system: str, conv_id: str) -> QAMemory:
         return _Mem0QA(conv_id)
     if system == "amem":
         return _AMemQA(conv_id)
+    if system == "raw":
+        return _RawQA(conv_id)
     if system == "ours":
         return _OursQA(conv_id)
     raise ValueError(system)
@@ -179,6 +181,43 @@ def _embedder():
                     "MEM0_EMBED_MODEL",
                     "sentence-transformers/all-MiniLM-L6-v2"))
     return _EMBEDDER
+
+
+class _RawQA(QAMemory):
+    """Arm B: the raw record, under C's store, retrieval and budget.
+
+    Each dialogue turn is kept verbatim as a patch, dated by its session. No
+    critic, no extraction, no chains, no supersession, no provenance annotation
+    and no grouping -- so B vs C isolates curating the content from merely
+    having it, exactly as in the agent-framing arms.
+    """
+    def __init__(self, conv_id):
+        from memlayer.vgr import PatchMemory
+        self.mem = PatchMemory(embedder=lambda texts: _embedder().encode(
+            texts, normalize_embeddings=True, show_progress_bar=False))
+        self.ns = conv_id
+        self._n = 0
+        self._lk = threading.Lock()
+
+    def add(self, text):
+        from memlayer.vgr import Patch
+        ts = ""
+        m = re.match(r"\s*([0-9].*?[0-9]{4})", text)
+        if m: ts = m.group(1)
+        for line in text.splitlines():
+            line = line.strip()
+            if len(line) < 12 or line == ts: continue
+            self._n += 1
+            self.mem.add(Patch(patch_id=f"{self.ns}#r{self._n}",
+                               chain_id=self.ns, version=1, key="turn",
+                               summary=line, content_before="",
+                               content_after=line, rationale="", evidence=ts))
+
+    def recall(self, query):
+        rk = int(os.environ.get("OURS_RECALL_K", str(TOPK * 2)))
+        with self._lk:
+            got = self.mem.retrieve(query, top_k=rk)
+        return "\n".join(f"- {p.content_after}" for p in (got or []))
 
 
 class _OursQA(QAMemory):
