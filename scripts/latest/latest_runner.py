@@ -66,13 +66,38 @@ from scripts.latest.eval import (
 # Fingerprint every trace row with the code revision that produced it, so a
 # resumed sweep can be audited for rows that predate a bug fix (a stale-row
 # resume once kept 300 pre-fix arm-B rows and silently voided a comparison).
-try:
-    import subprocess as _sp
-    _CODE_REV = _sp.check_output(["git", "rev-parse", "--short", "HEAD"],
-                                 cwd=str(PROJECT_ROOT), text=True,
-                                 stderr=_sp.DEVNULL).strip()
-except Exception:
-    _CODE_REV = "unknown"
+def _code_rev() -> str:
+    """Identify the code that actually ran, not the commit it was filed under.
+
+    A bare git HEAD lies whenever files are copied onto a box without committing
+    -- the usual way a fix reaches a running experiment -- so two traces can
+    carry the same rev while different code produced them, which is exactly what
+    poolable.py has to be able to see. Append a digest of the files that can move
+    a score, so any edit to them changes the stamp.
+    """
+    import hashlib, subprocess as _sp
+    try:
+        head = _sp.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                cwd=str(PROJECT_ROOT), text=True,
+                                stderr=_sp.DEVNULL).strip()
+    except Exception:
+        head = "nogit"
+    h = hashlib.sha256()
+    for rel in ("scripts/latest", "benchmarks", "memlayer", "src/latest"):
+        root = PROJECT_ROOT / rel
+        if not root.exists():
+            continue
+        for f in sorted(root.rglob("*.py")):
+            if "__pycache__" in f.parts or "obsolete" in f.parts:
+                continue
+            try:
+                h.update(f.read_bytes())
+            except Exception:
+                pass
+    return f"{head}.{h.hexdigest()[:8]}"
+
+
+_CODE_REV = _code_rev()
 
 # --- Sub-runners (per-benchmark EvoArena-style within-agent injection) ---
 from scripts.latest.gaia_runner import run_gaia_task, run_gaia_task_controlled

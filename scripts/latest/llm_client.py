@@ -339,11 +339,11 @@ def judge_preflight() -> tuple:
     if not JUDGE_MODEL:
         return True, "(backbone tie-break)"
     try:
-        cli = _openai_client()
-        r = cli.chat.completions.create(
-            model=JUDGE_MODEL, max_tokens=8,
-            messages=[{"role": "user", "content": "Reply with exactly: OK"}])
-        txt = (r.choices[0].message.content or "").strip()
+        # Route exactly as llm_judge_answer does, or the probe tests a different
+        # endpoint than the judge will actually use.
+        r = _openai_notool_sync("", "Reply with exactly: OK", 30,
+                                JUDGE_MODEL, JUDGE_BASE_URL, JUDGE_API_KEY)
+        txt = (r.get("text") or "").strip()
     except Exception as e:
         return False, f"{type(e).__name__}: {str(e)[:150]}"
     return (bool(txt), txt[:40] or "empty response")
