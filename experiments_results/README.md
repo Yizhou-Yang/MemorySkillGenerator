@@ -36,6 +36,9 @@ experiments_results/
 └── vgr/report.json
 ```
 
+`locomo_native/` is separate: LoCoMo under Mem0/A-Mem's own protocol (memory-layer
+comparison, not the A/B/C arms) — see `RUNNING_EXPERIMENTS.md`.
+
 Benchmarks: `gaia`, `gaia2`, `locomo`, `terminal_bench_2`. Runs only ever write to
 `latest/`; `formal/` snapshots are locked (never written by a run).
 

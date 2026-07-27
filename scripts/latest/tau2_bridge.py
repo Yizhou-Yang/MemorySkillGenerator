@@ -77,7 +77,8 @@ if _C_POLICY not in ("judgment", "meta", "guarded"):
     _C_POLICY = "judgment"
 
 GROUP_KEY = {"A": "no_mem", "B": "raw_patch", "C": "curated_patch",  # canonical (arms.py)
-             "mem0": "mem0"}   # external framework baselines (tab:external)
+             "mem0": "mem0",
+             "amem": "amem"}   # external framework baselines (tab:external)
 
 
 def _task_key(user_text: str) -> str:
@@ -99,7 +100,7 @@ def _code_rev() -> str:
 def _mk_memory(arm: str, benchmark: str = "tau2"):
     if arm == "A":
         return None
-    if arm in ("mem0",):   # external framework baselines, same interface as B/C
+    if arm in ("mem0", "amem"):   # external framework baselines, same interface as B/C
         from scripts.latest.baseline_memories import make_external_memory
         return make_external_memory(arm, benchmark)
     from scripts.latest.evomem_bridge import BenchmarkMemory, CuratedMemory
@@ -159,6 +160,13 @@ def _parse_results(save_to: Path) -> list[dict]:
             raise RuntimeError(
                 f"{save_to} is a directory with no results.json — inspect layout")
         save_to = cands[0]
+    # tau2-bench 0.2.x appends ".json" to --save-to itself, so the file lands at
+    # "<save_to>.json" (i.e. foo.json.json when we pass foo.json). Read whichever
+    # exists.
+    if not save_to.exists():
+        _alt = save_to.with_name(save_to.name + ".json")
+        if _alt.exists():
+            save_to = _alt
     try:
         data = json.loads(save_to.read_text())
     except Exception as e:
@@ -258,8 +266,13 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
            "--user-llm", model,
            "--num-trials", str(num_trials),
            "--max-concurrency", str(concurrency),
-           "--auto-resume",
            "--save-to", str(save_to)]
+    # --auto-resume only exists on the pinned internal tau2 build; the PyPI
+    # tau2-bench (0.2.x) CLI rejects it with rc=2 before running anything.
+    # Opt in via TAU2_AUTO_RESUME=1 only where the flag is known to exist —
+    # and remember resume poisons reruns unless artifacts are purged first.
+    if os.environ.get("TAU2_AUTO_RESUME", "0") == "1":
+        cmd.insert(-2, "--auto-resume")
     if n_tasks:
         cmd += ["--num-tasks", str(n_tasks)]
     for t in (task_ids or []):
@@ -269,7 +282,7 @@ def _tau2_cmd(tau2_bin: str, arm: str, model: str, domain: str, n_tasks: int,
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["A", "B", "C", "mem0"], required=True)
+    ap.add_argument("--arm", choices=["A", "B", "C", "mem0", "amem"], required=True)
     ap.add_argument("--iters", type=int, default=int(os.environ.get("ITER_CHAIN", "3")))
     ap.add_argument("--model", default=os.environ.get("TAU2_MODEL", "openai/hy3"))
     ap.add_argument("--domain", default=os.environ.get("TAU2_DOMAIN", "airline"),
@@ -316,6 +329,16 @@ def main() -> None:
     for domain in domains:
         for it in range(args.iters):
             save_to = out_root / f"tau2_{domain}_{args.arm}_iter{it}.json"
+            # Purge stale artifacts BEFORE launching: tau2-bench 0.2.x prompts
+            # interactively ("overwrite? [y/N]") when its save file exists, and
+            # under nohup stdin is closed -> EOFError kills the whole arm. It
+            # writes to <save_to>.json (double suffix), so clear both spellings.
+            for _stale in (save_to, save_to.with_name(save_to.name + ".json")):
+                try:
+                    if _stale.exists() and _stale.is_file():
+                        _stale.unlink()
+                except Exception:
+                    pass
             env = os.environ.copy()
             env["TAU2_ARM"] = args.arm
             env["TAU2_MEM_STATE"] = str(state)

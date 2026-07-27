@@ -14,9 +14,11 @@ import sys
 
 # Register our custom agent BEFORE tau2's CLI parses --agent
 from tau2.registry import registry
-from scripts.latest.tau2_agent import create_curated_tau2_agent
+from scripts.latest.tau2_agent import CuratedTau2Agent
 
-registry.register_agent_factory(create_curated_tau2_agent, "curated_tau2_agent")
+# tau2-bench 0.2.x renamed register_agent_factory -> register_agent and now
+# takes the agent CLASS (type[BaseAgent]), not a factory callable.
+registry.register_agent(CuratedTau2Agent, "curated_tau2_agent")
 
 # Delegate to the official tau2 CLI
 from tau2.cli import main

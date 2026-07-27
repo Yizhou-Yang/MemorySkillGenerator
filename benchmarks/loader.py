@@ -90,6 +90,16 @@ class BenchmarkLoader:
         logger.info(
             f"Loaded benchmark '{self.benchmark_name}': {len(tasks)} tasks"
         )
+        # LoCoMo ONLY: session scoping is structural there, so this can trip
+        # solely if _load_locomo is edited. A per-question LoCoMo run looks
+        # healthy while measuring the wrong thing, so refuse such tasks. Other
+        # benchmarks are independent tasks — no chain_id is correct for them.
+        if self.benchmark_name == "locomo" and tasks \
+                and not (tasks[0].get("metadata") or {}).get("chain_id"):
+            raise RuntimeError(
+                "LoCoMo tasks carry no session chain_id — memory would be "
+                "scoped per question, which is not what LoCoMo measures.")
+
         return tasks
 
     # PRIMARY BENCHMARKS — ONLINE / DYNAMIC
@@ -651,15 +661,19 @@ class BenchmarkLoader:
                         "evidence": evidence,
                         "num_sessions": len(sessions),
                         "num_turns": len(turns),
-                        # Conversation-scoped chains: all questions of one LoCoMo
-                        # conversation share a chain, so B/C patches written for
-                        # one question become retrievable by its siblings. OFF by
-                        # default — the shipped results scope memory to each
-                        # question's own iteration chain (task_id fallback in
-                        # evomem_bridge._chain_id); flipping this changes the
-                        # experiment semantics and needs a fresh (non-RESUME) run.
-                        **({"chain_id": f"locomo_s{sample_idx}"}
-                           if os.environ.get("LOCOMO_SESSION_CHAINS") == "1" else {}),
+                        # Conversation-scoped chain — MANDATORY, not a knob.
+                        # Every question of one LoCoMo conversation shares a
+                        # chain, so memory written for one question is
+                        # retrievable by its siblings. That is precisely what
+                        # LoCoMo measures (long-horizon conversational memory);
+                        # scoping each question to its own chain silently
+                        # destroys it — external baselines (mem0, A-Mem) are
+                        # built for cross-session recall and then score as if
+                        # they had no memory, and our own arm moved from -8 EM
+                        # (per-question) to +1 (session) on identical tasks.
+                        # Per-question is an INVALID comparison, not a
+                        # conservative one, so it is not reachable by config.
+                        "chain_id": f"locomo_s{sample_idx}",
                     },
                 })
 

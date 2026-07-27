@@ -157,11 +157,14 @@ _ARMS = set(os.environ.get("ARMS", "A,B,C").replace(" ", "").split(","))
 try:
     from scripts.latest.llm_client import critic_model_id as _critic_model_id
     from scripts.latest.llm_client import judge_model_id as _judge_model_id
+    from scripts.latest.llm_client import metadata_author_id as _metadata_author_id
     _CRITIC_MODEL = _critic_model_id()
     _JUDGE_MODEL = _judge_model_id()
+    _METADATA_AUTHOR = _metadata_author_id()
 except Exception:
     _CRITIC_MODEL = os.environ.get("CRITIC_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
     _JUDGE_MODEL = os.environ.get("JUDGE_MODEL") or os.environ.get("CODEBUDDY_MODEL") or "?"
+    _METADATA_AUTHOR = os.environ.get("METADATA_AUTHOR", "critic")
 # Which curation policy arm C ran: judgment (critic score + self-assessment) or
 # metadata (measured w_c + version lineage). Different methods, never poolable.
 _C_META = os.environ.get("C_META", "0") == "1"
@@ -188,6 +191,7 @@ def _protocol_dict() -> dict:
         "c_policy": _C_POLICY,
         "critic_model": _CRITIC_MODEL,
         "judge_model": _JUDGE_MODEL,
+        "metadata_author": _METADATA_AUTHOR,
         "score_provenance": _SCORE_PROVENANCE,
         "iter_chain": ITER_CHAIN,
         "iter_mutate": int(ITER_MUTATE),
@@ -196,6 +200,10 @@ def _protocol_dict() -> dict:
         "task_limit": os.environ.get("TASK_LIMIT", "100"),
         "c_inject_budget_ch": os.environ.get("C_INJECT_BUDGET_CH", "900"),
         "c_critic_gate": os.environ.get("C_CRITIC_GATE", "5"),
+        "c_endorse_demote_k": os.environ.get("C_ENDORSE_DEMOTE_K", "2"),
+        "c_repair_mode": os.environ.get("C_REPAIR_MODE", "0"),
+        "c_repair_thresh": os.environ.get("C_REPAIR_THRESH", "0.6"),
+        "c_repair_gate": os.environ.get("C_REPAIR_GATE", "stability"),
         "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
         "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
         "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),
@@ -947,6 +955,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   # 36% for DeepSeek-v4-pro vs 90% for
                                   # Llama-3.3-70B, and C-B flips sign with it.
                                   "critic_model": _CRITIC_MODEL,
+                                  "metadata_author": _METADATA_AUTHOR,
                                   "c_meta": _C_META,
                                   "c_policy": _C_POLICY,
                                   "score_provenance": _SCORE_PROVENANCE,
@@ -999,6 +1008,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "fb_mode": ITER_FEEDBACK,
                                    "code_rev": _CODE_REV,
                                    "critic_model": _CRITIC_MODEL,
+                                   "metadata_author": _METADATA_AUTHOR,
                                    "c_meta": _C_META,
                                    "c_policy": _C_POLICY,
                                    "score_provenance": _SCORE_PROVENANCE,
@@ -1034,6 +1044,8 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
     # B and C each keep their own cross-task memory; A keeps none.
     mem_b = BenchmarkMemory(benchmark, "B") if "B" in _ARMS else None
     mem_c = CuratedMemory(benchmark) if "C" in _ARMS else None
+    # C's curation-time statistics reference the chain's OWN iteration-0
+    # attempt (memory-free, same run window) — no other arm is read.
 
     # Equal-budget control (ablation `ctrl_reprompt` arm): wrap the no-memory
     # baseline with m extra self-refinement calls so the A slot spends the same
@@ -1242,6 +1254,39 @@ async def main():
     print(f"  Model: {MODEL:<22} | Global slots: {GLOBAL_TASK_SLOTS} "
           f"(docker {min(DOCKER_TASK_SLOTS, GLOBAL_TASK_SLOTS)}) "
           f"| embed threads: {_EMBED_THREADS}")
+    # The results directory and every trace row are keyed on MODEL, but the
+    # request carries whatever llm_client resolved. Refuse to write a run
+    # labelled as one backbone and answered by another.
+    try:
+        from scripts.latest.llm_client import served_model as _served_model
+        _served = _served_model()
+    except Exception:
+        _served = ""
+    if _served and MODEL and _served != MODEL.lower() \
+            and os.environ.get("ALLOW_MODEL_LABEL_MISMATCH") != "1":
+        raise SystemExit(
+            f"[gate] backbone label '{MODEL}' but the endpoint is being asked for "
+            f"'{_served}'. Results would be written to {MODEL}/ and read as that "
+            f"backbone. Fix OPENAI_MODEL/CODEBUDDY_MODEL (with LLM_PROVIDER=vllm, "
+            f"OPENAI_MODEL wins), or set ALLOW_MODEL_LABEL_MISMATCH=1 if the "
+            f"endpoint genuinely serves {MODEL} under another id.")
+    print(f"  Served model: {_served or '(unknown)'}")
+    # Arm C is defined by the critic's judgment; if that endpoint is dead the
+    # refinement path falls back to a constant quality score and the arm still
+    # reports error==0. Probe once and refuse rather than produce that.
+    if "C" in _ARMS or os.environ.get("METADATA_AUTHOR") == "critic":
+        try:
+            from scripts.latest.llm_client import critic_preflight, critic_model_id
+            _ok, _why = critic_preflight()
+        except Exception as e:
+            _ok, _why = False, f"{type(e).__name__}: {e}"
+        print(f"  Critic: {critic_model_id()} -> {'OK' if _ok else 'UNREACHABLE'} ({_why})")
+        if not _ok and os.environ.get("ALLOW_DEAD_CRITIC") != "1":
+            raise SystemExit(
+                f"[gate] critic '{critic_model_id()}' is unreachable ({_why}). Arm C "
+                f"would run on the fallback quality score and still report no errors. "
+                f"Point CRITIC_BASE_URL/CRITIC_API_KEY/CRITIC_MODEL_ID at a live model "
+                f"(note: HY3_BASE_URL, if set, overrides CRITIC_BASE_URL).")
     # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
     # config echo). One glance at the log answers "what exactly ran?" — the
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
@@ -1249,6 +1294,7 @@ async def main():
     _knobs = {
         "protocol_hash": _protocol_hash(),
         "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
+        "metadata_author": _METADATA_AUTHOR,
         "score_provenance": _SCORE_PROVENANCE,
         "ARMS": ",".join(sorted(_ARMS)),
         "ITER_CHAIN": ITER_CHAIN, "ITER_MUTATE": int(ITER_MUTATE),
