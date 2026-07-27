@@ -216,11 +216,14 @@ class _OursQA(QAMemory):
     and are simply inactive here — stated as such."""
     def __init__(self, conv_id):
         from memlayer.vgr import PatchMemory
-        self.mem = PatchMemory()     # keeps the version-chain structure
+        # Retrieval runs INSIDE the SDK: PatchMemory ranks semantically when
+        # given an embedder (same all-MiniLM encoder the baselines use). The
+        # harness holds no parallel index — everything the answerer sees comes
+        # out of the released memlayer API.
+        self.mem = PatchMemory(embedder=lambda texts: _embedder().encode(
+            texts, normalize_embeddings=True, show_progress_bar=False))
         self.ns = conv_id
         self._ver = collections.defaultdict(int)   # (entity,key) -> latest version
-        self._facts = []             # semantic index, parallel to self._emb rows
-        self._emb = None             # np matrix, normalized; built lazily
         self._lk = threading.Lock()
         # Extraction is CURATION — authored by the external critic (grok),
         # same author rule as the main method; the backbone only answers.
@@ -263,44 +266,26 @@ class _OursQA(QAMemory):
                                key=key, summary=f"{ent}: {fact}",
                                content_before=prev, content_after=fact,
                                rationale=ent, evidence=ts))   # ts = grounded provenance
-            # mirror into the semantic index (fact text is what we retrieve on)
-            self._facts.append({"fact": fact, "ent": ent, "chain": chain,
-                                "version": v, "ts": ts})
-            self._emb = None   # invalidate; rebuilt on next recall
-
-    def _ensure_emb(self):
-        if self._emb is not None or not self._facts:
-            return
-        with self._lk:
-            if self._emb is not None or not self._facts:
-                return
-            import numpy as np
-            vecs = _embedder().encode([f["fact"] for f in self._facts],
-                                      normalize_embeddings=True,
-                                      show_progress_bar=False)
-            self._emb = np.asarray(vecs, dtype="float32")
 
     def recall(self, query):
-        # Semantic top-k over the extracted facts (same encoder as the
-        # baselines), then layer CuratorMem's structure on top: mark facts that
-        # a later version superseded, and attach the dialogue timestamp as
-        # grounded provenance so temporal questions can reason about the date.
-        self._ensure_emb()
-        if self._emb is None or not self._facts:
-            return ""
-        import numpy as np
-        qv = _embedder().encode([query], normalize_embeddings=True,
-                                show_progress_bar=False)[0]
-        sims = self._emb @ np.asarray(qv, dtype="float32")
+        # Semantic top-k straight from the SDK (PatchMemory ranks with the same
+        # encoder the baselines use), then layer CuratorMem's structure on the
+        # rendering: mark superseded versions, attach dialogue-time provenance.
         # Our facts are ATOMIC (one clause each), whereas a mem0 "memory" is a
         # consolidated multi-fact statement — so k of ours carries less than k
         # of theirs. Retrieve more atomic facts to match the information budget,
         # not the item count (multi-hop especially needs several facts at once).
         rk = int(os.environ.get("OURS_RECALL_K", str(TOPK * 2)))
-        order = np.argsort(-sims)[:rk]
+        with self._lk:                       # embed cache builds once
+            got = self.mem.retrieve(query, top_k=rk)
+        if not got:
+            return ""
+        hits = [{"fact": p.content_after, "ent": p.rationale,
+                 "chain": p.chain_id, "version": p.version,
+                 "ts": p.evidence} for p in got]
         latest = {}
-        for f in self._facts:
-            latest[f["chain"]] = max(latest.get(f["chain"], 0), f["version"])
+        for p in self.mem.patches:
+            latest[p.chain_id] = max(latest.get(p.chain_id, 0), p.version)
         # Render grouped BY ENTITY, chronological within the group — the chains
         # are entity-keyed already, so this costs nothing and puts the several
         # facts a multi-hop question must combine next to each other instead of
@@ -312,8 +297,7 @@ class _OursQA(QAMemory):
                           r"(\d{4})", f["ts"] or "")
             return (f["ts"] == "", m.group(3) if m else "9999", f["ts"])
         groups = collections.OrderedDict()
-        for i in order:
-            f = self._facts[int(i)]
+        for f in hits:
             groups.setdefault(f["ent"], []).append(f)
         lines = []
         for ent, fs in groups.items():
