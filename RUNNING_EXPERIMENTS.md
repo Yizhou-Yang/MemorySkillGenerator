@@ -98,6 +98,20 @@ _更新:2026-07-20 11:xx,HEAD b4ccbfb6。当前:老 runner(pid 20608)收尾 gaia
 - **可检验预言**:`breakdown.py` 新增 "C−B by metadata author" 表——critic-authored 下弱 backbone(gpt-oss)的 C−B 翻转应消失;backbone-authored 下应复现。跑对照臂用 `METADATA_AUTHOR=backbone`。
 - **backbone 阵容(最终)**:gpt-oss-120B(最弱)/ HY3(主, 兼统一 critic)/ DeepSeek-v4-pro / gpt-5.5(论文 GPT-5 (low))。Claude/llama 已从论文移除。
 
+## 骨干模型怎么接(2026-07-27)
+
+- **hy3 走 taiji 直连,不经 CodeBuddy SDK**:`HY3_BASE_URL=http://api.taiji.woa.com/openapi/v2`,
+  模型名 `hy3`,Bearer 认证。key 放机器上的 `.env` 或 `/tmp/hy3_env.sh`,**永不进 git**。
+  `reasoning_effort` 平台缺省已于 2026-07-16 从 `no_think` 改为 `high` —— 显式传值,
+  别依赖缺省,否则平台改默认会在 sweep 中途悄悄换掉骨干行为。
+- **CodeBuddy SDK 只用于 deepseek-v4-pro**(判官)。其余骨干一律走 OpenAI 兼容端点。
+- **⚠ 只导 `CODEBUDDY_MODEL` 换不了骨干。** `LLM_PROVIDER=vllm` 下解析顺序是
+  `OPENAI_MODEL > CODEBUDDY_MODEL`,所以导 `CODEBUDDY_MODEL=hy3` 只改了**标签**
+  (结果目录 `hy3/`、trace 按 HY3 读),实际请求发的还是 `.env` 里的 `OPENAI_MODEL`。
+  **trace 不记录实际模型**,跑完无从查证。已在 `latest_runner.py` 加启动闸:
+  标签与 `llm_client.served_model()` 不符直接退出,并打印 `Served model:`。
+  换骨干必须同时设 `OPENAI_MODEL`+`OPENAI_API_BASE`+`OPENAI_API_KEY`。
+
 ## LoCoMo native protocol(记忆层对比,独立于 A/B/C)
 
 机器 **any4 容器**(`ssh -p 36000 root@yizhouyang-any4.devcloud.woa.com`,repo 在
