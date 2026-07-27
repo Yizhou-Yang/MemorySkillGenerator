@@ -1254,6 +1254,23 @@ async def main():
     print(f"  Model: {MODEL:<22} | Global slots: {GLOBAL_TASK_SLOTS} "
           f"(docker {min(DOCKER_TASK_SLOTS, GLOBAL_TASK_SLOTS)}) "
           f"| embed threads: {_EMBED_THREADS}")
+    # The results directory and every trace row are keyed on MODEL, but the
+    # request carries whatever llm_client resolved. Refuse to write a run
+    # labelled as one backbone and answered by another.
+    try:
+        from scripts.latest.llm_client import served_model as _served_model
+        _served = _served_model()
+    except Exception:
+        _served = ""
+    if _served and MODEL and _served != MODEL.lower() \
+            and os.environ.get("ALLOW_MODEL_LABEL_MISMATCH") != "1":
+        raise SystemExit(
+            f"[gate] backbone label '{MODEL}' but the endpoint is being asked for "
+            f"'{_served}'. Results would be written to {MODEL}/ and read as that "
+            f"backbone. Fix OPENAI_MODEL/CODEBUDDY_MODEL (with LLM_PROVIDER=vllm, "
+            f"OPENAI_MODEL wins), or set ALLOW_MODEL_LABEL_MISMATCH=1 if the "
+            f"endpoint genuinely serves {MODEL} under another id.")
+    print(f"  Served model: {_served or '(unknown)'}")
     # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
     # config echo). One glance at the log answers "what exactly ran?" — the
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
