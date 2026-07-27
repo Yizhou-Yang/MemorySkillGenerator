@@ -332,6 +332,23 @@ def critic_model_id() -> str:
     return CRITIC_MODEL
 
 
+def judge_preflight() -> tuple:
+    """Probe the designated judge. A judge that cannot be reached does not fail
+    the run -- it just never overrides a score -- so the arm looks judge-scored
+    while every row is raw exact match."""
+    if not JUDGE_MODEL:
+        return True, "(backbone tie-break)"
+    try:
+        cli = _openai_client()
+        r = cli.chat.completions.create(
+            model=JUDGE_MODEL, max_tokens=8,
+            messages=[{"role": "user", "content": "Reply with exactly: OK"}])
+        txt = (r.choices[0].message.content or "").strip()
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:150]}"
+    return (bool(txt), txt[:40] or "empty response")
+
+
 def critic_preflight() -> tuple:
     """One tiny call so a dead critic fails at launch, not silently mid-sweep.
 

@@ -1287,6 +1287,19 @@ async def main():
                 f"would run on the fallback quality score and still report no errors. "
                 f"Point CRITIC_BASE_URL/CRITIC_API_KEY/CRITIC_MODEL_ID at a live model "
                 f"(note: HY3_BASE_URL, if set, overrides CRITIC_BASE_URL).")
+    # A judge that cannot be reached never overrides a score, so every row is raw
+    # exact match while the trace still records the judge's name.
+    try:
+        from scripts.latest.llm_client import judge_preflight, JUDGE_MODEL as _JM
+        _jok, _jwhy = judge_preflight()
+    except Exception as e:
+        _jok, _jwhy = False, f"{type(e).__name__}: {e}"
+        _JM = os.environ.get("JUDGE_MODEL", "")
+    print(f"  Judge: {_JM or '(backbone)'} -> {'OK' if _jok else 'UNREACHABLE'} ({_jwhy})")
+    if not _jok and os.environ.get("ALLOW_DEAD_JUDGE") != "1":
+        raise SystemExit(
+            f"[gate] judge '{_JM}' is unreachable ({_jwhy}). Scores would silently "
+            f"fall back to raw exact match while the trace still names this judge.")
     # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
     # config echo). One glance at the log answers "what exactly ran?" — the
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
