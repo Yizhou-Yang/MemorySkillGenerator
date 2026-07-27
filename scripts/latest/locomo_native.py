@@ -148,7 +148,19 @@ _EXTRACT_SYS = (
     "WORDING: for subjective content (feelings, realizations, symbolism, "
     "reasons, aspirations) keep the speaker's OWN key words in the fact rather "
     "than abstracting them away ('a safe and inviting place for people to "
-    "grow', not 'a sanctuary').")
+    "grow', not 'a sanctuary'). "
+    "SPEAKER ATTRIBUTION: each dialogue line is prefixed with the speaker's "
+    "name. Attribute every fact to the person it is true of — an 'I ...' "
+    "statement belongs to its speaker, not the listener. The two speakers' "
+    "plans, opinions and experiences must never be mixed up; a fact filed "
+    "under the wrong person is worse than no fact. "
+    "NAMES: resolve every reference to the concrete name stated anywhere in "
+    "the excerpt — country, book/song title, object, place ('moved from "
+    "Sweden', not 'moved from her home country'; 'the book Becoming Nicole', "
+    "not 'the recommended book'). "
+    "EVENTS: when an event is described with several activities or items, "
+    "list them ALL in one fact ('explored nature, roasted marshmallows, and "
+    "hiked'), not just one of them.")
 
 
 _EMBEDDER = None
