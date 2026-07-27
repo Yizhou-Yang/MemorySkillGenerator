@@ -26,6 +26,8 @@ a silently-degraded baseline would be worse than no baseline.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import os
 import re
 from pathlib import Path
@@ -49,6 +51,22 @@ def _ns(benchmark: str, task: dict) -> str:
     return f"{benchmark}:{_chain_id(task)}"
 
 
+_IN_BASELINE = contextvars.ContextVar("in_baseline_memory_call", default=False)
+
+
+@contextlib.contextmanager
+def baseline_call():
+    """Mark the dynamic extent of a call INTO a third-party memory library.
+
+    Everything the backbone does outside this scope is left alone.
+    """
+    tok = _IN_BASELINE.set(True)
+    try:
+        yield
+    finally:
+        _IN_BASELINE.reset(tok)
+
+
 def _install_nothink_patch() -> None:
     """Make third-party memory libraries usable against a reasoning endpoint.
 
@@ -56,18 +74,20 @@ def _install_nothink_patch() -> None:
     fields, so `reasoning_effort` cannot be passed through configuration. On
     HY3/taiji that leaves `content` empty (the answer goes to the reasoning
     stream): mem0's fact extraction returns nothing and A-Mem's controller
-    raises `cannot access local variable 'response'`. Patch the SDK call site
-    once so every request for a reasoning model carries the off-switch. Only
-    the task-solving backbone identity matters for fairness; this changes how
-    the endpoint is *called*, not which model answers.
+    raises `cannot access local variable 'response'`.
+
+    The off-switch therefore has to go in at the SDK call site, but it must
+    apply to the memory library's calls only. Model identity cannot make that
+    distinction -- the backbone and mem0's extractor are the same model name --
+    so gating on it turned the backbone's reasoning off for every task that ran
+    after the first external-baseline arm imported this module, process-wide
+    (measured on gaia2/hy3: output tokens 29k -> 5.7k, iteration-0 score
+    54.8 -> 30.9, i.e. the arms were no longer comparable). Gate on the call's
+    dynamic extent instead: only requests issued inside baseline_call() are
+    rewritten.
     """
     if os.environ.get("BASELINE_NOTHINK", "1") != "1":
         return
-    # Deliberately NOT OPENAI_REASONING_EFFORT: that one is the backbone's
-    # knob, and sharing it means "make mem0 parseable" silently also means
-    # "answer every task with reasoning off", which weakens the backbone and
-    # makes arms run days apart incomparable (measured: hy3 GAIA 21 -> 10 EM).
-    # The baselines' internal LLM always runs plain; the backbone is untouched.
     effort = os.environ.get("BASELINE_REASONING_EFFORT", "no_think")
     models = tuple(m for m in os.environ.get(
         "NOTHINK_MODELS", "hy3").lower().split(",") if m)
@@ -81,13 +101,15 @@ def _install_nothink_patch() -> None:
 
     def create(self, *a, **kw):
         m = str(kw.get("model", "")).lower()
-        if any(t in m for t in models) and "reasoning_effort" not in kw:
+        if (_IN_BASELINE.get() and any(t in m for t in models)
+                and "reasoning_effort" not in kw):
             kw["reasoning_effort"] = effort
         return _orig(self, *a, **kw)
 
     create._nothink = True
     _c.Completions.create = create
-    print(f"[baseline] no_think patch installed for {models}", flush=True)
+    print(f"[baseline] no_think patch armed for {models} "
+          f"(applies inside baseline_call() only)", flush=True)
 
 
 _install_nothink_patch()
@@ -258,52 +280,54 @@ class Mem0Memory:
         self.__dict__.setdefault("_mems", {})
 
     def inject(self, task: dict) -> str:
-        query = task.get("description", "")[:2000]
-        try:
-            # Build OUTSIDE the lock: _mem() takes _IO_LOCK itself, and
-            # threading.Lock is non-reentrant, so `with lock: self._mem()`
-            # self-deadlocks on the first (lazy-build) call — which is exactly
-            # every arm's first inject. Resolve the client first, then hold the
-            # lock only for the search.
-            ns = _ns(self.benchmark, task)
-            # per-chain store => no cross-chain lock contention; mem0 >=2.x
-            # moved entity identity out of top-level kwargs for search().
-            hits = self._mem_for(ns).search(
-                query, filters={"user_id": ns}, limit=self.top_k)
-        except Exception as e:
-            print(f"[baseline:mem0] search failed: {e}", flush=True)
-            return ""
-        items = hits.get("results", hits) if isinstance(hits, dict) else hits
-        lines = [f"- {h.get('memory') or h.get('text') or ''}".strip()
-                 for h in (items or []) if isinstance(h, dict)]
-        lines = [l for l in lines if len(l) > 2][: self.top_k]
-        if not lines:
-            return ""
-        return "## Memories from earlier attempts (mem0)\n\n" + "\n".join(lines)
+        with baseline_call():
+            query = task.get("description", "")[:2000]
+            try:
+                # Build OUTSIDE the lock: _mem() takes _IO_LOCK itself, and
+                # threading.Lock is non-reentrant, so `with lock: self._mem()`
+                # self-deadlocks on the first (lazy-build) call — which is exactly
+                # every arm's first inject. Resolve the client first, then hold the
+                # lock only for the search.
+                ns = _ns(self.benchmark, task)
+                # per-chain store => no cross-chain lock contention; mem0 >=2.x
+                # moved entity identity out of top-level kwargs for search().
+                hits = self._mem_for(ns).search(
+                    query, filters={"user_id": ns}, limit=self.top_k)
+            except Exception as e:
+                print(f"[baseline:mem0] search failed: {e}", flush=True)
+                return ""
+            items = hits.get("results", hits) if isinstance(hits, dict) else hits
+            lines = [f"- {h.get('memory') or h.get('text') or ''}".strip()
+                     for h in (items or []) if isinstance(h, dict)]
+            lines = [l for l in lines if len(l) > 2][: self.top_k]
+            if not lines:
+                return ""
+            return "## Memories from earlier attempts (mem0)\n\n" + "\n".join(lines)
 
     async def record(self, task: dict, result: dict, score=None) -> None:
-        resp = (result.get("response") or "").strip()
-        if not resp:
-            return
-        try:
-            # mem0.add runs its own LLM extraction — blocking; keep it off
-            # the event loop or it throttles every concurrent task. Build the
-            # client BEFORE taking the lock (non-reentrant _IO_LOCK, same
-            # deadlock as inject).
-            ns = _ns(self.benchmark, task)
+        with baseline_call():
+            resp = (result.get("response") or "").strip()
+            if not resp:
+                return
+            try:
+                # mem0.add runs its own LLM extraction — blocking; keep it off
+                # the event loop or it throttles every concurrent task. Build the
+                # client BEFORE taking the lock (non-reentrant _IO_LOCK, same
+                # deadlock as inject).
+                ns = _ns(self.benchmark, task)
 
-            def _add():
-                # per-chain store: concurrent chains no longer serialise
-                self._mem_for(ns).add(
-                    [{"role": "user", "content": task.get("description", "")[:4000]},
-                     {"role": "assistant", "content": resp[:4000]}],
-                    user_id=ns)
-            await asyncio.to_thread(_add)
-        except Exception as e:
-            self._add_failures += 1
-            if self._add_failures <= 3 or self._add_failures % 50 == 0:
-                print(f"[baseline:mem0] add failed ({self._add_failures}): {e}",
-                      flush=True)
+                def _add():
+                    # per-chain store: concurrent chains no longer serialise
+                    self._mem_for(ns).add(
+                        [{"role": "user", "content": task.get("description", "")[:4000]},
+                         {"role": "assistant", "content": resp[:4000]}],
+                        user_id=ns)
+                await asyncio.to_thread(_add)
+            except Exception as e:
+                self._add_failures += 1
+                if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                    print(f"[baseline:mem0] add failed ({self._add_failures}): {e}",
+                          flush=True)
 
     def __len__(self) -> int:  # parity with other arms' logging
         return 0
@@ -433,58 +457,60 @@ class AMemMemory:
         return self._sys
 
     def inject(self, task: dict) -> str:
-        query = task.get("description", "")[:2000]
-        ns = _ns(self.benchmark, task)
-        try:
-            _sys = self._system()
-        except Exception as e:
-            print(f"[baseline:amem] system unavailable: {e}", flush=True)
-            return ""
-        mems = getattr(_sys, "memories", {}) or {}
-        chain_ids = self._per_chain.get(ns, [])
-        # Chain scoping (same discipline as B/C): serve THIS chain's own A-Mem
-        # notes. A-Mem still authored each note (keyword/context/link/evolution
-        # generation ran at record time); retrieval here is chain-local, so the
-        # comparison to B/C is on note QUALITY, not on a different candidate set.
-        # Fall back to global embedding retrieval only when the chain is empty.
-        notes = [mems[i] for i in chain_ids if i in mems]
-        if not notes and mems:
+        with baseline_call():
+            query = task.get("description", "")[:2000]
+            ns = _ns(self.benchmark, task)
             try:
-                idx = _sys.retriever.search(query, self.top_k * 4)
-                allm = list(mems.values())
-                notes = [allm[int(i)] for i in (idx or [])
-                         if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
-            except Exception:
-                notes = []
-        lines = []
-        for n in notes[-self.top_k:][::-1]:      # most recent first
-            text = (getattr(n, "content", "") or "").strip()
-            if text:
-                lines.append(f"- {text[:400]}")
-            if len(lines) >= self.top_k:
-                break
-        if not lines:
-            return ""
-        return "## Memories from earlier attempts (A-Mem)\n\n" + "\n".join(lines)
+                _sys = self._system()
+            except Exception as e:
+                print(f"[baseline:amem] system unavailable: {e}", flush=True)
+                return ""
+            mems = getattr(_sys, "memories", {}) or {}
+            chain_ids = self._per_chain.get(ns, [])
+            # Chain scoping (same discipline as B/C): serve THIS chain's own A-Mem
+            # notes. A-Mem still authored each note (keyword/context/link/evolution
+            # generation ran at record time); retrieval here is chain-local, so the
+            # comparison to B/C is on note QUALITY, not on a different candidate set.
+            # Fall back to global embedding retrieval only when the chain is empty.
+            notes = [mems[i] for i in chain_ids if i in mems]
+            if not notes and mems:
+                try:
+                    idx = _sys.retriever.search(query, self.top_k * 4)
+                    allm = list(mems.values())
+                    notes = [allm[int(i)] for i in (idx or [])
+                             if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
+                except Exception:
+                    notes = []
+            lines = []
+            for n in notes[-self.top_k:][::-1]:      # most recent first
+                text = (getattr(n, "content", "") or "").strip()
+                if text:
+                    lines.append(f"- {text[:400]}")
+                if len(lines) >= self.top_k:
+                    break
+            if not lines:
+                return ""
+            return "## Memories from earlier attempts (A-Mem)\n\n" + "\n".join(lines)
 
     async def record(self, task: dict, result: dict, score=None) -> None:
-        resp = (result.get("response") or "").strip()
-        if not resp:
-            return
-        ns = _ns(self.benchmark, task)
-        try:
-            note = (f"Task: {task.get('description', '')[:1500]}\n"
-                    f"Attempt: {resp[:2500]}")
-            _sys = self._system()
-            _fn = _sys.add_note if hasattr(_sys, "add_note") \
-                else _sys.create_memory
-            nid = await asyncio.to_thread(_fn, note)   # LLM link-gen inside
-            self._per_chain.setdefault(ns, []).append(nid)
-        except Exception as e:
-            self._add_failures = getattr(self, "_add_failures", 0) + 1
-            if self._add_failures <= 3 or self._add_failures % 50 == 0:
-                print(f"[baseline:amem] add failed ({self._add_failures}): {e}",
-                      flush=True)
+        with baseline_call():
+            resp = (result.get("response") or "").strip()
+            if not resp:
+                return
+            ns = _ns(self.benchmark, task)
+            try:
+                note = (f"Task: {task.get('description', '')[:1500]}\n"
+                        f"Attempt: {resp[:2500]}")
+                _sys = self._system()
+                _fn = _sys.add_note if hasattr(_sys, "add_note") \
+                    else _sys.create_memory
+                nid = await asyncio.to_thread(_fn, note)   # LLM link-gen inside
+                self._per_chain.setdefault(ns, []).append(nid)
+            except Exception as e:
+                self._add_failures = getattr(self, "_add_failures", 0) + 1
+                if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                    print(f"[baseline:amem] add failed ({self._add_failures}): {e}",
+                          flush=True)
 
     def __len__(self) -> int:
         return sum(len(v) for v in self._per_chain.values())
@@ -530,52 +556,54 @@ class MemoryOSMemory:
         return self._per_ns[ns]
 
     def inject(self, task: dict) -> str:
-        ns = _ns(self.benchmark, task)
-        if ns not in self._per_ns:
-            return ""      # nothing recorded for this chain yet
-        sys_ = self._per_ns[ns]
-        query = task.get("description", "")[:2000]
-        ctx = None
-        for meth in ("retrieve_context", "get_retrieval_context", "retrieve",
-                     "search"):
-            fn = getattr(sys_, meth, None)
-            if fn is None:
-                continue
-            try:
-                ctx = fn(query)
-                break
-            except TypeError:
-                try:
-                    ctx = fn(query, self.top_k)
-                    break
-                except Exception:
+        with baseline_call():
+            ns = _ns(self.benchmark, task)
+            if ns not in self._per_ns:
+                return ""      # nothing recorded for this chain yet
+            sys_ = self._per_ns[ns]
+            query = task.get("description", "")[:2000]
+            ctx = None
+            for meth in ("retrieve_context", "get_retrieval_context", "retrieve",
+                         "search"):
+                fn = getattr(sys_, meth, None)
+                if fn is None:
                     continue
-            except Exception as e:
-                print(f"[baseline:memoryos] {meth} failed: {e}", flush=True)
+                try:
+                    ctx = fn(query)
+                    break
+                except TypeError:
+                    try:
+                        ctx = fn(query, self.top_k)
+                        break
+                    except Exception:
+                        continue
+                except Exception as e:
+                    print(f"[baseline:memoryos] {meth} failed: {e}", flush=True)
+                    return ""
+            if not ctx:
                 return ""
-        if not ctx:
-            return ""
-        text = ctx if isinstance(ctx, str) else str(ctx)
-        text = text.strip()[:1200]
-        if len(text) < 3:
-            return ""
-        return "## Memories from earlier attempts (MemoryOS)\n\n" + text
+            text = ctx if isinstance(ctx, str) else str(ctx)
+            text = text.strip()[:1200]
+            if len(text) < 3:
+                return ""
+            return "## Memories from earlier attempts (MemoryOS)\n\n" + text
 
     async def record(self, task: dict, result: dict, score=None) -> None:
-        resp = (result.get("response") or "").strip()
-        if not resp:
-            return
-        ns = _ns(self.benchmark, task)
-        try:
-            await asyncio.to_thread(
-                self._sys_for(ns).add_memory,
-                user_input=task.get("description", "")[:3000],
-                agent_response=resp[:3000])
-        except Exception as e:
-            self._add_failures = getattr(self, "_add_failures", 0) + 1
-            if self._add_failures <= 3 or self._add_failures % 50 == 0:
-                print(f"[baseline:memoryos] add failed ({self._add_failures}): "
-                      f"{e}", flush=True)
+        with baseline_call():
+            resp = (result.get("response") or "").strip()
+            if not resp:
+                return
+            ns = _ns(self.benchmark, task)
+            try:
+                await asyncio.to_thread(
+                    self._sys_for(ns).add_memory,
+                    user_input=task.get("description", "")[:3000],
+                    agent_response=resp[:3000])
+            except Exception as e:
+                self._add_failures = getattr(self, "_add_failures", 0) + 1
+                if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                    print(f"[baseline:memoryos] add failed ({self._add_failures}): "
+                          f"{e}", flush=True)
 
     def __len__(self) -> int:
         return len(self._per_ns)
