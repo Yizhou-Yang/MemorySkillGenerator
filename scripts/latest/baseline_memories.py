@@ -389,24 +389,42 @@ class AMemMemory:
         # unbound ("cannot access local variable 'response'"). The SDK reads
         # OPENAI_BASE_URL from the environment, so set it here to point the
         # library's own client at our endpoint.
+        # Override rather than setdefault, and restore afterwards. When the
+        # backbone runs on another endpoint (hy3 on taiji) its OPENAI_BASE_URL
+        # is already exported, so setdefault left A-Mem's client pointed at the
+        # backbone's endpoint; it replied "model not found", note construction
+        # failed silently, and the arm scored at the no-memory floor while
+        # looking like a finding about A-Mem. Leaving the override in place
+        # would be the mirror bug -- the backbone would inherit the baseline's
+        # endpoint -- so the swap is scoped to construction.
+        _saved = {k: os.environ.get(k) for k in ("OPENAI_BASE_URL", "OPENAI_API_KEY")}
         if _int_base:
-            os.environ.setdefault("OPENAI_BASE_URL", _int_base)
+            os.environ["OPENAI_BASE_URL"] = _int_base
         if _int_key:
-            os.environ.setdefault("OPENAI_API_KEY", _int_key)
+            os.environ["OPENAI_API_KEY"] = _int_key
         # A-Mem's ctor signature varies across revisions; try the documented
         # form first, degrade to defaults rather than guessing kwargs.
+        def _restore():
+            for k, v in _saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
         try:
-            return AgenticMemorySystem(
-                model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                llm_backend="openai", llm_model=_int_model,
-                api_key=_int_key, api_base=_int_base)
-        except TypeError:
             try:
                 return AgenticMemorySystem(
                     model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                    llm_backend="openai", llm_model=_int_model)
+                    llm_backend="openai", llm_model=_int_model,
+                    api_key=_int_key, api_base=_int_base)
             except TypeError:
-                return AgenticMemorySystem()
+                try:
+                    return AgenticMemorySystem(
+                        model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
+                        llm_backend="openai", llm_model=_int_model)
+                except TypeError:
+                    return AgenticMemorySystem()
+        finally:
+            _restore()
 
     # ── pickle support (tau2 bridge hands the store between processes) ──
     # The live system holds a SentenceTransformer + an LLM client (both
