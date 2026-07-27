@@ -1271,6 +1271,22 @@ async def main():
             f"OPENAI_MODEL wins), or set ALLOW_MODEL_LABEL_MISMATCH=1 if the "
             f"endpoint genuinely serves {MODEL} under another id.")
     print(f"  Served model: {_served or '(unknown)'}")
+    # Arm C is defined by the critic's judgment; if that endpoint is dead the
+    # refinement path falls back to a constant quality score and the arm still
+    # reports error==0. Probe once and refuse rather than produce that.
+    if "C" in _ARMS or os.environ.get("METADATA_AUTHOR") == "critic":
+        try:
+            from scripts.latest.llm_client import critic_preflight, critic_model_id
+            _ok, _why = critic_preflight()
+        except Exception as e:
+            _ok, _why = False, f"{type(e).__name__}: {e}"
+        print(f"  Critic: {critic_model_id()} -> {'OK' if _ok else 'UNREACHABLE'} ({_why})")
+        if not _ok and os.environ.get("ALLOW_DEAD_CRITIC") != "1":
+            raise SystemExit(
+                f"[gate] critic '{critic_model_id()}' is unreachable ({_why}). Arm C "
+                f"would run on the fallback quality score and still report no errors. "
+                f"Point CRITIC_BASE_URL/CRITIC_API_KEY/CRITIC_MODEL_ID at a live model "
+                f"(note: HY3_BASE_URL, if set, overrides CRITIC_BASE_URL).")
     # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
     # config echo). One glance at the log answers "what exactly ran?" — the
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught

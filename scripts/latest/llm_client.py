@@ -332,6 +332,23 @@ def critic_model_id() -> str:
     return CRITIC_MODEL
 
 
+def critic_preflight() -> tuple:
+    """One tiny call so a dead critic fails at launch, not silently mid-sweep.
+
+    When the critic endpoint is unreachable the refinement path swallows the
+    error and stamps its fallback quality score, so the arm completes with
+    error==0 and looks healthy while carrying no critic judgment at all --
+    which is the one thing arm C is supposed to measure.
+    """
+    try:
+        out = llm_critic_fn("Reply with exactly: OK")
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:160]}"
+    if not (out or "").strip():
+        return False, "empty response"
+    return True, (out or "").strip()[:40]
+
+
 def llm_critic_fn(prompt: str) -> str:
     """Synchronous LLM call for the CRITIC only. Always HY3 — never the backbone;
     raises if HY3's endpoint is unconfigured rather than falling back to a
