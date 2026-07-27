@@ -1,28 +1,13 @@
 #!/usr/bin/env python3
-"""LoCoMo under the memory systems' OWN protocol (Mem0 / A-Mem paper setup),
-not our iterative A/B/C framework.
+"""LoCoMo under the memory systems' OWN protocol (Mem0 / A-Mem paper setup):
+ingest session by session, retrieve top-k per question, answer from the
+retrieved memories alone; score with an LLM judge (J, 0/1) and token-F1.
+Arms: mem0, amem, ours, full (upper bound), nomem (lower bound).
 
-Why this exists: LoCoMo is Mem0/A-Mem's flagship benchmark, and its task is
-cross-session conversational QA — ingest a whole multi-session dialogue into
-memory, then answer questions that require recalling facts from earlier
-sessions. Forcing it into our "re-attempt the same task" loop makes memory of
-prior *answers* irrelevant and scores the baselines as if they had no memory
-(see the paper). So here every system runs the way its authors intended:
+  BENCH_N=3 QA_MODEL=gpt-5.5 JUDGE_MODEL=gpt-5.6-sol \
+    python scripts/latest/locomo_native.py --systems mem0,amem,ours,full,nomem
 
-  ingest:  add each session's dialogue to the store, session by session
-  answer:  for each question, retrieve top-k memories and let the LLM answer
-           using ONLY the retrieved memories (no full transcript)
-  score:   LLM-as-a-Judge (J, 0/1 correctness by an external judge) + token-F1
-
-Systems compared behind one interface (make_qa_memory):
-  mem0, amem  — their own add()/search()
-  ours        — CuratorMem's store used purely as a memory layer
-  full        — upper bound: whole transcript in context (no retrieval)
-  nomem       — lower bound: answer with no memory
-
-Run:
-  BENCH_N=3 QA_MODEL=hy3 JUDGE_MODEL=grok-4.5 \
-    python scripts/latest/locomo_native.py --systems mem0,amem,ours,nomem
+See RUNNING_EXPERIMENTS.md for the full protocol and env vars.
 """
 from __future__ import annotations
 import argparse, json, os, re, sys, time, collections, asyncio, threading
@@ -80,17 +65,11 @@ def make_qa_memory(system: str, conv_id: str) -> QAMemory:
     raise ValueError(system)
 
 
-# One Mem0 store for the whole run, conversations separated by user_id — this
-# IS mem0's native LoCoMo protocol (one Memory, per-conversation user_id). It
-# also sidesteps mem0's fixed-path internal stores: mem0 opens a SECOND local
-# qdrant at $MEM0_DIR/migrations_qdrant (plus history.db) regardless of the
-# vector_store path we set, and a per-conversation Memory would make N builds
-# race for that one directory ("Storage folder ... already accessed by another
-# instance") and store nothing. A single Memory opens it exactly once. Set a
-# unique MEM0_DIR for the run to also isolate it from any concurrent mem0
-# process (e.g. the agent-framework sweep's external-baseline arm).
+# One Memory for the run, conversations split by user_id (mem0's own protocol).
+# Per-conversation instances race for mem0's fixed-path internal qdrant and store
+# nothing; set a unique MEM0_DIR to isolate concurrent mem0 processes.
 _MEM0_SHARED = None
-_MEM0_LOCK = threading.Lock()   # embedded qdrant is one instance; serialize ops
+_MEM0_LOCK = threading.Lock()
 
 
 def _mem0_store():
@@ -131,12 +110,8 @@ class _AMemQA(QAMemory):
     def recall(self, query):
         sysm = self.a._system()
         try:
-            # retriever.search returns a NUMPY ndarray of positional indices
-            # into list(memories.values()). Do NOT write `idx or []`: on a
-            # multi-element ndarray that raises "truth value ambiguous", which
-            # the except then swallows, and recall silently returns nothing
-            # (whole arm scored ~0 with all answers "I don't know"). Iterate the
-            # array element-wise instead.
+            # ndarray of positional indices; `idx or []` would raise
+            # "truth value ambiguous" and silently empty this arm.
             idx = sysm.retriever.search(query, TOPK)
             allm = list(sysm.memories.values())
             outs = []
@@ -181,14 +156,8 @@ _EMB_LK = threading.Lock()
 
 
 def _embedder():
-    """The SAME sentence-encoder mem0/A-Mem retrieve with (all-MiniLM-L6-v2).
-
-    CuratorMem's SDK store ranks patches lexically — fine for its agent-task
-    setting, but on conversational QA that is a keyword handicap against the
-    baselines' semantic search (a query 'relationship status' never lexically
-    matches the fact 'Caroline is single'). For an apples-to-apples memory-layer
-    comparison the retrieval encoder must be identical, so the adapter does its
-    own semantic top-k over the extracted facts with this shared model."""
+    """The same sentence-encoder mem0/A-Mem retrieve with, so the comparison
+    isolates the memory representation rather than the retriever."""
     global _EMBEDDER
     if _EMBEDDER is None:
         with _EMB_LK:
@@ -201,32 +170,17 @@ def _embedder():
 
 
 class _OursQA(QAMemory):
-    """CuratorMem in its NATIVE structure, mapped onto conversation memory.
-
-    A dialogue is not a bag of text: facts about one entity EVOLVE across
-    sessions ("May: Caroline is single" -> "Aug: Caroline is dating"). That is
-    exactly a patch version chain. So we (1) let the critic extract atomic
-    facts (like mem0's extraction), (2) key each fact's chain on (entity,key)
-    so a later fact about the same aspect SUPERSEDES the earlier one as a new
-    version — lineage preserved, not destructively overwritten, (3) stamp the
-    dialogue timestamp as grounded provenance, (4) retrieve chain-scoped and
-    lineage-ordered (latest version first, older versions available for
-    temporal questions). Mechanisms that need an execution loop (w_c reuse
-    weight, avoidance-of-failed-attempts) have no analogue in static dialogue
-    and are simply inactive here — stated as such."""
+    """CuratorMem's native structure on conversation memory: the critic extracts
+    facts, each (entity, aspect) chain versions so a later fact supersedes its
+    predecessor with lineage kept, and the dialogue timestamp is provenance.
+    Execution-loop mechanisms (reuse weight, avoidance) are inactive here."""
     def __init__(self, conv_id):
         from memlayer.vgr import PatchMemory
-        # Retrieval runs INSIDE the SDK: PatchMemory ranks semantically when
-        # given an embedder (same all-MiniLM encoder the baselines use). The
-        # harness holds no parallel index — everything the answerer sees comes
-        # out of the released memlayer API.
         self.mem = PatchMemory(embedder=lambda texts: _embedder().encode(
             texts, normalize_embeddings=True, show_progress_bar=False))
         self.ns = conv_id
-        self._ver = collections.defaultdict(int)   # (entity,key) -> latest version
+        self._ver = collections.defaultdict(int)
         self._lk = threading.Lock()
-        # Extraction is CURATION — authored by the external critic (grok),
-        # same author rule as the main method; the backbone only answers.
         self.model = os.environ.get("CRITIC_MODEL_ID",
                      os.environ.get("JUDGE_MODEL", "grok-4.5"))
         self.base = os.environ.get("CRITIC_BASE_URL",
@@ -237,13 +191,9 @@ class _OursQA(QAMemory):
     def add(self, text):
         from memlayer.vgr import Patch
         ts = ""
-        m = re.match(r"\s*([0-9].*?[0-9]{4})", text)   # LoCoMo sessions start with a date line
+        m = re.match(r"\s*([0-9].*?[0-9]{4})", text)
         if m: ts = m.group(1)
         try:
-            # LoCoMo sessions are long dialogues; a stingy budget would extract
-            # only the first few facts and leave the rest unrecalled at QA time.
-            # These are our own extractor's parameters (mem0/A-Mem extract with
-            # their own internal budgets), so a fair, non-truncating setting.
             raw = _chat(self.model, self.base, self.key, _EXTRACT_SYS,
                         text[:int(os.environ.get("OURS_EXTRACT_CHARS", "10000"))],
                         max_tokens=int(os.environ.get("OURS_EXTRACT_TOKENS", "2600")))
@@ -265,18 +215,11 @@ class _OursQA(QAMemory):
             self.mem.add(Patch(patch_id=f"{chain}#v{v}", chain_id=chain, version=v,
                                key=key, summary=f"{ent}: {fact}",
                                content_before=prev, content_after=fact,
-                               rationale=ent, evidence=ts))   # ts = grounded provenance
+                               rationale=ent, evidence=ts))
 
     def recall(self, query):
-        # Semantic top-k straight from the SDK (PatchMemory ranks with the same
-        # encoder the baselines use), then layer CuratorMem's structure on the
-        # rendering: mark superseded versions, attach dialogue-time provenance.
-        # Our facts are ATOMIC (one clause each), whereas a mem0 "memory" is a
-        # consolidated multi-fact statement — so k of ours carries less than k
-        # of theirs. Retrieve more atomic facts to match the information budget,
-        # not the item count (multi-hop especially needs several facts at once).
         rk = int(os.environ.get("OURS_RECALL_K", str(TOPK * 2)))
-        with self._lk:                       # embed cache builds once
+        with self._lk:
             got = self.mem.retrieve(query, top_k=rk)
         if not got:
             return ""
@@ -286,11 +229,6 @@ class _OursQA(QAMemory):
         latest = {}
         for p in self.mem.patches:
             latest[p.chain_id] = max(latest.get(p.chain_id, 0), p.version)
-        # Render grouped BY ENTITY, chronological within the group — the chains
-        # are entity-keyed already, so this costs nothing and puts the several
-        # facts a multi-hop question must combine next to each other instead of
-        # scattered in similarity order; chronology also aids temporal
-        # arithmetic ('how long has X been ...').
         def _ts_key(f):
             m = re.search(r"(\d{1,2})?\s*(January|February|March|April|May|June|"
                           r"July|August|September|October|November|December)?[ ,]*"
@@ -305,7 +243,7 @@ class _OursQA(QAMemory):
             lines.append(f"{ent}:")
             for f in fs:
                 ts = f["ts"]
-                mark = "[OK] " if ts else ""   # endorsed = carries dialogue-time provenance
+                mark = "[OK] " if ts else ""
                 note = " (this was updated in a later session)" \
                        if f["version"] < latest.get(f["chain"], f["version"]) else ""
                 lines.append(f"  - {mark}{f['fact']}{note}" + (f" [{ts}]" if ts else ""))
@@ -337,15 +275,8 @@ ANSWER_SYS = ("Answer the question using ONLY the memories below. Be concise —
               "probable answer the memories support — for hypothetical or "
               "judgment questions ('Would X ...?') answer e.g. 'Likely no', and "
               "if the memories are thin, give your best guess anyway.")
-# NOTE: ANSWER_SYS is SHARED by mem0/amem/ours/full, so every arm compared in one
-# table must be scored under the SAME wording. This run therefore reruns all five
-# arms — staged (ours+nomem first for a fast read, baselines right after) rather
-# than reusing the previous run's baseline rows, which predate this wording.
-# The no-memory arm must be a GUESSING lower bound, not a muzzled one: under
-# ANSWER_SYS ('answer ONLY from the memories') an empty context forces 'I don't
-# know' on every question and the arm reads 0 by construction, which is an
-# artifact of the prompt rather than a measurement. Mem0's paper lets the
-# no-memory baseline answer from the question alone; match that.
+# ANSWER_SYS is SHARED by mem0/amem/ours/full: changing it invalidates any
+# baseline rows scored under the old wording. Rerun every arm together.
 NOMEM_SYS = ("You have NO memory of this conversation. Answer the question with "
              "your single best guess from the question itself and common sense. "
              "Be concise — a short phrase. Never say you don't know; always "
@@ -402,8 +333,6 @@ def run():
     def ingest(system, conv):
         memory = None if system in ("nomem", "full") else make_qa_memory(system, conv["conv_id"])
         transcript = []
-        # sessions of ONE conversation stay ordered (later memory builds on
-        # earlier); different (system, conv) units run in parallel below.
         for sess in conv["sessions"]:
             txt = sess if isinstance(sess, str) else json.dumps(sess)
             transcript.append(txt)
@@ -436,13 +365,7 @@ def run():
             fout.flush()
 
     for system in systems:
-        # Isolate each system: a store that fails to even import (A-Mem raises
-        # SystemExit — a BaseException — when its repo isn't on the path) must
-        # not take down the systems that follow it in the list. Their rows are
-        # already flushed to disk; skip the broken one and keep going.
         try:
-            # ingest all conversations for this system in parallel (each is an
-            # independent store), then answer all questions in parallel.
             with ThreadPoolExecutor(max_workers=min(CONC, len(convs))) as ex:
                 built = list(ex.map(lambda c: (c, *ingest(system, c)), convs))
             jobs = [(system, c, mem, ctx, qa) for c, mem, ctx in built for qa in c["qa"]]

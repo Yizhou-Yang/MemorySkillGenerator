@@ -117,17 +117,14 @@ class PatchMemory:
     tie-breaker. The same retrieval feeds both B and C; the difference is
     purely what happens AFTER retrieval (B injects, C grounds-then-injects).
 
-    Relevance is lexical by default (zero dependencies). Pass ``embedder`` — a
-    callable ``(list[str]) -> array-like of L2-normalized row vectors`` (e.g. a
-    wrapped sentence-transformers ``encode``) — to rank semantically instead;
-    embeddings are cached per patch and computed lazily at retrieve time. The
-    ranking key is the only thing that changes; chain scoping and the recency
-    tie-break are identical on both paths."""
+    Relevance is lexical by default (zero dependencies). Pass ``embedder``, a
+    callable ``(list[str]) -> L2-normalized row vectors``, to rank semantically
+    instead; only the ranking key changes."""
 
     def __init__(self, embedder=None) -> None:
         self._patches: list[Patch] = []
         self._embedder = embedder
-        self._emb = None                    # row i ↔ self._patches[i]
+        self._emb = None                    # row i <-> self._patches[i]
 
     def __len__(self) -> int:
         return len(self._patches)
@@ -138,7 +135,7 @@ class PatchMemory:
 
     def add(self, patch: Patch) -> None:
         self._patches.append(patch)
-        self._emb = None                    # lazily rebuilt on next retrieve
+        self._emb = None
 
     def _scores(self, query: str) -> list[float]:
         if self._embedder is None:

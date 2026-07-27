@@ -98,6 +98,33 @@ _更新:2026-07-20 11:xx,HEAD b4ccbfb6。当前:老 runner(pid 20608)收尾 gaia
 - **可检验预言**:`breakdown.py` 新增 "C−B by metadata author" 表——critic-authored 下弱 backbone(gpt-oss)的 C−B 翻转应消失;backbone-authored 下应复现。跑对照臂用 `METADATA_AUTHOR=backbone`。
 - **backbone 阵容(最终)**:gpt-oss-120B(最弱)/ HY3(主, 兼统一 critic)/ DeepSeek-v4-pro / gpt-5.5(论文 GPT-5 (low))。Claude/llama 已从论文移除。
 
+## LoCoMo native protocol(记忆层对比,独立于 A/B/C)
+
+机器 **any4 容器**(`ssh -p 36000 root@yizhouyang-any4.devcloud.woa.com`,repo 在
+`/data/workspace/MemorySkillGenerator`),与 gpu3 的 A/B/C sweep 无关,可并行。
+
+- **是什么**:在 mem0/A-Mem 的主场用**他们的口径**比 ours vs mem0 vs amem——逐 session 摄入 →
+  top-10 检索 → 仅凭检索作答 → LLM judge(J,0/1)+ token-F1。跑 `scripts/latest/locomo_native.py`。
+- **为什么单独跑**:A/B/C 那套是"重试同一任务",在单轮对话 QA 上让"记住过去答案"失去意义,
+  会把检索型 baseline 压到 no-memory 水平。**结论进独立表,不是 `tab:framework`**(指标和骨干都不同)。
+- **模型**:answerer `gpt-5.5` / 抽取 `gpt-5.4-mini` / 判官 `gpt-5.6-sol`,全走 `api.mxzzz.xyz`。
+  grok 自建号池会 504(120s 无响应),**别用 grok 做抽取/判官**。
+- **口径锚点**:mem0 的 F1 应落在 **~39**(其论文报 38.7)。偏离说明 harness 坏了,先查再信任何数字。
+- **数据落点**:`experiments_results/locomo_native/{staged,ours_sdk}/`,汇总 `FINAL_COMPARISON.txt`。
+
+### 改码后什么作废(踩过的坑)
+
+| 改动 | 作废范围 |
+|---|---|
+| **`ANSWER_SYS`**(四个检索臂共用) | **全部五臂**。只重跑 ours 而复用旧 baseline 行 = 把提示词红利算成我们方法的功劳。 |
+| `_EXTRACT_SYS` / `OURS_RECALL_K` / `_OursQA` | 仅 ours,baseline 行可合法复用 |
+| `NOMEM_SYS` | 仅 nomem |
+| `memlayer/vgr.py` 检索路径 | 仅 ours(A/B/C 走词面默认,不受影响) |
+
+- `MEM0_DIR` 必须每次跑设成独立目录,否则和并发的 mem0 进程抢固定路径的内部 qdrant,**一条都存不进去**。
+- A-Mem 需要 `AMEM_PATH=/data/workspace/AgenticMemory`,否则 `_build_sys` 抛 `SystemExit` 把整个进程带崩。
+- 容器 load 高时 ssh 会空返回/断连;**别用 `git pull`**(工作树被在跑的实验写脏,ff 不动),直接 `scp` 单文件。
+
 ## 论文命名映射(2026-07-21)
 
 - **实验里的 `gpt-5.5`(mxzzz API)= 论文里的 `GPT-5 (low)`**。填 tab:main 时,读 `latest_evolving/gpt-5.5/<bench>/` 的数据,填进 **GPT-5 (low)** 那一行(已在 GAIA/GAIA2/LoCoMo 三块的 HY3 之后加好,现为 dash)。
