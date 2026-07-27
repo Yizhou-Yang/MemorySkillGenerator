@@ -150,10 +150,15 @@ class _AMemQA(QAMemory):
 
 
 _EXTRACT_SYS = (
-    "Extract atomic facts from this dialogue excerpt. For each fact output one "
+    "Extract facts from this dialogue excerpt. For each fact output one "
     "JSON object on its own line: {\"entity\": <who/what the fact is about>, "
     "\"key\": <short slug of the aspect, e.g. relationship_status, job, location>, "
-    "\"fact\": <the fact as a full sentence, include the date if stated>}. "
+    "\"fact\": <SELF-CONTAINED sentence: understandable entirely on its own — "
+    "name the person (never 'she/he/they'), include when/where/why/from-whom "
+    "when stated, and PACK directly related details into ONE sentence rather "
+    "than fragmenting them ('Melanie's grandma, who is from Sweden, gave her a "
+    "necklace that symbolizes love, faith, and strength' — not three separate "
+    "shards)>}. "
     "One line per fact, no prose, no array. Be EXHAUSTIVE: cover every concrete "
     "detail, however minor — objects and gifts (who gave what, what it "
     "symbolizes), activities and hobbies, places, opinions and realizations, "
@@ -296,14 +301,30 @@ class _OursQA(QAMemory):
         latest = {}
         for f in self._facts:
             latest[f["chain"]] = max(latest.get(f["chain"], 0), f["version"])
-        lines = []
+        # Render grouped BY ENTITY, chronological within the group — the chains
+        # are entity-keyed already, so this costs nothing and puts the several
+        # facts a multi-hop question must combine next to each other instead of
+        # scattered in similarity order; chronology also aids temporal
+        # arithmetic ('how long has X been ...').
+        def _ts_key(f):
+            m = re.search(r"(\d{1,2})?\s*(January|February|March|April|May|June|"
+                          r"July|August|September|October|November|December)?[ ,]*"
+                          r"(\d{4})", f["ts"] or "")
+            return (f["ts"] == "", m.group(3) if m else "9999", f["ts"])
+        groups = collections.OrderedDict()
         for i in order:
             f = self._facts[int(i)]
-            ts = f["ts"]
-            mark = "[OK] " if ts else ""     # endorsed = carries dialogue-time provenance
-            note = " (this was updated in a later session)" \
-                   if f["version"] < latest.get(f["chain"], f["version"]) else ""
-            lines.append(f"- {mark}{f['fact']}{note}" + (f" [{ts}]" if ts else ""))
+            groups.setdefault(f["ent"], []).append(f)
+        lines = []
+        for ent, fs in groups.items():
+            fs.sort(key=_ts_key)
+            lines.append(f"{ent}:")
+            for f in fs:
+                ts = f["ts"]
+                mark = "[OK] " if ts else ""   # endorsed = carries dialogue-time provenance
+                note = " (this was updated in a later session)" \
+                       if f["version"] < latest.get(f["chain"], f["version"]) else ""
+                lines.append(f"  - {mark}{f['fact']}{note}" + (f" [{ts}]" if ts else ""))
         return "\n".join(lines)
 
 
