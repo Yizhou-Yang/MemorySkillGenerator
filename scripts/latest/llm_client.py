@@ -893,15 +893,23 @@ async def llm_judge_answer(response: str, expected: str, question: str) -> float
         f"Model response: {response}\n\n"
         "Score (0.0=wrong, 0.5=partially, 1.0=fully correct). Output ONLY a number:"
     )
-    if JUDGE_MODEL is not None and JUDGE_VIA_SDK and _HAS_CODEBUDDY:
-        out = (await _sdk_judge_call(prompt, JUDGE_MODEL, timeout=30)).strip()
-    elif JUDGE_MODEL is not None:
-        r = await asyncio.to_thread(
-            _openai_notool_sync, "", prompt, 30,
-            JUDGE_MODEL, JUDGE_BASE_URL, JUDGE_API_KEY)
-        out = (r.get("text") or "").strip()
-    else:
-        out = await _llm_short_call(prompt, max_turns=1, timeout=30)
+    # A failed judge call returns "" and scores 0.0 -- conservative (it can only
+    # under-credit, never over-credit) but on a slow gateway the 30s client cut
+    # was manufacturing most of those failures itself: successful judge calls
+    # were observed at 57s while the client abandoned at 30. 120s + one retry.
+    out = ""
+    for _attempt in range(2):
+        if JUDGE_MODEL is not None and JUDGE_VIA_SDK and _HAS_CODEBUDDY:
+            out = (await _sdk_judge_call(prompt, JUDGE_MODEL, timeout=120)).strip()
+        elif JUDGE_MODEL is not None:
+            r = await asyncio.to_thread(
+                _openai_notool_sync, "", prompt, 120,
+                JUDGE_MODEL, JUDGE_BASE_URL, JUDGE_API_KEY)
+            out = (r.get("text") or "").strip()
+        else:
+            out = await _llm_short_call(prompt, max_turns=1, timeout=120)
+        if out:
+            break
     m = re.search(r'(\d+\.?\d*)', out)
     if m:
         try:
@@ -930,7 +938,14 @@ async def llm_critic_skill_quality(exp_summary: str, task_desc: str) -> float:
         f"## Task\n{task_desc}\n\n## Candidate skill\n{exp_summary}\n\n"
         "Output ONLY a single integer 0-10:"
     )
-    out = await _llm_short_call(prompt, max_turns=1, timeout=30)
+    # Same latency profile as the judge: the critic shares its gateway, and a
+    # timed-out call falls back to 5.0 -- which passes C_CRITIC_GATE=5 and quietly
+    # annotates an entry nobody reviewed. 120s + one retry on empty.
+    out = ""
+    for _attempt in range(2):
+        out = await _llm_short_call(prompt, max_turns=1, timeout=120)
+        if out:
+            break
     m = re.search(r'\b(\d{1,2})\b', out)
     if m:
         try:
