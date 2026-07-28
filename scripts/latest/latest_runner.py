@@ -1494,6 +1494,15 @@ async def main():
         else:
             print(f"  {name:>20}: {report}")
     await asyncio.sleep(2)
+    # A benchmark that died on api_unavailable still printed "ALL BENCHMARKS
+    # COMPLETE" and exited 0, so an orchestrating script moved on and a partial
+    # trace (67 of 100 tasks) looked like a finished arm. Report it in the exit
+    # code, which is the only thing the caller checks.
+    _failed = [n for n, r in all_reports.items()
+               if isinstance(r, dict) and "error" in r]
+    if _failed:
+        print(f"\n  INCOMPLETE: {', '.join(_failed)} — exiting non-zero", flush=True)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
