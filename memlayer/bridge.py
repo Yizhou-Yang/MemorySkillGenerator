@@ -84,10 +84,14 @@ _WC_IS_GROUNDED = _SCORE_PROVENANCE in ("gold", "env")
 #   meta     — selection/rendering use only store metadata; nothing endorsed.
 #   guarded  — a ✓ needs a SECOND independent key (grounded score or EXTERNAL
 #              critic); ungated entries render neutrally rather than dropping.
+# guarded is the method; judgment is the refuted control it is measured against
+# (the actor's own "self-assessed 100%" endorsing its own attempt) and is kept
+# only so the ablation row that reports its failure stays reproducible. It is
+# never the default: reaching it requires asking for it by name.
 _C_POLICY = (os.environ.get("C_POLICY")
-             or ("meta" if _C_META else "judgment")).strip().lower()
+             or ("meta" if _C_META else "guarded")).strip().lower()
 if _C_POLICY not in ("judgment", "meta", "guarded"):
-    _C_POLICY = "judgment"
+    _C_POLICY = "guarded"
 _C_META = _C_POLICY == "meta"
 # A critic equal to the acting backbone is self-judgment in a second hat, not a
 # second key — external requires CRITIC_MODEL set AND different.
