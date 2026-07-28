@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SkillForge Latest ? Main Orchestrator (v5 ? 5 primary benchmarks, EvoArena injection)."""
 import asyncio
+import datetime as _dtm
 import json
 import os
 import re
@@ -66,13 +67,38 @@ from scripts.latest.eval import (
 # Fingerprint every trace row with the code revision that produced it, so a
 # resumed sweep can be audited for rows that predate a bug fix (a stale-row
 # resume once kept 300 pre-fix arm-B rows and silently voided a comparison).
-try:
-    import subprocess as _sp
-    _CODE_REV = _sp.check_output(["git", "rev-parse", "--short", "HEAD"],
-                                 cwd=str(PROJECT_ROOT), text=True,
-                                 stderr=_sp.DEVNULL).strip()
-except Exception:
-    _CODE_REV = "unknown"
+def _code_rev() -> str:
+    """Identify the code that actually ran, not the commit it was filed under.
+
+    A bare git HEAD lies whenever files are copied onto a box without committing
+    -- the usual way a fix reaches a running experiment -- so two traces can
+    carry the same rev while different code produced them, which is exactly what
+    poolable.py has to be able to see. Append a digest of the files that can move
+    a score, so any edit to them changes the stamp.
+    """
+    import hashlib, subprocess as _sp
+    try:
+        head = _sp.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                cwd=str(PROJECT_ROOT), text=True,
+                                stderr=_sp.DEVNULL).strip()
+    except Exception:
+        head = "nogit"
+    h = hashlib.sha256()
+    for rel in ("scripts/latest", "benchmarks", "memlayer", "src/latest"):
+        root = PROJECT_ROOT / rel
+        if not root.exists():
+            continue
+        for f in sorted(root.rglob("*.py")):
+            if "__pycache__" in f.parts or "obsolete" in f.parts:
+                continue
+            try:
+                h.update(f.read_bytes())
+            except Exception:
+                pass
+    return f"{head}.{h.hexdigest()[:8]}"
+
+
+_CODE_REV = _code_rev()
 
 # --- Sub-runners (per-benchmark EvoArena-style within-agent injection) ---
 from scripts.latest.gaia_runner import run_gaia_task, run_gaia_task_controlled
@@ -790,8 +816,19 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             if stale:
                 print(f"  [resume] existing trace has iter_total != {ITER_CHAIN}; "
                       "clearing stale trace and starting fresh")
-            trace_path.unlink()
-            print(f"  Cleared stale trace: {trace_path}")
+            # Keep the rows instead of dropping them. Without RESUME a run that
+            # only tops up one arm still lands here, and the arms already
+            # collected -- hours of backbone time that no longer exist anywhere
+            # -- go with it. Rename, so the mistake costs a file move.
+            try:
+                _bak = trace_path.with_suffix(
+                    ".jsonl.replaced-%s" % _dtm.datetime.now().strftime("%m%d-%H%M%S"))
+                trace_path.rename(_bak)
+                print(f"  Previous trace moved aside: {_bak.name} "
+                      f"({sum(1 for _ in open(_bak))} rows kept)")
+            except Exception as _e:
+                trace_path.unlink()
+                print(f"  Cleared stale trace: {trace_path} (backup failed: {_e})")
     _trace.clear_benchmark(benchmark)
 
     test_tasks = tasks
@@ -1254,6 +1291,52 @@ async def main():
     print(f"  Model: {MODEL:<22} | Global slots: {GLOBAL_TASK_SLOTS} "
           f"(docker {min(DOCKER_TASK_SLOTS, GLOBAL_TASK_SLOTS)}) "
           f"| embed threads: {_EMBED_THREADS}")
+    # The results directory and every trace row are keyed on MODEL, but the
+    # request carries whatever llm_client resolved. Refuse to write a run
+    # labelled as one backbone and answered by another.
+    try:
+        from scripts.latest.llm_client import served_model as _served_model
+        _served = _served_model()
+    except Exception:
+        _served = ""
+    if _served and MODEL and _served != MODEL.lower() \
+            and os.environ.get("ALLOW_MODEL_LABEL_MISMATCH") != "1":
+        raise SystemExit(
+            f"[gate] backbone label '{MODEL}' but the endpoint is being asked for "
+            f"'{_served}'. Results would be written to {MODEL}/ and read as that "
+            f"backbone. Fix OPENAI_MODEL/CODEBUDDY_MODEL (with LLM_PROVIDER=vllm, "
+            f"OPENAI_MODEL wins), or set ALLOW_MODEL_LABEL_MISMATCH=1 if the "
+            f"endpoint genuinely serves {MODEL} under another id.")
+    print(f"  Served model: {_served or '(unknown)'}")
+    # Arm C is defined by the critic's judgment; if that endpoint is dead the
+    # refinement path falls back to a constant quality score and the arm still
+    # reports error==0. Probe once and refuse rather than produce that.
+    if "C" in _ARMS or os.environ.get("METADATA_AUTHOR") == "critic":
+        try:
+            from scripts.latest.llm_client import critic_preflight, critic_model_id
+            _ok, _why = critic_preflight()
+        except Exception as e:
+            _ok, _why = False, f"{type(e).__name__}: {e}"
+        print(f"  Critic: {critic_model_id()} -> {'OK' if _ok else 'UNREACHABLE'} ({_why})")
+        if not _ok and os.environ.get("ALLOW_DEAD_CRITIC") != "1":
+            raise SystemExit(
+                f"[gate] critic '{critic_model_id()}' is unreachable ({_why}). Arm C "
+                f"would run on the fallback quality score and still report no errors. "
+                f"Point CRITIC_BASE_URL/CRITIC_API_KEY/CRITIC_MODEL_ID at a live model "
+                f"(note: HY3_BASE_URL, if set, overrides CRITIC_BASE_URL).")
+    # A judge that cannot be reached never overrides a score, so every row is raw
+    # exact match while the trace still records the judge's name.
+    try:
+        from scripts.latest.llm_client import judge_preflight, JUDGE_MODEL as _JM
+        _jok, _jwhy = judge_preflight()
+    except Exception as e:
+        _jok, _jwhy = False, f"{type(e).__name__}: {e}"
+        _JM = os.environ.get("JUDGE_MODEL", "")
+    print(f"  Judge: {_JM or '(backbone)'} -> {'OK' if _jok else 'UNREACHABLE'} ({_jwhy})")
+    if not _jok and os.environ.get("ALLOW_DEAD_JUDGE") != "1":
+        raise SystemExit(
+            f"[gate] judge '{_JM}' is unreachable ({_jwhy}). Scores would silently "
+            f"fall back to raw exact match while the trace still names this judge.")
     # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
     # config echo). One glance at the log answers "what exactly ran?" — the
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught

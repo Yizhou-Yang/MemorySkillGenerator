@@ -53,6 +53,18 @@ Knobs (env): `C_INJECT_BUDGET_CH` (dose), `C_CRITIC_GATE` (quality gate),
 `C_RAW_FALLBACK` (never-silent), `C_PAGE_KEEP` (weak-compaction paging,
 0 = off = append-only).
 
+### Retrieval
+
+`PatchMemory` ranks lexically by default (zero dependencies). For corpora where
+paraphrase matters — conversational memory, say — pass an encoder and it ranks
+semantically instead; chain scoping and the recency tie-break are unchanged.
+
+```python
+from memlayer.vgr import PatchMemory
+enc = SentenceTransformer("all-MiniLM-L6-v2")
+mem = PatchMemory(embedder=lambda ts: enc.encode(ts, normalize_embeddings=True))
+```
+
 Minimal deps (no LLM mode): `rapidfuzz json_repair python-dotenv numpy
 requests`; `sentence-transformers` optional (falls back to TF-cosine).
 
