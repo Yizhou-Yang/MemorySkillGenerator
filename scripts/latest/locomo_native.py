@@ -273,7 +273,12 @@ class _OursQA(QAMemory):
         qv = _embedder().encode([query], normalize_embeddings=True,
                                 show_progress_bar=False)[0]
         sims = self._emb @ np.asarray(qv, dtype="float32")
-        order = np.argsort(-sims)[:TOPK]
+        # Our facts are ATOMIC (one clause each), whereas a mem0 "memory" is a
+        # consolidated multi-fact statement — so k of ours carries less than k
+        # of theirs. Retrieve more atomic facts to match the information budget,
+        # not the item count (multi-hop especially needs several facts at once).
+        rk = int(os.environ.get("OURS_RECALL_K", str(TOPK + 8)))
+        order = np.argsort(-sims)[:rk]
         latest = {}
         for f in self._facts:
             latest[f["chain"]] = max(latest.get(f["chain"], 0), f["version"])
