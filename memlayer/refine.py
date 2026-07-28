@@ -1,31 +1,7 @@
-"""Version-Conditioned AI Refinement + Cross-Agent Skill Quality Evaluation.
+"""Version-conditioned AI refinement + cross-agent skill quality evaluation.
 
-Theoretical Role (SRDP Framework — δ_att Reduction):
-    This module targets δ_att (attention degradation error) through two mechanisms:
-
-    1. AI Refinement (ai_review_experience):
-       - Converts raw action sequences into structured, generalized skills
-       - Reduces FORMAT PARSING AMBIGUITY dimension of δ_att by producing
-         consistent, well-structured output (numbered steps, clear causal lessons)
-       - The ZERO INFORMATION LOSS constraint ensures r_M (coverage radius)
-         is never increased — we only ADD structure, never remove content
-
-    2. Cross-Agent Critic (cross_agent_evaluate_skill + critic_refine_experience):
-       - Independent quality evaluation detects NOISE and INFORMATION LOSS
-       - Noise detection prevents RETRIEVAL DILUTION: noisy skills that would
-         split probability mass in Boltzmann retrieval are flagged and enriched
-       - Forced enrichment (never discard) maintains r_M while improving
-         the signal-to-noise ratio that directly affects δ_att
-       - The critic→refine loop is the system's primary δ_att reduction mechanism:
-         low-quality skills are iteratively improved until they can be properly
-         utilized by the LLM's attention mechanism
-
-    Gap Bound Contribution:
-        sup_s |V* - V^π_M| ≤ (2R_max)/(1-γ)² · (ε_LLM(r_M) + δ_sem + E[δ_att])
-        This module reduces E[δ_att] by ensuring every skill in the library is:
-        - Well-structured (low format parsing ambiguity)
-        - Non-trivial (low retrieval dilution from noise)
-        - Enriched with recovery strategies (reduces negation priming risk)
+Refinement restructures raw action sequences into generalized skills; the critic
+scores them and forces enrichment of weak entries (never discards).
 """
 from __future__ import annotations
 from json_repair import repair_json
@@ -73,13 +49,7 @@ Failure reason: {failure_reason}
 }}"""
 
 # ── FAILURE-SPECIFIC refinement prompt ──────────────────────────────────────
-# Activated when the initial refinement produces empty causal_lesson or avoidance_note.
-# This prompt is stricter: it demands STRATEGIC-LEVEL analysis (not factual-level).
-# The core insight: failure experiences are valuable ONLY if they explain WHY the
-# STRATEGY failed (e.g., "PDF text extraction failed because the file was scanned
-# images, not digital text") rather than WHAT fact was wrong (e.g., "the answer is
-# Rockhopper penguin, not Emperor penguin"). Factual errors have zero cross-task
-# transfer value and become noise when injected.
+# Retry when the first refinement yields an empty causal_lesson/avoidance_note.
 AI_REVIEW_FAILURE_RETRY_PROMPT = """You are a FAILURE ANALYSIS specialist. The first refinement attempt produced
 a trivial or empty causal lesson. You MUST extract a STRATEGIC-LEVEL analysis.
 
@@ -191,22 +161,10 @@ def _format_patch_history(patch_history: list) -> str:
     return "\n".join(lines)
 
 def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
-    """Version-conditioned refinement with quality self-check for failures.
+    """Version-conditioned refinement with a quality self-check for failures.
 
-    SRDP Theory: This function reduces δ_att (format parsing ambiguity dimension)
-    by transforming raw action sequences into structured, generalized skills.
-
-    QUALITY SELF-CHECK (for failures only):
-    If the first refinement produces empty causal_lesson or avoidance_note,
-    the experience is re-refined using AI_REVIEW_FAILURE_RETRY_PROMPT which
-    demands STRATEGIC-LEVEL analysis instead of factual-level noise.
-
-    The ZERO INFORMATION LOSS constraint is critical: it ensures r_M never
-    increases. We add generalization ON TOP of existing content, preserving
-    the original skill's coverage of its task region in the skill space.
-
-    When llm_fn is None (no LLM available), returns a minimal fallback that
-    preserves all original information but marks as unrefined.
+    Failures whose first pass yields an empty lesson/note are re-refined with a
+    stricter prompt. llm_fn=None returns an unrefined fallback with all originals.
     """
     if llm_fn is None:
         return {
@@ -222,13 +180,11 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
     steps_str = "\n".join(f"  {i+1}. {cmd}" for i, cmd in enumerate(exp.action_commands))
     missing_str = ", ".join(exp.missing_steps) if exp.missing_steps else "(none)"
 
-    # Include reasoning trace if available (from response_filter AI evaluation)
     reasoning_section = ""
     if exp.reasoning_trace:
         reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:10])
         reasoning_section = f"\nAgent's reasoning during execution:\n{reasoning_lines}\n"
 
-    # ── First refinement attempt ────────────────────────────────────────────
     prompt = AI_REVIEW_PROMPT.format(
         task_desc=exp.task_desc, outcome=exp.outcome, score=exp.score,
         steps=steps_str, missing=missing_str,
@@ -241,13 +197,9 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
     result = _call_refine_llm(prompt, llm_fn)
 
     # ── Quality self-check for failures ─────────────────────────────────────
-    # If the failure experience has empty causal_lesson or avoidance_note,
-    # the AI failed to extract strategic-level insight. Retry with a stricter
-    # prompt that explicitly forbids factual-level analysis.
     if (exp.outcome != "success" and result and result.get("refined") and
             (not result.get("causal_lesson", "").strip() or
              not result.get("avoidance_note", "").strip())):
-        # Show what we got from first attempt
         prev_section = (
             f"\n## Previous refinement attempt (REJECTED - missing strategic analysis)\n"
             f"Previous causal_lesson: '{result.get('causal_lesson', '') or '(EMPTY)'}'\n"
@@ -266,11 +218,9 @@ def ai_review_experience(exp: Experience, llm_fn=None) -> dict:
 
         retry_result = _call_refine_llm(retry_prompt, llm_fn)
         if retry_result and retry_result.get("refined"):
-            # Use retry result but keep the original generalized_steps if retry is worse
             if (retry_result.get("causal_lesson", "").strip() and
                     retry_result.get("avoidance_note", "").strip()):
                 return retry_result
-        # If retry also failed, return the first result but mark as low quality
 
     return result if result else _unrefined_fallback(exp)
 
@@ -309,23 +259,8 @@ def _unrefined_fallback(exp: Experience) -> dict:
 def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     """Cross-agent quality evaluation: an independent LLM judges skill quality.
 
-    SRDP Theory: This is the primary δ_att diagnostic mechanism.
-    It detects three failure modes that increase δ_att:
-
-    1. NOISE (trivial causal_lesson) → causes RETRIEVAL DILUTION:
-       Noisy skills split Boltzmann probability mass without providing
-       useful signal, diluting μ(c*|s) for the optimal skill.
-
-    2. INFORMATION LOSS (vague generalized_steps) → increases r_M:
-       If refinement accidentally compressed content, the skill's coverage
-       radius expands (it covers less of the task space precisely).
-
-    3. OVERFITTING (task-specific content) → increases δ_sem:
-       Overfitted skills have high similarity to one task but mislead
-       retrieval for related-but-different tasks.
-
-    When any issue is detected, verdict='low_confidence' triggers
-    critic_refine_experience (forced enrichment, never discard).
+    Detects noise, information loss and overfitting; verdict='low_confidence'
+    triggers critic_refine_experience (forced enrichment, never discard).
     """
     default = {"total": 5, "verdict": "inject", "reason": "no evaluator available",
                "outcome_verdict": "unsure",
@@ -338,7 +273,6 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     causal = exp.failure_taxonomy.get("causal_lesson", "")
     generalized = exp.failure_taxonomy.get("generalized_steps", "")
 
-    # Include reasoning trace for richer evaluation context
     reasoning_context = ""
     if exp.reasoning_trace:
         reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:8])
@@ -418,21 +352,10 @@ Weak dimensions: {weak_dimensions}
 
 
 def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None) -> dict:
-    """When critic scores low, REFINE the experience (never discard).
+    """When the critic scores low, enrich the experience (never discard).
 
-    SRDP Theory: This is the δ_att REPAIR mechanism.
-    Rather than discarding low-quality skills (which would increase r_M),
-    we enrich them to reduce their contribution to δ_att:
-
-    - Adding recovery strategies → reduces NEGATION PRIMING risk
-      (concrete "do X instead" replaces vague "don't do Y")
-    - Adding preconditions → reduces CONSISTENCY COLLAPSE risk
-      (explicit conditions prevent silent conflict resolution)
-    - Expanding causal reasoning → reduces FORMAT PARSING AMBIGUITY
-      (deeper explanation is easier for attention to anchor on)
-
-    The constraint that output must be LONGER than input guarantees
-    r_M never increases (Zero Information Loss principle).
+    Adds recovery strategies, preconditions and deeper causal reasoning; the
+    prompt requires output LONGER than input (zero information loss).
     """
     if llm_fn is None:
         return {"enhanced": False}
@@ -442,7 +365,6 @@ def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None)
     generalized = exp.failure_taxonomy.get("generalized_steps", "")
     avoidance = exp.failure_taxonomy.get("avoidance_note", "")
 
-    # Identify weak dimensions for targeted improvement
     weak = []
     if critic_verdict.get("actionability", 3) < 2:
         weak.append("actionability (steps not concrete enough)")
@@ -453,7 +375,6 @@ def critic_refine_experience(exp: Experience, critic_verdict: dict, llm_fn=None)
     if critic_verdict.get("novelty", 2) < 1:
         weak.append("novelty (too obvious)")
 
-    # Include reasoning trace for richer refinement context
     reasoning_context = ""
     if exp.reasoning_trace:
         reasoning_lines = "\n".join(f"  - {r}" for r in exp.reasoning_trace[:10])

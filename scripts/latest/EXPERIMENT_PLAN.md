@@ -5,7 +5,7 @@ plus the mechanism / breakdown sub-tables.
 
 - **Arms:** A = no memory, B = raw `\patchmem` (inject raw patches), C = curated
   patch memory (curated store). Set per benchmark by the existing `latest_runner.py`.
-- **Benchmarks (4):** `gaia`, `gaia2`, `locomo`, `terminal_bench_2`.
+- **Benchmarks (4):** `gaia`, `gaia2`, `locomo`, `tau2`.
 - **Models (7), cheapest → most expensive** (output price, RMB/MTok, USD×7):
 
   | # | model id (CodeBuddy) | out price | note |
@@ -27,7 +27,7 @@ plus the mechanism / breakdown sub-tables.
 1. ~~**Verify the 5 non-HY3 CodeBuddy model ids**~~ ✅ All 7 ids confirmed via SDK probe.
 2. **Internet environment:** HY3 uses `CODEBUDDY_INTERNET_ENVIRONMENT=ioa` (internal).
    External models may need a different value — override per model in the wrapper.
-3. **Docker up** for `gaia2` and `terminal_bench_2` (Harbor / sandbox); the other two
+3. **Docker up** for `gaia2` (Harbor / sandbox); the other two
    are pure text.
 4. **Datasets present** (HF cache, `/tmp/harbor-datasets/...` for gaia2-cli).
 5. `.env` has CodeBuddy credentials. API probe runs automatically at start.
@@ -48,7 +48,7 @@ Results land per model:
 ### Iteration chains (where patch memory actually pays off)
 
 Patch memory is feedback across **iterations of the same task**, not cross-task
-transfer. On a single-pass run of independent tasks (GAIA/GAIA2/TB2) there is no
+transfer. On a single-pass run of independent tasks (GAIA/GAIA2/tau2) there is no
 in-chain history, so B/C honestly inject nothing and A=B=C — retrieval is now
 **chain-scoped** (same task_id / LoCoMo session), not global. To exercise memory,
 run iteration chains:
@@ -85,7 +85,7 @@ old traces too: derives injection from a non-empty `augmented_prompt`).
 
 ## Pre-run correctness gate (learned from the first sweep)
 
-The first sweep's A/B/C were **identical** on GAIA/GAIA2/TB2 — cross-task memory
+The first sweep's A/B/C were **identical** on GAIA/GAIA2 — cross-task memory
 never fired (every task scoped to its own unique `task_id` ⇒ singleton chain ⇒
 empty retrieval). Fixed in `evomem_bridge.py` (global retrieval when no shared
 chain + pollution guard + effectiveness-weighted C). **Before trusting any new
@@ -94,7 +94,7 @@ sweep, confirm injection is actually happening:**
 ```bash
 python scripts/latest/breakdown.py experiments_results/latest/<model>
 # the "patch-injection isolation" table must show injected n > 0 for B and C on
-# GAIA/GAIA2/TB2 — if it prints the "NO patches were injected" warning, the run
+# GAIA/GAIA2 — if it prints the "NO patches were injected" warning, the run
 # is just sampling noise and must be re-run.
 ```
 

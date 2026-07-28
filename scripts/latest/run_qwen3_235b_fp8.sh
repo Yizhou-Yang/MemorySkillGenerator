@@ -147,7 +147,7 @@ smoke_test() {
 # ════════════════════════════════════════════════════════════════════════════
 run_full_sweep() {
     log "━━━ Full Experiment: Qwen3-VL-235B-FP8 ━━━"
-    log "   Benchmarks: gaia, gaia2, locomo, terminal_bench_2"
+    log "   Benchmarks: gaia, gaia2, locomo"
     log "   ITER_CHAIN=${ITER_CHAIN}  TASK_LIMIT=${TASK_LIMIT}  CONCURRENCY=${TASK_CONCURRENCY}"
     log "   Results: experiments_results/${RESULTS_BASE}/${SERVED_NAME}/"
 
@@ -159,7 +159,7 @@ run_full_sweep() {
     START_TIME=$(date +%s)
 
     # QA benchmarks (gaia, gaia2, locomo) - via latest_runner
-    # NOTE: gaia2 requires ARE/Docker, terminal_bench_2 requires Harbor/Docker
+    # NOTE: gaia2 requires ARE/Docker
     log "[1/3] Running gaia + locomo (pure text)..."
     TASK_LIMIT="$TASK_LIMIT" ITER_CHAIN="$ITER_CHAIN" \
         BENCHMARKS=gaia,locomo \
@@ -178,20 +178,10 @@ run_full_sweep() {
         python3 -u scripts/latest/latest_runner.py 2>&1 | tee "run_${SERVED_NAME}_gaia2.log"
     RC2=$?
 
-    # TB2 via Harbor bridge (requires Docker)
-    if [ "${NO_TB2:-0}" != "1" ]; then
-        log "[3/3] Running terminal_bench_2..."
-        bash scripts/latest/run_tb2_official.sh "$SERVED_NAME" 2>&1 | tee "run_${SERVED_NAME}_tb2.log"
-        RC3=$?
-    else
-        log "[3/3] Skipped terminal_bench_2 (NO_TB2=1)"
-        RC3=0
-    fi
-
     ELAPSED=$(( $(date +%s) - START_TIME ))
     log "━━━ Sweep Complete ━━━"
     log "   Elapsed: $((ELAPSED/3600))h $((ELAPSED%3600/60))m $((ELAPSED%60))s"
-    log "   RC: gaia/locomo=$RC1  gaia2=$RC2  tb2=$RC3"
+    log "   RC: gaia/locomo=$RC1  gaia2=$RC2"
 
     # Gate check
     log "━━━ Quality Gate ━━━"

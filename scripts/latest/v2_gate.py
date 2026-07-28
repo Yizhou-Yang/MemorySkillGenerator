@@ -1,20 +1,8 @@
 #!/usr/bin/env python3
-"""v2-method acceptance gate — MUST pass on every rerun before its numbers are
-trusted. Checks, per QA benchmark trace, that the frozen v2.2 read path is
-actually live in the data (not just in the code):
-
-  G1  C injection coverage at iter>=1 is ~100% (chain-index + fallback fixed
-      the 63-72% silence; a low rate means the old gate behaviour is back)
-  G2  C dose: mean/max rendered block within the budget (aug_len <= L + small
-      prompt-wrapper slack), and C mean dose <= B mean dose on this benchmark
-  G3  new-marker presence: "## Curated prior attempts" header, and at least
-      one "Answer given then" (false-failure answer preservation) where the
-      avoidance channel fired; "Actions used:" expected on gaia2
-  G4  per-arm final-iteration completeness (n tasks with a row at
-      iter_total-1) and ONE code_rev per trace
+"""v2-method acceptance gate — MUST pass on every rerun before its numbers are trusted.
 
 Usage: python scripts/latest/v2_gate.py <model> [BASE=latest_evolving]
-Exit code 1 if any hard gate (G1/G2/G4) fails.
+Exit code 1 if any hard gate fails.
 """
 from __future__ import annotations
 
@@ -27,8 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
 SLACK = 130          # headers + section titles around the budgeted blocks
 COVERAGE_FLOOR = 0.95
-# A trace with no C arm cannot be gated (see G1 below). Only turn this off for a
-# sweep that is deliberately A/B-only.
+# A trace with no C arm cannot be gated; turn off only for a deliberate A/B-only sweep.
 REQUIRE_C = os.environ.get("REQUIRE_C", "1") == "1"
 
 
@@ -52,22 +39,16 @@ def main() -> None:
     base = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BASE", "latest_evolving")
     hard_fail = False
     gated_any = False
-    # tau2 has no injection telemetry (no patch_injected/aug_len/markers), so
-    # the injection gates G1/G2/G3 do not apply there — but the integrity and
-    # policy gates (G0/G0b/G4/G5/G6/G7/G8) absolutely do: tau2 once returned
-    # reward 1.0 for doing NOTHING (unexecuted tools left the DB unmutated and
-    # db_match passed), and it was the one benchmark no gate ever looked at.
+    # tau2 has no injection telemetry (no patch_injected/aug_len/markers), so G1/G2/G3
+    # do not apply there; the integrity/policy gates (G0/G0b/G4-G8) still do.
     for bench in ["gaia", "gaia2", "locomo", "tau2"]:
         rs = rows(PROJECT_ROOT / "experiments_results" / base / model / bench / "trace.jsonl")
         if not rs:
             print(f"[{bench}] no trace — skipped")
             continue
         gated_any = True
-        # ── G0: infra health. Error rows (endpoint down / timeout) and
-        # empty-response zero rows (agent loop never engaged) are not task
-        # results; a run dominated by them is broken hardware, not a baseline
-        # (llama-33: gaia 770 APIUnavailable rows, gaia2 433 empty rows). They
-        # are excluded from the gate stats below, and a rate >20% hard-fails.
+        # ── G0 infra health: error rows and empty-response zero rows are not task
+        # results — excluded from the stats below, and a rate >20% hard-fails.
         _is_err = lambda r: bool(str(r.get("error") or "").strip()) \
             and not str(r.get("response") or "").strip()
         _is_empty = lambda r: not str(r.get("response") or "").strip() \
@@ -87,20 +68,16 @@ def main() -> None:
         if not rs:
             print(f"[{bench}] all rows were infra failures — nothing to gate")
             continue
-        # G0b dead benchmark: rows that ANSWERED but every one scored 0. Not a
-        # baseline — a broken scorer or a harness that never executed the task.
-        # The infra-rate check above cannot see this (these rows carry a real
-        # response). llama-33 gaia2: 511 answered rows, all 0.0, because the
-        # model's <|python_tag|> tool calls leaked into content unparsed.
+        # G0b dead benchmark: rows that ANSWERED but every one scored 0 — a broken
+        # scorer/tool path, invisible to G0 because these rows carry a real response.
         if not any(float(r.get("score") or 0.0) for r in rs):
             print(f"  G0 ✗ every one of {len(rs)} answered rows scored 0.0 — "
                   "the benchmark is dead (scorer or tool path broken), not a "
                   "zero baseline; fix it before reading any delta here")
             hard_fail = True
         kf = max(int(r.get("iter_total", 1) or 1) for r in rs) - 1
-        # Rev uniformity is PER GROUP: keeping valid A/B rows from an earlier
-        # rev while C reruns on the frozen rev is the sanctioned plan; only a
-        # rev mix WITHIN one arm means half an arm ran different code.
+        # Rev uniformity is PER GROUP: keeping valid A/B rows from an earlier rev while
+        # C reruns on the frozen rev is sanctioned; only a mix WITHIN one arm is a bug.
         by_rev = {}
         for r in rs:
             by_rev.setdefault(r.get("group", "?"), set()).add(
@@ -112,17 +89,9 @@ def main() -> None:
                 print(f"  G4 ✗ arm {g} has MIXED code_rev {sorted(v)} — "
                       "audit which rows predate the fix")
                 hard_fail = True
-        # G5 critic identity. Self-curation (critic == backbone) and
-        # cross-curation (a designated stronger critic) are different method
-        # configurations, not a nuisance parameter: on GAIA the rate of
-        # endorsements landing on a wrong prior attempt is 36% for
-        # DeepSeek-v4-pro but 90% for Llama-3.3-70B, and C−B flips from +6.0 to
-        # −3.0 with it. Pooling both into one C arm answers no question.
-        # Rows written before the field existed carry no critic_model at all.
-        # Missing is "unrecorded", not a policy of its own: a legacy trace
-        # legitimately RESUMEd after the fields landed would otherwise mix
-        # {"?", real} and hard-fail its own sanctioned continuation. Only two
-        # DIFFERENT recorded values prove a real policy mix.
+        # G5 critic identity: self- and cross-curation are different method configs and
+        # must not be pooled. Missing critic_model = legacy/unrecorded, NOT a policy —
+        # only two DIFFERENT recorded values prove a mix (else a legit RESUME fails).
         _c_rows = [r for r in rs if r.get("group") == "curated_patch"]
         crit = {str(r.get("critic_model")) for r in _c_rows if r.get("critic_model")}
         n_unrec = sum(1 for r in _c_rows if not r.get("critic_model"))
@@ -133,9 +102,8 @@ def main() -> None:
         elif crit:
             print(f"  G5 critic: {crit.pop()}"
                   + (f"  ({n_unrec} legacy rows predate the field)" if n_unrec else ""))
-        # G8 judge identity. The tie-break judge shapes the SCORE of every row
-        # in every arm, so two judges in one trace means two scoring functions
-        # pooled as one. Missing field = legacy rows (pre-field), warn only.
+        # G8 judge identity: two judges in one trace = two scoring functions pooled as
+        # one. Missing field = legacy rows (pre-field), warn only.
         jm = {str(r.get("judge_model")) for r in rs if r.get("judge_model")}
         n_unrec_jm = sum(1 for r in rs if not r.get("judge_model"))
         if len(jm) > 1:
@@ -145,9 +113,7 @@ def main() -> None:
         elif jm:
             print(f"  G8 judge: {jm.pop()}"
                   + (f"  ({n_unrec_jm} legacy rows predate the field)" if n_unrec_jm else ""))
-        # G6 curation policy. Judgment-guided (critic score + self-assessment)
-        # and metadata-guided (measured w_c + version lineage) are different
-        # methods; a C arm holding both answers nothing.
+        # G6 curation policy: judgment- and metadata-guided are different methods.
         pol = {str(r.get("c_policy") or ("meta" if r.get("c_meta") else "judgment"))
                for r in _c_rows}
         if len(pol) > 1:
@@ -156,11 +122,8 @@ def main() -> None:
             hard_fail = True
         elif pol:
             print(f"  G6 curation policy: {pol.pop()}")
-        # G7 score provenance. Everything arm C selects on — the ✓ gate, e.score,
-        # w_c — is built from the chain's feedback score, so whether that score is
-        # the benchmark's own (gold/env) or the backbone grading itself (self)
-        # decides whether the store's evidence is grounded or asserted. Mixing
-        # both in one arm pools measurements with opinions.
+        # G7 score provenance: everything C selects on (✓ gate, e.score, w_c) is built
+        # from the feedback score — gold/env is measured, self is asserted; never pool.
         sp = {str(r.get("score_provenance")) for r in _c_rows
               if r.get("score_provenance")}
         n_unrec_sp = sum(1 for r in _c_rows if not r.get("score_provenance"))
@@ -174,15 +137,10 @@ def main() -> None:
                   + ("  ⚠ selection rests on the backbone's self-assessment"
                      if v == "self_assessment" else "")
                   + (f"  ({n_unrec_sp} legacy rows predate the field)" if n_unrec_sp else ""))
-        # G9 protocol hash — the catch-all. G4-G8 each police one field by
-        # hand, which does not scale and already leaked: GEN_TEMPERATURE has no
-        # gate of its own, so nothing stopped greedy rows from being pooled with
-        # sampled ones. protocol_hash folds every knob (temperature, iter_chain,
-        # dose budget, critic/judge/policy, ...) into one value, so a knob added
-        # later is covered without a new gate. Checked PER ARM, not per trace:
-        # G4 deliberately permits keeping valid A/B rows from an earlier rev
-        # while C reruns on the frozen one, and a per-trace check would forbid
-        # that sanctioned plan. protocol.json beside the trace decodes a hash.
+        # G9 protocol hash — catch-all folding every knob (temperature, iter_chain, dose
+        # budget, critic/judge/policy, ...) into one value, so knobs added later are
+        # covered without a new gate. Checked PER ARM, not per trace (see G4).
+        # protocol.json beside the trace decodes a hash.
         by_proto = {}
         for r in rs:
             if r.get("protocol_hash"):
@@ -206,12 +164,8 @@ def main() -> None:
             cov = (len(inj) / len(late)) if late else 0.0
             print(f"  {g}: finished n={len(fin)}  inj@iter>=1 {len(inj)}/{len(late)}"
                   f" ({100*cov:.0f}%)  dose mean={doses[g]:.0f} max={max(lens) if lens else 0}")
-            # G4 arm completeness: an arm with rows but NONE at the final
-            # iteration started and died mid-sweep; its rows are a partial run,
-            # not a result. Every C gate below is conditional on C having late
-            # rows, so without this an aborted C arm silently skips G1/G2/G3
-            # and the trace reports PASS with the method never having run
-            # (llama-33: C had 16 iter0 rows on gaia, 0 finished, PASS).
+            # G4 arm completeness: rows but NONE at the final iteration = the arm died
+            # mid-sweep. Without this, an aborted C arm skips G1/G2/G3 and reports PASS.
             if grs and not fin:
                 print(f"  G4 ✗ arm {g}: {len(grs)} rows but NONE finished at "
                       f"iter {kf} — the arm started and died; partial run")
@@ -226,11 +180,8 @@ def main() -> None:
                 if lens and max(lens) > BUDGET + SLACK:
                     print(f"  G2 ✗ C max dose {max(lens)} > {BUDGET}+{SLACK}")
                     hard_fail = True
-        # This gate exists to prove the C read path is live IN THE DATA. With no
-        # C rows at iter>=1 there is nothing to prove, and a PASS here would be
-        # vacuous — the most dangerous output this script can produce, since it
-        # is the last thing between a broken sweep and the paper. Set
-        # REQUIRE_C=0 for a deliberate A/B-only baseline sweep.
+        # No C rows at iter>=1 means the read path is unproven and a PASS is vacuous.
+        # Set REQUIRE_C=0 for a deliberate A/B-only baseline sweep.
         if REQUIRE_C and bench != "tau2" and not [
                 r for r in rs if r.get("group") == "curated_patch"
                 and (r.get("iteration", 0) or 0) >= 1]:
@@ -240,10 +191,8 @@ def main() -> None:
             hard_fail = True
         if doses.get("curated_patch") and doses.get("raw_patch") and \
                 doses["curated_patch"] > doses["raw_patch"] + 1:
-            # The paper's below-B-dose claim is scoped to the AGENTIC
-            # benchmarks (gaia2/TB2), where dose harm was measured. On
-            # QA benches B's natural render can sit far below L (locomo
-            # B≈225ch) and C legitimately exceeds it under the same cap.
+            # The below-B-dose claim is scoped to the AGENTIC benchmarks; off-agentic,
+            # B's natural render can sit far below L and C may exceed it under the cap.
             if bench == "gaia2":
                 print(f"  G2 ✗ C mean dose {doses['curated_patch']:.0f} > B "
                       f"{doses['raw_patch']:.0f} (agentic below-B claim broken)")
@@ -264,10 +213,8 @@ def main() -> None:
             if hdr == 0:
                 print("  G3 ✗ no v2.2 header in any C block — old code ran?")
                 hard_fail = True
-            # v2.3/2.4 scoping: gaia2/TB2 render action payload; answer-scored
-            # benches render the raw attempt VERBATIM (superset of B) and must
-            # carry no action lines (they displaced prose and drove gaia C−B
-            # to −9.1pp).
+            # v2.3/2.4 scoping: gaia2/TB2 render the action payload; answer-scored
+            # benches render the raw attempt VERBATIM and must carry NO action lines.
             if bench == "gaia2" and act == 0:
                 print("  G3 ✗ gaia2 has no action-lines — v2.3 payload missing")
                 hard_fail = True
@@ -280,9 +227,7 @@ def main() -> None:
                     print(f"  G3 ✗ {bench} has no 'As recorded' verbatim lines "
                           "— v2.4 superset rendering missing")
                     hard_fail = True
-    # A model with no traces at all gated nothing. Printing PASS there reads as
-    # "this backbone is fine" when it has simply never run (hy3 after its data
-    # was archived) -- the same vacuous pass G1/G4 exist to prevent.
+    # A model with no traces at all gated nothing — never report that as a PASS.
     if not gated_any:
         print(f"\n  ✗ no traces for '{model}' under {base} — nothing was gated; "
               "this is not a pass")

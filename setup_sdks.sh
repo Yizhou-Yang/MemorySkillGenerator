@@ -44,7 +44,7 @@ install_with_retry() {
     return 1
 }
 
-# Step 1: Harbor (Terminal-Bench evaluation framework)
+# Step 1: Harbor (container evaluation framework)
 echo ""
 echo "--- Harbor ---"
 install_with_retry "git+https://github.com/harbor-framework/harbor.git" || \
