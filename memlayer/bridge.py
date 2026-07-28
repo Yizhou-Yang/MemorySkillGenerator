@@ -214,17 +214,28 @@ def _grounded_demoted(e) -> bool:
 def _endorse_basis(e):
     """Second key for an endorsement under C_POLICY=guarded, or None.
 
-    ("env", None) = grounded outcome score; ("critic", name) = external critic,
-    revocable by _grounded_demoted. Self-assessment alone never endorses.
+    ("env", None) = grounded outcome score. Only that. The critic used to be an
+    alternative second key, but the OR gave it exactly the region where no
+    grounded success exists — and there, reading a transcript, it endorsed
+    attempts whose own Lesson said they failed: on hy3/gaia every one of its 63
+    checkmarks sat on a chain with no prior success (4 solved), while the env
+    key's 47 had a verified success behind them (45 solved). Independence is not
+    enough; the second key must be outcome-grounded. The critic still curates
+    content and Lessons — it just cannot assert success.
     """
     if _C_POLICY != "guarded":
         return None
     if _WC_IS_GROUNDED and float(getattr(e, "score", 0.0) or 0.0) >= 0.5:
         return ("env", None)
-    if _CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE \
-            and not _grounded_demoted(e):
-        return ("critic", _CRITIC_RAW)
     return None
+
+
+def _critic_reviewed(e) -> bool:
+    """The critic's remaining role: annotation, not endorsement. A reviewed
+    entry may carry its Lesson (labeled opinion), but never the ✓ — that
+    distinction is exactly what the endorse-basis split above encodes."""
+    return (_CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE
+            and not _grounded_demoted(e))
 
 
 def _critic_q(e) -> int:
@@ -341,7 +352,8 @@ def _format_curated(successes: list, failures: list = (),
         # unchecked self-judge's lesson is the 48%-of-budget filler the dose
         # analysis flagged.
         _lesson_ok = (_C_POLICY == "judgment"
-                      or (_C_POLICY == "guarded" and _endorse_basis(e) is not None))
+                      or (_C_POLICY == "guarded"
+                          and (_endorse_basis(e) is not None or _critic_reviewed(e))))
         annot = (f"\nLesson: {lesson[:180]}"
                  if _lesson_ok and lesson and not _is_weak_lesson(lesson) else "")
         pairs.append(["\n".join(parts), annot])
