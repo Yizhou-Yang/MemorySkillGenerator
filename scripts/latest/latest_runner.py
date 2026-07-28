@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SkillForge Latest ? Main Orchestrator (v5 ? 5 primary benchmarks, EvoArena injection)."""
 import asyncio
+import datetime as _dtm
 import json
 import os
 import re
@@ -815,8 +816,19 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             if stale:
                 print(f"  [resume] existing trace has iter_total != {ITER_CHAIN}; "
                       "clearing stale trace and starting fresh")
-            trace_path.unlink()
-            print(f"  Cleared stale trace: {trace_path}")
+            # Keep the rows instead of dropping them. Without RESUME a run that
+            # only tops up one arm still lands here, and the arms already
+            # collected -- hours of backbone time that no longer exist anywhere
+            # -- go with it. Rename, so the mistake costs a file move.
+            try:
+                _bak = trace_path.with_suffix(
+                    ".jsonl.replaced-%s" % _dtm.datetime.now().strftime("%m%d-%H%M%S"))
+                trace_path.rename(_bak)
+                print(f"  Previous trace moved aside: {_bak.name} "
+                      f"({sum(1 for _ in open(_bak))} rows kept)")
+            except Exception as _e:
+                trace_path.unlink()
+                print(f"  Cleared stale trace: {trace_path} (backup failed: {_e})")
     _trace.clear_benchmark(benchmark)
 
     test_tasks = tasks
