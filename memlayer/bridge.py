@@ -105,6 +105,10 @@ _CRITIC_IS_EXTERNAL = bool(_CRITIC_RAW) and _CRITIC_RAW != _BACKBONE_ID
 # unbudgeted C block (~1.6x B's) measurably HURT accuracy, and dose-matching C to
 # B is what removes the block-size confound from C−B. 0 disables.
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
+# Serve nothing when no entry in the chain holds a grounded endorsement (see the
+# dead-chain block in inject). 0 restores the old always-inject behaviour, which
+# is the ablation that measures what anchoring costs.
+_DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
 
 
 # Ablation arm C_weak_compact (default off): show retrieval only the newest n
@@ -285,6 +289,18 @@ def _concrete_approach(exp) -> str:
 _ACTION_SCORED = {"gaia2", "terminal_bench_2", "tau2"}
 
 
+# The agent SDK's private markup (</think:hash>, </tool_call:..>) survives into
+# the recorded outcome and from there into the next iteration's prompt: 28 of
+# hy3/gaia's 197 injected blocks carried it, and 13 of the 14 whose chain saw it
+# twice never recovered. Strip at render time so old stores benefit too.
+_MARKUP_RE = re.compile(
+    r"</?(?:think|tool_calls?|name|args?|arg_key|arg_value)(?::[A-Za-z0-9_-]+)?>")
+
+
+def _scrub_markup(text: str) -> str:
+    return _MARKUP_RE.sub("", text or "").strip()
+
+
 def _format_curated(successes: list, failures: list = (),
                     current_tid: str = "", action_scored: bool = False) -> str:
     """Layered rendering: every prior attempt (verbatim) is the guaranteed base;
@@ -292,8 +308,8 @@ def _format_curated(successes: list, failures: list = (),
     Annotations must never displace an attempt — field caps adapt instead."""
     def _payload(e):
         tax = e.failure_taxonomy or {}
-        return ((tax.get("verbatim_outcome") or "").strip(),
-                _concrete_approach(e))
+        return (_scrub_markup((tax.get("verbatim_outcome") or "").strip()),
+                _scrub_markup(_concrete_approach(e)))
 
     n_est = sum(1 for e in list(successes) + list(failures)
                 if any(_payload(e)))
@@ -757,6 +773,22 @@ class CuratedMemory:
         # loss vs B came from disturbing a chain B had already solved
         # (spoiled 7/4/4 vs rescued 7/10/3); not touching succeeding chains
         # removes the spoilage channel by construction.
+        # DEAD-CHAIN SILENCE: with no grounded success anywhere in the chain,
+        # the store has nothing it can stand behind, and what it serves instead
+        # is the chain's own failed attempts verbatim. Measured on hy3/gaia:
+        # of 70 such chains C solved 0 at the last iteration while plain A
+        # solved 4 of the same 67 and B 3 of 70 — the injected transcript
+        # anchors the model to the path that already failed, and A's few wins
+        # come precisely from resampling freely. gpt-oss reproduces it (88
+        # chains, 1 solved). So the second key gates the store's right to speak
+        # at all, not merely its right to put a checkmark on what it says.
+        # Rendering nothing here makes C fall back to A exactly where C was
+        # strictly worse than A, and leaves the endorsed-chain advantage
+        # (86% retention vs A's 79%) untouched.
+        if _DEAD_CHAIN_SILENCE and _C_POLICY == "guarded":
+            if not any(_endorse_basis(e) is not None
+                       for e in (self._chain_entries.get(chain) or cands)):
+                return ""
         _repair_raw = False
         if _C_REPAIR_MODE and cands:
             if _C_REPAIR_GATE == "stability":
