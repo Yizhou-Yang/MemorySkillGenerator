@@ -123,6 +123,10 @@ class PatchMemory:
 
     def __init__(self, embedder=None) -> None:
         self._patches: list[Patch] = []
+        # chain_id -> positions in _patches. Without it a chain-scoped read still
+        # walks the whole store to find its chain, so the scoped path grew with
+        # total entries even after scoring was pruned.
+        self._by_chain: dict[str, list[int]] = {}
         self._embedder = embedder
         self._emb = None                    # row i <-> self._patches[i]
 
@@ -134,6 +138,7 @@ class PatchMemory:
         return list(self._patches)
 
     def add(self, patch: Patch) -> None:
+        self._by_chain.setdefault(patch.chain_id, []).append(len(self._patches))
         self._patches.append(patch)
         self._emb = None
 
@@ -156,8 +161,7 @@ class PatchMemory:
         # Prune to the chain BEFORE scoring. Scoring first and filtering after
         # costs the whole store on every read, which is what made a chain-scoped
         # read as slow as a global one -- the partition bought nothing.
-        idx = (None if chain_id is None else
-               [i for i, p in enumerate(self._patches) if p.chain_id == chain_id])
+        idx = None if chain_id is None else self._by_chain.get(chain_id, [])
         if idx is not None and not idx:
             return []
         pool = self._patches if idx is None else [self._patches[i] for i in idx]
