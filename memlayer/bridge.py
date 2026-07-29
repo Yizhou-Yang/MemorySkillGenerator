@@ -105,6 +105,13 @@ _CRITIC_IS_EXTERNAL = bool(_CRITIC_RAW) and _CRITIC_RAW != _BACKBONE_ID
 # unbudgeted C block (~1.6x B's) measurably HURT accuracy, and dose-matching C to
 # B is what removes the block-size confound from C−B. 0 disables.
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
+# Lean rendering. The dose budget counts the whole block, so on gpt-oss/LoCoMo
+# 74% of C's 851 characters were scaffolding -- headers, a Task: line restating
+# the prompt the agent is already reading, and a lineage listing v1 -> v2 --
+# against 3% for A-Mem and 5% for the raw store, both of which beat C there. A
+# weak backbone cannot act on an abstracted lesson; it needs text it can carry
+# over. Off by default so already-collected arms keep their rendering.
+_C_LEAN_RENDER = os.environ.get("C_LEAN_RENDER", "0") == "1"
 # Serve nothing when no entry in the chain holds a grounded endorsement (see the
 # dead-chain block in inject). 0 restores the old always-inject behaviour, which
 # is the ablation that measures what anchoring costs.
@@ -175,6 +182,8 @@ def _append_supersession(block: str, pool) -> str:
             seen.add(l); uniq.append(l)
     # This runs AFTER _format_curated has spent the whole budget, and the gate
     # hard-fails any C block over BUDGET+130 — so keep the append inside 100 chars.
+    if _C_LEAN_RENDER:
+        return block          # the version is already named in each entry's head
     header = "\n\nVersion lineage (later supersedes earlier):"
     room = _C_INJECT_BUDGET + 100 - len(block) - len(header)
     kept, used = [], 0
@@ -339,10 +348,15 @@ def _format_curated(successes: list, failures: list = (),
             if _basis is not None:
                 _src = ("environment-verified outcome" if _basis[0] == "env"
                         else f"reviewed by {_basis[1]}")
-                head = f"[✓ Prior attempt v{_ver} — {_src}]"
+                head = (f"[✓ v{_ver} verified]" if _C_LEAN_RENDER
+                        else f"[✓ Prior attempt v{_ver} — {_src}]")
             else:
-                head = f"[Prior attempt — store version v{_ver}]"
-            parts = [head, f"Task: {_core_task(e.task_desc)[:tcap]}"]
+                head = (f"[v{_ver}]" if _C_LEAN_RENDER
+                        else f"[Prior attempt — store version v{_ver}]")
+            # Retrieval is chain-scoped, so the task restated here is the one
+            # the agent is already being asked -- pure duplication of prompt.
+            parts = ([head] if _C_LEAN_RENDER
+                     else [head, f"Task: {_core_task(e.task_desc)[:tcap]}"])
         acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
                 or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
             if action_scored else []
@@ -392,8 +406,9 @@ def _format_curated(successes: list, failures: list = (),
         if key in seen:
             continue
         seen.add(key)
-        parts = [f"[✗ Earlier attempt fell short]",
-                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        parts = ([ "[✗ fell short]" ] if _C_LEAN_RENDER else
+                 [f"[✗ Earlier attempt fell short]",
+                  f"Task: {_core_task(e.task_desc)[:tcap]}"])
         if outcome:
             parts.append("As recorded (self-assessed doubtful, verify before "
                          f"reuse): {outcome[:min(150, vcap)]}")
@@ -432,9 +447,13 @@ def _format_curated(successes: list, failures: list = (),
         # (gaia: 56% of gold-wrong attempts self-assess >=0.5), so these are
         # "prior attempts", not "solved tasks". TB2 transcript checks grep for
         # the stable "## Curated prior attempts" marker.
-        out += "## Curated prior attempts (this task's chain)\n\n" + "\n\n".join(blocks)
+        _h = "## Prior attempts\n\n" if _C_LEAN_RENDER \
+            else "## Curated prior attempts (this task's chain)\n\n"
+        out += _h + "\n\n".join(blocks)
     if fail_blocks:
-        out += ("\n\n" if out else "") + "## What to avoid (from earlier attempts)\n\n" + "\n\n".join(fail_blocks)
+        _ha = "## Avoid\n\n" if _C_LEAN_RENDER \
+            else "## What to avoid (from earlier attempts)\n\n"
+        out += ("\n\n" if out else "") + _ha + "\n\n".join(fail_blocks)
     return out
 
 
