@@ -32,6 +32,14 @@ import os
 import re
 from pathlib import Path
 
+# mem0's constructor opens a SECOND qdrant store for telemetry at a path shared
+# by every instance in the process (~/.mem0/migrations_qdrant). With one store
+# per chain, the first instance file-locks it and every later chain's add() and
+# search() fails "already accessed by another instance" forever: the arm runs
+# to completion as no-memory with error=0 (hy3fix gaia/gaia2: 3 of ~300 rows
+# injected). Must be set before mem0 is imported.
+os.environ.setdefault("MEM0_TELEMETRY", "False")
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _MODEL_SLUG = re.sub(r"[^A-Za-z0-9._-]", "_",
                      os.environ.get("CODEBUDDY_MODEL", "hy3")).lower()
