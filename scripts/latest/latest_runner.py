@@ -194,6 +194,10 @@ except Exception:
 # Which curation policy arm C ran: judgment (critic score + self-assessment) or
 # metadata (measured w_c + version lineage). Different methods, never poolable.
 _C_META = os.environ.get("C_META", "0") == "1"
+# Two renderings of the same store are not the same treatment; record which
+# one produced a row so protocol_hash separates them and no analysis pools
+# a lean arm with a verbose one.
+_C_LEAN = os.environ.get("C_LEAN_RENDER", "0") == "1"
 _C_POLICY = (os.environ.get("C_POLICY")
              or ("meta" if _C_META else "judgment")).strip().lower()
 if _C_POLICY not in ("judgment", "meta", "guarded"):
@@ -215,6 +219,7 @@ def _protocol_dict() -> dict:
     return {
         "code_rev": _CODE_REV,
         "c_policy": _C_POLICY,
+        "c_lean_render": _C_LEAN,
         "critic_model": _CRITIC_MODEL,
         "judge_model": _JUDGE_MODEL,
         "metadata_author": _METADATA_AUTHOR,
@@ -995,6 +1000,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "metadata_author": _METADATA_AUTHOR,
                                   "c_meta": _C_META,
                                   "c_policy": _C_POLICY,
+                                  "c_lean_render": _C_LEAN,
                                   "score_provenance": _SCORE_PROVENANCE,
                                   "judge_model": _JUDGE_MODEL,
                                   "protocol_hash": _protocol_hash(),
@@ -1048,6 +1054,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "metadata_author": _METADATA_AUTHOR,
                                    "c_meta": _C_META,
                                    "c_policy": _C_POLICY,
+                                   "c_lean_render": _C_LEAN,
                                    "score_provenance": _SCORE_PROVENANCE,
                                    "judge_model": _JUDGE_MODEL,
                                    "protocol_hash": _protocol_hash()})
@@ -1344,6 +1351,7 @@ async def main():
     _knobs = {
         "protocol_hash": _protocol_hash(),
         "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
+        "c_lean_render": _C_LEAN,
         "metadata_author": _METADATA_AUTHOR,
         "score_provenance": _SCORE_PROVENANCE,
         "ARMS": ",".join(sorted(_ARMS)),
