@@ -215,6 +215,11 @@ def _parse_results(save_to: Path) -> list[dict]:
                         or f"reward={float(reward):.2f}; "
                            f"term={s.get('termination_reason') or 'n/a'}",
             "failure_mode": str(s.get("termination_reason") or "")[:200],
+            # tau2 scores a run by the final database state, so a run that calls
+            # no tool leaves the DB untouched and collects the same reward as one
+            # that did the work correctly. The mean alone cannot tell those apart;
+            # carry the count so an inert arm is visible.
+            "tool_calls": sum(len(m.get("tool_calls") or []) for m in messages),
         })
     if skipped_infra:
         print(f"[tau2] WARNING: dropped {skipped_infra}/{len(sims)} sims that never "
@@ -384,6 +389,7 @@ def main() -> None:
                         # (user-sim timeout, max-steps) must be visible per-arm so the
                         # paired analysis can confirm all arms died on the SAME tasks.
                         "failure_mode": r.get("failure_mode", ""),
+                        "tool_calls": r.get("tool_calls", 0),
                         "fb_mode": "env",  # tau2 feedback = final DB-state / action checks
                         "error": "",
                         "iteration": it, "iter_total": args.iters,
