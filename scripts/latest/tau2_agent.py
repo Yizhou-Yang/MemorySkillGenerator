@@ -93,31 +93,44 @@ def _load_mem(state: str):
     return _MEM_CACHE["mem"]
 
 
-def _inject_block(user_text: str) -> str:
-    """Arm-gated memory block for the current scenario (read-only on the store)."""
+def _inject_block(opening_text: str, query_text: str) -> str:
+    """Arm-gated memory block for the current scenario (read-only on the store).
+
+    The chain key comes from the OPENING user message alone. It used to be
+    hashed from the concatenation of every user turn so far, which changes the
+    sha1 on every turn of the dialogue: record() (bridge, keyed on the opener)
+    wrote to one chain while inject() read from a different one each turn, so
+    the store filled with single-entry orphan chains and the curated arm
+    retrieved other dialogues' fragments -- rewards fell iteration over
+    iteration while the uncurated arm, injecting verbatim text, held flat. The
+    full concatenation survives only as the retrieval QUERY, where growing with
+    the dialogue is what you want and no key stability is required."""
     arm = os.environ.get("TAU2_ARM", "A").upper()
     state = os.environ.get("TAU2_MEM_STATE", "")
-    if arm == "A" or not state or not os.path.exists(state) or not user_text:
+    if arm == "A" or not state or not os.path.exists(state) or not opening_text:
         return ""
     try:
         mem = _load_mem(state)        # BenchmarkMemory (B) / CuratedMemory (C) / external (mem0)
-        task = {"task_id": _task_key(user_text), "description": user_text,
-                "metadata": {"chain_id": _task_key(user_text)}}
+        key = _task_key(opening_text)
+        task = {"task_id": key, "description": query_text or opening_text,
+                "metadata": {"chain_id": key}}
         return mem.inject(task) or ""
     except Exception as e:  # never break the official agent over memory I/O
         print(f"[CuratedTau2Agent] inject skipped: {type(e).__name__}: {e}", flush=True)
         return ""
 
 
-def _first_user_text(messages: list) -> str:
-    """The scenario key material: the user turns seen so far, oldest first. The
-    opening user message alone is enough for a stable chain id; later user turns
-    enrich the retrieval query without changing the key (we key on the whole
-    concatenation, which is dominated by and prefixed with the opener)."""
+def _user_texts(messages: list) -> tuple[str, str]:
+    """(opening user message, all user turns so far). The opener is the chain
+    key -- it never changes across the dialogue, so it MUST be hashed alone; a
+    hash is not prefix-stable, so hashing the growing concatenation changes the
+    chain id on every turn. The concatenation is retrieval query material only."""
     parts = [m.get("content") for m in messages
              if isinstance(m, dict) and m.get("role") == "user"
              and isinstance(m.get("content"), str) and m.get("content").strip()]
-    return "\n".join(parts)[:2000]
+    if not parts:
+        return "", ""
+    return parts[0][:2000], "\n".join(parts)[:2000]
 
 
 def _prefix_system(messages: list, block: str) -> None:
@@ -160,7 +173,7 @@ class CuratedTau2Agent(_BaseAgent):
                 break
         if msgs is None:
             return
-        block = _inject_block(_first_user_text(msgs))
+        block = _inject_block(*_user_texts(msgs))
         if block:
             _prefix_system(msgs, block)
 
