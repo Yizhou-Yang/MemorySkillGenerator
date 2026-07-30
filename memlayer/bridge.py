@@ -116,6 +116,15 @@ _C_LEAN_RENDER = os.environ.get("C_LEAN_RENDER", "0") == "1"
 # dead-chain block in inject). 0 restores the old always-inject behaviour, which
 # is the ablation that measures what anchoring costs.
 _DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
+# On a dead chain the store currently says nothing at all, which is what stops it
+# from being worse than no memory -- injecting the chain's own failed transcript
+# anchors the model to the path that already failed. This asks whether the
+# silence is too broad: serve the critic's avoidance note ALONE, with no verbatim
+# attempt and no checkmark, so there is no path to anchor to. The note is a
+# compression of what this chain already produced (the critic never sees the gold
+# answer -- only the judge does), so nothing enters the prompt that the episode
+# did not contain. Off by default: it changes what arm C is.
+_DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "0") == "1"
 
 
 # Ablation arm C_weak_compact (default off): show retrieval only the newest n
@@ -455,6 +464,37 @@ def _format_curated(successes: list, failures: list = (),
             else "## What to avoid (from earlier attempts)\n\n"
         out += ("\n\n" if out else "") + _ha + "\n\n".join(fail_blocks)
     return out
+
+
+def _format_lessons_only(entries: list) -> str:
+    """What to avoid, and nothing else — no verbatim attempt, no checkmark.
+
+    For dead chains under C_DEAD_CHAIN_LESSON. Verbatim replay is what makes a
+    dead chain harmful, so this channel carries only the causal lesson the critic
+    distilled from the chain's own failures. Deduplicated, budgeted like every
+    other injection, and empty when the critic produced nothing usable (the
+    caller then falls back to silence)."""
+    notes, seen = [], set()
+    for e in entries:
+        tax = e.failure_taxonomy or {}
+        note = (tax.get("avoidance_note") or tax.get("causal_lesson") or "").strip()
+        if not note or _is_weak_lesson(note):
+            continue
+        key = note[:80].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        notes.append(f"- {note[:180]}")
+    if not notes:
+        return ""
+    budget = _C_INJECT_BUDGET if _C_INJECT_BUDGET > 0 else 10 ** 6
+    head = "## What earlier attempts on this task got wrong\n\n"
+    out, used = [], len(head)
+    for n in notes:
+        if used + len(n) + 1 > budget:
+            break
+        out.append(n); used += len(n) + 1
+    return head + "\n".join(out) if out else ""
 
 
 def _format_raw(entries: list, action_scored: bool = False) -> str:
@@ -807,6 +847,13 @@ class CuratedMemory:
         if _DEAD_CHAIN_SILENCE and _C_POLICY == "guarded":
             if not any(_endorse_basis(e) is not None
                        for e in (self._chain_entries.get(chain) or cands)):
+                if _DEAD_CHAIN_LESSON:
+                    _lessons = _format_lessons_only(
+                        self._chain_entries.get(chain) or cands)
+                    if _lessons:
+                        self._served[tid_now] = []
+                        self._served_keys[tid_now] = []
+                        return _lessons
                 return ""
         _repair_raw = False
         if _C_REPAIR_MODE and cands:
