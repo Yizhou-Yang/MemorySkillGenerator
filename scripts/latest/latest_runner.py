@@ -242,6 +242,7 @@ def _protocol_dict() -> dict:
         "w_c_disabled": os.environ.get("W_C_DISABLED", "0"),
         "reprompt_control": os.environ.get("REPROMPT_CONTROL", "0"),
         "passk": os.environ.get("PASSK", "0"),
+        "passk_final": os.environ.get("PASSK_FINAL", "0"),
         "external_mems": os.environ.get("EXTERNAL_MEMS", "(none)"),
     }
 
@@ -1012,18 +1013,23 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                       "cmds_executed", "pre_test_passed")
                                      if isinstance(r, dict) and k in r},
                                   **{f"prof_{k}": v for k, v in prof.items()}})
-                # ── FINAL-ITERATION resampling for the raw-patch arm
-                # (PASSK_FINAL=k): after the chain's last iteration, draw k-1
-                # extra independent solves of the SAME variant with the SAME
-                # frozen memory state (no record between samples), logged as
-                # groups raw_patch_passk_s1..s{k-1}; the normal final row is
-                # sample 0. This is the fair counterpart to the no-memory
-                # pass@k control: B keeps its chain advantage and spends the
-                # extra calls on resampling, exactly the budget C spends on
-                # curation. Set PASSK_FINAL from the START of the B run —
-                # RESUME skips completed chains and will not backfill samples.
+                # ── FINAL-ITERATION resampling, any arm (PASSK_FINAL=k):
+                # after the chain's last iteration, draw k-1 extra independent
+                # solves of the SAME variant with the SAME frozen memory state
+                # (no record between samples), logged as <group>_passk_s1..
+                # s{k-1}; the normal final row is sample 0. This is what makes
+                # the cost comparison answerable: every arm's score is then
+                # available at a budget of one, two or three attempts, so
+                # curation's extra write-time calls can be weighed against what
+                # the cheaper arms buy by simply trying again. It used to apply
+                # to raw_patch alone, which left the external layers with no
+                # pass@k of their own. Set PASSK_FINAL from the START of the run
+                # — RESUME skips completed chains and will not backfill samples.
                 _PKF = int(os.environ.get("PASSK_FINAL", "0"))
-                if (_PKF > 1 and group_key == "raw_patch"
+                _PK_ARMS = {g.strip() for g in os.environ.get(
+                    "PASSK_FINAL_GROUPS",
+                    "no_mem,raw_patch,curated_patch,mem0,amem").split(",") if g.strip()}
+                if (_PKF > 1 and group_key in _PK_ARMS
                         and _it == ITER_CHAIN - 1):
                     for _s in range(1, _PKF):
                         if needs_docker and docker_sem is not None:
@@ -1035,7 +1041,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                 _rs = await _run_bounded(build_coro, cur_task, False)
                         _evs = await evaluate_task(_rs, benchmark)
                         _trace.log(
-                            benchmark=benchmark, group=f"raw_patch_passk_s{_s}",
+                            benchmark=benchmark, group=f"{group_key}_passk_s{_s}",
                             phase="test", task_id=_rs.get("task_id", tid),
                             task_desc=cur_task.get("description", ""),
                             augmented_prompt=_rs.get("_aug_prompt", ""),
