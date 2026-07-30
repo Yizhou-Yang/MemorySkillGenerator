@@ -254,7 +254,31 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
 
     `model`/`base_url`/`api_key` override the backbone's endpoint (used to route the
     critic at a designated model instead of the backbone itself).
+
+    The whole call runs under a WALL-CLOCK deadline, not just the client's read
+    timeout. The read timeout resets on every byte, and the gateway keeps hung
+    streams alive with SSE keep-alives -- tau2's arm C sat in ep_poll for 3.5
+    hours on two such sockets, five seconds of CPU, store never persisted. A
+    deadline can only be enforced from outside the blocking iterator, so the
+    body runs in a worker thread; on expiry the thread is abandoned (one socket
+    leaks, bounded) and the caller gets the same error dict every failure path
+    already handles.
     """
+    _hard = timeout * 2 + 60
+    _pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        _fut = _pool.submit(_openai_notool_sync_body, system_prompt, user_prompt,
+                            timeout, model, base_url, api_key)
+        return _fut.result(timeout=_hard)
+    except concurrent.futures.TimeoutError:
+        return {"error": f"wall_clock_timeout after {_hard}s", "text": ""}
+    finally:
+        _pool.shutdown(wait=False)
+
+
+def _openai_notool_sync_body(system_prompt: str, user_prompt: str, timeout: int = 60,
+                             model: str | None = None, base_url: str | None = None,
+                             api_key: str | None = None) -> dict:
     if not _HAS_OPENAI:
         return {"text": "", "error": "openai_package_not_installed"}
     url = base_url if base_url is not None else _OPENAI_BASE_URL
