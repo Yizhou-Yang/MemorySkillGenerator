@@ -11,7 +11,6 @@ cd "$(dirname "$0")/../.."
 MODEL="${1:-deepseek-v4-pro}"
 BASE="${2:-latest_evolving}"
 D="experiments_results/$BASE/$MODEL"
-H="experiments_results/harbor_tb2/$MODEL"
 PY="${PYTHON:-python3}"
 
 echo "================================================================"
@@ -57,40 +56,10 @@ for f in files:
 EOF
 
 echo ""
-echo "── TB2 (harbor): env-death visibility + arm fairness ──"
-"$PY" - "$H" <<'EOF'
-import json, sys, collections, glob
-tb = glob.glob(f"{sys.argv[1]}/*/trace.jsonl")
-if not tb:
-    print("  (no harbor TB2 trace yet)")
-else:
-    rows = [json.loads(l) for l in open(tb[0]) if l.strip()]
-    fm = collections.defaultdict(collections.Counter)
-    tasks = collections.defaultdict(set)
-    for r in rows:
-        g = r.get("group", "?")
-        fm[g][r.get("failure_mode") or "(none)"] += 1
-        tasks[g].add(r.get("task_id"))
-    for g in sorted(fm):
-        top = ", ".join(f"{k}x{v}" for k, v in fm[g].most_common(4))
-        print(f"  {g:12s} failure_mode: {top}")
-    sets = list(tasks.values())
-    if len(sets) > 1:
-        common = set.intersection(*sets); union = set.union(*sets)
-        if common != union:
-            print(f"  <-- ARM TASK-SET MISMATCH: {len(union)-len(common)} tasks "
-                  f"missing from some arm (harness died pre-result) — paired "
-                  f"stats must restrict to the {len(common)} common tasks")
-        else:
-            print(f"  arm task sets identical ({len(common)} tasks) — paired-safe")
-EOF
-
-echo ""
 echo "── Gate 2-3: injection isolation + paired significance ──"
 "$PY" scripts/latest/breakdown.py "$D" 2>/dev/null | grep -E "^## |injected acc|NO patches|chain-level" | head -30
 echo ""
 "$PY" scripts/latest/soft_stats.py "$D" 2>/dev/null
-[ -d "$H/terminal_bench_2" ] && "$PY" scripts/latest/soft_stats.py "$H" terminal_bench_2 2>/dev/null
 
 echo ""
 echo "── GAIA2 dynamic-vs-static splits (needs dataset dir) ──"
@@ -108,7 +77,7 @@ echo ""
 echo "── verdict checklist ──"
 cat <<'TXT'
   [ ] every benchmark has A/B/C at expected n, err≈0, ONE code_rev
-  [ ] fb_mode=self everywhere (QA) / env-by-construction (TB2)
+  [ ] fb_mode=self everywhere (QA) / env-by-construction (interactive)
   [ ] mutated≈100% of iter>=1 rows; injected>0 for B and C
   [ ] v2 gate PASS (C coverage ~100%, dose <= B, v2.2 markers present)
   [ ] C vs B soft CI (secondary) + pooled_stats primary endpoint

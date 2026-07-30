@@ -113,12 +113,22 @@ def _lexical_sim(query: str, doc: str) -> float:
 
 class PatchMemory:
     """Append-only patch history shared across the tasks of an evolution chain.
-    Retrieval mirrors EvoMem: lexical relevance to the current task, recency as
-    the tie-breaker. The same retrieval feeds both B and C; the difference is
-    purely what happens AFTER retrieval (B injects, C grounds-then-injects)."""
+    Retrieval mirrors EvoMem: relevance to the current task, recency as the
+    tie-breaker. The same retrieval feeds both B and C; the difference is
+    purely what happens AFTER retrieval (B injects, C grounds-then-injects).
 
-    def __init__(self) -> None:
+    Relevance is lexical by default (zero dependencies). Pass ``embedder``, a
+    callable ``(list[str]) -> L2-normalized row vectors``, to rank semantically
+    instead; only the ranking key changes."""
+
+    def __init__(self, embedder=None) -> None:
         self._patches: list[Patch] = []
+        # chain_id -> positions in _patches. Without it a chain-scoped read still
+        # walks the whole store to find its chain, so the scoped path grew with
+        # total entries even after scoring was pruned.
+        self._by_chain: dict[str, list[int]] = {}
+        self._embedder = embedder
+        self._emb = None                    # row i <-> self._patches[i]
 
     def __len__(self) -> int:
         return len(self._patches)
@@ -128,14 +138,35 @@ class PatchMemory:
         return list(self._patches)
 
     def add(self, patch: Patch) -> None:
+        self._by_chain.setdefault(patch.chain_id, []).append(len(self._patches))
         self._patches.append(patch)
+        self._emb = None
+
+    def _scores(self, query: str, idx: Optional[list[int]] = None) -> list[float]:
+        """Similarity for the patches at `idx` (all of them when idx is None)."""
+        pool = self._patches if idx is None else [self._patches[i] for i in idx]
+        if self._embedder is None:
+            return [_lexical_sim(query, p._doc()) for p in pool]
+        import numpy as np
+        if self._emb is None:
+            self._emb = np.asarray(
+                self._embedder([p._doc() for p in self._patches]),
+                dtype="float32")
+        qv = np.asarray(self._embedder([query]), dtype="float32")[0]
+        emb = self._emb if idx is None else self._emb[idx]
+        return (emb @ qv).tolist()
 
     def retrieve(self, query: str, top_k: int = 5,
                  chain_id: Optional[str] = None) -> list[Patch]:
-        pool = [p for p in self._patches
-                if chain_id is None or p.chain_id == chain_id]
-        scored = [(p, _lexical_sim(query, p._doc()), p.version)
-                  for p in pool]
+        # Prune to the chain BEFORE scoring. Scoring first and filtering after
+        # costs the whole store on every read, which is what made a chain-scoped
+        # read as slow as a global one -- the partition bought nothing.
+        idx = None if chain_id is None else self._by_chain.get(chain_id, [])
+        if idx is not None and not idx:
+            return []
+        pool = self._patches if idx is None else [self._patches[i] for i in idx]
+        scores = self._scores(query, idx)
+        scored = [(p, scores[i], p.version) for i, p in enumerate(pool)]
         # relevance desc, then recency (version) desc
         scored.sort(key=lambda t: (t[1], t[2]), reverse=True)
         return [p for p, s, _ in scored[:top_k]]

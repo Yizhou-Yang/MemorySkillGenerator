@@ -26,9 +26,19 @@ a silently-degraded baseline would be worse than no baseline.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import os
 import re
 from pathlib import Path
+
+# mem0's constructor opens a SECOND qdrant store for telemetry at a path shared
+# by every instance in the process (~/.mem0/migrations_qdrant). With one store
+# per chain, the first instance file-locks it and every later chain's add() and
+# search() fails "already accessed by another instance" forever: the arm runs
+# to completion as no-memory with error=0 (hy3fix gaia/gaia2: 3 of ~300 rows
+# injected). Must be set before mem0 is imported.
+os.environ.setdefault("MEM0_TELEMETRY", "False")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _MODEL_SLUG = re.sub(r"[^A-Za-z0-9._-]", "_",
@@ -49,6 +59,22 @@ def _ns(benchmark: str, task: dict) -> str:
     return f"{benchmark}:{_chain_id(task)}"
 
 
+_IN_BASELINE = contextvars.ContextVar("in_baseline_memory_call", default=False)
+
+
+@contextlib.contextmanager
+def baseline_call():
+    """Mark the dynamic extent of a call INTO a third-party memory library.
+
+    Everything the backbone does outside this scope is left alone.
+    """
+    tok = _IN_BASELINE.set(True)
+    try:
+        yield
+    finally:
+        _IN_BASELINE.reset(tok)
+
+
 def _install_nothink_patch() -> None:
     """Make third-party memory libraries usable against a reasoning endpoint.
 
@@ -56,14 +82,21 @@ def _install_nothink_patch() -> None:
     fields, so `reasoning_effort` cannot be passed through configuration. On
     HY3/taiji that leaves `content` empty (the answer goes to the reasoning
     stream): mem0's fact extraction returns nothing and A-Mem's controller
-    raises `cannot access local variable 'response'`. Patch the SDK call site
-    once so every request for a reasoning model carries the off-switch. Only
-    the task-solving backbone identity matters for fairness; this changes how
-    the endpoint is *called*, not which model answers.
+    raises `cannot access local variable 'response'`.
+
+    The off-switch therefore has to go in at the SDK call site, but it must
+    apply to the memory library's calls only. Model identity cannot make that
+    distinction -- the backbone and mem0's extractor are the same model name --
+    so gating on it turned the backbone's reasoning off for every task that ran
+    after the first external-baseline arm imported this module, process-wide
+    (measured on gaia2/hy3: output tokens 29k -> 5.7k, iteration-0 score
+    54.8 -> 30.9, i.e. the arms were no longer comparable). Gate on the call's
+    dynamic extent instead: only requests issued inside baseline_call() are
+    rewritten.
     """
     if os.environ.get("BASELINE_NOTHINK", "1") != "1":
         return
-    effort = os.environ.get("OPENAI_REASONING_EFFORT", "no_think")
+    effort = os.environ.get("BASELINE_REASONING_EFFORT", "no_think")
     models = tuple(m for m in os.environ.get(
         "NOTHINK_MODELS", "hy3").lower().split(",") if m)
     try:
@@ -76,13 +109,15 @@ def _install_nothink_patch() -> None:
 
     def create(self, *a, **kw):
         m = str(kw.get("model", "")).lower()
-        if any(t in m for t in models) and "reasoning_effort" not in kw:
+        if (_IN_BASELINE.get() and any(t in m for t in models)
+                and "reasoning_effort" not in kw):
             kw["reasoning_effort"] = effort
         return _orig(self, *a, **kw)
 
     create._nothink = True
     _c.Completions.create = create
-    print(f"[baseline] no_think patch installed for {models}", flush=True)
+    print(f"[baseline] no_think patch armed for {models} "
+          f"(applies inside baseline_call() only)", flush=True)
 
 
 _install_nothink_patch()
@@ -175,7 +210,40 @@ class Mem0Memory:
             cfg = json.loads(override)
         self._cfg = cfg
         self._m = None                      # built lazily (see _mem)
+        self._mems: dict = {}               # ns -> per-chain Memory
         self._add_failures = 0
+
+    def _mem_for(self, ns: str):
+        """One qdrant store PER CHAIN.
+
+        Local (embedded) qdrant serialises every operation behind a directory
+        lock, so a single shared store turns N concurrent workers into a queue:
+        measured 40s per record at conc 24, i.e. raising concurrency bought
+        nothing. Chains never share memories (user_id already scopes them), so
+        each chain gets its own store directory — different chains then run
+        truly in parallel and only same-chain iterations serialise, which the
+        runner already orders anyway.
+        """
+        m = self._mems.get(ns)
+        if m is None:
+            with self._IO_LOCK:                 # guards dict + build only
+                m = self._mems.get(ns)
+                if m is None:
+                    import copy
+                    from mem0 import Memory
+                    cfg = copy.deepcopy(self._cfg)
+                    slug = re.sub(r"[^A-Za-z0-9_.-]", "_", ns)[:80]
+                    cfg["vector_store"]["config"]["path"] = str(
+                        _STORE_ROOT / f"mem0_{slug}")
+                    m = Memory.from_config(cfg)
+                    if not self._mems:
+                        try:
+                            import mem0 as _m0
+                            _log_version("mem0ai", _m0)
+                        except Exception:
+                            pass
+                    self._mems[ns] = m
+        return m
 
     def _mem(self):
         # Build under the SAME lock that serializes reads/writes: concurrent
@@ -199,8 +267,11 @@ class Mem0Memory:
         """Drop the live clients (frees the local-qdrant file lock) so another
         process — the tau2 subprocess, or the bridge after it — can open the
         same on-disk store. State lives on disk; nothing is lost."""
-        m, self._m = self._m, None
-        if m is not None:
+        live = [self._m] + list(self._mems.values())
+        self._m, self._mems = None, {}
+        for m in live:
+            if m is None:
+                continue
             try:
                 m.vector_store.client.close()   # qdrant releases the lock now,
             except Exception:                   # not at some later GC
@@ -209,57 +280,62 @@ class Mem0Memory:
     def __getstate__(self):
         d = dict(self.__dict__)
         d["_m"] = None                      # clients never cross a pickle
+        d["_mems"] = {}
         return d
 
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        self.__dict__.setdefault("_mems", {})
+
     def inject(self, task: dict) -> str:
-        query = task.get("description", "")[:2000]
-        try:
-            # Build OUTSIDE the lock: _mem() takes _IO_LOCK itself, and
-            # threading.Lock is non-reentrant, so `with lock: self._mem()`
-            # self-deadlocks on the first (lazy-build) call — which is exactly
-            # every arm's first inject. Resolve the client first, then hold the
-            # lock only for the search.
-            m = self._mem()
-            # mem0 >=2.x moved entity identity out of top-level kwargs: search()
-            # takes filters={"user_id": ...}, not user_id=... (add() still takes
-            # the top-level kwarg).
-            with self._IO_LOCK:
-                hits = m.search(query,
-                                filters={"user_id": _ns(self.benchmark, task)},
-                                limit=self.top_k)
-        except Exception as e:
-            print(f"[baseline:mem0] search failed: {e}", flush=True)
-            return ""
-        items = hits.get("results", hits) if isinstance(hits, dict) else hits
-        lines = [f"- {h.get('memory') or h.get('text') or ''}".strip()
-                 for h in (items or []) if isinstance(h, dict)]
-        lines = [l for l in lines if len(l) > 2][: self.top_k]
-        if not lines:
-            return ""
-        return "## Memories from earlier attempts (mem0)\n\n" + "\n".join(lines)
+        with baseline_call():
+            query = task.get("description", "")[:2000]
+            try:
+                # Build OUTSIDE the lock: _mem() takes _IO_LOCK itself, and
+                # threading.Lock is non-reentrant, so `with lock: self._mem()`
+                # self-deadlocks on the first (lazy-build) call — which is exactly
+                # every arm's first inject. Resolve the client first, then hold the
+                # lock only for the search.
+                ns = _ns(self.benchmark, task)
+                # per-chain store => no cross-chain lock contention; mem0 >=2.x
+                # moved entity identity out of top-level kwargs for search().
+                hits = self._mem_for(ns).search(
+                    query, filters={"user_id": ns}, limit=self.top_k)
+            except Exception as e:
+                print(f"[baseline:mem0] search failed: {e}", flush=True)
+                return ""
+            items = hits.get("results", hits) if isinstance(hits, dict) else hits
+            lines = [f"- {h.get('memory') or h.get('text') or ''}".strip()
+                     for h in (items or []) if isinstance(h, dict)]
+            lines = [l for l in lines if len(l) > 2][: self.top_k]
+            if not lines:
+                return ""
+            return "## Memories from earlier attempts (mem0)\n\n" + "\n".join(lines)
 
     async def record(self, task: dict, result: dict, score=None) -> None:
-        resp = (result.get("response") or "").strip()
-        if not resp:
-            return
-        try:
-            # mem0.add runs its own LLM extraction — blocking; keep it off
-            # the event loop or it throttles every concurrent task. Build the
-            # client BEFORE taking the lock (non-reentrant _IO_LOCK, same
-            # deadlock as inject).
-            def _add():
-                m = self._mem()
-                with self._IO_LOCK:
-                    m.add(
+        with baseline_call():
+            resp = (result.get("response") or "").strip()
+            if not resp:
+                return
+            try:
+                # mem0.add runs its own LLM extraction — blocking; keep it off
+                # the event loop or it throttles every concurrent task. Build the
+                # client BEFORE taking the lock (non-reentrant _IO_LOCK, same
+                # deadlock as inject).
+                ns = _ns(self.benchmark, task)
+
+                def _add():
+                    # per-chain store: concurrent chains no longer serialise
+                    self._mem_for(ns).add(
                         [{"role": "user", "content": task.get("description", "")[:4000]},
                          {"role": "assistant", "content": resp[:4000]}],
-                        user_id=_ns(self.benchmark, task))
-            await asyncio.to_thread(_add)
-        except Exception as e:
-            self._add_failures += 1
-            if self._add_failures <= 3 or self._add_failures % 50 == 0:
-                print(f"[baseline:mem0] add failed ({self._add_failures}): {e}",
-                      flush=True)
+                        user_id=ns)
+                await asyncio.to_thread(_add)
+            except Exception as e:
+                self._add_failures += 1
+                if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                    print(f"[baseline:mem0] add failed ({self._add_failures}): {e}",
+                          flush=True)
 
     def __len__(self) -> int:  # parity with other arms' logging
         return 0
@@ -321,24 +397,42 @@ class AMemMemory:
         # unbound ("cannot access local variable 'response'"). The SDK reads
         # OPENAI_BASE_URL from the environment, so set it here to point the
         # library's own client at our endpoint.
+        # Override rather than setdefault, and restore afterwards. When the
+        # backbone runs on another endpoint (hy3 on taiji) its OPENAI_BASE_URL
+        # is already exported, so setdefault left A-Mem's client pointed at the
+        # backbone's endpoint; it replied "model not found", note construction
+        # failed silently, and the arm scored at the no-memory floor while
+        # looking like a finding about A-Mem. Leaving the override in place
+        # would be the mirror bug -- the backbone would inherit the baseline's
+        # endpoint -- so the swap is scoped to construction.
+        _saved = {k: os.environ.get(k) for k in ("OPENAI_BASE_URL", "OPENAI_API_KEY")}
         if _int_base:
-            os.environ.setdefault("OPENAI_BASE_URL", _int_base)
+            os.environ["OPENAI_BASE_URL"] = _int_base
         if _int_key:
-            os.environ.setdefault("OPENAI_API_KEY", _int_key)
+            os.environ["OPENAI_API_KEY"] = _int_key
         # A-Mem's ctor signature varies across revisions; try the documented
         # form first, degrade to defaults rather than guessing kwargs.
+        def _restore():
+            for k, v in _saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
         try:
-            return AgenticMemorySystem(
-                model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                llm_backend="openai", llm_model=_int_model,
-                api_key=_int_key, api_base=_int_base)
-        except TypeError:
             try:
                 return AgenticMemorySystem(
                     model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                    llm_backend="openai", llm_model=_int_model)
+                    llm_backend="openai", llm_model=_int_model,
+                    api_key=_int_key, api_base=_int_base)
             except TypeError:
-                return AgenticMemorySystem()
+                try:
+                    return AgenticMemorySystem(
+                        model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
+                        llm_backend="openai", llm_model=_int_model)
+                except TypeError:
+                    return AgenticMemorySystem()
+        finally:
+            _restore()
 
     # ── pickle support (tau2 bridge hands the store between processes) ──
     # The live system holds a SentenceTransformer + an LLM client (both
@@ -389,58 +483,60 @@ class AMemMemory:
         return self._sys
 
     def inject(self, task: dict) -> str:
-        query = task.get("description", "")[:2000]
-        ns = _ns(self.benchmark, task)
-        try:
-            _sys = self._system()
-        except Exception as e:
-            print(f"[baseline:amem] system unavailable: {e}", flush=True)
-            return ""
-        mems = getattr(_sys, "memories", {}) or {}
-        chain_ids = self._per_chain.get(ns, [])
-        # Chain scoping (same discipline as B/C): serve THIS chain's own A-Mem
-        # notes. A-Mem still authored each note (keyword/context/link/evolution
-        # generation ran at record time); retrieval here is chain-local, so the
-        # comparison to B/C is on note QUALITY, not on a different candidate set.
-        # Fall back to global embedding retrieval only when the chain is empty.
-        notes = [mems[i] for i in chain_ids if i in mems]
-        if not notes and mems:
+        with baseline_call():
+            query = task.get("description", "")[:2000]
+            ns = _ns(self.benchmark, task)
             try:
-                idx = _sys.retriever.search(query, self.top_k * 4)
-                allm = list(mems.values())
-                notes = [allm[int(i)] for i in (idx or [])
-                         if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
-            except Exception:
-                notes = []
-        lines = []
-        for n in notes[-self.top_k:][::-1]:      # most recent first
-            text = (getattr(n, "content", "") or "").strip()
-            if text:
-                lines.append(f"- {text[:400]}")
-            if len(lines) >= self.top_k:
-                break
-        if not lines:
-            return ""
-        return "## Memories from earlier attempts (A-Mem)\n\n" + "\n".join(lines)
+                _sys = self._system()
+            except Exception as e:
+                print(f"[baseline:amem] system unavailable: {e}", flush=True)
+                return ""
+            mems = getattr(_sys, "memories", {}) or {}
+            chain_ids = self._per_chain.get(ns, [])
+            # Chain scoping (same discipline as B/C): serve THIS chain's own A-Mem
+            # notes. A-Mem still authored each note (keyword/context/link/evolution
+            # generation ran at record time); retrieval here is chain-local, so the
+            # comparison to B/C is on note QUALITY, not on a different candidate set.
+            # Fall back to global embedding retrieval only when the chain is empty.
+            notes = [mems[i] for i in chain_ids if i in mems]
+            if not notes and mems:
+                try:
+                    idx = _sys.retriever.search(query, self.top_k * 4)
+                    allm = list(mems.values())
+                    notes = [allm[int(i)] for i in (idx or [])
+                             if str(i).lstrip("-").isdigit() and 0 <= int(i) < len(allm)]
+                except Exception:
+                    notes = []
+            lines = []
+            for n in notes[-self.top_k:][::-1]:      # most recent first
+                text = (getattr(n, "content", "") or "").strip()
+                if text:
+                    lines.append(f"- {text[:400]}")
+                if len(lines) >= self.top_k:
+                    break
+            if not lines:
+                return ""
+            return "## Memories from earlier attempts (A-Mem)\n\n" + "\n".join(lines)
 
     async def record(self, task: dict, result: dict, score=None) -> None:
-        resp = (result.get("response") or "").strip()
-        if not resp:
-            return
-        ns = _ns(self.benchmark, task)
-        try:
-            note = (f"Task: {task.get('description', '')[:1500]}\n"
-                    f"Attempt: {resp[:2500]}")
-            _sys = self._system()
-            _fn = _sys.add_note if hasattr(_sys, "add_note") \
-                else _sys.create_memory
-            nid = await asyncio.to_thread(_fn, note)   # LLM link-gen inside
-            self._per_chain.setdefault(ns, []).append(nid)
-        except Exception as e:
-            self._add_failures = getattr(self, "_add_failures", 0) + 1
-            if self._add_failures <= 3 or self._add_failures % 50 == 0:
-                print(f"[baseline:amem] add failed ({self._add_failures}): {e}",
-                      flush=True)
+        with baseline_call():
+            resp = (result.get("response") or "").strip()
+            if not resp:
+                return
+            ns = _ns(self.benchmark, task)
+            try:
+                note = (f"Task: {task.get('description', '')[:1500]}\n"
+                        f"Attempt: {resp[:2500]}")
+                _sys = self._system()
+                _fn = _sys.add_note if hasattr(_sys, "add_note") \
+                    else _sys.create_memory
+                nid = await asyncio.to_thread(_fn, note)   # LLM link-gen inside
+                self._per_chain.setdefault(ns, []).append(nid)
+            except Exception as e:
+                self._add_failures = getattr(self, "_add_failures", 0) + 1
+                if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                    print(f"[baseline:amem] add failed ({self._add_failures}): {e}",
+                          flush=True)
 
     def __len__(self) -> int:
         return sum(len(v) for v in self._per_chain.values())
@@ -486,52 +582,54 @@ class MemoryOSMemory:
         return self._per_ns[ns]
 
     def inject(self, task: dict) -> str:
-        ns = _ns(self.benchmark, task)
-        if ns not in self._per_ns:
-            return ""      # nothing recorded for this chain yet
-        sys_ = self._per_ns[ns]
-        query = task.get("description", "")[:2000]
-        ctx = None
-        for meth in ("retrieve_context", "get_retrieval_context", "retrieve",
-                     "search"):
-            fn = getattr(sys_, meth, None)
-            if fn is None:
-                continue
-            try:
-                ctx = fn(query)
-                break
-            except TypeError:
-                try:
-                    ctx = fn(query, self.top_k)
-                    break
-                except Exception:
+        with baseline_call():
+            ns = _ns(self.benchmark, task)
+            if ns not in self._per_ns:
+                return ""      # nothing recorded for this chain yet
+            sys_ = self._per_ns[ns]
+            query = task.get("description", "")[:2000]
+            ctx = None
+            for meth in ("retrieve_context", "get_retrieval_context", "retrieve",
+                         "search"):
+                fn = getattr(sys_, meth, None)
+                if fn is None:
                     continue
-            except Exception as e:
-                print(f"[baseline:memoryos] {meth} failed: {e}", flush=True)
+                try:
+                    ctx = fn(query)
+                    break
+                except TypeError:
+                    try:
+                        ctx = fn(query, self.top_k)
+                        break
+                    except Exception:
+                        continue
+                except Exception as e:
+                    print(f"[baseline:memoryos] {meth} failed: {e}", flush=True)
+                    return ""
+            if not ctx:
                 return ""
-        if not ctx:
-            return ""
-        text = ctx if isinstance(ctx, str) else str(ctx)
-        text = text.strip()[:1200]
-        if len(text) < 3:
-            return ""
-        return "## Memories from earlier attempts (MemoryOS)\n\n" + text
+            text = ctx if isinstance(ctx, str) else str(ctx)
+            text = text.strip()[:1200]
+            if len(text) < 3:
+                return ""
+            return "## Memories from earlier attempts (MemoryOS)\n\n" + text
 
     async def record(self, task: dict, result: dict, score=None) -> None:
-        resp = (result.get("response") or "").strip()
-        if not resp:
-            return
-        ns = _ns(self.benchmark, task)
-        try:
-            await asyncio.to_thread(
-                self._sys_for(ns).add_memory,
-                user_input=task.get("description", "")[:3000],
-                agent_response=resp[:3000])
-        except Exception as e:
-            self._add_failures = getattr(self, "_add_failures", 0) + 1
-            if self._add_failures <= 3 or self._add_failures % 50 == 0:
-                print(f"[baseline:memoryos] add failed ({self._add_failures}): "
-                      f"{e}", flush=True)
+        with baseline_call():
+            resp = (result.get("response") or "").strip()
+            if not resp:
+                return
+            ns = _ns(self.benchmark, task)
+            try:
+                await asyncio.to_thread(
+                    self._sys_for(ns).add_memory,
+                    user_input=task.get("description", "")[:3000],
+                    agent_response=resp[:3000])
+            except Exception as e:
+                self._add_failures = getattr(self, "_add_failures", 0) + 1
+                if self._add_failures <= 3 or self._add_failures % 50 == 0:
+                    print(f"[baseline:memoryos] add failed ({self._add_failures}): "
+                          f"{e}", flush=True)
 
     def __len__(self) -> int:
         return len(self._per_ns)

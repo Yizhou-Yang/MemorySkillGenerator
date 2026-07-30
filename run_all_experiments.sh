@@ -59,7 +59,6 @@ TASK_LIMIT="${TASK_LIMIT:-100}"
 ITER_CHAIN="${ITER_CHAIN:-3}"
 TASK_CONCURRENCY="${TASK_CONCURRENCY:-20}"
 RESULTS_BASE="${RESULTS_BASE:-latest_evolving}"
-NO_TB2="${NO_TB2:-0}"
 
 # P800 特殊环境变量
 if [ "${GPU_PLATFORM:-}" = "p800" ] || [ -e /dev/xpuctrl ]; then
@@ -140,7 +139,7 @@ smoke_test() {
 run_sweep() {
     local MODEL_ID="$1"
     log "━━━ Full Sweep: ${MODEL_ID} ━━━"
-    log "  Benchmarks: gaia, gaia2, locomo, terminal_bench_2"
+    log "  Benchmarks: gaia, gaia2, locomo, tau2"
     log "  ITER_CHAIN=${ITER_CHAIN} TASK_LIMIT=${TASK_LIMIT}"
     log "  Results: experiments_results/${RESULTS_BASE}/${MODEL_ID}/"
 
@@ -163,11 +162,6 @@ run_sweep() {
         BENCHMARKS=gaia2 TASK_CONCURRENCY="$TASK_CONCURRENCY" \
         RESULTS_BASE="$RESULTS_BASE" CODEBUDDY_MODEL="$MODEL_ID" \
         python3 -u scripts/latest/latest_runner.py 2>&1 | tee "${LOG_PREFIX}_gaia2.log"
-
-    # terminal_bench_2
-    if [ "$NO_TB2" != "1" ]; then
-        bash scripts/latest/run_tb2_official.sh "$MODEL_ID" 2>&1 | tee "${LOG_PREFIX}_tb2.log"
-    fi
 
     local ELAPSED=$(( $(date +%s) - START ))
     log "  Done in $((ELAPSED/3600))h $((ELAPSED%3600/60))m"

@@ -1,6 +1,6 @@
 # Experiment Runner
 
-The A/B/C ablation runner for `gaia`, `gaia2`, `locomo`, and `terminal_bench_2`.
+The A/B/C ablation runner for `gaia`, `gaia2`, `locomo`, and `tau2`.
 
 ## Files
 
@@ -12,6 +12,7 @@ The A/B/C ablation runner for `gaia`, `gaia2`, `locomo`, and `terminal_bench_2`.
 | `breakdown.py` | Injection-isolation gate (did memory fire?), by-type / by-difficulty, chain-level accuracy. |
 | `EXPERIMENT_PLAN.md` | How a full sweep is launched (models, pre-flight, order of work). |
 | `<benchmark>_runner.py`, `evomem_bridge.py`, `eval.py`, `tools.py`, `trace.py` | Per-benchmark harnesses, the memory bridge that wires arms B/C, scoring, tools, and trace I/O. |
+| `locomo_native.py` | LoCoMo under Mem0/A-Mem's own protocol (ingest → top-k retrieve → answer from retrieved only; J + token-F1). A memory-layer comparison, separate from the A/B/C arms; see `RUNNING_EXPERIMENTS.md`. |
 
 ## Arms
 
@@ -36,7 +37,7 @@ identifiers (`A_baseline` / `B_evomem` / `C_gpr`) — read them as A/B/C.
    same task*, not cross-task transfer. Retrieval is chain-scoped, so a single
    pass over independent tasks injects nothing (A=B=C) — use `ITER_CHAIN>1`.
 3. **Metrics.** Exact-match for QA (`gaia`, `locomo`), soft recall for `gaia2`,
-   pytest pass for `terminal_bench_2`.
+   task reward for `tau2`.
 
 ## Run
 

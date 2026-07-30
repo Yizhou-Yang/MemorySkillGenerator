@@ -215,6 +215,11 @@ def _parse_results(save_to: Path) -> list[dict]:
                         or f"reward={float(reward):.2f}; "
                            f"term={s.get('termination_reason') or 'n/a'}",
             "failure_mode": str(s.get("termination_reason") or "")[:200],
+            # tau2 scores a run by the final database state, so a run that calls
+            # no tool leaves the DB untouched and collects the same reward as one
+            # that did the work correctly. The mean alone cannot tell those apart;
+            # carry the count so an inert arm is visible.
+            "tool_calls": sum(len(m.get("tool_calls") or []) for m in messages),
         })
     if skipped_infra:
         print(f"[tau2] WARNING: dropped {skipped_infra}/{len(sims)} sims that never "
@@ -325,6 +330,7 @@ def main() -> None:
                           os.environ.get("OPENROUTER_API_KEY", "EMPTY"))
     # Support comma-separated domains (e.g. airline,retail); tau2 run only
     # accepts a single --domain, so loop across them sequentially.
+    _arm_failed = False
     domains = [d.strip() for d in args.domain.split(",") if d.strip()]
     for domain in domains:
         for it in range(args.iters):
@@ -362,7 +368,11 @@ def main() -> None:
             print(f"[tau2] arm={args.arm} iter={it}: {' '.join(cmd)}", flush=True)
             rc = subprocess.call(cmd, env=env, cwd=str(PROJECT_ROOT))
             if rc != 0:
+                # Stopping the arm is right, but the process used to exit 0
+                # afterwards, so the launcher recorded a crashed arm as a finished
+                # one: arm A died on iteration 0 and the wrapper logged rc=0.
                 print(f"[tau2] tau2 exited rc={rc} — stopping arm", flush=True)
+                _arm_failed = True
                 break
             rows = _parse_results(save_to)
             _empty = sum(1 for r in rows if not r["response"]
@@ -384,6 +394,7 @@ def main() -> None:
                         # (user-sim timeout, max-steps) must be visible per-arm so the
                         # paired analysis can confirm all arms died on the SAME tasks.
                         "failure_mode": r.get("failure_mode", ""),
+                        "tool_calls": r.get("tool_calls", 0),
                         "fb_mode": "env",  # tau2 feedback = final DB-state / action checks
                         "error": "",
                         "iteration": it, "iter_total": args.iters,
@@ -417,6 +428,8 @@ def main() -> None:
                 except Exception:
                     pass
     print(f"[tau2] done. trace: {trace}", flush=True)
+    if _arm_failed:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
