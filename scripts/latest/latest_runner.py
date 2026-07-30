@@ -966,6 +966,12 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                            score=ev.get("score", 0.0),
                            extra={"em": ev.get("em", 0.0),
                                   "method": ev.get("method", ""),
+                                  # the normalised answer, not the whole
+                                  # transcript: a deployable selection rule
+                                  # over resamples needs something two
+                                  # attempts can agree on, and full responses
+                                  # match verbatim only 11% of the time.
+                                  "extracted_answer": ev.get("extracted_answer", ""),
                                   "execution_mode": exec_mode,
                                   "error": str(r.get("error") or "")[:200],
                                   # category/type and difficulty (when provided)
@@ -1025,12 +1031,31 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 # to raw_patch alone, which left the external layers with no
                 # pass@k of their own. Set PASSK_FINAL from the START of the run
                 # — RESUME skips completed chains and will not backfill samples.
-                _PKF = int(os.environ.get("PASSK_FINAL", "0"))
-                _PK_ARMS = {g.strip() for g in os.environ.get(
-                    "PASSK_FINAL_GROUPS",
-                    "no_mem,raw_patch,curated_patch,mem0,amem").split(",") if g.strip()}
-                if (_PKF > 1 and group_key in _PK_ARMS
-                        and _it == ITER_CHAIN - 1):
+                # Per-group budgets: "no_mem:4,raw_patch:4,curated_patch:2" gives
+                # each arm its own attempt count, which is what lets the
+                # comparison be budget-matched rather than attempt-matched. A
+                # curated attempt costs more than an uncurated one, so equal
+                # attempts would hand the cheaper arms a smaller total; equal
+                # totals is the constraint that answers the cost question. A bare
+                # integer in PASSK_FINAL still applies to every listed group.
+                _PKF_DEFAULT = int(os.environ.get("PASSK_FINAL", "0"))
+                _PK_SPEC = {}
+                for _g in os.environ.get(
+                        "PASSK_FINAL_GROUPS",
+                        "no_mem,raw_patch,curated_patch,mem0,amem").split(","):
+                    _g = _g.strip()
+                    if not _g:
+                        continue
+                    if ":" in _g:
+                        _name, _k = _g.split(":", 1)
+                        try:
+                            _PK_SPEC[_name.strip()] = int(_k)
+                        except ValueError:
+                            _PK_SPEC[_name.strip()] = _PKF_DEFAULT
+                    else:
+                        _PK_SPEC[_g] = _PKF_DEFAULT
+                _PKF = _PK_SPEC.get(group_key, 0)
+                if _PKF > 1 and _it == ITER_CHAIN - 1:
                     for _s in range(1, _PKF):
                         if needs_docker and docker_sem is not None:
                             async with docker_sem:
@@ -1050,6 +1075,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                             extra={"em": _evs.get("em", 0.0),
                                    "iteration": _it, "iter_total": ITER_CHAIN,
                                    "sample_idx": _s,
+                                   "extracted_answer": _evs.get("extracted_answer", ""),
                                    "patch_injected": bool(_rs.get("_aug_prompt")),
                                    "aug_len": len(_rs.get("_aug_prompt") or ""),
                                    **({k: v for k, v in (_rs.get("_wc") or {}).items()}
