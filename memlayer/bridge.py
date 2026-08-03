@@ -125,7 +125,7 @@ _DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
 # answer -- only the judge does), so nothing enters the prompt that the episode
 # did not contain. On by default: a dead chain is where a weak backbone needs
 # the store most, and silence there is what C_DEAD_CHAIN_LESSON=0 measures.
-_DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "1") == "1"
+_DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "0") == "1"
 
 
 # Ablation arm C_weak_compact (default off): show retrieval only the newest n
