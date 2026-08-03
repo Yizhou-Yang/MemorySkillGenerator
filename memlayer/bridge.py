@@ -105,6 +105,18 @@ _CRITIC_IS_EXTERNAL = bool(_CRITIC_RAW) and _CRITIC_RAW != _BACKBONE_ID
 # unbudgeted C block (~1.6x B's) measurably HURT accuracy, and dose-matching C to
 # B is what removes the block-size confound from C−B. 0 disables.
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
+def _action_cap() -> int:
+    """How many characters of action sequence a rendered entry may carry.
+
+    On an action-scored benchmark the action list is the payload, not a
+    decoration on the answer text, so it gets the bulk of the per-entry budget
+    rather than a fixed slice. The floor keeps behaviour sane if the budget is
+    set very low.
+    """
+    try:
+        return max(200, int(_C_INJECT_BUDGET * 0.6))
+    except Exception:
+        return 200
 # Lean rendering. The dose budget counts the whole block, so on gpt-oss/LoCoMo
 # 74% of C's 851 characters were scaffolding -- headers, a Task: line restating
 # the prompt the agent is already reading, and a lineage listing v1 -> v2 --
@@ -400,7 +412,7 @@ def _format_curated(successes: list, failures: list = (),
             if outcome:
                 parts.append(f"Answer given then (unverified): {outcome[:160]}")
             if acts:
-                parts.append("Actions used: " + " -> ".join(acts)[:200])
+                parts.append("Actions used: " + " -> ".join(acts)[:_action_cap()])
             elif concrete:
                 parts.append(f"What worked: {concrete[:200]}")
         elif outcome:
@@ -549,7 +561,7 @@ def _format_raw(entries: list, action_scored: bool = False) -> str:
         parts = [f"[Prior attempt on this task — raw, self-assessed {sc:.0%}]",
                  f"Task: {_core_task(e.task_desc)[:150]}"]
         if acts:   # agentic: the action sequence is the payload (see curated)
-            parts.append("Actions used: " + " -> ".join(acts)[:200])
+            parts.append("Actions used: " + " -> ".join(acts)[:_action_cap()])
             if concrete:
                 parts.append(f"{head}: {concrete[:200]}")
         else:
