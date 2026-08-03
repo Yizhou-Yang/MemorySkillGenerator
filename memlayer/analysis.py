@@ -66,10 +66,30 @@ def analyze_execution(task_id: str, task_desc: str,
                       augmentation_used: str = "") -> Experience:
     """Format-adaptive: extracts action keys from any format, then fuzzy matches."""
     agent_keys = [k for a in agent_actions if isinstance(a, dict) and (k := _extract_action_key(a)) is not None]
-    agent_cmds = [str(a.get('command', '') or (a.get('input', {}).get('command', '') if isinstance(a.get('input'), dict) else a.get('input', ''))
-                      or a.get('output', '')[:200])
-                  if isinstance(a, dict) else str(a)[:200]
-                  for a in agent_actions]
+    def _cmd_text(a) -> str:
+        """Human-readable form of one action, across every format we ingest.
+
+        GAIA2/ARE events carry app+fn (and args), not command/input/output; the
+        old probe only knew the latter and silently produced empty strings, so
+        the curated block rendered as a chain of bare arrows."""
+        if not isinstance(a, dict):
+            return str(a)[:200]
+        app, fn = a.get("app"), (a.get("fn") or a.get("function") or a.get("name"))
+        if app and fn:
+            args = a.get("args") or a.get("arguments") or a.get("input")
+            return ("%s.%s(%s)" % (app, fn, str(args)[:80])) if args else "%s.%s" % (app, fn)
+        if a.get("command"):
+            return str(a["command"])[:200]
+        inp = a.get("input")
+        if isinstance(inp, dict) and inp.get("command"):
+            return str(inp["command"])[:200]
+        if a.get("tool"):
+            return ("%s(%s)" % (a["tool"], str(inp)[:80])) if inp else str(a["tool"])
+        if inp:
+            return str(inp)[:200]
+        return str(a.get("output", ""))[:200]
+
+    agent_cmds = [_cmd_text(a) for a in agent_actions]
     oracle_keys = [k for o in oracle_actions if isinstance(o, dict) and (k := _extract_action_key(o)) is not None]
 
     # Greedy ordered matching

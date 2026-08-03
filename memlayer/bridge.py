@@ -366,8 +366,11 @@ def _format_curated(successes: list, failures: list = (),
             # the agent is already being asked -- pure duplication of prompt.
             parts = ([head] if _C_LEAN_RENDER
                      else [head, f"Task: {_core_task(e.task_desc)[:tcap]}"])
-        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
-                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+        # Keep only non-blank entries BEFORE the fallback: a list of empty
+        # strings is truthy, which is how 26 blank commands shadowed a perfectly
+        # good tool_sequence and rendered as " ->  ->  -> ".
+        acts = ([c for c in (str(x).strip() for x in (getattr(e, "action_commands", None) or [])) if c]
+                or [s for s in (str(y).strip() for y in (getattr(e, "tool_sequence", None) or [])) if s]) \
             if action_scored else []
         if action_scored:
             # gaia2/TB2: scored on which actions occurred — action list is the
@@ -506,8 +509,11 @@ def _format_raw(entries: list, action_scored: bool = False) -> str:
     blocks, seen = [], set()
     for e in entries:
         concrete = _concrete_approach(e)
-        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
-                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+        # Keep only non-blank entries BEFORE the fallback: a list of empty
+        # strings is truthy, which is how 26 blank commands shadowed a perfectly
+        # good tool_sequence and rendered as " ->  ->  -> ".
+        acts = ([c for c in (str(x).strip() for x in (getattr(e, "action_commands", None) or [])) if c]
+                or [s for s in (str(y).strip() for y in (getattr(e, "tool_sequence", None) or [])) if s]) \
             if action_scored else []
         if not concrete and not acts:
             continue
@@ -593,7 +599,15 @@ class BenchmarkMemory:
         refinement). Async for a uniform interface with CuratedMemory."""
         resp = (result.get("response") or "").strip()
         if not resp:
-            return
+            # GAIA2 scores the action sequence, so a task can score 1.0 with an
+            # empty final message. Record the actions instead; skip only when
+            # there is nothing at all.
+            _acts = _actions_from_result(result)
+            if _acts:
+                resp = ("[no final message; action sequence follows]\n"
+                        + "\n".join(str(a) for a in _acts))[:4000]
+            else:
+                return
         with self._lock:
             self._n += 1
             n = self._n
@@ -959,7 +973,15 @@ class CuratedMemory:
         served = self._served.pop(tid, None)
         resp = (result.get("response") or "").strip()
         if not resp:
-            return
+            # GAIA2 scores the action sequence, so a task can score 1.0 with an
+            # empty final message. Record the actions instead; skip only when
+            # there is nothing at all.
+            _acts = _actions_from_result(result)
+            if _acts:
+                resp = ("[no final message; action sequence follows]\n"
+                        + "\n".join(str(a) for a in _acts))[:4000]
+            else:
+                return
         # Effectiveness update (w_c feedback): the injected experiences get the
         # within-chain paired delta -- this iteration's score minus the previous
         # iteration's. Positive => they helped; negative => they hurt. Bounded
