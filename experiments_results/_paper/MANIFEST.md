@@ -30,23 +30,27 @@ is worth knowing before hunting for a number: the two checkouts use the same
 `RESULTS_BASE` names for different content, and this checkout's `hy3dose500`
 stops at 12 tasks while `MSG2`'s has all 100.
 
-Table 2 does not come from a trace; the native-protocol harness writes its own
-results, and each answerer is its own run:
+The per-task-type breakdown does not come from a trace; the native-protocol
+harness writes its own results, and each answerer is its own run:
 
-- answerer HY3, all arms but A-Mem: `locomo_native/hy3/SUMMARY.txt`
-- answerer HY3, A-Mem: `locomo_native/hy3_amem/results.jsonl`. The `8.0` in
-  `hy3/SUMMARY.txt` is the pass that hit the A-Mem recall bug; this is its rerun.
-- answerer GPT-5.5, all five: `locomo_native/FINAL_COMPARISON.txt`
+| Breakdown column | File under `locomo_native/` |
+|---|---|
+| answerer HY3 — Raw, Patched, Mem0, CuratorMem | `hy3/` (`SUMMARY.txt`, `results.jsonl`) |
+| answerer HY3 — A-Mem | `hy3_amem/` — the rerun. The `8.0` in `hy3/SUMMARY.txt` is the pass that hit the A-Mem recall bug |
+| answerer GPT-5.5 — Raw, A-Mem, Mem0 | `staged/` |
+| answerer GPT-5.5 — Patched | `raw_arm/` |
+| answerer GPT-5.5 — CuratorMem | `ours_sdk/` |
+| both answerers, assembled | `FINAL_COMPARISON.txt` |
 
-`locomo_native/main/FINAL_SUMMARY.txt` is **superseded** and reports `ours 49.5`,
-below both baselines. Its own `CATEGORY_BREAKDOWN.txt` says why: that run used
-extraction from before `cab3c334`, and its `nomem` arm was a muzzled-prompt
-artifact scoring ~0 by construction. It is kept because deleting a superseded run
-is how a rerun gets mistaken for a contradiction — read the header before
-quoting any number out of that directory.
+Archived off main to `data/locomo-iteration-chain-archive-2026-08-03`: the
+iteration-chain LoCoMo runs (superseded by the main table's LoCoMo rows), plus
+`locomo_native/main/`, `gpt55_grok/`, `ours_sdk_prev/` and `mini/`.
 
-## The rule this exists to enforce
+`locomo_native/main/` is the one worth naming. It reports `ours 49.5`, below both
+baselines, and reads as a flat contradiction of the reported numbers until you
+read its own `CATEGORY_BREAKDOWN.txt` header: pre-`cab3c334` extraction, and a
+`nomem` arm that was a muzzled-prompt artifact scoring ~0 by construction. It is
+on the archive branch rather than deleted for exactly that reason.
 
-A result is not data until it is on a branch. Traces that live only on a leased
-box are one reclamation away from unbacked cells, and a box gives no warning.
-Commit and push each arm as it lands, not at the end of a sweep.
+Also worth knowing: in that harness `full` is the full-transcript context and
+`raw` is the patch-memory arm. `full` is **not** the paper's Patched column.
