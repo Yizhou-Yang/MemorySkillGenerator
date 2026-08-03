@@ -123,8 +123,9 @@ _DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
 # attempt and no checkmark, so there is no path to anchor to. The note is a
 # compression of what this chain already produced (the critic never sees the gold
 # answer -- only the judge does), so nothing enters the prompt that the episode
-# did not contain. Off by default: it changes what arm C is.
-_DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "0") == "1"
+# did not contain. On by default: a dead chain is where a weak backbone needs
+# the store most, and silence there is what C_DEAD_CHAIN_LESSON=0 measures.
+_DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "1") == "1"
 
 
 # Ablation arm C_weak_compact (default off): show retrieval only the newest n
@@ -234,9 +235,10 @@ def _grounded_demoted(e) -> bool:
 
 
 # Endorse on a measured improvement over the chain's own memory-free first
-# attempt, not only on clearing an absolute bar. Off reproduces every cell
-# collected before 2026-08-03.
-_ENDORSE_RELATIVE = os.environ.get("C_ENDORSE_RELATIVE", "0").strip().lower() in ("1", "true", "yes")
+# attempt, not only on clearing an absolute bar. This is the rule, not an
+# option; C_ENDORSE_RELATIVE=0 is the ablation that reports what the
+# absolute bar alone buys, and reproduces cells collected before 2026-08-03.
+_ENDORSE_RELATIVE = os.environ.get("C_ENDORSE_RELATIVE", "1").strip().lower() in ("1", "true", "yes")
 
 
 def _endorse_basis(e):
