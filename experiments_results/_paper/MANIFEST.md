@@ -14,21 +14,21 @@ A cell is: the arm's mean over the tasks it completed at the final iteration
 (2), replicates averaged first — τ² runs each task twice. Δ in Table 1 is the
 plain difference of two printed cells, so the row is self-checking.
 
-## Status as of 2026-08-03
+## Status
 
-27 ok, 1 failed, 8 missing. The gaps are all one event: **the gpu3 container was
-reclaimed while nine cells' traces lived only on its disk.** The gateway now
-answers `acl_denied`, so those files are not coming back.
+**36 ok, 0 failed, 0 missing.**
 
-| Paper cell | Source that is gone |
-|---|---|
-| Table 1, GAIA / GPT-5.5 / A-Mem — 23.00 and 28.99 | the `amem` arm of `gpt55full/gpt-5.5/gaia`; what is on `main` is a 20-task partial |
-| Table 1, GAIA2 / HY3 / CuratorMem — 42.00 | `hy3g2fix/hy3/gaia2` — the record-fix rerun, never pushed |
-| Table 1, τ² / HY3 — Patched, A-Mem, Mem0, CuratorMem | `hy3tau2/hy3/tau2` was pushed mid-sweep; only `no_mem` and one `raw_patch` iteration made it |
-| Figure 2a, L=500 (24.80) and L=∞ (26.60) | `hy3dose500` is a 12-task partial, `hy3dose0` was never pushed |
+Cells are read from `_paper/cells/*.jsonl` — each full trace distilled to the
+columns a mean is computed from (`task_id`, `group`, `iteration`, `score`, `em`,
+`error`). The full traces carry every prompt and response and are far too large
+to push; `hy3g2fix`'s alone is 143 MB. Regenerate the distilled copies with
+`mkcells.py` after a rerun. The originals live on `any4` under
+`/data/workspace/{MemorySkillGenerator,MSG2}/experiments_results/`.
 
-Everything else — all of Table 1's GAIA rows, all of Table 2, the L=900 point —
-reproduces from files in this checkout.
+Two of the eight files came from the `MSG2` checkout rather than this one, which
+is worth knowing before hunting for a number: the two checkouts use the same
+`RESULTS_BASE` names for different content, and this checkout's `hy3dose500`
+stops at 12 tasks while `MSG2`'s has all 100.
 
 Table 2 does not come from a trace; the native-protocol harness writes its own
 results, and each answerer is its own run:
