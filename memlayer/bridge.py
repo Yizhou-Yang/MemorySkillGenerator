@@ -233,6 +233,12 @@ def _grounded_demoted(e) -> bool:
     return all(d < 0.0 for d in ds[-_DEMOTE_K:])
 
 
+# Endorse on a measured improvement over the chain's own memory-free first
+# attempt, not only on clearing an absolute bar. Off reproduces every cell
+# collected before 2026-08-03.
+_ENDORSE_RELATIVE = os.environ.get("C_ENDORSE_RELATIVE", "0").strip().lower() in ("1", "true", "yes")
+
+
 def _endorse_basis(e):
     """Second key for an endorsement under C_POLICY=guarded, or None.
 
@@ -249,6 +255,18 @@ def _endorse_basis(e):
         return None
     if _WC_IS_GROUNDED and float(getattr(e, "score", 0.0) or 0.0) >= 0.5:
         return ("env", None)
+    # Relative form of the same grounded key: the attempt beat the chain's own
+    # memory-free first attempt. On a binary metric this is subsumed by the
+    # clause above and adds nothing; under partial credit it is what keeps a
+    # weaker backbone's store from being empty by construction. Still grounded
+    # -- baseline_delta is measured, not a model's reading of the transcript.
+    if _ENDORSE_RELATIVE and _WC_IS_GROUNDED:
+        try:
+            st = getattr(e, "sys_stats", None) or {}
+            if float(st.get("baseline_delta", 0.0) or 0.0) > 0.0:
+                return ("env", None)
+        except Exception:
+            pass
     return None
 
 
