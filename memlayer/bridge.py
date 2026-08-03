@@ -115,6 +115,8 @@ _C_LEAN_RENDER = os.environ.get("C_LEAN_RENDER", "0") == "1"
 # Serve nothing when no entry in the chain holds a grounded endorsement (see the
 # dead-chain block in inject). 0 restores the old always-inject behaviour, which
 # is the ablation that measures what anchoring costs.
+# Ablation only: 0 serves every dead chain regardless of what it achieved,
+# which is the behaviour 8f122f3f measured at 0 solved of 70.
 _DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
 # On a dead chain the store currently says nothing at all, which is what stops it
 # from being worse than no memory -- injecting the chain's own failed transcript
@@ -123,8 +125,8 @@ _DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
 # attempt and no checkmark, so there is no path to anchor to. The note is a
 # compression of what this chain already produced (the critic never sees the gold
 # answer -- only the judge does), so nothing enters the prompt that the episode
-# did not contain. On by default: a dead chain is where a weak backbone needs
-# the store most, and silence there is what C_DEAD_CHAIN_LESSON=0 measures.
+# did not contain. Ablation only: a dead chain that has something to say now
+# takes the normal render path, and one that does not is silent regardless.
 _DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "0") == "1"
 
 
@@ -879,16 +881,22 @@ class CuratedMemory:
         # strictly worse than A, and leaves the endorsed-chain advantage
         # (86% retention vs A's 79%) untouched.
         if _DEAD_CHAIN_SILENCE and _C_POLICY == "guarded":
-            if not any(_endorse_basis(e) is not None
-                       for e in (self._chain_entries.get(chain) or cands)):
-                if _DEAD_CHAIN_LESSON:
-                    _lessons = _format_lessons_only(
-                        self._chain_entries.get(chain) or cands)
-                    if _lessons:
-                        self._served[tid_now] = []
-                        self._served_keys[tid_now] = []
-                        return _lessons
-                return ""
+            _chain_es = self._chain_entries.get(chain) or cands
+            if not any(_endorse_basis(e) is not None for e in _chain_es):
+                # A dead chain is silenced only when it has nothing measurable to
+                # say. Under a binary metric every attempt on such a chain scored
+                # zero by definition, so this is silence -- the condition 8f122f3f
+                # measured. Under partial credit a dead chain can still hold work
+                # that got part of the way, and that is worth serving: it asserts
+                # no success, since nothing here carries a certificate.
+                _best = 0.0
+                for _e in _chain_es:
+                    try:
+                        _best = max(_best, float(getattr(_e, "score", 0.0) or 0.0))
+                    except (TypeError, ValueError):
+                        pass
+                if _best <= 0.0:
+                    return ""
         _repair_raw = False
         if _C_REPAIR_MODE and cands:
             if _C_REPAIR_GATE == "stability":
