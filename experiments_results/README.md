@@ -8,17 +8,21 @@ deciding whether a run is valid. Most runs that look interesting fail a gate.
 
 Every benchmark is run under three arms (the `group` field in each trace row):
 
-- **A — no memory** (`A_baseline`): the plain agent; the control.
-- **B — raw patch memory** (`B_evomem`): injects the raw record of what worked on
+- **A — no memory** (`no_mem`): the plain agent; the control.
+- **B — raw patch memory** (`raw_patch`): injects the raw record of what worked on
   earlier iterations of the *same* task, verbatim. Chain-scoped.
-- **C — curated patch memory** (`C_gpr`): the method under test — B's patches, but
-  refined (generalized + causal lesson), critic-scored, low-quality ones enriched
-  not dropped, retrieval effectiveness-weighted, plus an "avoid this" channel from
-  failed attempts.
+- **C — curated patch memory** (`curated_patch`): the method under test — B's
+  patches, but refined (generalized + causal lesson), critic-scored, low-quality
+  ones enriched not dropped, retrieval effectiveness-weighted, plus an "avoid
+  this" channel from failed attempts.
 
-The headline comparison is **C vs B**; **B vs A** is the secondary check. Trace
-keys are legacy identifiers — read them as A/B/C. (Older frozen snapshots use
-`B_evoarena`/`C_skillforge`.)
+Two external memory layers run behind the same record/inject interface: `amem`
+(A-Mem) and `mem0` (Mem0).
+
+The headline comparison is **C vs B**; **B vs A** is the secondary check.
+Snapshots archived before the rename carry `A_baseline`/`B_evomem`/`C_gpr` (and
+older still, `B_evoarena`/`C_skillforge`); `scripts/latest/analyze_results.py`
+maps all of them onto the names above on read.
 
 ## Layout
 
