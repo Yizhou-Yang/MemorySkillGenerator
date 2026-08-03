@@ -1,0 +1,24 @@
+LoCoMo under the memory systems' own protocol -- weak backbones
+
+answerer served locally by vLLM on 2x V100 (float16, sm_70 has no bf16).
+judge = gpt-5.6-sol on the mxzzz gateway, fixed across all three, so no
+backbone ever grades itself. n=497 questions per system, BENCH_N=3.
+
+mem0 is absent: it is the only arm that requests response_format=json_object
+from the gateway, and that call was failing in bursts. It goes in a separate
+pass rather than contributing a store that silently failed to ingest.
+
+answerer         system       J%     F1%      n
+llama-3.2-1b     nomem       4.4     5.2    497
+llama-3.2-1b     amem       18.7    11.8    497
+llama-3.2-1b     ours       38.0    26.4    497
+llama-3.2-3b     nomem       7.4     8.9    497
+llama-3.2-3b     amem       23.3    14.9    497
+llama-3.2-3b     ours       48.3    41.1    497
+qwen2.5-1.5b     nomem       6.8    10.7    497
+qwen2.5-1.5b     amem       18.1    21.2    497
+qwen2.5-1.5b     ours       37.2    39.0    497
+
+A-Mem lost 33-38 note constructions per run to the same gateway 500s; its
+own build path is not covered by the retry added to _chat and to mem0's LLM,
+so these A-Mem numbers are a mild under-estimate.
