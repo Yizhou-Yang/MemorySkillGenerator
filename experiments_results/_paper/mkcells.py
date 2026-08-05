@@ -18,6 +18,8 @@ SRC = [
     ("gpt55full/gpt-5.5/gaia", "gaia_gpt55.jsonl"),
     ("hy3fix/hy3/gaia2",     "gaia2_hy3.jsonl"),
     ("hy3g2fix/hy3/gaia2",   "gaia2_hy3_curated.jsonl"),
+    ("gpt55full/gpt-5.5/gaia2",   "gaia2_gpt55.jsonl"),
+    ("gpt55g2act2/gpt-5.5/gaia2", "gaia2_gpt55_curated.jsonl"),
     ("hy3tau2/hy3/tau2",     "tau2_hy3.jsonl"),
     ("hy3dose500/hy3/gaia",  "dose500_hy3.jsonl"),
     ("hy3dose0/hy3/gaia",    "dose0_hy3.jsonl"),

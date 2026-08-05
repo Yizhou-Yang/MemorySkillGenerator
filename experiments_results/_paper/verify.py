@@ -79,6 +79,14 @@ CELLS = [
     # success, which starved 9 of 11 eligible chains and held this cell at 34.32.
     ("tab:main GAIA2/HY3        CuratorMem", 42.00, T+"gaia2_hy3_curated.jsonl",     "curated_patch", 2, "score"),
 
+    ("tab:main GAIA2/G55        Raw",        31.57, T+"gaia2_gpt55.jsonl",         "no_mem",        2, "score"),
+    ("tab:main GAIA2/G55        Patched",    41.01, T+"gaia2_gpt55.jsonl",         "raw_patch",     2, "score"),
+    ("tab:main GAIA2/G55        A-Mem",      19.96, T+"gaia2_gpt55.jsonl",         "amem",          2, "score"),
+    ("tab:main GAIA2/G55        Mem0",       37.18, T+"gaia2_gpt55.jsonl",         "mem0",          2, "score"),
+    # The coverage rerun: the endorsement key plus the measured dead-chain rule took
+    # arm C from serving 19% of chains to 92%, and the cell from 33.73 to 41.99.
+    ("tab:main GAIA2/G55        CuratorMem", 41.99, T+"gaia2_gpt55_curated.jsonl", "curated_patch", 2, "score"),
+
     ("tab:main tau2/HY3         Raw",        68.75, T+"tau2_hy3.jsonl",       "no_mem",        2, "score"),
     ("tab:main tau2/HY3         Patched",    72.50, T+"tau2_hy3.jsonl",       "raw_patch",     2, "score"),
     ("tab:main tau2/HY3         A-Mem",      71.25, T+"tau2_hy3.jsonl",       "amem",          2, "score"),

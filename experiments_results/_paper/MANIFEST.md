@@ -81,3 +81,20 @@ checked, not a broken arm — identical question sets, zero empty predictions, z
 Mem0 ingestion skips. At 1B it is partly length (Mem0 averages 16.4 words to our
 12.6 against a 4.9-word gold); at Qwen2.5-1.5B the lengths match and Mem0 is
 simply judged right more often.
+
+## GAIA2 under GPT-5.5 — Table 1's second GAIA2 row
+
+| Column | Source |
+|---|---|
+| Raw, Patched, A-Mem, Mem0 | `gpt55full/gpt-5.5/gaia2` |
+| CuratorMem | `gpt55g2act2/gpt-5.5/gaia2` |
+
+The curated arm is a separate run because the earlier one is not the same
+mechanism. Arm C used to serve only 19% of chains, which held the cell at
+`33.73`; the endorsement key plus the measured dead-chain rule took coverage to
+92% and the cell to `41.99`. Read-time budget 1500, `ITER_CHAIN=3`, critic and
+judge `gpt-5.6-terra` (`gpt-5.6-sol` was returning 500s by then).
+
+`no_mem` and `raw_patch` carry n=99, not 100 — one task errored out of those two
+arms and is dropped rather than scored zero, which is the same rule used
+everywhere else in the table.
