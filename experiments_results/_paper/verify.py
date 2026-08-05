@@ -130,5 +130,85 @@ for label, rel, needle in NATIVE:
         print("ok       %s  <- %s" % (label, rel))
         ok += 1
 
+# -- Table 1's Llama-3.2-3B rows and all of Appendix A. The weak-backbone harness
+#    writes one row per (system, conversation, question); a cell is the plain mean
+#    over its 497 rows, no per-task replicates to average.
+#
+#    Grader: gpt-5.6-sol graded ours/amem/nomem, then degraded to ~90% 503s and
+#    was replaced by gpt-5.5 for mem0/raw. The three sol-graded arms were re-graded
+#    from their stored predictions into results_judge55.jsonl so a row is not
+#    compared across two graders; that file wins wherever it exists.
+WEAK_DIR = "experiments_results/locomo_weak/"
+WEAK = [
+    # (model, system, J, F1)
+    ("llama-3.2-1b", "nomem",  4.8,  5.2),
+    ("llama-3.2-1b", "raw",   31.0, 20.1),
+    ("llama-3.2-1b", "amem",  18.9, 11.8),
+    ("llama-3.2-1b", "mem0",  40.4, 24.1),
+    ("llama-3.2-1b", "ours",  38.2, 26.4),
+    ("llama-3.2-3b", "nomem",  7.2,  8.9),
+    ("llama-3.2-3b", "raw",   40.0, 33.9),
+    ("llama-3.2-3b", "amem",  23.1, 14.9),
+    ("llama-3.2-3b", "mem0",  48.9, 40.8),
+    ("llama-3.2-3b", "ours",  47.9, 41.1),
+    ("qwen2.5-1.5b", "nomem",  7.2, 10.7),
+    ("qwen2.5-1.5b", "raw",   35.6, 32.0),
+    ("qwen2.5-1.5b", "amem",  20.1, 21.2),
+    ("qwen2.5-1.5b", "mem0",  46.1, 38.3),
+    ("qwen2.5-1.5b", "ours",  40.8, 39.0),
+]
+
+
+def weak_rows(model):
+    """Rows for one backbone, with re-graded J substituted where it exists."""
+    d = os.path.join(ROOT, WEAK_DIR, model)
+    base = os.path.join(d, "results.jsonl")
+    if not os.path.exists(base):
+        return None
+    regraded = {}
+    rj = os.path.join(d, "results_judge55.jsonl")
+    if os.path.exists(rj):
+        for line in open(rj, errors="replace"):
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            regraded[(r["system"], r["conv"], r["q"])] = r["J"]
+    out = collections.defaultdict(lambda: [0.0, 0.0, 0])
+    for line in open(base, errors="replace"):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        k = (r["system"], r["conv"], r["q"])
+        a = out[r["system"]]
+        a[0] += regraded.get(k, r["J"])
+        a[1] += r["F1"]
+        a[2] += 1
+    return out
+
+
+print()
+_cache = {}
+for model, system, want_j, want_f1 in WEAK:
+    if model not in _cache:
+        _cache[model] = weak_rows(model)
+    agg = _cache[model]
+    label = "tab:weak %-13s %-6s" % (model, system)
+    if agg is None or system not in agg:
+        print("MISSING  %s  <- %s%s" % (label, WEAK_DIR, model))
+        miss += 1
+        continue
+    j, f1, n = agg[system]
+    got_j, got_f1 = round(100 * j / n, 1), round(100 * f1 / n, 1)
+    if abs(got_j - want_j) > 0.05 or abs(got_f1 - want_f1) > 0.05:
+        print("FAIL     %s  want J=%.1f F1=%.1f  got J=%.1f F1=%.1f (n=%d)"
+              % (label, want_j, want_f1, got_j, got_f1, n))
+        bad += 1
+    else:
+        print("ok       %s  J=%-5.1f F1=%-5.1f n=%d" % (label, got_j, got_f1, n))
+        ok += 1
+
+
 print("\n%d ok, %d failed, %d missing" % (ok, bad, miss))
 sys.exit(1 if (bad or miss) else 0)

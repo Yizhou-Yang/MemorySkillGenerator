@@ -54,3 +54,30 @@ on the archive branch rather than deleted for exactly that reason.
 
 Also worth knowing: in that harness `full` is the full-transcript context and
 `raw` is the patch-memory arm. `full` is **not** the paper's Patched column.
+
+## Sub-3B backbones — Table 1's Llama-3.2-3B rows, and Appendix A
+
+`locomo_weak/{llama-3.2-1b,llama-3.2-3b,qwen2.5-1.5b}/`, run 2026-08-05 on the
+V100 box, all five arms, `n=497` per cell. Answerers are served locally by vLLM in
+`float16` (sm_70 has no `bfloat16`); only the grader is remote.
+
+| File | What it is |
+|---|---|
+| `results.jsonl` | one row per (system, conversation, question) with `pred`, `gold`, `J`, `F1` |
+| `results_judge55.jsonl` | the same rows for `ours`/`amem`/`nomem`, re-graded by `gpt-5.5` |
+
+Two graders touched this block. `gpt-5.6-sol` graded `ours`, `amem` and `nomem`;
+it then began returning `SERVICE_UNAVAILABLE` on ~90% of requests even when idle,
+so `mem0` and `raw` were graded by `gpt-5.5`. Rather than compare arms across
+graders, the three sol-graded arms were re-graded from their stored predictions —
+no answer was regenerated, only the grader changed. The two agree to within 3.6
+points and on every ordering. **`results_judge55.jsonl` is the one to read**;
+`verify.py` substitutes it wherever it exists and falls back to `results.jsonl`
+for `mem0`/`raw`, which were never sol-graded.
+
+Worth knowing before quoting these: Mem0 beats CuratorMem on the judge metric on
+all three backbones while CuratorMem beats Mem0 on token-F1 on all three. That is
+checked, not a broken arm — identical question sets, zero empty predictions, zero
+Mem0 ingestion skips. At 1B it is partly length (Mem0 averages 16.4 words to our
+12.6 against a 4.9-word gold); at Qwen2.5-1.5B the lengths match and Mem0 is
+simply judged right more often.
