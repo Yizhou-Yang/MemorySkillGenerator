@@ -149,21 +149,21 @@ for label, rel, needle in NATIVE:
 WEAK_DIR = "experiments_results/locomo_weak/"
 WEAK = [
     # (model, system, J, F1)
-    ("llama-3.2-1b", "nomem",  4.8,  5.2),
-    ("llama-3.2-1b", "raw",   31.0, 20.1),
-    ("llama-3.2-1b", "amem",  18.9, 11.8),
-    ("llama-3.2-1b", "mem0",  40.4, 24.1),
-    ("llama-3.2-1b", "ours",  38.2, 26.4),
-    ("llama-3.2-3b", "nomem",  7.2,  8.9),
-    ("llama-3.2-3b", "raw",   40.0, 33.9),
-    ("llama-3.2-3b", "amem",  23.1, 14.9),
-    ("llama-3.2-3b", "mem0",  48.9, 40.8),
-    ("llama-3.2-3b", "ours",  47.9, 41.1),
-    ("qwen2.5-1.5b", "nomem",  7.2, 10.7),
-    ("qwen2.5-1.5b", "raw",   35.6, 32.0),
-    ("qwen2.5-1.5b", "amem",  20.1, 21.2),
-    ("qwen2.5-1.5b", "mem0",  46.1, 38.3),
-    ("qwen2.5-1.5b", "ours",  40.8, 39.0),
+    ("llama-3.2-1b", "nomem",  4.83,  5.23),
+    ("llama-3.2-1b", "raw",   30.99, 20.15),
+    ("llama-3.2-1b", "amem",  18.91, 11.80),
+    ("llama-3.2-1b", "mem0",  40.44, 24.11),
+    ("llama-3.2-1b", "ours",  38.23, 26.40),
+    ("llama-3.2-3b", "nomem",  7.24,  8.88),
+    ("llama-3.2-3b", "raw",   40.04, 33.90),
+    ("llama-3.2-3b", "amem",  23.14, 14.86),
+    ("llama-3.2-3b", "mem0",  48.89, 40.79),
+    ("llama-3.2-3b", "ours",  47.89, 41.14),
+    ("qwen2.5-1.5b", "nomem",  7.24, 10.74),
+    ("qwen2.5-1.5b", "raw",   35.61, 32.02),
+    ("qwen2.5-1.5b", "amem",  20.12, 21.20),
+    ("qwen2.5-1.5b", "mem0",  46.08, 38.31),
+    ("qwen2.5-1.5b", "ours",  40.85, 38.97),
 ]
 
 
@@ -196,6 +196,49 @@ def weak_rows(model):
     return out
 
 
+# -- Table 1's LoCoMo rows. The native-protocol harness writes one row per
+#    (system, conversation, question) and no trace, and it splits one backbone's
+#    arms across directories, so each cell names its own file. Recomputed here
+#    rather than grepped out of SUMMARY.txt, which prints to one decimal.
+NAT = "experiments_results/locomo_native/"
+NATIVE_CELLS = [
+    ("tab:main LoCoMo/HY3       Raw",        10.06,  9.46, NAT+"hy3/results.jsonl",      "nomem"),
+    ("tab:main LoCoMo/HY3       Patched",    33.20, 14.50, NAT+"hy3/results.jsonl",      "raw"),
+    # the A-Mem rerun; hy3/results.jsonl still holds the pass that hit the recall bug
+    ("tab:main LoCoMo/HY3       A-Mem",      30.38, 13.11, NAT+"hy3_amem/results.jsonl", "amem"),
+    ("tab:main LoCoMo/HY3       Mem0",       49.90, 25.80, NAT+"hy3/results.jsonl",      "mem0"),
+    ("tab:main LoCoMo/HY3       CuratorMem", 52.52, 28.04, NAT+"hy3/results.jsonl",      "ours"),
+    ("tab:main LoCoMo/G55       Raw",        15.69, 16.95, NAT+"staged/results.jsonl",   "nomem"),
+    ("tab:main LoCoMo/G55       Patched",    46.28, 41.21, NAT+"raw_arm/results.jsonl",  "raw"),
+    ("tab:main LoCoMo/G55       A-Mem",      57.14, 50.58, NAT+"staged/results.jsonl",   "amem"),
+    ("tab:main LoCoMo/G55       Mem0",       61.17, 51.22, NAT+"staged/results.jsonl",   "mem0"),
+    ("tab:main LoCoMo/G55       CuratorMem", 63.98, 53.45, NAT+"ours_sdk/results.jsonl", "ours"),
+]
+
+print()
+for label, want_j, want_f1, rel, system in NATIVE_CELLS:
+    path = os.path.join(ROOT, rel)
+    if not os.path.exists(path):
+        print("MISSING  %s  <- %s" % (label, rel)); miss += 1; continue
+    j = f1 = 0.0; n = 0
+    for line in open(path, errors="replace"):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("system") != system:
+            continue
+        j += r["J"]; f1 += r["F1"]; n += 1
+    if not n:
+        print("MISSING  %s  <- %s [%s absent]" % (label, rel, system)); miss += 1; continue
+    got_j, got_f1 = round(100 * j / n, 2), round(100 * f1 / n, 2)
+    if abs(got_j - want_j) > 0.005 or abs(got_f1 - want_f1) > 0.005:
+        print("FAIL     %s  want J=%.2f F1=%.2f  got J=%.2f F1=%.2f (n=%d)"
+              % (label, want_j, want_f1, got_j, got_f1, n)); bad += 1
+    else:
+        print("ok       %s  J=%-6.2f F1=%-6.2f n=%d" % (label, got_j, got_f1, n)); ok += 1
+
+
 print()
 _cache = {}
 for model, system, want_j, want_f1 in WEAK:
@@ -208,13 +251,13 @@ for model, system, want_j, want_f1 in WEAK:
         miss += 1
         continue
     j, f1, n = agg[system]
-    got_j, got_f1 = round(100 * j / n, 1), round(100 * f1 / n, 1)
-    if abs(got_j - want_j) > 0.05 or abs(got_f1 - want_f1) > 0.05:
-        print("FAIL     %s  want J=%.1f F1=%.1f  got J=%.1f F1=%.1f (n=%d)"
+    got_j, got_f1 = round(100 * j / n, 2), round(100 * f1 / n, 2)
+    if abs(got_j - want_j) > 0.005 or abs(got_f1 - want_f1) > 0.005:
+        print("FAIL     %s  want J=%.2f F1=%.2f  got J=%.2f F1=%.2f (n=%d)"
               % (label, want_j, want_f1, got_j, got_f1, n))
         bad += 1
     else:
-        print("ok       %s  J=%-5.1f F1=%-5.1f n=%d" % (label, got_j, got_f1, n))
+        print("ok       %s  J=%-6.2f F1=%-6.2f n=%d" % (label, got_j, got_f1, n))
         ok += 1
 
 
