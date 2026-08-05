@@ -105,6 +105,18 @@ _CRITIC_IS_EXTERNAL = bool(_CRITIC_RAW) and _CRITIC_RAW != _BACKBONE_ID
 # unbudgeted C block (~1.6x B's) measurably HURT accuracy, and dose-matching C to
 # B is what removes the block-size confound from C−B. 0 disables.
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
+def _action_cap() -> int:
+    """How many characters of action sequence a rendered entry may carry.
+
+    On an action-scored benchmark the action list is the payload, not a
+    decoration on the answer text, so it gets the bulk of the per-entry budget
+    rather than a fixed slice. The floor keeps behaviour sane if the budget is
+    set very low.
+    """
+    try:
+        return max(200, int(_C_INJECT_BUDGET * 0.6))
+    except Exception:
+        return 200
 # Lean rendering. The dose budget counts the whole block, so on gpt-oss/LoCoMo
 # 74% of C's 851 characters were scaffolding -- headers, a Task: line restating
 # the prompt the agent is already reading, and a lineage listing v1 -> v2 --
@@ -115,6 +127,8 @@ _C_LEAN_RENDER = os.environ.get("C_LEAN_RENDER", "0") == "1"
 # Serve nothing when no entry in the chain holds a grounded endorsement (see the
 # dead-chain block in inject). 0 restores the old always-inject behaviour, which
 # is the ablation that measures what anchoring costs.
+# Ablation only: 0 serves every dead chain regardless of what it achieved,
+# which is the behaviour 8f122f3f measured at 0 solved of 70.
 _DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
 # On a dead chain the store currently says nothing at all, which is what stops it
 # from being worse than no memory -- injecting the chain's own failed transcript
@@ -123,7 +137,8 @@ _DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
 # attempt and no checkmark, so there is no path to anchor to. The note is a
 # compression of what this chain already produced (the critic never sees the gold
 # answer -- only the judge does), so nothing enters the prompt that the episode
-# did not contain. Off by default: it changes what arm C is.
+# did not contain. Ablation only: a dead chain that has something to say now
+# takes the normal render path, and one that does not is silent regardless.
 _DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "0") == "1"
 
 
@@ -233,6 +248,13 @@ def _grounded_demoted(e) -> bool:
     return all(d < 0.0 for d in ds[-_DEMOTE_K:])
 
 
+# Endorse on a measured improvement over the chain's own memory-free first
+# attempt, not only on clearing an absolute bar. This is the rule, not an
+# option; C_ENDORSE_RELATIVE=0 is the ablation that reports what the
+# absolute bar alone buys, and reproduces cells collected before 2026-08-03.
+_ENDORSE_RELATIVE = os.environ.get("C_ENDORSE_RELATIVE", "1").strip().lower() in ("1", "true", "yes")
+
+
 def _endorse_basis(e):
     """Second key for an endorsement under C_POLICY=guarded, or None.
 
@@ -249,6 +271,18 @@ def _endorse_basis(e):
         return None
     if _WC_IS_GROUNDED and float(getattr(e, "score", 0.0) or 0.0) >= 0.5:
         return ("env", None)
+    # Relative form of the same grounded key: the attempt beat the chain's own
+    # memory-free first attempt. On a binary metric this is subsumed by the
+    # clause above and adds nothing; under partial credit it is what keeps a
+    # weaker backbone's store from being empty by construction. Still grounded
+    # -- baseline_delta is measured, not a model's reading of the transcript.
+    if _ENDORSE_RELATIVE and _WC_IS_GROUNDED:
+        try:
+            st = getattr(e, "sys_stats", None) or {}
+            if float(st.get("baseline_delta", 0.0) or 0.0) > 0.0:
+                return ("env", None)
+        except Exception:
+            pass
     return None
 
 
@@ -378,7 +412,7 @@ def _format_curated(successes: list, failures: list = (),
             if outcome:
                 parts.append(f"Answer given then (unverified): {outcome[:160]}")
             if acts:
-                parts.append("Actions used: " + " -> ".join(acts)[:200])
+                parts.append("Actions used: " + " -> ".join(acts)[:_action_cap()])
             elif concrete:
                 parts.append(f"What worked: {concrete[:200]}")
         elif outcome:
@@ -527,7 +561,7 @@ def _format_raw(entries: list, action_scored: bool = False) -> str:
         parts = [f"[Prior attempt on this task — raw, self-assessed {sc:.0%}]",
                  f"Task: {_core_task(e.task_desc)[:150]}"]
         if acts:   # agentic: the action sequence is the payload (see curated)
-            parts.append("Actions used: " + " -> ".join(acts)[:200])
+            parts.append("Actions used: " + " -> ".join(acts)[:_action_cap()])
             if concrete:
                 parts.append(f"{head}: {concrete[:200]}")
         else:
@@ -859,16 +893,22 @@ class CuratedMemory:
         # strictly worse than A, and leaves the endorsed-chain advantage
         # (86% retention vs A's 79%) untouched.
         if _DEAD_CHAIN_SILENCE and _C_POLICY == "guarded":
-            if not any(_endorse_basis(e) is not None
-                       for e in (self._chain_entries.get(chain) or cands)):
-                if _DEAD_CHAIN_LESSON:
-                    _lessons = _format_lessons_only(
-                        self._chain_entries.get(chain) or cands)
-                    if _lessons:
-                        self._served[tid_now] = []
-                        self._served_keys[tid_now] = []
-                        return _lessons
-                return ""
+            _chain_es = self._chain_entries.get(chain) or cands
+            if not any(_endorse_basis(e) is not None for e in _chain_es):
+                # A dead chain is silenced only when it has nothing measurable to
+                # say. Under a binary metric every attempt on such a chain scored
+                # zero by definition, so this is silence -- the condition 8f122f3f
+                # measured. Under partial credit a dead chain can still hold work
+                # that got part of the way, and that is worth serving: it asserts
+                # no success, since nothing here carries a certificate.
+                _best = 0.0
+                for _e in _chain_es:
+                    try:
+                        _best = max(_best, float(getattr(_e, "score", 0.0) or 0.0))
+                    except (TypeError, ValueError):
+                        pass
+                if _best <= 0.0:
+                    return ""
         _repair_raw = False
         if _C_REPAIR_MODE and cands:
             if _C_REPAIR_GATE == "stability":

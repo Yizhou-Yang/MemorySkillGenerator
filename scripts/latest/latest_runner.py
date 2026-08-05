@@ -236,6 +236,12 @@ def _protocol_dict() -> dict:
         "c_repair_thresh": os.environ.get("C_REPAIR_THRESH", "0.6"),
         "c_repair_gate": os.environ.get("C_REPAIR_GATE", "stability"),
         "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
+        # Both of these decide whether a chain gets a store at all, so a run
+        # that leaves them unrecorded cannot be told apart from one that had
+        # them off -- which is how a sweep spent two hours exporting
+        # C_ENDORSE_RELATIVE=1 into code that never read it.
+        "c_endorse_relative": os.environ.get("C_ENDORSE_RELATIVE", "1"),
+        "c_dead_chain_lesson": os.environ.get("C_DEAD_CHAIN_LESSON", "0"),
         "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
         "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),
         "c_no_partition": os.environ.get("C_NO_PARTITION", "0"),

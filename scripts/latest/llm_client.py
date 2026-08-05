@@ -444,6 +444,54 @@ def _openai_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
     return {"text": r.get("text", ""), "actions": [], "error": r.get("error")}
 
 
+def _salvage_tool_calls(text: str, tools) -> list:
+    """Tool calls a model wrote as text, in an envelope the parser missed.
+
+    Accepts both the correct {"name", "parameters"} shape and the schema echo
+    {"type": "function", "function": {"name", "parameters"}} that Llama-3.2-3B
+    produces under a large tool list, with or without a ``` fence, and however
+    many objects are concatenated. A name that is not in `tools` is dropped:
+    the point is to read what the model meant, not to invent a call.
+    """
+    if not text or "{" not in text:
+        return []
+    known = set()
+    for t in (tools or []):
+        fn = (t or {}).get("function") or {}
+        if fn.get("name"):
+            known.add(fn["name"])
+    out = []
+    dec = json.JSONDecoder()
+    i = 0
+    while i < len(text) and len(out) < 16:
+        j = text.find("{", i)
+        if j < 0:
+            break
+        try:
+            obj, end = dec.raw_decode(text[j:])
+        except ValueError:
+            i = j + 1
+            continue
+        i = j + end
+        if not isinstance(obj, dict):
+            continue
+        if isinstance(obj.get("function"), dict):
+            obj = obj["function"]
+        name = obj.get("name")
+        args = obj.get("parameters")
+        if args is None:
+            args = obj.get("arguments")
+        if not isinstance(name, str) or name not in known:
+            continue
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {}
+        out.append({"name": name, "arguments": args if isinstance(args, dict) else {}})
+    return out
+
+
 def openai_tool_chat(messages: list, tools: list | None,
                      timeout: int = 120, model: str | None = None) -> dict:
     """One OpenAI-compatible chat turn with function-calling tools.
@@ -478,6 +526,27 @@ def openai_tool_chat(messages: list, tools: list | None,
                 except Exception:
                     args = {}
                 parsed.append({"id": tc.id, "name": tc.function.name, "arguments": args})
+        if not parsed:
+            # Nothing parsed server-side: see whether the model wrote calls into
+            # the text in an envelope the parser does not know.
+            # One at a time: the Llama 3.2 chat template rejects an assistant
+            # message carrying more than one tool call ("This model only
+            # supports single tool-calls at once!"), and a model that needed
+            # recovering is not one to trust with parallel calls anyway. The
+            # loop picks up the rest on later turns.
+            for i, call in enumerate(_salvage_tool_calls(assistant.get("content") or "",
+                                                         tools)[:1]):
+                cid = "recovered-%d" % i
+                parsed.append({"id": cid, "name": call["name"],
+                               "arguments": call["arguments"]})
+                assistant.setdefault("tool_calls", []).append(
+                    {"id": cid, "type": "function",
+                     "function": {"name": call["name"],
+                                  "arguments": json.dumps(call["arguments"])}})
+            if parsed:
+                # The text was the call, not an answer; leaving it in content
+                # makes the next turn re-read its own malformed attempt.
+                assistant["content"] = ""
         return {"assistant_message": assistant, "tool_calls": parsed, "error": None}
     except Exception as e:
         return {"assistant_message": None, "tool_calls": [], "error": str(e)[:200]}
