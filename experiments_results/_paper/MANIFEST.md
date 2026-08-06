@@ -98,3 +98,26 @@ judge `gpt-5.6-terra` (`gpt-5.6-sol` was returning 500s by then).
 `no_mem` and `raw_patch` carry n=99, not 100 — one task errored out of those two
 arms and is dropped rather than scored zero, which is the same rule used
 everywhere else in the table.
+
+## Figure 2a, read-time budget — re-run 2026-08-06
+
+`_paper/cells/dose{500,900,0}_fix.jsonl`, distilled from `MSG2/experiments_results/dosefix{500,900,0}/hy3/gaia`.
+Arm C only, n=100 tasks, three iterations, HY3.
+
+The published version of this figure was not a dose sweep. `bridge.py`'s
+`room = _C_INJECT_BUDGET + 100 - len(block) - len(header)` read the uncapped
+setting (`0`) as a literal zero, so the version-lineage footer was dropped
+outright from the L=inf arm and squeezed to about one line at L=500, while L=900
+carried roughly seven. The bars ranked by how much lineage they carried, not by
+budget: `24.80 / 30.93 / 26.60` against `~1 / ~7 / 0` lineage lines.
+
+With `0` treated as unlimited, the sweep is monotone — `28.47 / 29.09 / 32.99` at
+L=500/900/inf — and the injected dose finally respects the cap (460 and 664 chars
+under caps of 500 and 900; the old L=500 arm read 525). All three bars come from
+one code revision. The earlier `dose500_hy3` / `dose0_hy3` cells are retired;
+`dose0_hy3`'s trace no longer exists anywhere, which is why the old figure's
+character annotations could not be re-derived and were removed.
+
+**Note for anyone comparing panels:** this L=900 bar (29.09) and Table 1's
+GAIA/HY3 CuratorMem judge cell (30.93) are the same configuration but different
+runs at different code revisions. They are not expected to match to the decimal.

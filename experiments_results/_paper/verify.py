@@ -93,11 +93,14 @@ CELLS = [
     ("tab:main tau2/HY3         Mem0",       73.75, T+"tau2_hy3.jsonl",       "mem0",          2, "score"),
     ("tab:main tau2/HY3         CuratorMem", 78.75, T+"tau2_hy3.jsonl",       "curated_patch", 2, "score"),
 
-    # -- Figure 2a, read-time budget. L=900 is the shared default, so it is the
-    #    same run as the GAIA/HY3 judge CuratorMem cell.
-    ("fig:dose L=500",   24.80, T+"dose500_hy3.jsonl",  "curated_patch", 2, "score"),
-    ("fig:dose L=900",   30.93, T+"gaia_hy3_curated.jsonl",   "curated_patch", 2, "score"),
-    ("fig:dose L=inf",   26.60, T+"dose0_hy3.jsonl",    "curated_patch", 2, "score"),
+    # -- Figure 2a, read-time budget. Re-run 2026-08-06 after the lineage-footer
+    #    fix: `room = _C_INJECT_BUDGET + 100 - ...` read the uncapped setting (0)
+    #    as a literal zero and dropped the version-lineage footer from the L=inf
+    #    arm entirely, so the old bars ranked by footer presence rather than by
+    #    budget. All three come from one revision; the earlier cells are retired.
+    ("fig:dose L=500",   28.47, T+"dose500_fix.jsonl", "curated_patch", 2, "score"),
+    ("fig:dose L=900",   29.09, T+"dose900_fix.jsonl", "curated_patch", 2, "score"),
+    ("fig:dose L=inf",   32.99, T+"dose0_fix.jsonl",   "curated_patch", 2, "score"),
 ]
 
 # -- Table 2 is not a trace: the native-protocol harness writes its own files.
