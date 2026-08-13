@@ -1,0 +1,62 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@36ff4f9164b5:/app# python3 - << 'EOF'
+> import struct
+> d = open('/app/data.parquet','rb').read()
+> fl = struct.unpack('<I', d[-8:-4])[0]
+> footer = d[-8-fl:-8]
+> class D:
+>     def __init__(s,b): s.d=b; s.i=0
+>     def u8(s): v=s.d[s.i]; s.i+=1; return v
+>     def vi(s):
+>         sh=0; r=0
+>         while True:
+>             b=s.u8(); r|=(b&0x7f)<<sh
+>             if not b&0x80: break
+>             sh+=7
+>         return r
+>     def zz(s,n): return (n>>1)^-(n&1)
+>     def fld(s):
+>         b=s.u8()
+>         if b==0: return None
+>         dl=(b>>4)&0xf; t=b&0xf
+>         if dl==15: dl=s.vi()
+>         return dl,t
+>     def val(s,t):
+>         if t==4 or t==5 or t==6: return s.zz(s.vi())
+>         if t==7: v=struct.unpack('<d',s.d[s.i:s.i+8])[0]; s.i+=8; return v
+>         if t==8: ln=s.vi(); v=s.d[s.i:s.i+ln]; s.i+=ln; return v
+>         if t in (9,10):
+>             b=s.u8(); sz=(b>>4)&0xf; et=b&0xf
+>             if sz==15: sz=s.vi()
+>             return [s.val(et) for _ in range(sz)]
+>         if t==12: return s.struct()
+>     def struct(s):
+>         o={}; fid=0
+>         while True:
+>             f=s.fld()
+>             if f is None: return o
+>             dl,t=f; fid+=dl; o[fid]=s.val(t)
+> m=D(footer).struct()
+> schema=m[2]
+> names=[]
+> for el in schema:
+>     e=D(el).struct()
+>     names.append(e.get(4, b'?').decode())
+> types={2:'INT64',5:'DOUBLE',6:'BYTE_ARRAY'}
+> print('root num_children=', schema[0][1] if isinstance(schema[0], bytes) else 'n/a')
+> print('schema names:', names)
+> for el in schema[1:]:
+>     e=D(el).struct()
+>     print('  ', e[4].decode(), '->', types.get(e[1], e[1]))
+> EOF
+Traceback (most recent call last):
+  File "<stdin>", line 41, in <module>
+  File "<stdin>", line 34, in struct
+  File "<stdin>", line 17, in fld
+  File "<stdin>", line 7, in u8
+KeyError: 0
+root@36ff4f9164b5:/app#

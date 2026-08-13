@@ -1,0 +1,19 @@
+{
+  "analysis": "QEMU started and fell back to TCG (no KVM, which is fine). But ss showed no listening ports for 9001 or 2222, and pgrep isn't available. I need to verify whether the qemu process is actually alive and whether the serial TCP port is listening. ss may not be installed. Let me check with alternative tools.",
+  "plan": "Check qemu process via ps, check the serial port 9001 listening state via nc or /proc. Then confirm the ISO boots. The serial server uses server,nowait so it should be listening now regardless of guest. Let me verify and also test connecting to the serial console briefly.",
+  "commands": [
+    {
+      "keystrokes": "ps aux | grep -i qemu | grep -v grep\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat /tmp/qemu.pid 2>/dev/null; echo '---'; (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -E '9001|2222'; echo '=== done ==='\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "timeout 3 nc -v 127.0.0.1 9001 < /dev/null; echo \"exit=$?\"\n",
+      "duration": 3.5
+    }
+  ],
+  "task_complete": false
+}

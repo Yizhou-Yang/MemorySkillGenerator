@@ -1,0 +1,25 @@
+New Terminal Output:
+
+root@5e342d11bde6:/app# which wget; python3 --version
+/usr/bin/wget
+Python 3.13.1
+root@5e342d11bde6:/app# cat > /tmp/dl.py <<'EOF'
+> import urllib.request, concurrent.futures, sys, os
+> urls=[u.strip() for u in open('/tmp/urls.txt') if u.strip()]
+> os.makedirs('/tmp/debs', exist_ok=True)
+> def get(u):
+>     fn='/tmp/debs/'+os.path.basename(u.split('?')[0])
+>     for _ in range(3):
+>         try:
+>             urllib.request.urlretrieve(u, fn); return (u,'ok')
+>         except Exception as e:
+>             pass
+>     return (u,'FAIL')
+> with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+>     for u,r in ex.map(get, urls):
+>         if r!='ok': print('FAIL',u)
+> print('done', len(urls))
+> EOF
+root@5e342d11bde6:/app# python3 /tmp/dl.py
+done 76
+root@5e342d11bde6:/app#

@@ -1,0 +1,21 @@
+New Terminal Output:
+
+root@d74a665d2e11:/app# rm -f /tmp/git.sock; cat > /app/exp-master.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 120
+> spawn ssh -tt -M -S /tmp/git.sock -fN git@localhost
+> expect {
+>     -re "(?i)password:" { send "password\r"; exp_continue }
+>     timeout { puts "TIMEOUT"; exit 1 }
+>     eof {}
+> }
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/exp-master.exp
+root@d74a665d2e11:/app# expect -f /app/exp-master.exp
+spawn ssh -tt -M -S /tmp/git.sock -fN git@localhost
+git@localhost's password:
+root@d74a665d2e11:/app# ls -la /tmp/git.sock 2>&1; ssh -S /tmp/git.sock -o ControlMaster=no git@localhost 'echo MASTER_OK; whoami'
+srw------- 1 root root 0 Jul  2 21:33 /tmp/git.sock
+MASTER_OK
+git
+root@d74a665d2e11:/app#

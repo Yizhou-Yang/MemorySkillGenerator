@@ -1,0 +1,87 @@
+New Terminal Output:
+
+root@4b43a390eb24:/app# cat > /app/explore.py << 'PYEOF'
+> import subprocess, os, sys
+>
+> DIRS = [('N', -1, 0), ('S', 1, 0), ('E', 0, 1), ('W', 0, -1)]
+> OPP = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
+> sys.setrecursionlimit(1000000)
+>
+>
+> def explore(mid):
+>     proc = subprocess.Popen(['python3', '-u', '/protected/maze_server.py', str(mid)],
+>                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+>
+>     def read_prompt():
+>         buf = b''
+>         while True:
+>             ch = proc.stdout.read(1)
+>             if not ch:
+>                 return ''
+>             buf += ch
+>             if buf.endswith(b'> '):
+>                 break
+>         return buf.decode(errors='replace')
+>
+>     read_prompt()
+>     cell = {(0, 0): 'S'}
+>     visited = {(0, 0)}
+>     counter = [0]
+>     maxdepth = [0]
+>     desync = [None]
+>
+>     def dfs(r, c, depth):
+>         maxdepth[0] = max(maxdepth[0], depth)
+>         counter[0] += 1
+>         if counter[0] > 50000:
+>             raise RuntimeError('probe limit r=%d c=%d depth=%d visited=%d' % (r, c, depth, len(visited)))
+>         for d, dr, dc in DIRS:
+>             nr, nc = r + dr, c + dc
+>             if (nr, nc) in visited:
+>                 continue
+>             proc.stdin.write(('move ' + d + '\n').encode())
+>             proc.stdin.flush()
+>             chunk = read_prompt()
+>             if chunk == '':
+>                 raise RuntimeError('server closed mid-explore')
+>             res = chunk.rsplit('> ', 1)[0].strip()
+>             if res == 'hit wall':
+>                 continue
+>             cell[(nr, nc)] = 'E' if res == 'reached exit' else ' '
+>             visited.add((nr, nc))
+>             dfs(nr, nc, depth + 1)
+>             proc.stdin.write(('move ' + OPP[d] + '\n').encode())
+>             proc.stdin.flush()
+>             bchunk = read_prompt()
+>             bres = bchunk.rsplit('> ', 1)[0].strip()
+>             if bres == 'hit wall':
+>                 desync[0] = 'at (%d,%d) back %s expected (%d,%d) res=%r' % (nr, nc, OPP[d], r, c, bchunk)
+>                 raise RuntimeError('DESYNC ' + desync[0])
+>
+>     try:
+>         dfs(0, 0, 0)
+>         print('maze %d OK probes=%d maxdepth=%d visited=%d' % (mid, counter[0], maxdepth[0], len(visited)))
+>     except RuntimeError as e:
+>         print('maze %d ERROR: %s' % (mid, e))
+>     finally:
+>         proc.stdin.write(b'exit\n')
+>         proc.stdin.flush()
+>         try:
+>             proc.wait(timeout=5)
+>         except Exception:
+>             proc.kill()
+>     return None
+>
+>
+> def main():
+>     ids = [int(a) for a in sys.argv[1:]] or list(range(1, 11))
+>     for mid in ids:
+>         explore(mid)
+>
+>
+> if __name__ == '__main__':
+>     main()
+> PYEOF
+root@4b43a390eb24:/app# python3 /app/explore.py 1
+maze 1 OK probes=3 maxdepth=1 visited=3
+root@4b43a390eb24:/app#

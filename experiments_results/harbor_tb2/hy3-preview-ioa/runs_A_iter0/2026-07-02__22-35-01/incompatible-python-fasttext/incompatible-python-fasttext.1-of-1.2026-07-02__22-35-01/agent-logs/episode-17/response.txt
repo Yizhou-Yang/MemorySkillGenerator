@@ -1,0 +1,14 @@
+{
+  "analysis": "The patch worked. All three `copy=False` calls were replaced with `np.asarray(...)`, and the previously failing operations now succeed: `predict` returns labels and probabilities, and `get_sentence_vector` returns a shape of (5,). The root cause was fasttext 0.9.3 using `np.array(..., copy=False)` which is incompatible with numpy 2.x (2.5.0 installed). Let me run a broader smoke test to confirm nothing else is broken.",
+  "plan": "Run a comprehensive smoke test covering train, load, predict, get_sentence_vector, and the meter functions (precision_recall_curve etc. which also use the patched lines). Also check fasttext.util for similar numpy issues. This confirms the fix is complete.",
+  "commands": [
+    {
+      "keystrokes": "python -c 'import fasttext; m=fasttext.load_model(\"/app/model.bin\"); print(m.test(\"/tmp/ft_train.txt\")); print(m.get_word_vector(\"hello\").shape)' 2>&1\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "python -c 'import fasttext, fasttext.util as u; print(\"util ok\")' 2>&1\n",
+      "duration": 1.0
+    }
+  ]
+}

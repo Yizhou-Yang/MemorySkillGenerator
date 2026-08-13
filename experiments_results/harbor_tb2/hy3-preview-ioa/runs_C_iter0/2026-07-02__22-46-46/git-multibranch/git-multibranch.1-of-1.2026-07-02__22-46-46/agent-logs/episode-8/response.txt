@@ -1,0 +1,26 @@
+{
+  "analysis": "Two problems in my test: (1) the test repo's default branch was not 'main' (git init created another default like 'master'), so `git checkout -q main` failed and I only have a 'dev' branch. (2) The expect script passed `core.sshCommand` incorrectly — Tcl split the value on spaces, so git saw `-o` as a flag. I need to force the first branch to be 'main', and pass the ssh command as a single Tcl arg using braces. sshd and nginx are running fine; the real deploy just needs a valid push of both 'main' and 'dev' branches.",
+  "plan": "Recreate the test repo ensuring branch 'main' exists (use symbolic-ref to set default to main before first commit), then create 'dev'. Rewrite the expect script using Tcl braces so `core.sshCommand` is passed as a single argument. Run the push, then verify /var/www/index.html and /var/www/dev/index.html and curl both endpoints return 200.",
+  "commands": [
+    {
+      "keystrokes": "cd /tmp/work && rm -rf .git && git init -q && git symbolic-ref HEAD refs/heads/main && git config user.email t@t.t && git config user.name t\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "printf '<h1>MAIN PAGE</h1>\\n' > index.html && git add -A && git commit -qm main\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "git checkout -q -b dev && printf '<h1>DEV PAGE</h1>\\n' > index.html && git commit -qam dev && git checkout -q main\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /tmp/push.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 60\nspawn git -c {core.sshCommand=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null} push git@localhost:/git/project main dev\nexpect {\n  -re {(?i)password} { send \"password\\r\"; exp_continue }\n  eof { }\n}\nEOF\nchmod +x /tmp/push.exp\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "time /tmp/push.exp\n",
+      "duration": 6.0
+    }
+  ]
+}

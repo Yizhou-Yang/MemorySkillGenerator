@@ -1,0 +1,24 @@
+New Terminal Output:
+
+root@5800c03d8045:/app# mv /git/project/hooks/post-receive /tmp/hook.bak
+root@5800c03d8045:/app# cat > /tmp/push.sh <<'EOF'
+> #!/bin/bash
+> cd /app
+> rm -rf /tmp/work3; mkdir -p /tmp/work3; cd /tmp/work3
+> git init -q -b main
+> git config user.email t@t.com; git config user.name t
+> echo '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main
+> git checkout -q -b dev
+> echo '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev
+> git remote add origin git@localhost:/git/project
+> export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null'
+> export SSH_ASKPASS=/tmp/askpass.sh; export SSH_ASKPASS_REQUIRE=force; export DISPLAY=:0
+> setsid git push -v origin main dev
+> echo "PUSH_EXIT=$?"
+> EOF
+root@5800c03d8045:/app# bash /tmp/push.sh > /tmp/push.out 2>&1; echo DONE
+DONE
+root@5800c03d8045:/app# grep -nE 'fatal|error|PUSH_EXIT|remote:|Could not|<h1>|404' /tmp/push.out
+3:fatal: Could not read from remote repository.
+7:PUSH_EXIT=128
+root@5800c03d8045:/app#

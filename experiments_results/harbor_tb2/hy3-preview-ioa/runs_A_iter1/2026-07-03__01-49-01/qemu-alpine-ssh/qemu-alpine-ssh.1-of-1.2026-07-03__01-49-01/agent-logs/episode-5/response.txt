@@ -1,0 +1,18 @@
+{
+  "analysis": "Kernel (vmlinuz) and initramfs extracted successfully to /app/boot. No KVM, so qemu will use TCG software emulation. My plan is to boot qemu directly with -kernel/-initrd (extracted) plus the ISO as -cdrom so the initramfs can find the modloop. I'll pass console=ttyS0 and init=/bin/sh so the live Alpine system boots and drops a root shell onto the serial console, which I can drive via tmux send-keys. I'll forward host port 2222 to the guest ssh port (22).",
+  "plan": "1) Create a run_vm.sh script that launches qemu with serial on stdio, user-mode networking with hostfwd 2222->22, the ISO attached, and the extracted kernel/initrd with cmdline 'console=ttyS0 init=/bin/sh'. 2) Launch it inside a detached tmux session 'vm'. 3) Poll the tmux pane to confirm the guest boots and a shell appears. Then I'll drive setup (set root password, bring up eth0, install/start openssh) via tmux send-keys.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/run_vm.sh << 'EOF'\n#!/bin/sh\nexec qemu-system-x86_64 \\\n  -m 1024 -smp 2 -no-kvm \\\n  -display none -monitor none -serial stdio \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device e1000,netdev=net0 \\\n  -cdrom /app/alpine.iso \\\n  -kernel /app/boot/vmlinuz \\\n  -initrd /app/boot/initramfs \\\n  -append 'console=ttyS0 init=/bin/sh'\nEOF\nchmod +x /app/run_vm.sh\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "tmux kill-session -t vm 2>/dev/null; tmux new-session -d -s vm '/app/run_vm.sh'\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 3; tmux capture-pane -pt vm | tail -n 20\n",
+      "duration": 4.0
+    }
+  ]
+}

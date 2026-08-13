@@ -1,0 +1,14 @@
+{
+  "analysis": "DNS resolves api.devnet.solana.com to 185.45.7.185 (not Solana's real IP) — strong sign of a transparent proxy/DNS hijack intercepting outbound connections. Pip works (reached PyPI) but urllib HTTPS to Solana fails with 'SSL WRONG_VERSION_NUMBER', meaning the proxy responds with plaintext HTTP instead of TLS for that host. I need to determine how to actually reach a Solana RPC. Let me test whether TLS works to PyPI at all, and probe the proxy behavior more.",
+  "plan": "Test urllib HTTPS to pypi.org to see if TLS is generally functional. Then try sending a JSON-RPC request over plain HTTP (in case the proxy expects HTTP), and try the proxy as an HTTP proxy for HTTPS via CONNECT. This will clarify the reachability path for Solana RPC.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"import urllib.request; r=urllib.request.urlopen('https://pypi.org/simple/flask/',timeout=15); print('pypi https OK', r.status)\" 2>&1 | tail -3\n",
+      "duration": 18.0
+    },
+    {
+      "keystrokes": "python3 -c \"import urllib.request;\\nreq=urllib.request.Request('http://api.devnet.solana.com',data=b'{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"getHealth\\\"}',headers={'Content-Type':'application/json'});\\nr=urllib.request.urlopen(req,timeout=12); print('HTTP OK',r.status,r.read()[:300])\" 2>&1 | tail -5\n",
+      "duration": 15.0
+    }
+  ]
+}

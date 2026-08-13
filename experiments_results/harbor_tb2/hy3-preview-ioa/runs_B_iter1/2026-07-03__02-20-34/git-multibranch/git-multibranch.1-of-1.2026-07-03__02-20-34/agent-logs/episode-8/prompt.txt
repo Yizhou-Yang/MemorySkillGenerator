@@ -1,0 +1,38 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@d7094f788f94:/tmp/wt# rm -rf /git/project && git init --bare -b main /git/project >/dev/null; cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> GIT_DIR=/git/project
+> while read oldrev newrev refname; do
+>   branch="${refname#refs/heads/}"
+>   case "$branch" in
+>     main) target=/var/www ;;
+>     dev) target=/var/www/dev ;;
+>     *) continue ;;
+>   esac
+>   mkdir -p "$target"
+>   git --git-dir="$GIT_DIR" archive "$branch" | tar -x -C "$target"
+> done
+> EOF
+root@d7094f788f94:/tmp/wt# chmod +x /git/project/hooks/post-receive; chown -R git:git /git/project /var/www; echo RESET_DONE
+RESET_DONE
+root@d7094f788f94:/tmp/wt# rm -rf /tmp/wt2; mkdir -p /tmp/wt2; chown git:git /tmp/wt2; su git -c 'cd /tmp/wt2 && git init -q -b main . && git config user.email
+t@t && git config user.name t && echo "<h1>MAIN_SITE</h1>" > index.html && git add -A && git commit -qm m && git checkout -q -b dev && echo "<h1>DEV_SITE</h1>"
+> index.html && git add -A && git commit -qm d && git remote add origin /git/project && time git push -q origin main dev && echo PUSH_OK'
+
+real	0m0.155s
+user	0m0.017s
+sys	0m0.043s
+PUSH_OK
+root@d7094f788f94:/tmp/wt# echo '== MAIN =='; curl -sk https://localhost:8443/index.html; echo '== DEV =='; curl -sk https://localhost:8443/dev/index.html
+== MAIN ==
+<h1>MAIN_SITE</h1>
+== DEV ==
+<h1>DEV_SITE</h1>
+root@d7094f788f94:/tmp/wt# which python3; python3 -c 'import pexpect; print("HAVE_PEXPECT")' 2>/dev/null || echo NO_PEXPECT
+/usr/bin/python3
+NO_PEXPECT
+root@d7094f788f94:/tmp/wt#

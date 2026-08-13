@@ -1,0 +1,26 @@
+{
+  "analysis": "Good progress. I've extracted vmlinuz-lts (11.8MB) and initramfs-lts (20.5MB). Crucially, openssh-server IS in the ISO's local APK cache (/APKS/X86_64/OPENSSH_SERVER_9_5_P1_R0.APK), so I can install it offline once the live system boots. Host internet also works as a fallback. There's no serial console in the ISO's default boot, so I'll boot vmlinuz+initramfs directly with console=ttyS0 and attach the ISO so the initramfs can find modloop. Before choosing the qemu storage backend, I must inspect the initramfs to see which storage modules it actually contains (the append line lists loop,squashfs,sd-mod,usb-storage).",
+  "plan": "1) Inspect initramfs_lts: file type, extract it, list which .ko modules are bundled, and read the init script to understand how it finds modloop and whether it auto-spawns a serial getty. 2) Based on available modules, pick a qemu storage device whose driver is in the initramfs (likely IDE/ATAPI or USB-storage, matching the modules line). 3) Then construct the qemu launch + expect-driven setup.",
+  "commands": [
+    {
+      "keystrokes": "cd /tmp; rm -rf ir; mkdir ir; cd ir\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "file /app/extracted/initramfs_lts\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "gzip -dc /app/extracted/initramfs_lts 2>/dev/null | cpio -id 2>&1 | tail -3; echo EXIT=${PIPESTATUS[1]}\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "echo '--- count + names of modules ---'; find . -name '*.ko' | wc -l; find . -name '*.ko' | sed 's#.*/##' | sort | tr '\\n' ' '; echo\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "echo '--- init script (first 50) ---'; sed -n '1,50p' init 2>/dev/null\n",
+      "duration": 0.2
+    }
+  ]
+}

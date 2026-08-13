@@ -1,0 +1,10 @@
+{
+  "analysis": "Output index is `output_n` not `n`. Input sequence works (4294967295 = 0xffffffff for genesis coinbase). The `coinbase` attribute returned None for the genesis input, which is unexpected — I need to find where coinbase data lives. Transaction inputs/outputs use `inputs`/`outputs`, Output index is `output_n`. I still need to find the coinbase field and the scriptPubKey hex/asm/type on outputs.",
+  "plan": "Inspect the input's unlocking_script/script/prev_txid/output_n to locate coinbase data, and inspect the output's `script` (script_pubkey) for hex/asm/type. Also verify gettransaction fills block_hash. Then build the final service.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/btest7.py << 'EOF'\nfrom bitcoinlib.services.services import Service\ns = Service(network='bitcoin')\nb = s.getblock('000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f')\ntx = b.transactions[0]\ni = tx.inputs[0]\nprint('prev_txid', getattr(i,'prev_txid',None))\nprint('output_n', getattr(i,'output_n',None))\nprint('unlocking_script', getattr(i,'unlocking_script',None))\nprint('script', getattr(i,'script',None))\nspk = tx.outputs[0].script_pubkey\nfor a in ['hex','asm','script_type','script']:\n    print('spk',a,'=',repr(getattr(spk,a,'MISSING'))[:80])\no = tx.outputs[0]\nprint('out output_n', o.output_n, 'value', o.value)\nprint('out script', getattr(o,'script',None))\ntx2 = s.gettransaction(tx.txid)\nprint('gtx block_hash', getattr(tx2,'block_hash',None))\nprint('gtx block_height', getattr(tx2,'block_height',None))\nprint('errors', s.errors)\nEOF\npython3 /tmp/btest7.py\n",
+      "duration": 60
+    }
+  ]
+}

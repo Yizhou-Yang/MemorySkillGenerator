@@ -1,0 +1,18 @@
+{
+  "analysis": "Good findings: python3, tmux, nc, expect, wget are available. Host has working internet (got 200 from alpine CDN). No /dev/kvm => qemu will run under TCG (slower). Loop mount of the ISO is blocked ('Operation not permitted'), so I cannot mount it directly to extract kernel/initrd. Strategy: use a small Python ISO9660 reader to extract the ISO's kernel (vmlinuz-lts) and initramfs-lts directly, then boot qemu with -kernel/-initrd plus the ISO as -cdrom and console=ttyS0 on the serial console. Alpine's default inittab spawns a getty on ttyS0, so I'll get a login prompt and can configure SSH.",
+  "plan": "1) Write a Python ISO9660 parser to /tmp/extract.py and run it to extract vmlinuz and initramfs from /app/alpine.iso into /app. 2) Verify the extracted files exist and are reasonable sizes. After that I'll launch qemu in a tmux session with serial console and port forwarding, then configure openssh from the serial console.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/extract.py << 'PYEOF'\nimport struct\nISO='/app/alpine.iso'\ndef rd(f,off,n):\n    f.seek(off); return f.read(n)\nwith open(ISO,'rb') as f:\n    pvd=None\n    for s in range(16,16+200):\n        buf=rd(f,s*2048,2048)\n        if buf[1:6]==b'CD001' and buf[0]==1:\n            pvd=buf; break\n    assert pvd,'no PVD'\n    def parse_dr(d):\n        if len(d)<33: return None\n        return (struct.unpack('<I',d[2:6])[0],struct.unpack('<I',d[10:14])[0],d[25],d[33:33+d[32]])\n    def read_dir(ext,length):\n        f.seek(ext*2048)\n        data=f.read(((length+2047)//2048)*2048)\n        out=[]; off=0\n        while off<length:\n            lr=data[off]\n            if lr==0:\n                off=((off//2048)+1)*2048; continue\n            rec=data[off:off+lr]\n            e=parse_dr(rec)\n            if e: out.append(e)\n            off+=lr\n        return out\n    def nameof(b):\n        s=b.decode('latin1')\n        if ';' in s: s=s.split(';')[0]\n        return s\n    cands={'vmlinuz':[],'initramfs':[]}\n    def walk(entries,path):\n        for ext,length,flags,name in entries:\n            nm=nameof(name)\n            if nm in ('.','..'): continue\n            isdir=bool(flags & 0x2)\n            full=path+'/'+nm\n            if isdir:\n                walk(read_dir(ext,length),full)\n            else:\n                low=nm.lower()\n                if 'vmlinuz' in low: cands['vmlinuz'].append((ext,length,full))\n                if 'initramfs' in low: cands['initramfs'].append((ext,length,full))\n    root=parse_dr(pvd[156:156+34])\n    walk(read_dir(root[0],root[1]),'')\n    def pick(lst):\n        if not lst: return None\n        for x in lst:\n            if 'lts' in x[2].lower(): return x\n        return lst[0]\n    for k in ('vmlinuz','initramfs'):\n        x=pick(cands[k])\n        print(k,x)\n        if x:\n            ext,length,full=x\n            f.seek(ext*2048)\n            data=f.read(length)\n            open('/app/'+k,'wb').write(data)\n            print('wrote','/app/'+k,length)\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /tmp/extract.py\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "ls -la /app/vmlinuz /app/initramfs\n",
+      "duration": 0.2
+    }
+  ]
+}

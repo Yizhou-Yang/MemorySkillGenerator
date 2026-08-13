@@ -1,0 +1,133 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected after JSON object
+
+New Terminal Output:
+
+root@bfac91bdc11c:/app/astropy# grep -n -i 'read\|serr\|terr\|command\|NO' /app/astropy/astropy/io/ascii/qdp.py
+3:This package contains functions for reading and writing QDP tables that are
+4:not meant to be used directly, but instead are available as readers/writers in
+20:def _line_type(line, delimiter=None):
+31:        Line type: "comment", "command", or "data"
+35:    >>> _line_type("READ SERR 3")
+36:    'command'
+43:    >>> _line_type(" 21345.45 1.53e-3 1e-3 .04 NO nan")
+45:    >>> _line_type(" 21345.45,1.53e-3,1e-3,.04,NO,nan", delimiter=',')
+49:    >>> _line_type("NO NO NO NO NO")
+51:    >>> _line_type("NO,NO,NO,NO,NO", delimiter=',')
+53:    >>> _line_type("N O N NOON OON O")
+57:    >>> _line_type(" some non-comment gibberish")
+63:    _command_re = r"READ [TS]ERR(\s+[0-9]+)+"
+66:    if delimiter is None:
+68:    _new_re = rf"NO({sep}NO)+"
+69:    _data_re = rf"({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)"
+70:    _type_re = rf"^\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\s*(\!(?P<comment>.*))?\s*$"
+73:    if not line:
+77:    if match is None:
+80:        if val is None:
+88:def _get_type_from_list_of_lines(lines, delimiter=None):
+89:    """Read through the list of QDP file lines and label each line by type.
+123:    current_ncol = None
+127:            if current_ncol is None:
+140:            lines = [line.strip() for line in fobj.readlines()]
+149:def _interpret_err_lines(err_specs, ncols, names=None):
+150:    """Give list of column names from the READ SERR and TERR commands.
+155:        ``{'serr': [n0, n1, ...], 'terr': [n2, n3, ...]}``
+163:        Name of data columns (defaults to ['col1', 'col2', ...]), _not_
+176:    >>> cols = _interpret_err_lines(None, 2, names=col_in)
+179:    >>> err_specs = {'terr': [1], 'serr': [2]}
+194:    if err_specs is None:
+195:        serr_cols = terr_cols = []
+201:        serr_cols = err_specs.pop("serr", [])
+202:        terr_cols = err_specs.pop("terr", [])
+204:    if names is not None:
+205:        all_error_cols = len(serr_cols) + len(terr_cols) * 2
+217:        if names is not None:
+221:        if col_num in serr_cols:
+226:        if col_num in terr_cols:
+232:    assert not np.any([c == "" for c in colnames])
+237:def _get_tables_from_qdp_file(qdp_file, input_colnames=None, delimiter=None):
+248:        Name of data columns (defaults to ['col1', 'col2', ...]), _not_
+263:    colnames = None
+267:    command_lines = ""
+268:    current_rows = None
+277:        if datatype == "command":
+278:            # The first time I find commands, I save whatever comments into
+280:            if command_lines == "":
+286:                    "This file contains multiple command blocks. Please verify",
+289:            command_lines += line + "\n"
+294:            if err_specs == {} and command_lines != "":
+295:                for cline in command_lines.strip().split("\n"):
+296:                    command = cline.strip().split()
+298:                    if len(command) < 3:
+300:                    err_specs[command[1].lower()] = [int(c) for c in command[2:]]
+301:            if colnames is None:
+304:            if current_rows is None:
+309:                if v == "NO":
+322:            if current_rows is not None:
+331:                current_rows = None
+336:    if current_rows is not None:
+351:    >>> serr, terr = _understand_err_col(colnames)
+352:    >>> np.allclose(serr, [1])
+354:    >>> np.allclose(terr, [2])
+356:    >>> serr, terr = _understand_err_col(['a', 'a_nerr'])
+360:    >>> serr, terr = _understand_err_col(['a', 'a_perr'])
+366:    serr = []
+367:    terr = []
+373:            serr.append(i - shift)
+376:            terr.append(i - shift)
+377:            if len(colnames) == i + 1 or not colnames[i + 1].endswith("_nerr"):
+380:        elif col.endswith("_nerr") and not colnames[i - 1].endswith("_perr"):
+382:    return serr, terr
+385:def _read_table_qdp(qdp_file, names=None, table_id=None, delimiter=None):
+386:    """Read a table from a QDP file.
+396:        Name of data columns (defaults to ['col1', 'col2', ...]), _not_
+400:        Number of the table to be read from the QDP file. This is useful
+401:        when multiple tables present in the file. By default, the first is read.
+411:    if table_id is None:
+413:            "table_id not specified. Reading the first available table",
+425:def _write_table_qdp(table, filename=None, err_specs=None):
+438:        Dictionary of the format {'serr': [1], 'terr': [2, 3]}, specifying
+449:            if not line.startswith("!"):
+453:    if err_specs is None:
+454:        serr_cols, terr_cols = _understand_err_col(table.colnames)
+456:        serr_cols = err_specs.pop("serr", [])
+457:        terr_cols = err_specs.pop("terr", [])
+458:    if serr_cols != []:
+459:        col_string = " ".join([str(val) for val in serr_cols])
+460:        print(f"READ SERR {col_string}", file=fobj)
+461:    if terr_cols != []:
+462:        col_string = " ".join([str(val) for val in terr_cols])
+463:        print(f"READ TERR {col_string}", file=fobj)
+468:            if not line.startswith("!"):
+477:            if not np.ma.is_masked(val):
+480:                rep = "NO"
+487:    if filename is not None:
+518:    fill_values = [(core.masked, "NO")]
+520:    write_comment = None
+530:        READ TERR 1
+531:        READ SERR 3
+536:        NO NO NO NO NO
+539:        54000.5   2.25  -2.5   NO  3.5  5.5 5
+542:    The input table above contains some initial comments, the error commands,
+545:    of ``NO``s. Comments are exclamation marks, and missing values are single
+546:    ``NO`` entries. The delimiter is usually whitespace, more rarely a comma.
+548:    above has commands::
+550:        READ TERR 1
+551:        READ SERR 3
+559:    comments containing column names will be ignored and columns will be called
+562:    When passing column names, pass **only the names of the data columns, not
+569:    passing a dictionary ``{'serr': [3], 'terr': [1, 2]}``, meaning that data
+572:    a symmetric error (just like the ``READ SERR`` and ``READ TERR`` commands
+579:    For this reason, we ignore the comments that might encode the column names
+588:        >53000.123456   2.378e-05     -2.378472e-05     NO             0.212439
+590:    These readers and writer classes will strive to understand which of the
+597:        t = Table.read(example_qdp, format='ascii.qdp', table_id=1, names=['a', 'b', 'c', 'd'])
+599:    reads the second table (``table_id=1``) in file ``example.qdp`` containing
+601:    Because the ``READ SERR`` and ``READ TERR`` commands say that there are
+606:    The table can be written to another file, preserving the same information,
+609:        t.write(test_file, err_specs={'terr': [1], 'serr': [3]})
+611:    Note how the ``terr`` and ``serr`` commands are passed to the writer.
+623:    def __init__(self, table_id=None, names=None, err_specs=None, sep=None):
+630:    def read(self, table):
+632:        return _read_table_qdp(
+root@bfac91bdc11c:/app/astropy#

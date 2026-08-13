@@ -1,0 +1,18 @@
+{
+  "analysis": "I understand the test conventions: `asyncfs` fixture gives an async mock fs; `make_dirfs(fs, asynchronous=...)` builds a DirFileSystem. I'll add a regression test mirroring `test_open` but for `open_async`, using the asyncfs fixture and awaiting the call.",
+  "plan": "Append a test_open_async using the asyncfs fixture (wrapping it in an async dirfs) and asserting delegation with the joined path. Then clean up the temporary _version.py I created for local testing so the repo stays pristine.",
+  "commands": [
+    {
+      "keystrokes": "cat >> fsspec/implementations/tests/test_dirfs.py << 'EOF'\n\n\n@pytest.mark.asyncio\nasync def test_open_async(mocker, asyncfs):\n    asyncfs.open_async = mocker.AsyncMock()\n    dirfs = DirFileSystem(PATH, asyncfs, asynchronous=True)\n    assert await dirfs.open_async(\"file\", *ARGS, **KWARGS) == asyncfs.open_async.return_value\n    asyncfs.open_async.assert_awaited_once_with(f\"{PATH}/file\", *ARGS, **KWARGS)\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "rm -f fsspec/_version.py\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "tail -12 fsspec/implementations/tests/test_dirfs.py\n",
+      "duration": 0.3
+    }
+  ]
+}

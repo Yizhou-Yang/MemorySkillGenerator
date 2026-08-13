@@ -1,0 +1,14 @@
+{
+  "analysis": "I have 384 .deb URLs in the apt print-uris format: `'URL' filename size MD5Sum:...`. The URL contains %2b encoding which urllib handles. Now I'll download all .debs with python3 (which writes fine to the overlay, proven earlier), then install with dpkg.",
+  "plan": "1) Write a python3 script that parses /app/uris.txt for quotes-starting lines, extracts the URL and filename, and downloads each to /app/debs with a browser User-Agent. 2) Run it and monitor. 3) Install all .debs with dpkg -i. Let me create the downloader.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /app/debs\ncat > /app/dl.py <<'EOF'\nimport urllib.request, re, sys, os\nout='/app/debs'\nos.makedirs(out, exist_ok=True)\nurls=[]\nfor line in open('/app/uris.txt'):\n    line=line.strip()\n    if not line.startswith(\"'\"):\n        continue\n    url=line[1:line.index(\"'\",1)]\n    fn=line.split()[1]\n    urls.append((url,fn))\nprint('total',len(urls))\nhdr={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36','Accept':'*/*'}\nok=0\nfor i,(url,fn) in enumerate(urls):\n    dest=os.path.join(out,fn)\n    if os.path.exists(dest) and os.path.getsize(dest)>0:\n        ok+=1; continue\n    try:\n        req=urllib.request.Request(url,headers=hdr)\n        with urllib.request.urlopen(req,timeout=120) as r, open(dest,'wb') as f:\n            f.write(r.read())\n        ok+=1\n    except Exception as e:\n        print('FAIL',fn,e)\n    if (i+1)%50==0:\n        print('progress',i+1,ok)\nprint('done ok',ok,'of',len(urls))\nEOF\necho written\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/dl.py\n",
+      "duration": 60.0
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "analysis": "Root-cause found: the SSH push fails with 'bad line length character: Welc' — the server prints 'Welcome to Ubuntu...' (motd) to the SSH session's stdout before git-receive-pack runs, corrupting the git protocol. This is motd output from PAM (pam_motd), printed on every SSH session including non-interactive git commands. The fix is to disable pam_motd and also set the git user's shell to git-shell (the conventional, safe choice for a git server). sshd and nginx are otherwise working; local pushes and HTTPS endpoints are correct.",
+  "plan": "1) Locate git-shell. 2) Disable pam_motd in /etc/pam.d/sshd via sed (backup first). 3) Set git user's login shell to git-shell. 4) Diagnostic: SSH as git running 'echo HELLO_MARKER' to confirm no motd garbage. 5) Re-run the real SSH push test via expect and confirm deployment updates. 6) Restore clean MAIN/DEV content via a local push so the repo is left in a sensible state.",
+  "commands": [
+    {
+      "keystrokes": "which git-shell; cp /etc/pam.d/sshd /etc/pam.d/sshd.bak; sed -i 's/^session.*pam_motd/#&/' /etc/pam.d/sshd; grep -n pam_motd /etc/pam.d/sshd\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "usermod -s /usr/bin/git-shell git; getent passwd git\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /tmp/diag.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 30\nspawn bash -c {ssh git@localhost 'echo HELLO_MARKER'}\nexpect {\n  -re {password:} { send \"password\\r\"; exp_continue }\n  eof { }\n}\nEOF\nchmod +x /tmp/diag.exp; /tmp/diag.exp\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "cat > /tmp/push_ssh.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 30\nspawn bash -c {cd /tmp && rm -rf t && git init -q -b main t && cd t && git config user.email x@x && git config user.name x && echo '<h1>SSHMAIN</h1>' > index.html && git add -A && git commit -qm m && git remote add origin git@localhost:/git/project && time git push -q origin main}\nexpect {\n  -re {password:} { send \"password\\r\"; exp_continue }\n  eof { }\n}\nEOF\nchmod +x /tmp/push_ssh.exp; time /tmp/push_ssh.exp\n",
+      "duration": 8.0
+    },
+    {
+      "keystrokes": "echo '--- MAIN after SSH push ---'; curl -sk https://localhost:8443/index.html\n",
+      "duration": 1.0
+    }
+  ]
+}

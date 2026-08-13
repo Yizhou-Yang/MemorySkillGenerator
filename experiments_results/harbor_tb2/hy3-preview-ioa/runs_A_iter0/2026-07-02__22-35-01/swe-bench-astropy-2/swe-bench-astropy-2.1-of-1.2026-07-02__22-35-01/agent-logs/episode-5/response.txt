@@ -1,0 +1,10 @@
+{
+  "analysis": "I now understand the bug. In `_line_type`, the command regex `_command_re = r\"READ [TS]ERR(\\s+[0-9]+)+\"` is case-sensitive. So `read serr 1 2` fails to match the 'command' branch and falls through to raise 'Unrecognized QDP line'. The downstream processing of the command (`command[1].lower()`) is already case-insensitive for the error type, so the only needed fix is making the command regex case-insensitive. I'll scope the case-insensitivity to just the command group with `(?i:...)`.",
+  "plan": "Edit `_command_re` to wrap the pattern in a case-insensitive scoped group: `(?i:READ [TS]ERR(\\s+[0-9]+)+)`. Then verify by creating a test qdp file with lowercase commands and reading it. I'll also add a regression test in test_qdp.py.",
+  "commands": [
+    {
+      "keystrokes": "grep -n '_command_re' /app/astropy/astropy/io/ascii/qdp.py\n",
+      "duration": 0.3
+    }
+  ]
+}

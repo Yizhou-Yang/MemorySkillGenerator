@@ -1,0 +1,110 @@
+New Terminal Output:
+
+root@76a65199b158:/app# cat > /tmp/setup.sh <<'OUTER'
+> #!/bin/bash
+> # 1. host alias
+> grep -q ' server$' /etc/hosts || echo '127.0.0.1 server' >> /etc/hosts
+>
+> # 2. user account
+> id user >/dev/null 2>&1 || useradd -m -s /bin/bash user
+>
+> # 3. sshd setup
+> mkdir -p /run/sshd
+> [ -f /root/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -f /root/.ssh/id_ed25519
+> mkdir -p /home/user/.ssh
+> cat /root/.ssh/id_ed25519.pub >> /home/user/.ssh/authorized_keys
+> chmod 700 /home/user/.ssh
+> chmod 600 /home/user/.ssh/authorized_keys
+> chown -R user:user /home/user/.ssh
+>
+> cat > /root/.ssh/config <<'CFG'
+> Host server
+>     StrictHostKeyChecking no
+>     UserKnownHostsFile /dev/null
+>     LogLevel ERROR
+> CFG
+> chmod 600 /root/.ssh/config
+>
+> mkdir -p /etc/ssh/sshd_config.d
+> echo 'PubkeyAuthentication yes' > /etc/ssh/sshd_config.d/99-git.conf
+>
+> if ! pgrep -x sshd >/dev/null 2>&1; then
+>     /usr/sbin/sshd
+> fi
+>
+> # 4. bare repo
+> mkdir -p /git
+> chown user:user /git
+> su user -c 'git init --bare /git/server'
+>
+> # 5. web root
+> mkdir -p /srv/web
+> chown user:user /srv/web
+>
+> # 6. post-receive hook
+> cat > /git/server/hooks/post-receive <<'HOOK'
+> #!/bin/bash
+> while read oldrev newrev refname; do
+>     if [ "$refname" = "refs/heads/webserver" ]; then
+>         GIT_WORK_TREE=/srv/web git checkout -f webserver
+>     fi
+> done
+> HOOK
+> chmod +x /git/server/hooks/post-receive
+> chown user:user /git/server/hooks/post-receive
+>
+> # 7. TLS cert (trusted system-wide)
+> mkdir -p /etc/web
+> openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/web/key.pem -out /etc/web/cert.pem -days 3650 -subj '/CN=server' -addext 'subjectAltName = DNS:server,I
+P:127.0.0.1' 2>/dev/null
+> cp /etc/web/cert.pem /usr/local/share/ca-certificates/server.crt
+> update-ca-certificates >/dev/null 2>&1
+>
+> # 8. HTTPS web server on 8080
+> cat > /usr/local/bin/webserver.py <<'PY'
+> import http.server, ssl, os
+> os.chdir('/srv/web')
+> httpd = http.server.HTTPServer(('0.0.0.0', 8080), http.server.SimpleHTTPRequestHandler)
+> ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+> ctx.load_cert_chain('/etc/web/cert.pem', '/etc/web/key.pem')
+> httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+> httpd.serve_forever()
+> PY
+>
+> if ! pgrep -f webserver.py >/dev/null 2>&1; then
+>     nohup python3 /usr/local/bin/webserver.py >/var/log/webserver.log 2>&1 &
+> fi
+>
+> echo SETUP_DONE
+> OUTER
+root@76a65199b158:/app# bash /tmp/setup.sh
+Generating public/private ed25519 key pair.
+Created directory '/root/.ssh'.
+Your identification has been saved in /root/.ssh/id_ed25519
+Your public key has been saved in /root/.ssh/id_ed25519.pub
+The key fingerprint is:
+SHA256:6U6uH5WFacvmaHveJrZ3s8+teAVdDaMwpUsT+UfCQAs root@76a65199b158
+The key's randomart image is:
++--[ED25519 256]--+
+|        E.*=. o..|
+|         ..Oo...o|
+|          O.oo ..|
+|         = *. o .|
+|        S B  . . |
+|       . =      .|
+|        * .    . |
+|       = o+.o.+..|
+|      .o=+o=ooo=+|
++----[SHA256]-----+
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint:
+hint:   git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint:   git branch -m <name>
+Initialized empty Git repository in /git/server/
+

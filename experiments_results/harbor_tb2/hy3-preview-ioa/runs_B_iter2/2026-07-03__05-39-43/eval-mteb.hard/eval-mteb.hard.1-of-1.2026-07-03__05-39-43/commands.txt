@@ -1,0 +1,92 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'pwd && ls -la\n'
+'python3 -c "import mteb; print(mteb.__version__)"\n'
+'pip show sentence-transformers 2>/dev/null | head -5\n'
+''
+'python3 -c "import transformers,sys; print(transformers.__version__)"\n'
+'pip show mteb 2>/dev/null | head -3; pip show sentence-transformers 2>/dev/null | head -3\n'
+'python3 -c "import sentence_transformers; print(sentence_transformers.__version__)" 2>&1 | head -3\n'
+"sed -n '1,30p' /usr/local/lib/python3.10/site-packages/mteb/models/gme_v_models.py\n"
+'python3 -c "import sentence_transformers; print(sentence_transformers.__version__)" 2>&1 | head -3\n'
+''
+"python3 - <<'EOF'\nimport re\np='/usr/local/lib/python3.10/site-packages/mteb/models/gme_v_models.py'\ns=open(p).read()\nold='from transformers import AutoModelForVision2Seq, AutoProcessor'\nnew='try:\\n    from transformers import AutoModelForVision2Seq\\nexcept ImportError:\\n    AutoModelForVision2Seq = None\\nfrom transformers import AutoProcessor'\nassert old in s, 'pattern not found'\ns=s.replace(old,new)\nopen(p,'w').write(s)\nprint('patched')\nEOF\n"
+'python3 -c "import mteb; print(\'mteb\', mteb.__version__)" 2>&1 | tail -5\n'
+'curl -sI https://huggingface.co 2>&1 | head -3; echo EXIT=$?\n'
+'python3 -c "import urllib.request as u; r=u.urlopen(\'https://huggingface.co\', timeout=15); print(\'OK\', r.status)" 2>&1 | tail -3\n'
+"python3 - <<'EOF'\nimport mteb\nprint('mteb', mteb.__version__)\nfor attr in ['get_model_meta','get_model','model_meta','get_model_names','available_models']:\n    print(attr, hasattr(mteb, attr))\n# try listing model metas\nmm = getattr(mteb,'model_meta',None)\nif mm is not None:\n    names = list(mm.keys()) if hasattr(mm,'keys') else []\n    print('num models', len(names))\n    print([n for n in names if 'mpnet' in n.lower() or 'e5-base' in n.lower() or 'e5-large' in n.lower()][:20])\nEOF\n"
+''
+''
+"python3 - <<'EOF'\nimport mteb\nfrom mteb import model_meta\nprint('type', type(model_meta))\ntry:\n    print('len', len(model_meta))\nexcept Exception as e:\n    print('no len', e)\ntry:\n    items = list(model_meta.items())\n    print('items count', len(items))\n    print([k for k,_ in items if 'mpnet' in k.lower() or 'e5-base' in k.lower() or 'e5-large' in k.lower()][:20])\nexcept Exception as e:\n    print('no items', e)\nEOF\n"
+''
+''
+'grep -rln "all-mpnet-base-v2" /usr/local/lib/python3.10/site-packages/mteb/models/ | head\n'
+'grep -rn "all-mpnet-base-v2" /usr/local/lib/python3.10/site-packages/mteb/models/*.py | head\n'
+"sed -n '245,275p' /usr/local/lib/python3.10/site-packages/mteb/models/sentence_transformers_models.py\n"
+'python3 -c "import mteb; print([x for x in dir(mteb) if \'task\' in x.lower()])"\n'
+'python3 -c "import mteb, inspect; print(inspect.signature(mteb.MTEB.run))" 2>&1 | tail -3\n'
+''
+''
+'python3 -c "import mteb, inspect; print(\'get_model\', inspect.signature(mteb.get_model)); print(\'get_task\', inspect.signature(mteb.get_task))" 2>&1 | tail -3\n'
+'python3 -c "import mteb; t=mteb.get_task(\'STS12\'); print(type(t), t.metadata.name)" 2>&1 | tail -3\n'
+''
+''
+''
+'cat > /app/run_sts12.py <<\'EOF\'\nimport mteb\n\nmodel_name = "sentence-transformers/all-mpnet-base-v2"\nmodel = mteb.get_model(model_name)\ntask = mteb.get_task("STS12")\n\nevaluation = mteb.MTEB(tasks=[task])\nresults = evaluation.run(model, output_folder="results", overwrite_results=True)\nfor r in results:\n    print(r)\nEOF\n'
+'cd /app && python3 run_sts12.py 2>&1 | tail -40\n'
+'df -h / /root /tmp 2>&1\n'
+"sed -n '555,585p' /usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py\n"
+'grep -rn "has_sufficient_disk_space\\|DISK_SIZE_CHECK\\|disk_usage" /usr/local/lib/python3.10/site-packages/datasets/builder.py | head\n'
+"sed -n '960,975p' /usr/local/lib/python3.10/site-packages/datasets/builder.py\n"
+'python3 - <<\'EOF\'\np=\'/usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py\'\ns=open(p).read()\nold=\'\'\'def has_sufficient_disk_space(needed_bytes, directory="."):\n    try:\n        free_bytes = disk_usage(os.path.abspath(directory)).free\n    except OSError:\n        return True\n    return needed_bytes < free_bytes\'\'\'\nnew=\'\'\'def has_sufficient_disk_space(needed_bytes, directory="."):\n    return True\'\'\'\nassert old in s, \'pattern not found\'\ns=s.replace(old,new)\nopen(p,\'w\').write(s)\nprint(\'patched disk space check\')\nEOF\n'
+'cd /app && python3 run_sts12.py 2>&1 | tail -40\n'
+''
+''
+''
+''
+''
+''
+''
+''
+'C-c'
+'cd /app && nohup python3 -u run_sts12.py > /app/run.log 2>&1 &\n'
+'sleep 20; tail -30 /app/run.log\n'
+"jobs; ps aux | grep -c '[r]un_sts12.py'\n"
+"sleep 15; echo '---LOG---'; tail -30 /app/run.log\n"
+"sleep 30; echo '---LOG---'; tail -30 /app/run.log\n"
+"sleep 45; echo '---LOG---'; tail -20 /app/run.log\n"
+'jobs\n'
+'python3 -c "import mteb; t=mteb.get_task(\'STS12\'); print(t.metadata_dict.get(\'dataset\'))" 2>&1 | tail -5\n'
+'ls -la ~/.cache/huggingface/hub/ 2>/dev/null | head; du -sh ~/.cache/huggingface/hub/ 2>/dev/null\n'
+''
+''
+"sleep 40; echo '---LOG---'; tail -15 /app/run.log\n"
+'kill %1 2>/dev/null; sleep 1; jobs\n'
+'timeout 60 python3 -u -c "import datasets; print(\'loading...\'); d=datasets.load_dataset(\'mteb/sts12-sts\', revision=\'a0d554a64d88156834ff5ae9920b964011b16384\'); print(\'OK\', d)" 2>&1 | tail -20\n'
+'cd /app && nohup python3 -u run_sts12.py > /app/run.log 2>&1 &\n'
+"sleep 45; echo '---LOG---'; tail -30 /app/run.log\n"
+"sleep 45; echo '---LOG---'; tail -30 /app/run.log\n"
+'jobs; ls -la /proc/$(pgrep -f run_sts12.py | head -1)/status 2>/dev/null && cat /proc/$(pgrep -f run_sts12.py | head -1)/stat 2>/dev/null | awk \'{print "state:",$3}\'\n'
+'find /proc -maxdepth 1 -name \'[0-9]*\' 2>/dev/null | while read p; do if grep -qa run_sts12.py "$p/cmdline" 2>/dev/null; then st=$(awk \'{print $3}\' "$p/stat" 2>/dev/null); echo "pid ${p#/proc/} state=$st"; fi; done\n'
+''
+"sleep 50; echo '---LOG---'; tail -25 /app/run.log\n"
+"sleep 50; echo '---LOG---'; tail -25 /app/run.log; echo '---RESULTS---'; find /app/results -type f 2>/dev/null\n"
+"sleep 50; echo '---RESULTS---'; find /app/results -type f; echo '---LOG---'; tail -15 /app/run.log\n"
+"sleep 50; echo '---RESULTS---'; find /app/results -type f; echo '---LOG---'; tail -15 /app/run.log\n"
+'find /proc -maxdepth 1 -name \'[0-9]*\' 2>/dev/null | while read p; do if grep -qa run_sts12.py "$p/cmdline" 2>/dev/null; then st=$(awk \'{print $3}\' "$p/stat" 2>/dev/null); echo "pid ${p#/proc/} state=$st"; fi; done\n'
+'cat /app/results/sentence-transformers__all-mpnet-base-v2/9a3225965996d404b775526de6dbfe85d3368642/model_meta.json 2>/dev/null\n'
+"sleep 45; echo '---RESULTS---'; find /app/results -type f; echo '---LOG---'; tail -8 /app/run.log\n"
+"sleep 40; echo '---RESULTS---'; find /app/results -type f; echo '---LOG---'; tail -6 /app/run.log\n"
+'kill 2595 2>/dev/null; sleep 1; jobs\n'
+'grep -rn "def save_results\\|def to_dict\\|.json\\|json.dump" /usr/local/lib/python3.10/site-packages/mteb/evaluation/MTEB.py | head\n'
+'grep -rn "def save_results\\|def to_dict\\|model_dump_json\\|json.dump\\|def _get_output_path\\|output_folder" /usr/local/lib/python3.10/site-packages/mteb/abstasks/*.py | head -30\n'
+'grep -rn "cosine_spearman\\|def evaluate\\|class ScoreDict\\|TaskResult\\|model_dump\\|to_dict" /usr/local/lib/python3.10/site-packages/mteb/abstasks/AbsTaskSTS.py 2>/dev/null | head\n'
+'grep -rn "cosine_spearman" /usr/local/lib/python3.10/site-packages/mteb/ 2>/dev/null | grep -v pyc | head\n'
+"python3 - <<'EOF'\nimport time\nfrom sentence_transformers import SentenceTransformer\nt=time.time()\nm = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')\nprint('loaded in', round(time.time()-t,2),'s', flush=True)\nsents=['this is a test sentence number %d about something meaningful to encode properly'%i for i in range(2000)]\nt=time.time()\ne=m.encode(sents, batch_size=32, show_progress_bar=False, convert_to_numpy=True)\nprint('encoded', e.shape, 'in', round(time.time()-t,2),'s', flush=True)\nEOF\n"
+"sed -n '560,740p' /usr/local/lib/python3.10/site-packages/mteb/evaluation/MTEB.py\n"
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

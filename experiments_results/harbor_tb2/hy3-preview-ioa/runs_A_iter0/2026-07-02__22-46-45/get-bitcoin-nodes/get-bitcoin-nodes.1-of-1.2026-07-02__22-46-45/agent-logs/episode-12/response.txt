@@ -1,0 +1,10 @@
+{
+  "analysis": "Patch confirmed (lines 142, 157, 160, 221, 224). Service restarted, P2P reconnected to the Bitcoin network. Now re-test to confirm invalid block/tx return 404 with the error schema, and that valid endpoints still work.",
+  "plan": "Run a focused test: hit /status, a valid block, a valid tx, and invalid block/tx expecting 404. Confirm the error schema shape.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"\nimport requests as r\nB='http://127.0.0.1:5000'\nh='00000000000000000001ff479f59fad262511577ca386061c3c4c7d2aa3a7506'\nprint('status', r.get(B+'/status',timeout=20).json())\nb=r.get(B+'/block/'+h,timeout=30).json(); print('block keys', sorted(b.keys()))\nt=r.get(B+'/transaction/'+b['tx'][0],timeout=30).json(); print('tx keys', sorted(t.keys()))\nfor p in ['/block/deadbeef','/transaction/deadbeef']:\n    e=r.get(B+p,timeout=20); print('ERR', p, e.status_code, e.json())\n\"\n",
+      "duration": 40
+    }
+  ]
+}

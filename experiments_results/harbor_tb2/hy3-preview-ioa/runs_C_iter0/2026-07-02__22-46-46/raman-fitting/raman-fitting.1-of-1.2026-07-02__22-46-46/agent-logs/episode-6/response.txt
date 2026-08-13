@@ -1,0 +1,10 @@
+{
+  "analysis": "The data covers x from 1648 to 47183 with y from 40 to 79400. There's one very large peak at x~19139 (y=79400). I need to understand the full spectrum shape to locate both G and 2D peaks. The single-peak detection with a high threshold isn't enough - let me explore more thoroughly with a lower threshold and a coarse view of the spectrum.",
+  "plan": "Write a better exploration: find peaks with a lower height threshold, and print a coarse ASCII overview of the spectrum to see where the G and 2D peaks are. This will clarify the model and the x-positions of both peaks.",
+  "commands": [
+    {
+      "keystrokes": "cat > explore.py << 'EOF'\nimport numpy as np\nfrom scipy.signal import find_peaks\n\nd = np.loadtxt('graphene.dat', delimiter=None, converters={0: lambda s: float(str(s).replace(',','.')), 1: lambda s: float(str(s).replace(',','.'))})\nx = d[:,0]; y = d[:,1]\no = np.argsort(x); x=x[o]; y=y[o]\npk,_ = find_peaks(y, height=y.max()*0.03, distance=10)\nprint('num peaks', len(pk))\nfor p in pk:\n    print('peak x=%.2f y=%.1f' % (x[p], y[p]))\n# coarse overview\nnb=60\nedges=np.linspace(x.min(),x.max(),nb+1)\nfor i in range(nb):\n    m=(x>=edges[i])&(x<edges[i+1])\n    if m.sum()==0: continue\n    print('%.0f-%.0f  ymax=%.0f' % (edges[i],edges[i+1],y[m].max()))\nEOF\npython3 explore.py\n",
+      "duration": 3.0
+    }
+  ]
+}

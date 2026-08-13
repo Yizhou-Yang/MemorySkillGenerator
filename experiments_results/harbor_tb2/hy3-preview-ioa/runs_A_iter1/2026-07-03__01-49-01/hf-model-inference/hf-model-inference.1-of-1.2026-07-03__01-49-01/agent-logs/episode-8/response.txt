@@ -1,0 +1,18 @@
+{
+  "analysis": "The model downloaded successfully and was saved to /app/model_cache/sentiment_model (files: tokenizer_config.json, model.safetensors, config.json, tokenizer.json). The disk space warnings are spurious - the files saved correctly. Now I need to create the Flask API app.",
+  "plan": "Create the Flask app that loads the model from the local directory. It should expose POST /sentiment, return sentiment + confidence scores, and handle errors. Then run it in background and create a test script.",
+  "commands": [
+    {
+      "keystrokes": "ls -la /app/model_cache/sentiment_model/\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cat > /app/app.py << 'EOF'\nimport os\nimport json\nimport torch\nfrom flask import Flask, request, jsonify\nfrom transformers import AutoModelForSequenceClassification, AutoTokenizer\n\nMODEL_DIR = \"/app/model_cache/sentiment_model\"\n\nprint(\"Loading model from\", MODEL_DIR, flush=True)\ntokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)\nmodel = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)\nmodel.eval()\nprint(\"Model loaded.\", flush=True)\n\napp = Flask(__name__)\n\nLABELS = {0: \"negative\", 1: \"positive\"}\n\ndef softmax(logits):\n    probs = torch.softmax(logits, dim=-1)\n    return probs.detach().cpu().numpy()[0]\n\n@app.route(\"/sentiment\", methods=[\"POST\"])\ndef sentiment():\n    try:\n        data = request.get_json(silent=True)\n        if not data or \"text\" not in data:\n            return jsonify({\"error\": \"Missing 'text' field in request body\"}), 400\n        text = data[\"text\"]\n        if not isinstance(text, str) or not text.strip():\n            return jsonify({\"error\": \"'text' must be a non-empty string\"}), 400\n    except Exception as e:\n        return jsonify({\"error\": f\"Invalid JSON: {e}\"}), 400\n\n    try:\n        inputs = tokenizer(text, return_tensors=\"pt\", truncation=True, max_length=512)\n        with torch.no_grad():\n            logits = model(**inputs).logits\n        probs = softmax(logits)\n        pos = float(probs[1])\n        neg = float(probs[0])\n        pred = int(probs.argmax())\n        sentiment_label = LABELS[pred]\n        return jsonify({\n            \"sentiment\": sentiment_label,\n            \"confidence\": {\n                \"positive\": round(pos, 6),\n                \"negative\": round(neg, 6),\n            },\n        })\n    except Exception as e:\n        return jsonify({\"error\": f\"Inference failed: {e}\"}), 500\n\n@app.route(\"/health\", methods=[\"GET\"])\ndef health():\n    return jsonify({\"status\": \"ok\"})\n\nif __name__ == \"__main__\":\n    app.run(host=\"0.0.0.0\", port=5000)\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "head -5 /app/app.py\n",
+      "duration": 0.1
+    }
+  ]
+}

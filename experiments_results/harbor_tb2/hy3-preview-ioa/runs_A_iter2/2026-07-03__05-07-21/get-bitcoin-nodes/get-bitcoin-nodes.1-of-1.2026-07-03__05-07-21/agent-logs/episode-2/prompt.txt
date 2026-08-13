@@ -1,0 +1,131 @@
+New Terminal Output:
+
+root@465f00b73b9d:/app# cat > /app/bitcoin_service.py << 'PYEOF'
+> #!/usr/bin/env python3
+> """Bitcoin blockchain data service.
+>
+> Exposes a Flask API that connects to a local Bitcoin Core node via JSON-RPC
+> and returns blockchain data (blocks, transactions, network status).
+> """
+> import os
+> import re
+> import sys
+> import json
+> import requests
+> from flask import Flask, jsonify
+>
+> # RPC configuration for the local Bitcoin Core node.
+> RPC_HOST = os.environ.get("BITCOIN_RPC_HOST", "127.0.0.1")
+> RPC_PORT = int(os.environ.get("BITCOIN_RPC_PORT", "8332"))
+> RPC_USER = os.environ.get("BITCOIN_RPC_USER", "user")
+> RPC_PASSWORD = os.environ.get("BITCOIN_RPC_PASSWORD", "password")
+> RPC_URL = "http://{}:{}".format(RPC_HOST, RPC_PORT)
+> # Bitcoin P2P network port (informational / connection target).
+> P2P_PORT = int(os.environ.get("BITCOIN_P2P_PORT", "8333"))
+>
+> app = Flask(__name__)
+>
+> # Regex for a 64-char hex Bitcoin hash / txid.
+> HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
+>
+>
+> def _rpc(method, params=None):
+>     """Call a Bitcoin Core JSON-RPC method. Returns the result dict, or None on error."""
+>     payload = {"jsonrpc": "1.0", "id": "curltext", "method": method,
+>                "params": params or []}
+>     try:
+>         resp = requests.post(
+>             RPC_URL, json=payload, auth=(RPC_USER, RPC_PASSWORD),
+>             timeout=10)
+>         resp.raise_for_status()
+>         data = resp.json()
+>     except Exception:
+>         return None
+>     if "error" in data and data["error"] is not None:
+>         return None
+>     return data.get("result")
+>
+>
+> def _connected():
+>     """Return True if the node responds to RPC."""
+>     return _rpc("getnetworkinfo") is not None
+>
+>
+> def _hex(v):
+>     """Convert a bytes/hex value to a hex string."""
+>     if isinstance(v, bytes):
+>         return v.hex()
+>     if isinstance(v, str):
+>         return v
+>     return str(v)
+>
+>
+> @app.route("/status", methods=["GET"])
+> def status():
+>     info = _rpc("getnetworkinfo")
+>     if info is None:
+>         return jsonify({"error": "Not connected to the Bitcoin network"}), 503
+>     return jsonify({"status": "online"}), 200
+>
+>
+> @app.route("/block/<block_hash>", methods=["GET"])
+> def block(block_hash):
+>     if not HEX64.match(block_hash):
+>         return jsonify({"error": "Invalid block hash"}), 404
+>     if not _connected():
+>         return jsonify({"error": "Not connected to the Bitcoin network"}), 503
+>     blk = _rpc("getblock", [block_hash])
+>     if blk is None:
+>         return jsonify({"error": "Block not found"}), 404
+>     return jsonify({
+>         "hash": _hex(blk.get("hash", "")),
+>         "height": blk.get("height", 0),
+>         "merkleroot": _hex(blk.get("merkleroot", "")),
+>         "time": blk.get("time", 0),
+>         "nonce": blk.get("nonce", 0),
+>         "tx": [_hex(t) for t in blk.get("tx", [])],
+>     }), 200
+>
+>
+> @app.route("/transaction/<txid>", methods=["GET"])
+> def transaction(txid):
+>     if not HEX64.match(txid):
+>         return jsonify({"error": "Invalid transaction id"}), 404
+>     if not _connected():
+>         return jsonify({"error": "Not connected to the Bitcoin network"}), 503
+>     raw = _rpc("getrawtransaction", [txid, True])
+>     if raw is None:
+>         return jsonify({"error": "Transaction not found"}), 404
+>     vin = []
+>     for inp in raw.get("vin", []):
+>         entry = {"sequence": inp.get("sequence", 0)}
+>         if "coinbase" in inp:
+>             entry["coinbase"] = inp["coinbase"]
+>         vin.append(entry)
+>     vout = []
+>     for out in raw.get("vout", []):
+>         spk = out.get("scriptPubKey", {})
+>         vout.append({
+>             "value": out.get("value", 0),
+>             "n": out.get("n", 0),
+>             "scriptPubKey": {
+>                 "asm": spk.get("asm", ""),
+>                 "hex": spk.get("hex", ""),
+>                 "type": spk.get("type", ""),
+>             },
+>         })
+>     return jsonify({
+>         "txid": _hex(raw.get("txid", "")),
+>         "blockhash": _hex(raw.get("blockhash", "")),
+>         "vin": vin,
+>         "vout": vout,
+>     }), 200
+>
+>
+> if __name__ == "__main__":
+>     app.run(host="127.0.0.1", port=5000)
+> PYEOF
+root@465f00b73b9d:/app# ls -la /app/bitcoin_service.py && python3 -c "import ast; ast.parse(open('/app/bitcoin_service.py').read()); print('syntax ok')"
+-rw-r--r-- 1 root root 3903 Jul  2 22:43 /app/bitcoin_service.py
+syntax ok
+root@465f00b73b9d:/app#

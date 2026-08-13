@@ -1,0 +1,14 @@
+{
+  "analysis": "Found the real bug. `import fasttext` and even training/saving/loading work fine. The failure happens in `predict`: `FastText.py` line 239 uses `np.array(probs, copy=False)`, which is incompatible with NumPy 2.0. In NumPy 2.0, `np.array(obj, copy=False)` raises a ValueError whenever a copy is actually required. The fix is to replace `np.array(..., copy=False)` with `np.asarray(...)`. Let me find all such occurrences in the file.",
+  "plan": "1. Grep for all `copy=False` usages in FastText.py. 2. Replace them with `np.asarray(...)` (or simply `np.asarray`). 3. Re-run the predict test to confirm it works.",
+  "commands": [
+    {
+      "keystrokes": "grep -n 'copy=False' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "grep -n 'np.array' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py\n",
+      "duration": 0.2
+    }
+  ]
+}

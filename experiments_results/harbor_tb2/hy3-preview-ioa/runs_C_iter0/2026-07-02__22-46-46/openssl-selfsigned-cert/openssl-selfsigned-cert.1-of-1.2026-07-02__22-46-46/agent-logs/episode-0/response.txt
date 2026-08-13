@@ -1,0 +1,54 @@
+{
+  "analysis": "Fresh shell at /app. Nothing has been created yet. I need to create the SSL directory, generate a 2048-bit RSA key, create a self-signed certificate, combine into a PEM, write a verification file, and create a Python check script.",
+  "plan": "1. Create /app/ssl. 2. Generate RSA key and set 600 perms. 3. Generate self-signed cert valid 365 days with given O and CN. 4. Concatenate key+cert to server.pem. 5. Build verification.txt with subject, dates, SHA-256 fingerprint. 6. Write check_cert.py via heredoc and run it to confirm. Then verify everything.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /app/ssl\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "openssl genrsa -out /app/ssl/server.key 2048\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "chmod 600 /app/ssl/server.key\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "openssl req -x509 -new -nodes -key /app/ssl/server.key -sha256 -days 365 -out /app/ssl/server.crt -subj \"/O=DevOps Team/CN=dev-internal.company.local\"\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "cat /app/ssl/server.key /app/ssl/server.crt > /app/ssl/server.pem\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "printf '=== Certificate Verification ===\\n' > /app/ssl/verification.txt\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "echo \"Subject:\" >> /app/ssl/verification.txt\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "openssl x509 -in /app/ssl/server.crt -noout -subject >> /app/ssl/verification.txt\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "echo \"Validity:\" >> /app/ssl/verification.txt\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "openssl x509 -in /app/ssl/server.crt -noout -dates >> /app/ssl/verification.txt\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "echo \"SHA-256 Fingerprint:\" >> /app/ssl/verification.txt\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "openssl x509 -in /app/ssl/server.crt -noout -fingerprint -sha256 >> /app/ssl/verification.txt\n",
+      "duration": 0.1
+    }
+  ]
+}

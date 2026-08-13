@@ -1,0 +1,26 @@
+{
+  "analysis": "The launcher script and checker were never written to disk (the earlier heredocs didn't take effect — only stale output is present). I need to recreate /app/run-qemu.sh and /app/wait-ready.py, then launch qemu and verify the telnet listener and qemu.log.",
+  "plan": "1. Recreate /app/run-qemu.sh (background qemu, TCG, serial on telnet 6665) and /app/wait-ready.py. 2. Launch it and confirm port 6665 is listening and qemu.log has no errors.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/run-qemu.sh << 'EOF'\n#!/bin/bash\nnohup qemu-system-x86_64 \\\n  -m 2048 \\\n  -kernel /app/extracted/VMLINUZ_LTS \\\n  -initrd /app/extracted/INTEL_UCODE.IMG,/app/extracted/AMD_UCODE.IMG,/app/extracted/INITRAMFS_LTS \\\n  -append \"modules=loop,squashfs,sd-mod,usb-storage console=ttyS0 quiet\" \\\n  -cdrom /app/alpine.iso \\\n  -display none \\\n  -serial telnet:127.0.0.1:6665,server,nowait \\\n  -monitor none \\\n  > /app/qemu.log 2>&1 &\necho \"qemu pid $!\"\nEOF\nchmod +x /app/run-qemu.sh\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /app/wait-ready.py << 'PYEOF'\nimport socket, sys, time\nHOST, PORT = \"127.0.0.1\", 6665\ndeadline = time.time() + 30\nwhile time.time() < deadline:\n    try:\n        s = socket.create_connection((HOST, PORT), timeout=5)\n        break\n    except Exception:\n        time.sleep(1)\nelse:\n    print(\"FAILED: cannot connect to telnet port\")\n    sys.exit(1)\ns.settimeout(3)\nbuf = b\"\"\nstart = time.time()\nwhile time.time() - start < 280:\n    try:\n        d = s.recv(4096)\n    except socket.timeout:\n        continue\n    if not d:\n        time.sleep(1)\n        continue\n    buf += d\n    if b\"login\" in buf.lower():\n        sys.stdout.write(buf.decode(\"latin-1\", \"replace\")[-800:])\n        print(\"\\n\\nREADY: login prompt detected on telnet 6665\")\n        s.close()\n        sys.exit(0)\nprint(\"TIMEOUT. Last received data:\")\nprint(buf.decode(\"latin-1\", \"replace\")[-800:])\nsys.exit(2)\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ls -la /app/run-qemu.sh /app/wait-ready.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "/app/run-qemu.sh\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 1; (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep 6665; echo '--- log ---'; cat /app/qemu.log\n",
+      "duration": 1.5
+    }
+  ]
+}

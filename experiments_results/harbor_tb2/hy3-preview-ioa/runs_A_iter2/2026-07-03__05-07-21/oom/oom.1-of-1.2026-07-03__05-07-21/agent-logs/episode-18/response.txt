@@ -1,0 +1,14 @@
+{
+  "analysis": "The verification command failed because bash history expansion triggered on the `!` in the string. I need to avoid `!` in interactive commands. I'll write the verification to a Python file and run it, which sidesteps the issue.",
+  "plan": "1. Write a small Python script (verify.py) that loads the model and tokenizer with local_files_only=True and runs a forward pass. 2. Run it to confirm the cached model+tokenizer work fully offline.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/verify.py << 'EOF'\nimport transformers as T\nm = T.AlbertModel.from_pretrained('albert-base-v2', local_files_only=True)\ntok = T.AlbertTokenizer.from_pretrained('albert-base-v2', local_files_only=True)\nout = m(**tok('Hello, offline world', return_tensors='pt'))\nprint('OK model+tokenizer loaded offline:', tuple(out.last_hidden_state.shape))\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /tmp/verify.py\n",
+      "duration": 20.0
+    }
+  ]
+}

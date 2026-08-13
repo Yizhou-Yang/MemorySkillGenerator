@@ -1,0 +1,20 @@
+The select-based driver produced 0 bytes while the synchronous `t.py` (direct blocking reads) captured output perfectly. I'll switch to a synchronous driver modeled on the proven `t.py`.
+
+{
+  "analysis": "transcript.txt is 0 bytes from play5 (select-based), but t.py (synchronous blocking reads) captured frotz's output correctly. The proven pattern is synchronous blocking reads after each command. I'll build a synchronous driver modeled exactly on t.py: for each command, write it, wait, then do a blocking read and append to the transcript. After the final 'quit'/'y', I'll send one trailing newline so frotz exits and the last read returns EOF. This avoids the 30s deadline wait and reliably captures output.",
+  "plan": "1) Write /app/play6.py using synchronous blocking reads (t.py pattern). 2) Run it on the opening command file. 3) Read the transcript to confirm the opening sequence reaches the Cellar. If good, I'll build the full walkthrough.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/play6.py <<'PYEOF'\nimport os, pty, sys, time, pwd\n\ndef main():\n    cmds = [c for c in open(sys.argv[1]).read().split('\\n') if c.strip() != '']\n    uid = pwd.getpwnam('player').pw_uid\n    gid = pwd.getpwnam('player').pw_gid\n    pid, fd = pty.fork()\n    if pid == 0:\n        os.setgid(gid)\n        os.setuid(uid)\n        os.environ['TERM'] = 'dumb'\n        os.environ['LINES'] = '40'\n        os.environ['COLUMNS'] = '80'\n        os.execv('/app/frotz/frotz', ['frotz', '/app/frotz/zork1.z5'])\n    out = open('/app/transcript.txt', 'wb')\n    time.sleep(1.0)\n    def read_one():\n        try:\n            return os.read(fd, 65536)\n        except OSError:\n            return b''\n    # initial banner read\n    time.sleep(0.3)\n    out.write(read_one())\n    for c in cmds:\n        os.write(fd, (c + '\\n').encode())\n        time.sleep(0.3)\n        d = read_one()\n        out.write(d)\n    # trailing newline to dismiss 'Hit any key to exit.'\n    os.write(fd, b'\\n')\n    time.sleep(0.4)\n    d = read_one()\n    out.write(d)\n    out.close()\n    try:\n        os.waitpid(pid, 0)\n    except Exception:\n        pass\n\nmain()\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /app/play6.py /app/cmds.txt\n",
+      "duration": 6.0
+    },
+    {
+      "keystrokes": "echo RC=$?; wc -l /app/transcript.txt\n",
+      "duration": 0.3
+    }
+  ]
+}

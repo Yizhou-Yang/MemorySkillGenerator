@@ -1,0 +1,16 @@
+The map is incomplete — only 2 open cells were found, so my explorer is desyncing. I need to see the exact raw protocol. Let me probe the server directly.
+
+{
+  "analysis": "The explorer produced a tiny 3x3 map (OPEN:2) but the real maze is 5x5, meaning my DFS desynced after a couple of moves. I need to see the exact raw I/O format from the server (whether each result is on its own line or prefixed with the prompt, etc.) before trusting my parser.",
+  "plan": "Write a small probe script that launches the server and prints repr() of each raw line read, including the welcome lines and the first few command responses. This will reveal the true line format so I can fix getres/parsing.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/probe.py << 'EOF'\nimport subprocess\np=subprocess.Popen(['python3','-u','/protected/maze_server.py'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,bufsize=1)\nfor i in range(6):\n    print(i, repr(p.stdout.readline()))\np.stdin.write('move N\\n'); p.stdin.flush()\nprint('N', repr(p.stdout.readline()))\np.stdin.write('move S\\n'); p.stdin.flush()\nprint('S', repr(p.stdout.readline()))\np.stdin.write('move S\\n'); p.stdin.flush()\nprint('S2', repr(p.stdout.readline()))\np.stdin.write('move N\\n'); p.stdin.flush()\nprint('N2', repr(p.stdout.readline()))\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/probe.py\n",
+      "duration": 1.0
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "analysis": "verification.txt is created with subject, validity dates (both OpenSSL and YYYY-MM-DD), and SHA-256 fingerprint. The subject line has a 'subject=' prefix which I'll clean up. Now I need to create the Python check script.",
+  "plan": "Regenerate verification.txt with the 'subject=' prefix stripped for cleanliness. Then write /app/check_cert.py which loads the cert, prints CN and expiration, and prints success. Then run it to confirm it works.",
+  "commands": [
+    {
+      "keystrokes": "SUBJ=$(openssl x509 -in /app/ssl/server.crt -noout -subject | sed 's/^subject=//'); NB=$(openssl x509 -in /app/ssl/server.crt -noout -startdate | cut -d= -f2); NA=$(openssl x509 -in /app/ssl/server.crt -noout -enddate | cut -d= -f2); FP=$(openssl x509 -in /app/ssl/server.crt -noout -fingerprint -sha256 | cut -d= -f2); NBD=$(date -u -d \"$NB\" +%Y-%m-%d); NAD=$(date -u -d \"$NA\" +%Y-%m-%d); printf 'Subject: %s\\nNot Before: %s (%s)\\nNot After: %s (%s)\\nSHA-256 Fingerprint: %s\\n' \"$SUBJ\" \"$NB\" \"$NBD\" \"$NA\" \"$NAD\" \"$FP\" > /app/ssl/verification.txt\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /app/check_cert.py << 'EOF'\n#!/usr/bin/env python3\nimport ssl\nimport subprocess\nimport sys\n\nCERT_PATH = \"/app/ssl/server.crt\"\n\n\ndef main():\n    # Verify the certificate file exists and can be loaded\n    try:\n        with open(CERT_PATH, \"rb\") as f:\n            cert_data = f.read()\n    except FileNotFoundError:\n        print(f\"Error: certificate file not found at {CERT_PATH}\")\n        sys.exit(1)\n\n    # Use openssl to parse the certificate (loads/validates it)\n    result = subprocess.run(\n        [\"openssl\", \"x509\", \"-in\", CERT_PATH, \"-noout\",\n         \"-subject\", \"-enddate\"],\n        capture_output=True, text=True,\n    )\n    if result.returncode != 0:\n        print(\"Error: failed to load certificate\")\n        print(result.stderr)\n        sys.exit(1)\n\n    subject = \"\"\n    enddate = \"\"\n    for line in result.stdout.splitlines():\n        if line.startswith(\"subject=\"):\n            subject = line[len(\"subject=\"):].strip()\n        elif line.startswith(\"notAfter=\"):\n            enddate = line[len(\"notAfter=\"):].strip()\n\n    # Extract Common Name from the subject\n    common_name = \"\"\n    for part in subject.split(\",\"):\n        part = part.strip()\n        if part.startswith(\"CN =\"):\n            common_name = part.split(\"=\", 1)[1].strip()\n        elif part.startswith(\"CN=\"):\n            common_name = part.split(\"=\", 1)[1].strip()\n\n    # Convert expiration to YYYY-MM-DD\n    exp_result = subprocess.run(\n        [\"date\", \"-u\", \"-d\", enddate, \"+%Y-%m-%d\"],\n        capture_output=True, text=True,\n    )\n    expiration = exp_result.stdout.strip() if exp_result.returncode == 0 else enddate\n\n    print(f\"Common Name: {common_name}\")\n    print(f\"Expiration Date: {expiration}\")\n    print(\"Certificate verification successful\")\n\n\nif __name__ == \"__main__\":\n    main()\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /app/check_cert.py\n",
+      "duration": 0.5
+    }
+  ]
+}

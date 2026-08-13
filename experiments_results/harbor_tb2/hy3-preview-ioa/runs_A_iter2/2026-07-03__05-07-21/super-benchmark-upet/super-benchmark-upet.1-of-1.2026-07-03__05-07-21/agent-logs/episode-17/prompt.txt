@@ -1,0 +1,82 @@
+New Terminal Output:
+
+root@7bcf8a0cf7c8:/app/UPET# grep -n 'class Roberta\|past_key_value\|prompt_tokens\|prefix' model/head_for_sequence_classification.py | head -40
+15:from model.prefix_encoder import PrefixEncoder
+140:        self.prefix_tokens = torch.arange(self.pre_seq_len).long()
+142:        self.prefix_encoder = PrefixEncoder(config)
+160:        prefix_tokens = self.prefix_tokens.unsqueeze(0).expand(batch_size, -1).to(self.bert.device)
+161:        past_key_values = self.prefix_encoder(prefix_tokens)
+162:        # bsz, seqlen, _ = past_key_values.shape
+163:        past_key_values = past_key_values.view(
+170:        past_key_values = self.dropout(past_key_values)
+171:        past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(2)
+172:        return past_key_values
+190:        past_key_values = self.get_prompt(batch_size=batch_size)
+191:        prefix_attention_mask = torch.ones(batch_size, self.pre_seq_len).to(self.bert.device)
+192:        attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+204:            past_key_values=past_key_values,
+266:        self.prefix_tokens = torch.arange(self.pre_seq_len).long()
+267:        self.prefix_encoder = torch.nn.Embedding(self.pre_seq_len, config.hidden_size)
+276:        prefix_tokens = self.prefix_tokens.unsqueeze(0).expand(batch_size, -1).to(self.bert.device)
+277:        prompts = self.prefix_encoder(prefix_tokens)
+303:        prefix_attention_mask = torch.ones(batch_size, self.pre_seq_len).to(self.bert.device)
+304:        attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+316:            # past_key_values=past_key_values,
+415:            # past_key_values=past_key_values,
+556:class RobertaPrefixForSequenceClassification(RobertaPreTrainedModel):
+576:        self.prefix_tokens = torch.arange(self.pre_seq_len).long()
+577:        self.prefix_encoder = PrefixEncoder(config)
+596:        prefix_tokens = self.prefix_tokens.unsqueeze(0).expand(batch_size, -1).to(self.roberta.device)
+597:        # print("prefix_tokens.shape=", prefix_tokens.shape)
+598:        past_key_values = self.prefix_encoder(prefix_tokens)
+599:        # print("past_key_values[0].shape=", past_key_values[0].shape)
+600:        past_key_values = past_key_values.view(
+607:        # print("past_key_values[0].shape=", past_key_values[0].shape)
+608:        past_key_values = self.dropout(past_key_values)
+609:        past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(2)
+610:        # print("past_key_values[0].shape=", past_key_values[0].shape)
+611:        return past_key_values
+630:        past_key_values = self.get_prompt(batch_size=batch_size)
+631:        prefix_attention_mask = torch.ones(batch_size, self.pre_seq_len).to(self.roberta.device)
+632:        attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+633:        # print("prefix_attention_mask.shape=", prefix_attention_mask.shape)
+645:            past_key_values=past_key_values,
+root@7bcf8a0cf7c8:/app/UPET# sed -n '1,40p' model/prefix_encoder.py
+import torch
+
+# from transformers.models.bart.modeling_bart import BartForConditionalGeneration
+# from transformers.models.bert.modeling_bert import BertForSequenceClassification
+
+# model = BartForConditionalGeneration(None)
+
+
+
+class PrefixEncoder(torch.nn.Module):
+    r'''
+    The torch.nn model to encode the prefix
+
+    Input shape: (batch-size, prefix-length)
+
+    Output shape: (batch-size, prefix-length, 2*layers*hidden)
+    '''
+    def __init__(self, config):
+        super().__init__()
+        self.prefix_projection = config.prefix_projection
+        if self.prefix_projection:
+            # Use a two-layer MLP to encode the prefix
+            self.embedding = torch.nn.Embedding(config.pre_seq_len, config.hidden_size)
+            self.trans = torch.nn.Sequential(
+                torch.nn.Linear(config.hidden_size, config.prefix_hidden_size),
+                torch.nn.Tanh(),
+                torch.nn.Linear(config.prefix_hidden_size, config.num_hidden_layers * 2 * config.hidden_size)
+            )
+        else:
+            self.embedding = torch.nn.Embedding(config.pre_seq_len, config.num_hidden_layers * 2 * config.hidden_size)
+
+    def forward(self, prefix: torch.Tensor):
+        if self.prefix_projection:
+            prefix_tokens = self.embedding(prefix) # [pre_seq_len, hidden_dim]
+            past_key_values = self.trans(prefix_tokens)
+        else:
+            past_key_values = self.embedding(prefix)
+        return past_key_valuesroot@7bcf8a0cf7c8:/app/UPET#

@@ -1,0 +1,14 @@
+{
+  "analysis": "I have 215 .deb URLs (~144MB) in /tmp/uris.txt with format `'url' filename size MD5Sum:hash`. Since apt's statvfs free-space check is broken by the fuse-overlayfs quirk (but the disk is actually fine — I wrote 200MB successfully), I'll bypass apt's installer: download the debs with python, then install with `dpkg -i` which does no such check. I dropped python3-pip (will get yt-dlp as a standalone script instead) to keep size reasonable.",
+  "plan": "1) Write a python downloader (/tmp/dl.py) that parses the URI lines, downloads all debs concurrently to /app/aptcache, verifies size. 2) Run it. 3) Then install the debs with dpkg -i. Let me write and launch the downloader first.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/dl.py <<'PYEOF'\nimport concurrent.futures, re, os, urllib.request\n\ndest = '/app/aptcache'\nos.makedirs(dest, exist_ok=True)\nuris = []\nwith open('/tmp/uris.txt') as f:\n    for line in f:\n        line = line.strip()\n        if not line.startswith(\"'http\"):\n            continue\n        m = re.match(r\"'([^']+)'\\s+(\\S+)\\s+(\\d+)\\s\", line)\n        if m:\n            uris.append((m.group(1), m.group(2), int(m.group(3))))\n\nprint('urls', len(uris))\n\ndef fetch(item):\n    url, name, size = item\n    path = os.path.join(dest, name)\n    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})\n    try:\n        data = urllib.request.urlopen(req, timeout=90).read()\n        with open(path, 'wb') as fh:\n            fh.write(data)\n        if len(data) != size:\n            return name, 'SIZEMISMATCH %d!=%d' % (len(data), size)\n        return name, 'ok'\n    except Exception as e:\n        return name, 'FAIL:%s' % e\n\nok = 0\nwith concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:\n    for name, status in ex.map(fetch, uris):\n        if status != 'ok':\n            print('FAILED', name, status)\n        else:\n            ok += 1\nprint('done ok=', ok)\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /tmp/dl.py\n",
+      "duration": 60.0
+    }
+  ]
+}

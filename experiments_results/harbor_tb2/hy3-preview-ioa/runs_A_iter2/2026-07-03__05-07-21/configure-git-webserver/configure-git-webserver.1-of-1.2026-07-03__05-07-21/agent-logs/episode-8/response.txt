@@ -1,0 +1,9 @@
+{
+  "analysis": "Root cause found: the fuse-overlayfs root filesystem misreports '0 available' via statvfs, even though real writes succeed (I just wrote a 100MB file fine). apt's pre-flight disk-space check trusts statvfs on the apt archives dir and aborts. The error specifically names /var/cache/apt/archives. I can work around this by mounting a tmpfs (which reports real free space) over that directory so apt's space check passes, while the actual install writes to the real filesystem.",
+  "plan": "1) Mount a 512M tmpfs at /var/cache/apt/archives so statvfs reports free space. 2) Retry installing git and openssh-server with --no-install-recommends. This should now pass the space check and install successfully. Then I'll proceed to configure the git server.",
+  "commands": [
+    {"keystrokes": "mount -t tmpfs -o size=512M tmpfs /var/cache/apt/archives && df -h /var/cache/apt/archives\n", "duration": 0.5},
+    {"keystrokes": "apt-get install -y --no-install-recommends git openssh-server 2>&1 | tail -15\n", "duration": 60}
+  ],
+  "task_complete": false
+}

@@ -1,0 +1,14 @@
+{
+  "analysis": "The disk is NOT actually full — I just wrote 200MB to /app successfully. The fuse-overlayfs reports bavail=0 / 'Use% 100%' as a statvfs quirk, and apt's free-space check (which I tried to disable with APT::NoCheck-Space) keeps refusing anyway. Since python can download to disk fine, I'll bypass apt's installer entirely: use `apt-get install --print-uris` to list the .deb download URLs, fetch them with python, then install with `dpkg -i` (which doesn't do this statvfs check). I'll drop python3-pip and instead get yt-dlp as a standalone script to reduce packages.",
+  "plan": "1) Generate the list of .deb URLs for ffmpeg + tesseract via `apt-get install --print-uris` (this does NOT download and won't trigger the space check). 2) Inspect the output format and total size. Then in the next batch I'll write a python downloader and dpkg-install them.",
+  "commands": [
+    {
+      "keystrokes": "apt-get install --print-uris --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng > /tmp/uris.txt 2>/tmp/uris.err; echo EXIT=$?\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "wc -l /tmp/uris.txt; head -3 /tmp/uris.txt; echo '---ERR---'; cat /tmp/uris.err\n",
+      "duration": 0.3
+    }
+  ]
+}

@@ -1,0 +1,535 @@
+root@13028e079751:/app# ls -la /app
+total 588
+drwxr-xr-x  2 root root   4096 Jul  2 13:59 .
+drwxr-xr-x 19 root root   4096 Jul  2 16:42 ..
+-rw-r--r--  1 root root  79506 Jul  2 13:59 cJSON.c
+-rw-r--r--  1 root root  16393 Jul  2 13:59 cJSON.h
+-rw-r--r--  1 root root    389 Jul  2 13:59 image.png
+-rw-r--r--  1 root root 311873 Jul  2 13:59 lodepng.cpp
+-rw-r--r--  1 root root 107788 Jul  2 13:59 lodepng.h
+-rw-r--r--  1 root root  54714 Jul  2 13:59 model.pth
+-rw-r--r--  1 root root    681 Jul  2 13:59 model.py
+root@13028e079751:/app# cat /app/model.py
+import torch
+import torch.nn as nn
+
+
+class MnistModel(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        num_classes: int,
+    ) -> torch.nn.Module:
+        super().__init__()
+
+        self.input_layer = nn.Linear(input_dim, hidden_dim)
+        self.hidden_layer = nn.Linear(hidden_dim, hidden_dim)
+        self.output_layer = nn.Linear(hidden_dim, num_classes)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        x = self.input_layer(x)
+        x = self.activation(x)
+
+        x = self.hidden_layer(x)
+        x = self.activation(x)
+
+        x = self.output_layer(x)
+        return x
+root@13028e079751:/app# which python3; python3 -c 'import torch; print(torch.__version__)' 2>&1 | head
+/usr/local/bin/python3
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import torch; print(torch.__version__)
+    ^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'torch'
+root@13028e079751:/app# file /app/model.pth; xxd /app/model.pth | head -5
+bash: file: command not found
+bash: xxd: command not found
+root@13028e079751:/app# head -c 4 /app/model.pth | od -c
+0000000   P   K 003 004
+0000004
+root@13028e079751:/app# python3 -c "import zipfile; print(zipfile.is_zipfile('/app/model.pth'))"
+True
+pip --version 2>&1 | head -1
+root@13028e079751:/app# pip --version 2>&1 | head -1
+pip 24.3.1 from /usr/local/lib/python3.13/site-packages/pip (python 3.13)
+root@13028e079751:/app# python3 -c 'import numpy; print(numpy.__version__)' 2>&1 | head -1
+Traceback (most recent call last):
+root@13028e079751:/app# python3 -c "import zipfile; z=zipfile.ZipFile('/app/model.pth'); print(z.namelist())"
+['simple_mnist/data.pkl', 'simple_mnist/byteorder', 'simple_mnist/data/0', 'simple_mnist/data/1', 'simple_mnist/data/2', 'simple_mnist/data/3', 'simple_mnist/da
+ta/4', 'simple_mnist/data/5', 'simple_mnist/version', 'simple_mnist/.data/serialization_id']
+root@13028e079751:/app# cat > /app/convert.py << 'EOF'
+> import zipfile, struct, io, json, collections, pickle
+> from types import SimpleNamespace
+>
+> def get_flat(storage, offset, size, stride):
+>     size = tuple(size); stride = tuple(stride)
+>     if len(size) == 1:
+>         return [storage[offset + i*stride[0]] for i in range(size[0])]
+>     result = []
+>     for i in range(size[0]):
+>         result.extend(get_flat(storage, offset + i*stride[0], size[1:], stride[1:]))
+>     return result
+>
+> class MyUnpickler(pickle.Unpickler):
+>     def __init__(self, file, zf):
+>         super().__init__(file)
+>         self.zf = zf
+>     def find_class(self, module, name):
+>         if module == 'torch.storage' and name == '_get_storage_from_record':
+>             def f(key, numel, cls):
+>                 k = key if key.startswith('simple_mnist/') else 'simple_mnist/' + key
+>                 data = self.zf.read(k)
+>                 return list(struct.unpack('<%df' % numel, data))
+>             return f
+>         if module == 'torch.storage' and name == '_load_from_bytes':
+>             def f(b):
+>                 numel = len(b)//4
+>                 return list(struct.unpack('<%df' % numel, b))
+>             return f
+>         if module == 'torch._utils' and name == '_rebuild_tensor_v2':
+>             def f(storage, offset, size, stride, requires_grad=False, *rest):
+>                 t = SimpleNamespace()
+>                 t.size = tuple(size)
+>                 t.flat = get_flat(storage, offset, size, stride)
+>                 return t
+>             return f
+>         if module == 'torch._utils' and name == '_rebuild_parameter':
+>             def f(data, requires_grad=False, *rest):
+>                 return data
+>             return f
+>         if module == 'collections' and name == 'OrderedDict':
+>             return collections.OrderedDict
+>         return super().find_class(module, name)
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+> data = zf.read('simple_mnist/data.pkl')
+> sd = MyUnpickler(io.BytesIO(data), zf).load()
+> for k, v in sd.items():
+>     print(k, v.size, len(v.flat))
+>
+> order = ['input_layer','hidden_layer','output_layer']
+> layer_list = []
+> for name in order:
+>     w = sd[name + '.weight'].flat
+>     b = sd[name + '.bias'].flat
+>     rows = sd[name + '.weight'].size[0]
+>     cols = sd[name + '.weight'].size[1]
+>     layer_list.append({'rows':rows,'cols':cols,'w':w,'b':b})
+>
+> input_dim = layer_list[0]['cols']
+> hidden_dim = layer_list[0]['rows']
+> num_classes = layer_list[2]['rows']
+> out = {'input_dim':input_dim,'hidden_dim':hidden_dim,'num_classes':num_classes,'layers':layer_list}
+> with open('/app/weights.json','w') as fo:
+>     json.dump(out, fo)
+> print('written weights.json input=%d hidden=%d classes=%d' % (input_dim,hidden_dim,num_classes))
+> EOF
+root@13028e079751:/app# python3 /app/convert.py
+Traceback (most recent call last):
+  File "/app/convert.py", line 46, in <module>
+    sd = MyUnpickler(io.BytesIO(data), zf).load()
+  File "/app/convert.py", line 42, in find_class
+    return super().find_class(module, name)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'torch'
+root@13028e079751:/app# cat > /app/convert.py << 'EOF'
+> import zipfile, struct, io, json, collections, pickle
+> from types import SimpleNamespace
+>
+> def get_flat(storage, offset, size, stride):
+>     size = tuple(size); stride = tuple(stride)
+>     if len(size) == 1:
+>         return [storage[offset + i*stride[0]] for i in range(size[0])]
+>     result = []
+>     for i in range(size[0]):
+>         result.extend(get_flat(storage, offset + i*stride[0], size[1:], stride[1:]))
+>     return result
+>
+> class Dummy:
+>     pass
+>
+> class MyUnpickler(pickle.Unpickler):
+>     def __init__(self, file, zf):
+>         super().__init__(file)
+>         self.zf = zf
+>     def find_class(self, module, name):
+>         if module == 'torch.storage' and name == '_get_storage_from_record':
+>             def f(key, numel, cls):
+>                 k = key if key.startswith('simple_mnist/') else 'simple_mnist/' + key
+>                 data = self.zf.read(k)
+>                 return list(struct.unpack('<%df' % numel, data))
+>             return f
+>         if module == 'torch.storage' and name == '_load_from_bytes':
+>             def f(b):
+>                 numel = len(b)//4
+>                 return list(struct.unpack('<%df' % numel, b))
+>             return f
+>         if module == 'torch._utils' and name == '_rebuild_tensor_v2':
+>             def f(storage, offset, size, stride, requires_grad=False, *rest):
+>                 t = SimpleNamespace()
+>                 t.size = tuple(size)
+>                 t.flat = get_flat(storage, offset, size, stride)
+>                 return t
+>             return f
+>         if module == 'torch._utils' and name == '_rebuild_parameter':
+>             def f(data, requires_grad=False, *rest):
+>                 return data
+>             return f
+>         if module == 'collections' and name == 'OrderedDict':
+>             return collections.OrderedDict
+>         if module.startswith('torch'):
+>             return Dummy
+>         return super().find_class(module, name)
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+> data = zf.read('simple_mnist/data.pkl')
+> sd = MyUnpickler(io.BytesIO(data), zf).load()
+> for k, v in sd.items():
+>     print(k, v.size, len(v.flat))
+>
+> order = ['input_layer','hidden_layer','output_layer']
+> layer_list = []
+> for name in order:
+>     w = sd[name + '.weight'].flat
+>     b = sd[name + '.bias'].flat
+>     rows = sd[name + '.weight'].size[0]
+>     cols = sd[name + '.weight'].size[1]
+>     layer_list.append({'rows':rows,'cols':cols,'w':w,'b':b})
+>
+> input_dim = layer_list[0]['cols']
+> hidden_dim = layer_list[0]['rows']
+> num_classes = layer_list[2]['rows']
+> out = {'input_dim':input_dim,'hidden_dim':hidden_dim,'num_classes':num_classes,'layers':layer_list}
+> with open('/app/weights.json','w') as fo:
+>     json.dump(out, fo)
+> print('written weights.json input=%d hidden=%d classes=%d' % (input_dim,hidden_dim,num_classes))
+> EOF
+root@13028e079751:/app# python3 /app/convert.py
+Traceback (most recent call last):
+  File "/app/convert.py", line 51, in <module>
+    sd = MyUnpickler(io.BytesIO(data), zf).load()
+_pickle.UnpicklingError: A load persistent id instruction was encountered, but no persistent_load function was specified.
+root@13028e079751:/app# cat > /app/conv2.py << 'EOF'
+> import zipfile, struct, io, pickle
+> from types import SimpleNamespace
+>
+> class MyUnpickler(pickle.Unpickler):
+>     def __init__(self, file, zf):
+>         super().__init__(file)
+>         self.zf = zf
+>     def find_class(self, module, name):
+>         if module.startswith('torch'):
+>             return lambda *a, **k: None
+>         return super().find_class(module, name)
+>     def persistent_load(self, pid):
+>         print('PERSISTENT_ID:', repr(pid))
+>         return None
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+> data = zf.read('simple_mnist/data.pkl')
+> try:
+>     MyUnpickler(io.BytesIO(data), zf).load()
+> except Exception as e:
+>     print('done:', e)
+> EOF
+root@13028e079751:/app# python3 /app/conv2.py
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '0', 'cpu', 12544)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '1', 'cpu', 16)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '2', 'cpu', 256)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '3', 'cpu', 16)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '4', 'cpu', 160)
+PERSISTENT_ID: ('storage', <function MyUnpickler.find_class.<locals>.<lambda> at 0x7ffa93f66ac0>, '5', 'cpu', 10)
+root@13028e079751:/app# cat > /app/convert.py << 'EOF'
+> import zipfile, struct, io, json, collections, pickle
+> from types import SimpleNamespace
+>
+> def get_flat(storage, offset, size, stride):
+>     size = tuple(size); stride = tuple(stride)
+>     if len(size) == 1:
+>         return [storage[offset + i*stride[0]] for i in range(size[0])]
+>     result = []
+>     for i in range(size[0]):
+>         result.extend(get_flat(storage, offset + i*stride[0], size[1:], stride[1:]))
+>     return result
+>
+> class MyUnpickler(pickle.Unpickler):
+>     def __init__(self, file, zf):
+>         super().__init__(file)
+>         self.zf = zf
+>     def find_class(self, module, name):
+>         if module == 'torch._utils' and name == '_rebuild_tensor_v2':
+>             def f(storage, offset, size, stride, requires_grad=False, *rest):
+>                 t = SimpleNamespace()
+>                 t.size = tuple(size)
+>                 t.flat = get_flat(storage, offset, size, stride)
+>                 return t
+>             return f
+>         if module.startswith('torch'):
+>             return lambda *a, **k: None
+>         return super().find_class(module, name)
+>     def persistent_load(self, pid):
+>         # ('storage', storage_cls, key, 'cpu', numel)
+>         kind, cls, key, device, numel = pid
+>         k = 'simple_mnist/data/' + key
+>         data = self.zf.read(k)
+>         vals = list(struct.unpack('<%df' % (len(data)//4), data))
+>         return vals
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+> data = zf.read('simple_mnist/data.pkl')
+> sd = MyUnpickler(io.BytesIO(data), zf).load()
+> for k, v in sd.items():
+>     print(k, v.size, len(v.flat))
+>
+> order = ['input_layer','hidden_layer','output_layer']
+> layer_list = []
+> for name in order:
+>     w = sd[name + '.weight'].flat
+>     b = sd[name + '.bias'].flat
+>     rows = sd[name + '.weight'].size[0]
+>     cols = sd[name + '.weight'].size[1]
+>     layer_list.append({'rows':rows,'cols':cols,'w':w,'b':b})
+>
+> input_dim = layer_list[0]['cols']
+> hidden_dim = layer_list[0]['rows']
+> num_classes = layer_list[2]['rows']
+> out = {'input_dim':input_dim,'hidden_dim':hidden_dim,'num_classes':num_classes,'layers':layer_list}
+> with open('/app/weights.json','w') as fo:
+>     json.dump(out, fo)
+> print('written weights.json input=%d hidden=%d classes=%d' % (input_dim,hidden_dim,num_classes))
+> EOF
+root@13028e079751:/app# python3 /app/convert.py
+input_layer.weight (16, 784) 12544
+input_layer.bias (16,) 16
+hidden_layer.weight (16, 16) 256
+hidden_layer.bias (16,) 16
+output_layer.weight (10, 16) 160
+output_layer.bias (10,) 10
+written weights.json input=784 hidden=16 classes=10
+root@13028e079751:/app# cat > /app/main.c << 'EOF'
+*json_text = read_file(weights_path);
+    cJSON *root = cJSON_Parse(json_text);
+    if (!root) { fprintf(stderr, "bad json\n"); return 1; }
+
+    int input_dim = cJSON_GetObjectItem(root, "input_dim")->valueint;
+    int hidden_dim = cJSON_GetObjectItem(root, "hidden_dim")->valueint;
+    int num_classes = cJSON_GetObjectItem(root, "num_classes")->valueint;
+    (void)hidden_dim;
+
+    cJSON *layers = cJSON_GetObjectItem(root, "layers");
+    int nlayers = cJSON_GetArraySize(layers);
+
+    int *rows = (int*)malloc(sizeof(int)*nlayers);
+    int *cols = (int*)malloc(sizeof(int)*nlayers);
+    double **W = (double**)malloc(sizeof(double*)*nlayers);
+    double **B = (double**)malloc(sizeof(double*)*nlayers);
+    for (int l = 0; l < nlayers; l++) {
+        cJSON *layer = cJSON_GetArrayItem(layers, l);
+        rows[l] = cJSON_GetObjectItem(layer, "rows")->valueint;
+        cols[l] = cJSON_GetObjectItem(layer, "cols")->valueint;
+        W[l] = parse_vec(cJSON_GetObjectItem(layer, "w"), NULL);
+        B[l] = parse_vec(cJSON_> #include <stdio.h>
+> #include <stdlib.h>
+> #include <string.h>
+> #include <math.h>
+> #include "cJSON.h"
+> #include "lodepng.h"
+>
+> static char *read_file(const char *path) {
+>     FILE *f = fopen(path, "rb");
+>     if (!f) { fprintf(stderr, "cannot open %s\n", path); exit(1); }
+>     fseek(f, 0, SEEK_END);
+>     long sz = ftell(f);
+>     fseek(f, 0, SEEK_SET);
+>     char *buf = (char*)malloc(sz + 1);
+>     fread(buf, 1, sz, f);
+>     buf[sz] = '\0';
+>     fclose(f);
+>     return buf;
+> }
+>
+> static double *parse_vec(cJSON *arr, int *nout) {
+>     int n = cJSON_GetArraySize(arr);
+>     double *v = (double*)malloc(sizeof(double) * n);
+>     for (int i = 0; i < n; i++) {
+>         cJSON *it = cJSON_GetArrayItem(arr, i);
+>         v[i] = it->valuedouble;
+>     }
+>     if (nout) *nout = n;
+>     return v;
+> }
+>
+> int main(int argc, char **argv) {
+>     if (argc < 3) {
+>         fprintf(stderr, "usage: %s weights.json image.png\n", argv[0]);
+>         return 1;
+>     }
+>     const char *weights_path = argv[1];
+>     const char *img_path = argv[2];
+>
+>     char *json_text = read_file(weights_path);
+>     cJSON *root = cJSON_Parse(json_text);
+>     if (!root) { fprintf(stderr, "bad json\n"); return 1; }
+>
+>     int input_dim = cJSON_GetObjectItem(root, "input_dim")->valueint;
+>     int hidden_dim = cJSON_GetObjectItem(root, "hidden_dim")->valueint;
+>     int num_classes = cJSON_GetObjectItem(root, "num_classes")->valueint;
+>     (void)hidden_dim;
+>
+>     cJSON *layers = cJSON_GetObjectItem(root, "layers");
+>     int nlayers = cJSON_GetArraySize(layers);
+>
+>     int *rows = (int*)malloc(sizeof(int)*nlayers);
+>     int *cols = (int*)malloc(sizeof(int)*nlayers);
+>     double **W = (double**)malloc(sizeof(double*)*nlayers);
+>     double **B = (double**)malloc(sizeof(double*)*nlayers);
+>     for (int l = 0; l < nlayers; l++) {
+>         cJSON *layer = cJSON_GetArrayItem(layers, l);
+>         rows[l] = cJSON_GetObjectItem(layer, "rows")->valueint;
+>         cols[l] = cJSON_GetObjectItem(layer, "cols")->valueint;
+>         W[l] = parse_vec(cJSON_GetObjectItem(layer, "w"), NULL);
+>         B[l] = parse_vec(cJSON_GetObjectItem(layer, "b"), NULL);
+>     }
+>
+>     unsigned char *img = NULL;
+>     unsigned w, h;
+>     unsigned err = lodepng_decode32_file(&img, &w, &h, img_path);
+>     if (err) { fprintf(stderr, "png error %u\n", err); return 1; }
+>     if ((int)(w*h) != input_dim) {
+>         fprintf(stderr, "image size %ux%u != %d\n", w, h, input_dim);
+>         return 1;
+>     }
+>
+>     double *x = (double*)malloc(sizeof(double)*input_dim);
+>     for (int p = 0; p < input_dim; p++) {
+>         unsigned char r = img[p*4];
+>         x[p] = (double)r / 255.0;
+>     }
+>
+>     double *y = NULL;
+>     for (int l = 0; l < nlayers; l++) {
+>         int r = rows[l], c = cols[l];
+>         y = (double*)malloc(sizeof(double)*r);
+>         for (int i = 0; i < r; i++) {
+>             double s = B[l][i];
+>             double *wr = W[l] + (size_t)i * c;
+>             for (int j = 0; j < c; j++) s += wr[j] * x[j];
+>             if (l != nlayers - 1) { if (s < 0) s = 0; }
+>             y[i] = s;
+>         }
+>         free(x);
+>         x = y;
+>     }
+>
+>     int best = 0;
+>     double bestv = x[0];
+>     for (int i = 1; i < num_classes; i++) {
+>         if (x[i] > bestv) { bestv = x[i]; best = i; }
+>     }
+>
+>     printf("%d\n", best);
+>
+>     FILE *pf = fopen("/app/prediction.txt", "w");
+>     if (pf) { fprintf(pf, "%d\n", best); fclose(pf); }
+>
+>     free(img);
+>     free(json_text);
+>     return 0;
+> }
+> EOF
+root@13028e079751:/app# cd /app && g++ -O2 -o cli_tool cJSON.c lodepng.cpp main.c 2>&1 | head -30
+bash: g++: command not found
+root@13028e079751:/app# which gcc cc clang clang++ 2>&1; ls /usr/bin | grep -E 'gcc|clang|cc$' 2>&1
+root@13028e079751:/app# ls /usr/bin /usr/local/bin 2>/dev/null | grep -iE 'gcc|clang|^cc|g\+\+|tcc'; find / -name 'gcc*' -o -name 'clang*' 2>/dev/null | head
+/usr/share/doc/gcc-12-base
+/usr/share/gcc
+/var/lib/dpkg/info/gcc-12-base:amd64.list
+/var/lib/dpkg/info/gcc-12-base:amd64.md5sums
+root@13028e079751:/app# apt-get install -y gcc g++ 2>&1 | tail -15
+Reading package lists...
+Building dependency tree...
+Reading state information...
+E: Unable to locate package gcc
+root@13028e079751:/app# apt-get update 2>&1 | tail -15
+Get:1 http://deb.debian.org/debian bookworm InRelease [151 kB]
+Get:2 http://deb.debian.org/debian bookworm-updates InRelease [55.4 kB]
+Get:3 http://deb.debian.org/debian-security bookworm-security InRelease [48.0 kB]
+Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8790 kB]
+Get:5 http://deb.debian.org/debian bookworm-updates/main amd64 Packages [6924 B]
+Get:6 http://deb.debian.org/debian-security bookworm-security/main amd64 Packages [314 kB]
+Fetched 9365 kB in 13s (696 kB/s)
+Reading package lists...
+root@13028e079751:/app# apt-get install -y gcc g++ 2>&1 | tail -15
+  libaom3 libasan8 libatomic1 libavif15 libbinutils libbrotli1 libbsd0
+  libc-dev-bin libc-devtools libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0
+  libctf0 libdav1d6 libde265-0 libdeflate0 libfontconfig1 libfreetype6
+  libgav1-1 libgcc-12-dev libgd3 libgomp1 libgprofng0 libheif1 libisl23
+  libitm1 libjansson4 libjbig0 libjpeg62-turbo liblerc4 liblsan0 libmpc3
+  libmpfr6 libnsl-dev libnuma1 libpng16-16 libquadmath0 librav1e0
+  libstdc++-12-dev libsvtav1enc1 libtiff6 libtirpc-dev libtsan2 libubsan1
+  libwebp7 libx11-6 libx11-data libx265-199 libxau6 libxcb1 libxdmcp6 libxpm4
+  libyuv0 linux-libc-dev manpages manpages-dev rpcsvc-proto
+The following packages will be upgraded:
+  gcc-12-base libc-bin libc6 libgcc-s1 libstdc++6
+5 upgraded, 70 newly installed, 0 to remove and 42 not upgraded.
+Need to get 83.9 MB of archives.
+After this operation, 316 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@13028e079751:/app# df -h /; du -sh /var/cache/apt/archives 2>/dev/null
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  959G     0 100% /
+8.0K    /var/cache/apt/archives
+root@13028e079751:/app# df -B1 / ; dd if=/dev/zero of=/tmp/test.img bs=1M count=80 2>&1; echo EXIT=$?; ls -la /tmp/test.img 2>&1; rm -f /tmp/test.img
+Filesystem         1B-blocks          Used Available Use% Mounted on
+fuse-overlayfs 1056550322176 1029013594112         0 100% /
+^Cecho hi > /tmp/probe.txt && echo WROTE_OK && ls -la /tmp/probe.txt && rm -f /tmp/probe.txt
+4+0 records in
+4+0 records out
+4194304 bytes (4.2 MB, 4.0 MiB) copied, 63.8213 s, 65.7 kB/s
+
+root@13028e079751:/app# echo hi > /tmp/probe.txt && echo WROTE_OK && ls -la /tmp/probe.txt && rm -f /tmp/probe.txt
+WROTE_OK
+-rw-r--r-- 1 root root 3 Jul  2 16:50 /tmp/probe.txt
+root@13028e079751:/app# C-c
+bash: C-c: command not found
+root@13028e079751:/app# echo hi > /tmp/probe.txt && echo WROTE_OK || echo WROTE_FAIL
+WROTE_OK
+root@13028e079751:/app# ls -la /tmp/probe.txt; rm -f /tmp/probe.txt
+-rw-r--r-- 1 root root 3 Jul  2 16:50 /tmp/probe.txt
+root@13028e079751:/app# for c in gcc cc clang clang++ tcc zig gcc-12 cc-12; do p=$(command -v $c 2>/dev/null); echo "$c -> ${p:-none}"; done
+gcc -> none
+cc -> none
+clang -> none
+clang++ -> none
+tcc -> none
+zig -> none
+gcc-12 -> none
+cc-12 -> none
+root@13028e079751:/app# find / -type f \( -name 'gcc*' -o -name 'cc' -o -name 'tcc' -o -name 'clang*' -o -name 'zig' \) 2>/dev/null | head -20
+/var/lib/dpkg/info/gcc-12-base:amd64.list
+/var/lib/dpkg/info/gcc-12-base:amd64.md5sums
+root@13028e079751:/app# apt-get install -y --no-install-recommends gcc 2>&1 | tail -20
+  gcc-12-base libasan8 libatomic1 libbinutils libcc1-0 libctf-nobfd0 libctf0
+  libgcc-12-dev libgcc-s1 libgomp1 libgprofng0 libisl23 libitm1 libjansson4
+  liblsan0 libmpc3 libmpfr6 libquadmath0 libstdc++6 libtsan2 libubsan1
+Suggested packages:
+  binutils-doc cpp-doc gcc-12-locales cpp-12-doc gcc-multilib make
+  manpages-dev autoconf automake libtool flex bison gdb gcc-doc
+  gcc-12-multilib gcc-12-doc
+Recommended packages:
+  libc6-dev | libc-dev libc6-dev
+The following NEW packages will be installed:
+  binutils binutils-common binutils-x86-64-linux-gnu cpp cpp-12 gcc gcc-12
+  libasan8 libatomic1 libbinutils libcc1-0 libctf-nobfd0 libctf0 libgcc-12-dev
+  libgomp1 libgprofng0 libisl23 libitm1 libjansson4 liblsan0 libmpc3 libmpfr6
+  libquadmath0 libtsan2 libubsan1
+The following packages will be upgraded:
+  gcc-12-base libgcc-s1 libstdc++6
+3 upgraded, 25 newly installed, 0 to remove and 44 not upgraded.
+Need to get 46.7 MB of archives.
+After this operation, 180 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@13028e079751:/app#

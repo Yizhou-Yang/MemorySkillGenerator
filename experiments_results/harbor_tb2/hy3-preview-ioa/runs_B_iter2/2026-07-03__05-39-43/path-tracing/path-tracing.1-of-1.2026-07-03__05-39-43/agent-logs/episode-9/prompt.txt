@@ -1,0 +1,63 @@
+New Terminal Output:
+
+root@03270641b450:/app# nm orig 2>/dev/null | head; echo '=== strings ==='; strings -n 4 orig | grep -i -E 'sphere|light|sky|radius|sun|camera|ground|vec|color|
+grad|step|scale|pos|dir|norm|sqrt' | head -40
+0000000000004d58 d _DYNAMIC
+0000000000004f58 d _GLOBAL_OFFSET_TABLE_
+0000000000003000 R _IO_stdin_used
+                 w _ITM_deregisterTMCloneTable
+                 w _ITM_registerTMCloneTable
+0000000000003650 r __FRAME_END__
+00000000000032c0 r __GNU_EH_FRAME_HDR
+0000000000005010 D __TMC_END__
+000000000000038c r __abi_tag
+0000000000005020 B __bss_start
+=== strings ===
+sqrt
+ffmpeg -i high_res.ppm -vf "scale=800:600" -y reconstructed.ppm
+vector_normalize
+vector_create
+vector_dot
+vector_length
+vector_subtract
+vector_add
+sqrt@GLIBC_2.2.5
+vector_multiply
+sphere_intersect
+sky_color
+root@03270641b450:/app# .venv/bin/python - << 'EOF'
+> import numpy as np
+> from PIL import Image
+> img=np.array(Image.open('image.ppm')).astype(float)
+> H,W,_=img.shape
+> # low-rank
+> flat=img.reshape(H*W,3)
+> u,s,vt=np.linalg.svd(flat,full_matrices=False)
+> print('sing vals',s)
+> print('rank1 recon err (RMSE)', np.sqrt(((flat-flat.mean(0)-u[:,:1]*s[0]@vt[:1])**2).mean()))
+> # grid for red sphere
+> red=(img[:,:,0]-img[:,:,1])
+> print('max redness', red.max(), 'at', np.unravel_index(red.argmax(),red.shape))
+> # print grid of redness
+> for y in range(0,H,40):
+>     print(''.join('#' if red[y,x]>15 else '.' for x in range(0,W,20)))
+> EOF
+sing vals [202038.56565826  15512.63719583   2563.3993024 ]
+rank1 recon err (RMSE) 156.10534815095752
+max redness 152.0 at (np.int64(283), np.int64(437))
+........................................
+........................................
+........................................
+........................................
+........................................
+........................................
+........................................
+...................###..................
+.................#######................
+..................#####.................
+........................................
+........................................
+........................................
+........................................
+........................................
+root@03270641b450:/app#

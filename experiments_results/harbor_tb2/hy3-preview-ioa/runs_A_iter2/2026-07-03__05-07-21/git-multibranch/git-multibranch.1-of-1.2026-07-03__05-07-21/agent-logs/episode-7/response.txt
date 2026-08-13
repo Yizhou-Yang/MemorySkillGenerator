@@ -1,0 +1,18 @@
+{
+  "analysis": "chsh set git's shell to /usr/bin/git-shell (it warned it's 'invalid' because it's not in /etc/shells, but the passwd entry is now git-shell). The earlier 'Welc' protocol error was caused by extra text being emitted on the server side before git-receive-pack ran — most likely /etc/motd via sshd's PrintMotd reaching git's exec channel. git-shell is the correct shell for git-only SSH access and emits no banner. I also can't drive the test via `su - git -c` anymore because git-shell rejects arbitrary commands, so I'll run the test push as root (the remote user is git@localhost, so the local user doesn't matter) using GIT_SSH_COMMAND to skip host-key prompts. The push must be driven by expect to supply the password.",
+  "plan": "1) Add git-shell to /etc/shells so sshd accepts it cleanly. 2) Disable sshd PrintMotd (to avoid motd corrupting the git protocol) and keep PasswordAuthentication yes. 3) Restart sshd. 4) As root, in /home/git/t, push the 'main' and 'dev' branches to ssh://git@localhost/git/project using the expect helper with GIT_SSH_COMMAND set. 5) Curl both HTTPS endpoints to confirm deployment. If 'Welc' persists I'll capture the exact output.",
+  "commands": [
+    {
+      "keystrokes": "echo /usr/bin/git-shell >> /etc/shells; grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config; sed -i 's/^#*PrintMotd.*/PrintMotd no/' /etc/ssh/sshd_config; grep -q '^PrintMotd no' /etc/ssh/sshd_config || echo 'PrintMotd no' >> /etc/ssh/sshd_config\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "pkill -f /usr/sbin/sshd; sleep 1; /usr/sbin/sshd; sleep 1; netstat -tlnp 2>/dev/null | grep ':22'\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "export GIT_SSH_COMMAND=\"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null\"; cd /home/git/t && expect /tmp/push.exp main 2>&1 | tail -8\n",
+      "duration": 4.0
+    }
+  ]
+}

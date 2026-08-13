@@ -1,0 +1,28 @@
+New Terminal Output:
+
+root@d158d1a80b24:/app# cat > /app/explore3.py << 'EOF'
+> import numpy as np
+> data = np.loadtxt('/app/graphene.dat', delimiter=None, dtype=str)
+> c1 = np.array([float(s.replace(',', '.')) for s in data[:,0]])
+> c2 = np.array([float(s.replace(',', '.')) for s in data[:,1]])
+>
+> # Interpretation B: x=c2 (wavenumber), y=c1 (intensity)
+> order = np.argsort(c2)
+> x = c2[order]; y = c1[order]
+> N = 120
+> bins = np.linspace(x.min(), x.max(), N+1)
+> centers = 0.5*(bins[:-1]+bins[1:])
+> avg = np.zeros(N)
+> for i in range(N):
+>     m = (x>=bins[i])&(x<bins[i+1])
+>     avg[i] = y[m].mean() if m.any() else np.nan
+> print('=== Interp B: x=c2(wavenumber), y=c1(intensity), binned ===')
+> for c,a in zip(centers, avg):
+>     if not np.isnan(a) and 1400<c<2900:
+>         print(f'{c:8.1f}  {a:8.1f}')
+> EOF
+root@d158d1a80b24:/app# python3 /app/explore3.py
+=== Interp B: x=c2(wavenumber), y=c1(intensity), binned ===
+  1693.4    2489.4
+  2354.8    2912.6
+root@d158d1a80b24:/app#

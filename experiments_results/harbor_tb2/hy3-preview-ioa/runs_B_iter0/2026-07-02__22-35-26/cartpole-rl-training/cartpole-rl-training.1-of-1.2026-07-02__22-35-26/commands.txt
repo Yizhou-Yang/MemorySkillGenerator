@@ -1,0 +1,39 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'find /app -type f | head -50\n'
+'cat /app/run.py\n'
+'cat /app/test.py\n'
+'python3 -c "import torch, gymnasium, numpy; print(torch.__version__, gymnasium.__version__, numpy.__version__)"\n'
+''
+''
+''
+''
+''
+"cat > /app/agent.py << 'EOF'\nimport os\nimport numpy as np\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\n\n\nSTATE_DIM = 4\nACTION_DIM = 2\nHIDDEN = 64\n\n\nclass QNetwork(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.fc1 = nn.Linear(STATE_DIM, HIDDEN)\n        self.fc2 = nn.Linear(HIDDEN, ACTION_DIM)\n\n    def forward(self, x):\n        x = torch.relu(self.fc1(x))\n        return self.fc2(x)\n\n\nclass ReplayBuffer:\n    def __init__(self, capacity):\n        self.capacity = capacity\n        self.buffer = []\n        self.pos = 0\n\n    def push(self, state, action, reward, next_state, done):\n        if len(self.buffer) < self.capacity:\n            self.buffer.append(None)\n        self.buffer[self.pos] = (state, action, reward, next_state, done)\n        self.pos = (self.pos + 1) % self.capacity\n\n    def sample(self, batch_size):\n        idx = np.random.choice(len(self.buffer), batch_size, replace=False)\n        return [self.buffer[i] for i in idx]\n\n    def __len__(self):\n        return len(self.buffer)\n\n\nclass Agent:\n    def __init__(self):\n        self.policy_net = QNetwork()\n        self.buffer = ReplayBuffer(20000)\n\n    def select_action(self, current_observation, epsilon=0.0):\n        obs = torch.as_tensor(np.asarray(current_observation), dtype=torch.float32).unsqueeze(0)\n        if np.random.rand() < epsilon:\n            return int(np.random.randint(0, ACTION_DIM))\n        with torch.no_grad():\n            q = self.policy_net(obs)\n            return int(q.argmax(dim=1).item())\n\n    def train(self, env, num_episodes=1000):\n        self.policy_net.train()\n        target_net = QNetwork()\n        target_net.load_state_dict(self.policy_net.state_dict())\n        target_net.eval()\n        optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=5e-4)\n        gamma = 0.99\n        epsilon_start = 1.0\n        epsilon_end = 0.05\n        epsilon_decay = 8000\n        batch_size = 64\n        update_target_every = 100\n        steps = 0\n        episode_rewards = []\n        for ep in range(num_episodes):\n            state, _ = env.reset()\n            ep_reward = 0\n            for t in range(500):\n                epsilon = epsilon_end + (epsilon_start - epsilon_end) * np.exp(-steps / epsilon_decay)\n                steps += 1\n                action = self.select_action(state, epsilon)\n                next_state, reward, terminated, truncated, _ = env.step(action)\n                done = terminated or truncated\n                self.buffer.push(state, action, reward, next_state, done)\n                state = next_state\n                ep_reward += reward\n                if len(self.buffer) >= batch_size:\n                    transitions = self.buffer.sample(batch_size)\n                    states = torch.as_tensor(np.asarray([tr[0] for tr in transitions]), dtype=torch.float32)\n                    actions = torch.as_tensor([tr[1] for tr in transitions], dtype=torch.int64)\n                    rewards = torch.as_tensor([tr[2] for tr in transitions], dtype=torch.float32)\n                    next_states = torch.as_tensor(np.asarray([tr[3] for tr in transitions]), dtype=torch.float32)\n                    dones = torch.as_tensor([tr[4] for tr in transitions], dtype=torch.float32)\n                    q_values = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)\n                    with torch.no_grad():\n                        next_q = target_net(next_states).max(1)[0]\n                        target = rewards + gamma * next_q * (1 - dones)\n                    loss = F.smooth_l1_loss(q_values, target)\n                    optimizer.zero_grad()\n                    loss.backward()\n                    optimizer.step()\n                if done:\n                    break\n            episode_rewards.append(ep_reward)\n            if ep % update_target_every == 0:\n                target_net.load_state_dict(self.policy_net.state_dict())\n            print(f'Episode {ep+1}, Reward {ep_reward}', end='\\r')\n            if len(episode_rewards) >= 100:\n                avg = np.mean(episode_rewards[-100:])\n                if avg >= 450:\n                    print(f'\\nSolved at episode {ep+1}, avg last 100 = {avg:.1f}')\n                    break\n        self.policy_net.eval()\n        target_net.load_state_dict(self.policy_net.state_dict())\n\n    def save(self, directory):\n        os.makedirs(directory, exist_ok=True)\n        torch.save(self.policy_net.state_dict(), os.path.join(directory, 'model.pt'))\n\n    def load(self, directory):\n        path = os.path.join(directory, 'model.pt')\n        self.policy_net.load_state_dict(torch.load(path, map_location='cpu'))\n        self.policy_net.eval()\n\n\ndef main():\n    import gymnasium as gym\n    env = gym.make('CartPole-v1')\n    agent = Agent()\n    agent.train(env, num_episodes=1000)\n    agent.save('/app/trained_model')\n    env.close()\n\n\nif __name__ == '__main__':\n    main()\nEOF\n"
+'ls -la /app/agent.py\n'
+'python3 -m py_compile /app/agent.py && echo SYNTAX_OK\n'
+'python3 /app/agent.py\n'
+''
+''
+''
+''
+''
+'C-c'
+"cat > /app/bench.py << 'EOF'\nimport time\nimport gymnasium as gym\nimport numpy as np\nimport torch\nfrom agent import QNetwork\n\nenv = gym.make('CartPole-v1')\nnet = QNetwork()\n\nt = time.time()\ns, _ = env.reset()\nfor _ in range(200):\n    s, r, d, tr, _ = env.step(env.action_space.sample())\n    if d or tr:\n        s, _ = env.reset()\nprint('env 200 steps:', time.time() - t)\n\nopt = torch.optim.Adam(net.parameters(), lr=1e-3)\nx = torch.randn(64, 4)\ny = torch.randn(64)\nt = time.time()\nfor _ in range(200):\n    opt.zero_grad()\n    loss = ((net(x).sum(1) - y) ** 2).mean()\n    loss.backward()\n    opt.step()\nprint('net fwd+bwd 200 batches:', time.time() - t)\nEOF\n"
+'python3 /app/bench.py\n'
+''
+''
+''
+''
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+'C-c'
+['bash ', '/tests/run-tests.sh', 'Enter']
+''
+"sed -i '/^import torch$/a torch.set_num_threads(1)' /app/agent.py\n"
+"sed -n '1,8p' /app/agent.py\n"
+'python3 /app/bench.py\n'
+['C-d']
+['C-d']

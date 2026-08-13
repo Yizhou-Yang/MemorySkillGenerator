@@ -1,0 +1,14 @@
+{
+  "analysis": "The apt install aborted on 'not enough free space', but my 200MB write to /tmp succeeded, so the fuse-overlayfs df reporting of '0 avail' is misleading — there is real space. apt's space check is just reading statvfs and getting a bogus 0. I should verify actual writable space, then try installing with the apt cache redirected to /tmp (the error specifically referenced the cache dir). If apt still refuses, I'll switch to a pure-pip approach (imageio-ffmpeg for frame extraction + easyocr for OCR).",
+  "plan": "1) Write a larger (500MB) file to /tmp to confirm real space and re-check df. 2) Try apt-get install with Dir::Cache redirected to /tmp so the cache-dir space check passes. This is the fastest path to getting ffmpeg + tesseract-ocr, which are lighter than an easyocr/torch approach.",
+  "commands": [
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmp/_big bs=1M count=500 2>&1 | tail -1; df -h /tmp / 2>&1; rm -f /tmp/_big\n",
+      "duration": 8.0
+    },
+    {
+      "keystrokes": "mkdir -p /tmp/aptcache /tmp/aptstate && apt-get -o Dir::Cache=/tmp/aptcache -o Dir::State=/tmp/aptstate install -y ffmpeg tesseract-ocr python3-pip 2>&1 | tail -15; echo EXIT=$?\n",
+      "duration": 30.0
+    }
+  ]
+}

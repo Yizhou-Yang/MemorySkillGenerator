@@ -1,0 +1,104 @@
+New Terminal Output:
+
+root@114e8bf2da3f:/mnt/debs# gcc --version | head -1; make --version | head -1
+gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+GNU Make 4.3
+root@114e8bf2da3f:/mnt/debs# cat > /app/cli_tool.c <<'EOF'
+> #include <stdio.h>
+> #include <stdlib.h>
+> #include <string.h>
+> #include <math.h>
+> #include "cJSON.h"
+> #include "lodepng.h"
+>
+> /* Model dims: 784 -> 16 -> 16 -> 10, ReLU */
+> #define IN 784
+> #define HID 16
+> #define OUT 10
+>
+> static double W0[HID*IN], b0[HID];
+> static double W1[HID*HID], b1[HID];
+> static double W2[OUT*HID], b2[OUT];
+>
+> static char *read_file(const char *path){
+>     FILE *f = fopen(path,"rb");
+>     if(!f){ fprintf(stderr,"cannot open %s\n", path); return NULL; }
+>     fseek(f,0,SEEK_END); long n = ftell(f); fseek(f,0,SEEK_SET);
+>     char *buf = (char*)malloc(n+1);
+>     if(fread(buf,1,n,f)!=(size_t)n){ fprintf(stderr,"read error\n"); free(buf); fclose(f); return NULL; }
+>     buf[n]=0; fclose(f); return buf;
+> }
+>
+> static int fill_matrix(cJSON *arr, double *out, int rows, int cols){
+>     if(!cJSON_IsArray(arr) || cJSON_GetArraySize(arr)!=rows) return -1;
+>     for(int i=0;i<rows;i++){
+>         cJSON *row = cJSON_GetArrayItem(arr,i);
+>         if(!cJSON_IsArray(row) || cJSON_GetArraySize(row)!=cols) return -1;
+>         cJSON *el = row->child;
+>         for(int j=0;j<cols;j++){
+>             if(!el) return -1;
+>             out[i*cols+j] = el->valuedouble;
+>             el = el->next;
+>         }
+>     }
+>     return 0;
+> }
+>
+> static int fill_vec(cJSON *arr, double *out, int n){
+>     if(!cJSON_IsArray(arr) || cJSON_GetArraySize(arr)!=n) return -1;
+>     for(int i=0;i<n;i++) out[i]=cJSON_GetArrayItem(arr,i)->valuedouble;
+>     return 0;
+> }
+>
+> int main(int argc, char **argv){
+>     if(argc < 3){ fprintf(stderr,"usage: %s weights.json image.png\n", argv[0]); return 1; }
+>     const char *wpath = argv[1];
+>     const char *ipath = argv[2];
+>
+>     char *j = read_file(wpath);
+>     if(!j) return 1;
+>     cJSON *root = cJSON_Parse(j);
+>     free(j);
+>     if(!root){ fprintf(stderr,"JSON parse error\n"); return 1; }
+>
+>     if(fill_matrix(cJSON_GetObjectItem(root,"input_layer.weight"), W0, HID, IN) ||
+>        fill_vec(cJSON_GetObjectItem(root,"input_layer.bias"), b0, HID) ||
+>        fill_matrix(cJSON_GetObjectItem(root,"hidden_layer.weight"), W1, HID, HID) ||
+>        fill_vec(cJSON_GetObjectItem(root,"hidden_layer.bias"), b1, HID) ||
+>        fill_matrix(cJSON_GetObjectItem(root,"output_layer.weight"), W2, OUT, HID) ||
+>        fill_vec(cJSON_GetObjectItem(root,"output_layer.bias"), b2, OUT)){
+>         fprintf(stderr,"weight shape error\n"); cJSON_Delete(root); return 1;
+>     }
+>     cJSON_Delete(root);
+>
+>     unsigned char *pixels = NULL; unsigned w,h;
+>     unsigned err = lodepng_decode32_file(&pixels, &w, &h, ipath);
+>     if(err){ fprintf(stderr,"png error %u: %s\n", err, lodepng_error_text(err)); return 1; }
+>     if(w*h != IN){ fprintf(stderr,"image must be 28x28, got %ux%u\n", w, h); free(pixels); return 1; }
+>
+>     double input[IN];
+>     for(unsigned y=0;y<h;y++){
+>         for(unsigned x=0;x<w;x++){
+>             unsigned char v = pixels[4*(y*w+x)]; /* R (grayscale) */
+>             double nrm = ((double)v/255.0 - 0.1307)/0.3081;
+>             input[y*w+x] = nrm;
+>         }
+>     }
+>     free(pixels);
+>
+>     double h1[HID], h2[HID], out[OUT];
+>     for(int i=0;i<HID;i++){ double s=b0[i]; for(int j=0;j<IN;j++) s+=W0[i*IN+j]*input[j]; h1[i]= s>0?s:0; }
+>     for(int i=0;i<HID;i++){ double s=b1[i]; for(int j=0;j<HID;j++) s+=W1[i*HID+j]*h1[j]; h2[i]= s>0?s:0; }
+>     for(int i=0;i<OUT;i++){ double s=b2[i]; for(int j=0;j<HID;j++) s+=W2[i*HID+j]*h2[j]; out[i]=s; }
+>
+>     int best=0; for(int i=1;i<OUT;i++) if(out[i]>out[best]) best=i;
+>
+>     FILE *pf = fopen("prediction.txt","w");
+>     if(pf){ fprintf(pf,"%d\n", best); fclose(pf); }
+>     printf("%d\n", best);
+>     return 0;
+> }
+> EOF
+root@114e8bf2da3f:/mnt/debs# echo wrote cli_tool.c
+wrote cli_tool.c
+root@114e8bf2da3f:/mnt/debs#

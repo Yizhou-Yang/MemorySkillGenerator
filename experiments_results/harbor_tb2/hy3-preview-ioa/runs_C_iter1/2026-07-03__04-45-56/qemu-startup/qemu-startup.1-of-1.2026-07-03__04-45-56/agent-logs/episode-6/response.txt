@@ -1,0 +1,9 @@
+{
+  "analysis": "I've extracted the kernel (vmlinuz-lts), initramfs, and microcode images, and confirmed the ISO's boot append line: modules=loop,squashfs,sd-mod,usb-storage quiet. The ISO's own config does not set alpine_dev, so the initramfs auto-detects the boot media. I'll do a direct-kernel boot, passing the ISO as -cdrom, map serial to a telnet server on 127.0.0.1:6665, and daemonize it. Then I'll probe the port (sending CRLF first) until the login prompt appears.",
+  "plan": "1) Write a launch script that runs qemu with -kernel/-initrd, console=ttyS0, -cdrom alpine.iso, and -serial telnet:127.0.0.1:6665,server,nowait, daemonized. 2) Launch it. 3) Write a probe that connects, sends CRLF, and waits for 'login'. Block (loop) until ready or timeout. This gets the user to a live serial login prompt.",
+  "commands": [
+    {"keystrokes": "cat > /app/run-alpine.sh << 'EOF'\n#!/bin/bash\nexec qemu-system-x86_64 \\\n  -m 1024 \\\n  -smp 2 \\\n  -kernel /tmp/vmlinuz-lts \\\n  -initrd /tmp/intel-ucode.img,/tmp/amd-ucode.img,/tmp/initramfs-lts \\\n  -append \"console=ttyS0,115200 modules=loop,squashfs,sd-mod,usb-storage quiet\" \\\n  -cdrom /app/alpine.iso \\\n  -serial telnet:127.0.0.1:6665,server,nowait \\\n  -display none \\\n  -daemonize\nEOF\n", "duration": 0.2},
+    {"keystrokes": "bash /app/run-alpine.sh && echo LAUNCHED\n", "duration": 2.0},
+    {"keystrokes": "sleep 2; (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep 6665; ps aux | grep qemu | grep -v grep\n", "duration": 0.5}
+  ]
+}

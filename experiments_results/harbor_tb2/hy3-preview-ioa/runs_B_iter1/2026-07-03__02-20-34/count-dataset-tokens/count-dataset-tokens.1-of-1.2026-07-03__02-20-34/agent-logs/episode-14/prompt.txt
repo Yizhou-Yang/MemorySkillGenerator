@@ -1,0 +1,36 @@
+New Terminal Output:
+
+root@a2a36590ae88:/app# cat > /app/scan.py << 'EOF'
+> from collections import Counter
+> from huggingface_hub import hf_hub_download
+> from pyarrow import parquet as pq
+> import os
+> REPO='open-thoughts/OpenThoughts-114k'
+> shards=[f'metadata/train-{i:05d}-of-00012.parquet' for i in range(12)]
+> for sh in shards:
+>     path=hf_hub_download(repo_id=REPO, filename=sh, repo_type='dataset')
+>     t=pq.read_table(path, columns=['domain'])
+>     c=Counter(t.column('domain').to_pylist())
+>     print(sh, dict(c.most_common()), flush=True)
+>     del t
+>     os.remove(path)
+> EOF
+root@a2a36590ae88:/app# nohup python3 /app/scan.py > /app/scan.log 2>&1 &
+[1] 846
+root@a2a36590ae88:/app# sleep 30; cat /app/scan.log
+[1]+  Done                    nohup python3 /app/scan.py > /app/scan.log 2>&1
+nohup: ignoring input
+metadata/train-00000-of-00012.parquet {'math': 9497}
+metadata/train-00001-of-00012.parquet {'math': 9497}
+metadata/train-00002-of-00012.parquet {'math': 9497}
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+metadata/train-00003-of-00012.parquet {'math': 9497}
+metadata/train-00004-of-00012.parquet {'math': 9497}
+metadata/train-00005-of-00012.parquet {'math': 9496}
+metadata/train-00006-of-00012.parquet {'math': 9496}
+metadata/train-00007-of-00012.parquet {'math': 9496}
+metadata/train-00008-of-00012.parquet {'math': 9496}
+metadata/train-00009-of-00012.parquet {'code': 5845, 'math': 3651}
+metadata/train-00010-of-00012.parquet {'code': 9496}
+metadata/train-00011-of-00012.parquet {'code': 4563, 'biology': 1246, 'physics': 1246, 'chemistry': 1222, 'puzzle': 1219}
+root@a2a36590ae88:/app#

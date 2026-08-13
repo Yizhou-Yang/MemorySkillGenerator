@@ -1,0 +1,105 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@114e8bf2da3f:/app# cat > /app/ref.py <<'PYEOF'
+> import zlib, struct, json, math
+>
+> def read_png(path):
+>     d = open(path,'rb').read()
+>     assert d[:8] == b'\x89PNG\r\n\x1a\n'
+>     pos = 8; w=h=bd=ct=None; idat=b''
+>     while pos < len(d):
+>         ln = struct.unpack('>I', d[pos:pos+4])[0]; typ = d[pos+4:pos+8]; data = d[pos+8:pos+8+ln]
+>         if typ == b'IHDR':
+>             w,h,bd,ct = struct.unpack('>IIBB', data[:10])
+>         elif typ == b'IDAT':
+>             idat += data
+>         elif typ == b'IEND':
+>             break
+>         pos += 12+ln
+>     raw = zlib.decompress(idat)
+>     channels = {0:1,2:3,3:1,4:2,6:4}[ct]
+>     bpp = channels*1
+>     stride = w*channels
+>     out = bytearray()
+>     prev = bytearray(stride)
+>     i = 0
+>     for y in range(h):
+>         f = raw[i]; i+=1
+>         line = bytearray(raw[i:i+stride]); i+=stride
+>         for x in range(stride):
+>             a = line[x-bpp] if x>=bpp else 0
+>             b = prev[x]
+>             c = prev[x-bpp] if x>=bpp else 0
+>             if f==0: v=line[x]
+>             elif f==1: v=line[x]+a
+>             elif f==2: v=line[x]+b
+>             elif f==3: v=line[x]+(a+b)//2
+>             elif f==4:
+>                 p=a+b-c
+>                 pa=abs(p-a); pb=abs(p-b); pc=abs(p-c)
+>                 v=line[x]+(a if (pa<=pb and pa<=pc) else (b if pb<=pc else c))
+>             else: raise ValueError('filter')
+>             line[x]=v & 0xff
+>         out += line
+>         prev = line
+>     return w,h,channels,out
+>
+> def to_gray(w,h,ch,raw):
+>     g=[]
+>     for y in range(h):
+>         row=[]
+>         for x in range(w):
+>             base=(y*w+x)*ch
+>             if ch==1: v=raw[base]
+>             elif ch==3: v=(raw[base]+raw[base+1]+raw[base+2])//3
+>             elif ch==4: v=(raw[base]+raw[base+1]+raw[base+2])//3
+>             else: v=raw[base]
+>             row.append(v)
+>         g.append(row)
+>     return g
+>
+> w,h,ch,raw = read_png('/app/image.png')
+> print('wh',w,h,'ch',ch)
+> g = to_gray(w,h,ch,raw)
+> # print downsample preview
+> mn=min(min(r) for r in g); mx=max(max(r) for r in g)
+> print('min',mn,'max',mx)
+> for r in g[::4]:
+>     print(''.join('#' if v>128 else ('.' if v>32 else ' ') for v in r[::4]))
+>
+> W=json.load(open('/app/weights.json'))
+> def mat(name): return W[name]
+> def vec(name): return W[name]
+> def lin(Wm,b,x):
+>     return [sum(Wm[i][j]*x[j] for j in range(len(x)))+b[i] for i in range(len(b))]
+> def relu(x): return [v if v>0 else 0.0 for v in x]
+>
+> def forward(pixels):
+>     h1=relu(lin(mat('input_layer.weight'),vec('input_layer.bias'),pixels))
+>     h2=relu(lin(mat('hidden_layer.weight'),vec('hidden_layer.bias'),h1))
+>     out=lin(mat('output_layer.weight'),vec('output_layer.bias'),h2)
+>     return out
+>
+> flat=[g[y][x] for y in range(h) for x in range(w)]
+> for name,fn in [('x/255', lambda v:v/255.0),('std', lambda v:(v/255.0-0.1307)/0.3081)]:
+>     x=[fn(v) for v in flat]
+>     out=forward(x)
+>     am=max(range(10),key=lambda i:out[i])
+>     print(name,'argmax',am,'logits',[round(o,3) for o in out])
+> PYEOF
+root@114e8bf2da3f:/app# python3 /app/ref.py
+wh 28 28 ch 1
+min 0 max 255
+
+  # #
+     #
+     #
+  ##
+  ## #
+
+x/255 argmax 2 logits [0.015, -3.092, 1.696, -0.952, 0.247, -1.045, 0.563, -3.205, -0.763, -1.764]
+std argmax 2 logits [-0.897, -12.966, 8.403, -3.769, 0.287, -3.309, 1.832, -16.38, -2.828, -8.916]
+root@114e8bf2da3f:/app#

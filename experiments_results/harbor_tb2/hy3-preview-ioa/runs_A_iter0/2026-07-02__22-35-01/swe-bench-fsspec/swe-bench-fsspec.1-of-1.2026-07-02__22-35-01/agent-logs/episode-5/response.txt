@@ -1,0 +1,12 @@
+I'll add an `open_async()` method to DirFileSystem that delegates to the underlying filesystem, matching the pattern of the existing `open()` method.
+
+{
+  "analysis": "The base `open_async()` in asyn.py raises NotImplementedError. DirFileSystem's `open()` joins the path via `self._join(path)` and delegates to `self.fs.open()`. I need to add an analogous `open_async()` that joins the path and delegates to `self.fs.open_async()`.",
+  "plan": "Add an `open_async` method to DirFileSystem. I'll place it right before or after the existing `open` method at the end of the file. Using Edit to insert it after the `open` method. Then verify the file compiles and run a quick test.",
+  "commands": [
+    {
+      "keystrokes": "python - <<'EOF'\nimport re\npath = 'fsspec/implementations/dirfs.py'\nwith open(path) as f:\n    src = f.read()\n\nanchor = '''    def open(\n        self,\n        path,\n        *args,\n        **kwargs,\n    ):\n        return self.fs.open(\n            self._join(path),\n            *args,\n            **kwargs,\n        )'''\n\nnew_method = '''    async def open_async(self, path, *args, **kwargs):\n        return await self.fs.open_async(\n            self._join(path),\n            *args,\n            **kwargs,\n        )\n\n    def open(\n        self,\n        path,\n        *args,\n        **kwargs,\n    ):\n        return self.fs.open(\n            self._join(path),\n            *args,\n            **kwargs,\n        )'''\n\nassert anchor in src, 'anchor not found'\nsrc = src.replace(anchor, new_method)\nwith open(path, 'w') as f:\n    f.write(src)\nprint('done')\nEOF\n",
+      "duration": 0.3
+    }
+  ]
+}

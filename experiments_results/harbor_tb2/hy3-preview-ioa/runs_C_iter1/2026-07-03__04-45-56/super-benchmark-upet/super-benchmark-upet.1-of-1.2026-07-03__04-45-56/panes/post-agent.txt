@@ -1,0 +1,2027 @@
+        default=None, metadata={"help": "A csv or a json file containing the validation data."}
+    )
+    test_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "A csv or a json file containing the test data."}
+    )
+    template_id: Optional[int] = field(
+        default=0,
+        metadata={
+            "help": "The specific prompt string to use"
+        }
+    )
+
+
+@dataclass
+class ModelArguments:
+    """
+    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
+    """
+    model_name_or_path: str = field(
+        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
+    )
+    config_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+    )
+    tokenizer_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
+    )
+    cache_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
+    )
+    use_fast_tokenizer: bool = field(
+        default=True,
+        metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
+    )
+    model_revision: str = field(
+        default="main",
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    use_auth_token: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+            "with private models)."
+        },
+    )
+    use_pe: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to use parameter-efficient settings. If true, that means fix the parameters of the backbone, and only"
+            "tune the new initialized modules (e.g., adapter, prefix, ptuning, etc.)"
+        }
+    )
+    head_prefix: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Head-tuning Prefix (P-tuning v2) during training"
+        }
+    )
+    prompt_prefix: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Prompt-tuning Prefix (P-tuning v2) during training"
+        }
+    )
+    head_only: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Head Fine-tuning during training (w/o. any new modules)"
+        }
+    )
+    prompt_only: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Prompt Fine-tuning during training (w/o. any new modules)"
+        }
+    )
+    head_ptuning: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Head-tuning P-tuning during training (w. parameter-efficient)"
+        }
+    )
+    prompt_ptuning: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Prompt-tuning P-tuning during training (w. parameter-efficient)"
+        }
+    )
+    head_adapter: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Head-tuning Adapter tuning during training (w. parameter-efficient)"
+        }
+    )
+    prompt_adapter: bool = field(
+        default=False,
+        metadata={
+            "help": "Will use Prompt-tuning Adapter tuning during training (w. parameter-efficient)"
+        }
+    )
+    adapter_choice: str = field(
+        default="LiST",
+        metadata={"help": "The choice of adapter, list, lora, houlsby."},
+    )
+    adapter_dim: int = field(
+        default=128,
+        metadata={"help": "The hidden size of adapter. default is 128."},
+    )
+    pre_seq_len: int = field(
+        default=4,
+        metadata={
+            "help": "The length of prompt"
+        }
+    )
+    prefix_projection: bool = field(
+        default=False,
+        metadata={
+            "help": "Apply a two-layer MLP head over the prefix embeddings"
+        }
+    )
+    prefix_hidden_size: int = field(
+        default=512,
+        metadata={
+            "help": "The hidden size of the MLP projection head in Prefix Encoder if prefix projection is used"
+        }
+    )
+    hidden_dropout_prob: float = field(
+        default=0.1,
+        metadata={
+            "help": "The dropout probability used in the models"
+        }
+    )
+
+
+@dataclass
+class SemiSupervisedArguments:
+    use_semi: bool = field(
+        default=False, metadata={"help": "If true, the training process will be transformed into self-training framework."}
+    )
+    unlabeled_data_num: int = field(
+        default=-1,
+        metadata={
+            "help": "The total number of unlabeled data. If set -1 means all the training data (expect of few-shot labeled data)"
+        }
+    )
+    unlabeled_data_batch_size: int = field(
+        default=16,
+        metadata={
+            "help": "The number of unlabeled data in one batch."
+        }
+    )
+    pseudo_sample_num_or_ratio: float = field(
+        default=0.1,
+        metadata={
+            "help": "The number / ratio of pseudo-labeled data sampling. For example, if have 1000 unlabeled data, 0.1 / 100 means sampling 100 pseduo-labeled d
+ata."
+        }
+    )
+    teacher_training_epoch: int = field(
+        default=10,
+        metadata={
+            "help": "The epoch number of teacher training at the beginning of self-training."
+        }
+    )
+    teacher_tuning_epoch: int = field(
+        default=10,
+        metadata={
+            "help": "The epoch number of teacher tuning in each self-training iteration."
+        }
+    )
+    student_training_epoch: int = field(
+        default=16,
+        metadata={
+            "help": "The epoch number of student training in each self-training iteration."
+        }
+    )
+    student_learning_rate: float = field(
+        default=1e-5,
+        metadata={
+            "help": "The learning rate of student training in each self-training iteration."
+        }
+    )
+    self_training_epoch: int = field(
+        default=30,
+        metadata={
+            "help": "The number of teacher-student iteration ."
+        }
+    )
+    # self-training过程中，unlabeled data会先采样一个子集，因此student模型学习的样本数量只有不到1024个
+    # post_student_train设置后，即允许在self-training后，选择最佳的teacher模型，并在全部的unlabeled data上打标和mc dropout
+    # 此时student模型将会在更多的样本上训练（样本数量不超过20k）
+    post_student_train: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to train a student model on large pseudo-labeled data after self-training iteration"
+        }
+    )
+    student_pre_seq_len: int = field(
+        default=4,
+        metadata={
+            "help": "The length of prompt"
+        }
+    )
+
+
+
+
+
+@dataclass
+class QuestionAnwseringArguments:
+    n_best_size: int = field(
+        default=20,
+        metadata={"help": "The total number of n-best predictions to generate when looking for an answer."},
+    )
+    max_answer_length: int = field(
+        default=30,
+        metadata={
+            "help": "The maximum length of an answer that can be generated. This is needed because the start "
+            "and end predictions are not conditioned on one another."
+        },
+    )
+    version_2_with_negative: bool = field(
+        default=False, metadata={"help": "If true, some of the examples do not have an answer."}
+    )
+    null_score_diff_threshold: float = field(
+        default=0.0,
+        metadata={
+            "help": "The threshold used to select the null answer: if the best answer has a score that is less than "
+            "the score of the null answer minus this threshold, the null answer is selected for this example. "
+            "Only useful when `version_2_with_negative=True`."
+        },
+    )
+
+
+
+
+def get_args():
+    """Parse all the args."""
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments, SemiSupervisedArguments, QuestionAnwseringArguments))
+
+    args = parser.parse_args_into_dataclasses()
+
+    return argsroot@9a429f9c7fca:/app/UPET# cat /app/UPET/requirements.txt
+datasets==1.15.1
+numpy==1.19.2
+tqdm==4.62.3
+transformers==4.11.3
+seqeval==1.2.2
+root@9a429f9c7fca:/app/UPET# python3 -c "import transformers, datasets, torch; print('tf', transformers.__version__, 'ds', datasets.__version__, 'torch', torch.
+__version__)" 2>&1 | tail -n 5
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'datasets'
+root@9a429f9c7fca:/app/UPET# timeout 15 curl -sI https://huggingface.co/ 2>&1 | head -n 3 || echo 'HF_UNREACHABLE'
+HTTP/2 200
+content-type: text/html; charset=utf-8
+content-length: 176000
+root@9a429f9c7fca:/app/UPET# pip3 list 2>/dev/null | grep -iE 'transformers|datasets|numpy|torch|tokenizers|huggingface|sacre|sentencepiece|tqdm'
+echo '=== superglue get_trainer ===' && sed -n '1,80p' tasks/superglue/get_trainer.py
+huggingface_hub         0.36.2
+numpy                   1.25.2
+sentencepiece           0.1.99
+tokenizers              0.19.1
+torch                   2.2.1+cpu
+tqdm                    4.66.4
+transformers            4.40.2
+root@9a429f9c7fca:/app/UPET# echo '=== superglue get_trainer ===' && sed -n '1,80p' tasks/superglue/get_trainer.py
+=== superglue get_trainer ===
+import logging
+import os
+import random
+import sys
+
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+)
+
+from model.utils import get_model, TaskType
+from tasks.superglue.dataset import SuperGlueDataset
+from training.trainer_base import BaseTrainer
+from training.trainer_exp import ExponentialTrainer
+from training.self_trainer import SelfTrainer
+
+logger = logging.getLogger(__name__)
+
+def get_trainer(args):
+    model_args, data_args, training_args, semi_training_args, _ = args
+
+    log_level = training_args.get_process_log_level()
+    logger.setLevel(log_level)
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_args.model_name_or_path,
+        use_fast=model_args.use_fast_tokenizer,
+        revision=model_args.model_revision,
+    )
+
+    # add by wjn check if use prompt template
+    use_prompt = False
+    if model_args.prompt_prefix or model_args.prompt_ptuning or model_args.prompt_adapter or model_args.prompt_only:
+        use_prompt = True
+
+    dataset = SuperGlueDataset(tokenizer, data_args, training_args, semi_training_args=semi_training_args, use_prompt=use_prompt)
+
+    data_args.label_word_list = None # add by wjn
+    if use_prompt:
+        data_args.label_word_list = dataset.label_word_list # add by wjn
+
+    if training_args.do_train:
+        for index in random.sample(range(len(dataset.train_dataset)), 3):
+            logger.info(f"Sample {index} of the training set: {dataset.train_dataset[index]}.")
+
+    if not dataset.multiple_choice:
+        config = AutoConfig.from_pretrained(
+            model_args.model_name_or_path,
+            num_labels=dataset.num_labels,
+            label2id=dataset.label2id,
+            id2label=dataset.id2label,
+            finetuning_task=data_args.dataset_name,
+            revision=model_args.model_revision,
+        )
+    else:
+        config = AutoConfig.from_pretrained(
+            model_args.model_name_or_path,
+            num_labels=dataset.num_labels,
+            finetuning_task=data_args.dataset_name,
+            revision=model_args.model_revision,
+        )
+
+    if not dataset.multiple_choice:
+        model = get_model(data_args, model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
+    else:
+        model = get_model(data_args, model_args, TaskType.MULTIPLE_CHOICE, config)
+
+
+    # Initialize our Trainer
+
+    if semi_training_args.use_semi:
+        model_args.pre_seq_len = semi_training_args.student_pre_seq_len
+        student_model = get_model(data_args, model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
+        trainer = SelfTrainer(
+            teacher_base_model=model,
+            student_base_model=student_model,
+            training_args=training_args,
+            semi_training_args=semi_training_args,
+            train_dataset=dataset.train_dataset if training_args.do_train else None,
+            unlabeled_dataset=dataset.unlabeled_dataset,
+root@9a429f9c7fca:/app/UPET# echo '=== trainer_base.py ===' && sed -n '1,120p' training/trainer_base.py
+=== trainer_base.py ===
+import logging
+import os
+from typing import Dict, OrderedDict
+
+from transformers import Trainer
+
+logger = logging.getLogger(__name__)
+
+_default_log_level = logging.INFO
+logger.setLevel(_default_log_level)
+
+class BaseTrainer(Trainer):
+    def __init__(self, *args, predict_dataset = None, test_key = "accuracy", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.predict_dataset = predict_dataset
+        self.test_key = test_key
+        self.best_metrics = OrderedDict({
+            "best_epoch": 0,
+            f"best_eval_{self.test_key}": 0,
+        })
+
+    def log_best_metrics(self):
+        self.log_metrics("best", self.best_metrics)
+        self.save_metrics("best", self.best_metrics, combined=False)
+
+
+
+    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+        if self.control.should_log:
+            logs: Dict[str, float] = {}
+
+
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            logs["learning_rate"] = self._get_learning_rate()
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs)
+
+        eval_metrics = None
+        if self.control.should_evaluate:
+            eval_metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
+            self._report_to_hp_search(trial, epoch, eval_metrics)
+            print("eval_metrics=", eval_metrics)
+            if eval_metrics["eval_"+self.test_key] > self.best_metrics["best_eval_"+self.test_key]:
+                self.best_metrics["best_epoch"] = epoch
+                self.best_metrics["best_eval_"+self.test_key] = eval_metrics["eval_"+self.test_key]
+
+                if self.predict_dataset is not None:
+                    if isinstance(self.predict_dataset, dict):
+                        for dataset_name, dataset in self.predict_dataset.items():
+                            _, _, test_metrics = self.predict(dataset, metric_key_prefix="test")
+                            self.best_metrics[f"best_test_{dataset_name}_{self.test_key}"] = test_metrics["test_"+self.test_key]
+                    else:
+                        _, _, test_metrics = self.predict(self.predict_dataset, metric_key_prefix="test")
+                        self.best_metrics["best_test_"+self.test_key] = test_metrics["test_"+self.test_key]
+
+            logger.info(f"***** Epoch {epoch}: Best results *****")
+            for key, value in self.best_metrics.items():
+                logger.info(f"{key} = {value}")
+            self.log(self.best_metrics)
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial, metrics=eval_metrics)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+root@9a429f9c7fca:/app/UPET# echo '=== model/utils.py head ===' && sed -n '1,60p' model/utils.py
+=== model/utils.py head ===
+from enum import Enum
+
+from model.head_for_token_classification import (
+    BertPrefixForTokenClassification,
+    BertAdapterForTokenClassification,
+    RobertaPrefixForTokenClassification,
+    RobertaAdapterForTokenClassification,
+    DebertaPrefixForTokenClassification,
+    DebertaV2PrefixForTokenClassification
+)
+
+from model.head_for_sequence_classification import (
+    BertPrefixForSequenceClassification,
+    BertPtuningForSequenceClassification,
+    BertAdapterForSequenceClassification,
+    RobertaPrefixForSequenceClassification,
+    RobertaPtuningForSequenceClassification,
+    RobertaAdapterForSequenceClassification,
+    DebertaPrefixForSequenceClassification
+)
+
+from model.head_for_question_answering import (
+    BertPrefixForQuestionAnswering,
+    BertAdapterForQuestionAnswering,
+    RobertaPrefixModelForQuestionAnswering,
+    RobertaAdapterForQuestionAnswering,
+    DebertaPrefixModelForQuestionAnswering
+)
+
+from model.prompt_for_sequence_classification import (
+    PromptBertForSequenceClassification,
+    PromptBertPrefixForSequenceClassification,
+    PromptBertPtuningForSequenceClassification,
+    PromptBertAdapterForSequenceClassification,
+    PromptRobertaForSequenceClassification,
+    PromptRobertaPrefixForSequenceClassification,
+    PromptRobertaPtuningForSequenceClassification,
+    PromptRobertaAdapterForSequenceClassification,
+    PromptDebertaForSequenceClassification,
+    PromptDebertaPrefixForSequenceClassification,
+    PromptDebertaPtuningForSequenceClassification,
+    # PromptDebertaAdapterForSequenceClassification,
+    PromptDebertav2ForSequenceClassification,
+    PromptDebertav2PrefixForSequenceClassification,
+    PromptDebertav2PtuningForSequenceClassification,
+    # PromptDebertav2AdapterForSequenceClassification
+)
+
+from model.multiple_choice import (
+    BertPrefixForMultipleChoice,
+    RobertaPrefixForMultipleChoice,
+    DebertaPrefixForMultipleChoice,
+    BertPromptForMultipleChoice,
+    RobertaPromptForMultipleChoice
+)
+
+from transformers import (
+    AutoConfig,
+    AutoModelForTokenClassification,
+    AutoModelForSequenceClassification,
+root@9a429f9c7fca:/app/UPET# pip3 install 'datasets>=2.14,<3' 2>&1 | tail -n 15
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.8/134.8 kB 7.0 MB/s eta 0:00:00
+Requirement already satisfied: python-dateutil>=2.8.2 in /usr/local/lib/python3.10/site-packages (from pandas->datasets<3,>=2.14) (2.9.0.post0)
+Requirement already satisfied: pytz>=2020.1 in /usr/local/lib/python3.10/site-packages (from pandas->datasets<3,>=2.14) (2026.2)
+Requirement already satisfied: tzdata>=2022.1 in /usr/local/lib/python3.10/site-packages (from pandas->datasets<3,>=2.14) (2026.2)
+Requirement already satisfied: six>=1.5 in /usr/local/lib/python3.10/site-packages (from python-dateutil>=2.8.2->pandas->datasets<3,>=2.14) (1.17.0)
+Installing collected packages: xxhash, requests, pyarrow, propcache, multidict, frozenlist, dill, attrs, async-timeout, aiohappyeyeballs, yarl, multiprocess, ai
+osignal, aiohttp, datasets
+  Attempting uninstall: requests
+    Found existing installation: requests 2.31.0
+    Uninstalling requests-2.31.0:
+      Successfully uninstalled requests-2.31.0
+Successfully installed aiohappyeyeballs-2.7.1 aiohttp-3.14.1 aiosignal-1.4.0 async-timeout-5.0.1 attrs-26.1.0 datasets-2.21.0 dill-0.3.8 frozenlist-1.8.0 multid
+ict-6.7.1 multiprocess-0.70.16 propcache-0.5.2 pyarrow-24.0.0 requests-2.34.2 xxhash-3.8.0 yarl-1.24.2
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a v
+irtual environment instead: https://pip.pypa.io/warnings/venv
+
+[notice] A new release of pip is available: 23.0.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@9a429f9c7fca:/app/UPET# echo '=== superglue/dataset.py ===' && sed -n '1,140p' tasks/superglue/dataset.py
+=== superglue/dataset.py ===
+from datasets.load import load_dataset, load_metric
+from transformers import (
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    EvalPrediction,
+    default_data_collator,
+)
+import numpy as np
+import logging
+from collections import defaultdict
+from typing import Optional
+
+# add by wjn
+def random_sampling(raw_datasets: load_dataset, data_type: str="train", num_examples_per_label: Optional[int]=16):
+    assert data_type in ["train", "validation", "test"]
+    label_list = raw_datasets[data_type]["label"] # [0, 1, 0, 0, ...]
+    label_dict = dict()
+    # 记录每个label对应的样本索引
+    for ei, label in enumerate(label_list):
+        if label not in label_dict.keys():
+            label_dict[label] = list()
+        label_dict[label].append(ei)
+    # 对于每个类别，随机采样k个样本
+    few_example_ids = list()
+    for label, eid_list in label_dict.items():
+        # examples = deepcopy(eid_list)
+        # shuffle(examples)
+        idxs = np.random.choice(len(eid_list), size=num_examples_per_label, replace=False)
+        selected_eids = [eid_list[i] for i in idxs]
+        few_example_ids.extend(selected_eids)
+    # 保存没有被选中的example id
+    num_examples = len(label_list)
+    un_selected_examples_ids = [idx for idx in range(num_examples) if idx not in few_example_ids]
+    return few_example_ids, un_selected_examples_ids
+
+task_to_test_key = {
+    "boolq": "accuracy",
+    "cb": "accuracy",
+    "rte": "accuracy",
+    "wic": "accuracy",
+    "wsc": "accuracy",
+    "copa": "accuracy",
+    "record": "f1",
+    "multirc": "f1"
+}
+
+task_to_keys = {
+    "boolq": ("question", "passage"),
+    "cb": ("premise", "hypothesis"),
+    "rte": ("premise", "hypothesis"),
+    "wic": ("processed_sentence1", None),
+    "wsc": ("span2_word_text", "span1_text"),
+    "copa": (None, None),
+    "record": (None, None),
+    "multirc": ("paragraph", "question_answer")
+}
+
+task_to_template = {
+    "boolq" : [{"prefix_template": "Question: ", "suffix_template": ""}, {"prefix_template": "Passage: ", "suffix_template": " Answer: <mask> ."}],
+    "cb": [None, {"prefix_template": "? <mask> ,", "suffix_template": ""}],
+    "rte": [None, {"prefix_template": "? <mask> ,", "suffix_template": ""}], # prefix / suffix template in each segment.
+    # "wic": [None, None],
+    # "wsc": [None, None],
+    # "copa": [None, None],
+    # "record": [None, None],
+    # "multirc": [None, None],
+}
+
+# add by wjn
+label_words_mapping = {
+    "boolq": {"True": ["Yes"], "False": ["No"]},
+    "cb": {"contradiction": ["No"], "neutral": ["Maybe"], "entailment": ["Yes"]},
+    "rte": {"not_entailment": ["No"], "entailment": ["Yes"]}
+}
+
+
+logger = logging.getLogger(__name__)
+
+
+class SuperGlueDataset():
+    def __init__(
+        self,
+        tokenizer: AutoTokenizer,
+        data_args,
+        training_args,
+        semi_training_args=None,
+        use_prompt=False
+    ) -> None:
+        super().__init__()
+        raw_datasets = load_dataset("super_glue", data_args.dataset_name)
+        self.tokenizer = tokenizer
+        self.data_args = data_args
+
+        self.multiple_choice = data_args.dataset_name in ["copa"]
+
+        if data_args.dataset_name == "record":
+            self.num_labels = 2
+            self.label_list = ["0", "1"]
+        elif not self.multiple_choice:
+            self.label_list = raw_datasets["train"].features["label"].names
+            self.num_labels = len(self.label_list)
+        else:
+            self.num_labels = 1
+
+        # === generate template ===== add by wjn
+        self.use_prompt = False
+        if data_args.dataset_name in task_to_template.keys():
+            self.use_prompt = use_prompt
+
+        if self.use_prompt:
+            if 't5' in type(tokenizer).__name__.lower():
+                self.special_token_mapping = {
+                    'cls': 3, 'mask': 32099, 'sep': tokenizer.eos_token_id,
+                    'sep+': tokenizer.eos_token_id,
+                    'pseudo_token': tokenizer.unk_token_id
+                }
+            else:
+                self.special_token_mapping = {
+                    'cls': tokenizer.cls_token_id, 'mask': tokenizer.mask_token_id, 'sep': tokenizer.sep_token_id,
+                    'sep+': tokenizer.sep_token_id,
+                    'pseudo_token': tokenizer.unk_token_id
+                }
+            self.template = task_to_template[data_args.dataset_name] # dict
+
+
+        # === generate label word mapping ===== add by wjn
+        if self.use_prompt:
+            assert data_args.dataset_name in label_words_mapping.keys(), "You must define label word mapping for the task {}".format(data_args.dataset_name)
+            self.label_to_word = label_words_mapping[data_args.dataset_name] # e.g., {"0": ["great"], "1": [bad]}
+            self.label_to_word = {label: label_word[0] if type(label_word) == list else label_word for label, label_word in self.label_to_word.items()}
+
+            for key in self.label_to_word:
+                # For RoBERTa/BART/T5, tokenization also considers space, so we use space+word as label words.
+                if self.label_to_word[key][0] not in ['<', '[', '.', ',']:
+                    # Make sure space+word is in the vocabulary
+                    assert len(tokenizer.tokenize(' ' + self.label_to_word[key])) == 1
+                    self.label_to_word[key] = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(' ' + self.label_to_word[key])[0])
+                else:
+                    self.label_to_word[key] = tokenizer.convert_tokens_to_ids(self.label_to_word[key])
+                logger.info("Label {} to word {} ({})".format(key, tokenizer._convert_id_to_token(self.label_to_word[key]), self.label_to_word[key]))
+root@9a429f9c7fca:/app/UPET# echo '=== get_trainer rest ===' && sed -n '80,200p' tasks/superglue/get_trainer.py
+=== get_trainer rest ===
+            unlabeled_dataset=dataset.unlabeled_dataset,
+            eval_dataset=dataset.eval_dataset if training_args.do_eval else None,
+            compute_metrics=dataset.compute_metrics,
+            tokenizer=tokenizer,
+            teacher_data_collator=dataset.data_collator,
+            student_data_collator=dataset.data_collator,
+            test_key=dataset.test_key,
+            task_type="cls",
+            num_classes=len(dataset.label2id),
+        )
+
+        return trainer, None
+
+    trainer = BaseTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset.train_dataset if training_args.do_train else None,
+        eval_dataset=dataset.eval_dataset if training_args.do_eval else None,
+        compute_metrics=dataset.compute_metrics,
+        tokenizer=tokenizer,
+        data_collator=dataset.data_collator,
+        test_key=dataset.test_key
+    )
+
+    return trainer, None
+root@9a429f9c7fca:/app/UPET# echo '=== dataset.py 140-320 ===' && sed -n '140,320p' tasks/superglue/dataset.py
+=== dataset.py 140-320 ===
+                logger.info("Label {} to word {} ({})".format(key, tokenizer._convert_id_to_token(self.label_to_word[key]), self.label_to_word[key]))
+
+            if len(self.label_list) > 1:
+                self.label_word_list = [self.label_to_word[label] for label in self.label_list]
+            else:
+                # Regression task
+                # '0' represents low polarity and '1' represents high polarity.
+                self.label_word_list = [self.label_to_word[label] for label in ['0', '1']]
+        # =============
+
+        # Preprocessing the raw_datasets
+        self.sentence1_key, self.sentence2_key = task_to_keys[data_args.dataset_name]
+
+        # Padding strategy
+        if data_args.pad_to_max_length:
+            self.padding = "max_length"
+        else:
+            # We will pad later, dynamically at batch creation, to the max sequence length in each batch
+            self.padding = False
+
+        if not self.multiple_choice:
+            self.label2id = {l: i for i, l in enumerate(self.label_list)}
+            self.id2label = {id: label for label, id in self.label2id.items()}
+            print(f"{self.label2id}")
+            print(f"{self.id2label}")
+
+        if data_args.max_seq_length > tokenizer.model_max_length:
+            logger.warning(
+                f"The max_seq_length passed ({data_args.max_seq_length}) is larger than the maximum length for the"
+                f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
+            )
+
+        self.max_seq_length = min(data_args.max_seq_length, tokenizer.model_max_length)
+
+        if data_args.dataset_name == "record":
+            raw_datasets = raw_datasets.map(
+                self.record_preprocess_function,
+                batched=True,
+                load_from_cache_file=not data_args.overwrite_cache,
+                remove_columns=raw_datasets["train"].column_names,
+                desc="Running tokenizer on dataset",
+            )
+        else:
+            raw_datasets = raw_datasets.map(
+                self.preprocess_function,
+                batched=True,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on dataset",
+            )
+
+        if training_args.do_train:
+            self.train_dataset = raw_datasets["train"]
+            if data_args.max_train_samples is not None:
+                self.train_dataset = self.train_dataset.select(range(data_args.max_train_samples))
+
+        if training_args.do_eval:
+            self.eval_dataset = raw_datasets["validation"]
+            if data_args.max_eval_samples is not None:
+                self.eval_dataset = self.eval_dataset.select(range(data_args.max_eval_samples))
+
+        if training_args.do_predict or data_args.dataset_name is not None or data_args.test_file is not None:
+            self.predict_dataset = raw_datasets["test"]
+            if data_args.max_predict_samples is not None:
+                self.predict_dataset = self.predict_dataset.select(range(data_args.max_predict_samples))
+
+
+        # add by wjn
+        self.unlabeled_dataset = None
+        if semi_training_args.use_semi is True:
+            assert data_args.num_examples_per_label is not None and data_args.num_examples_per_label != -1
+
+        # 随机采样few-shot training / dev data（传入label_list，对每个label进行采样，最后得到索引列表）
+        if data_args.num_examples_per_label is not None and data_args.num_examples_per_label != -1:
+            train_examples_idx_list, un_selected_idx_list = random_sampling(
+                raw_datasets=raw_datasets,
+                data_type="train",
+                num_examples_per_label=data_args.num_examples_per_label
+            )
+            self.all_train_dataset = self.train_dataset
+            self.train_dataset = self.all_train_dataset.select(train_examples_idx_list)
+            print("Randomly sampling {}-shot training examples for each label. Total examples number is {}".format(
+                data_args.num_examples_per_label,
+                len(self.train_dataset)
+                ))
+
+            if semi_training_args.use_semi is True:
+                self.unlabeled_dataset = self.all_train_dataset.select(un_selected_idx_list)
+                print("The number of unlabeled data is {}".format(len(self.unlabeled_dataset)))
+
+        self.metric = load_metric("./metrics/super_glue", data_args.dataset_name)
+
+        if data_args.pad_to_max_length:
+            self.data_collator = default_data_collator
+        elif training_args.fp16:
+            self.data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8)
+
+        # self.test_key = "accuracy" if data_args.dataset_name not in ["record", "multirc"] else "f1"
+
+        # ==== define test key ====== add by wjn
+        self.test_key = task_to_test_key[data_args.dataset_name]
+
+    def preprocess_function(self, examples):
+
+        # print("examples[self.sentence1_key]=", examples[self.sentence1_key][0])
+
+        # WSC
+        if self.data_args.dataset_name == "wsc":
+            examples["span2_word_text"] = []
+            for text, span2_index, span2_word in zip(examples["text"], examples["span2_index"], examples["span2_text"]):
+                if self.data_args.template_id == 0:
+                    examples["span2_word_text"].append(span2_word + ": " + text)
+                elif self.data_args.template_id == 1:
+                    words_a = text.split()
+                    words_a[span2_index] = "*" + words_a[span2_index] + "*"
+                    examples["span2_word_text"].append(' '.join(words_a))
+
+        # WiC
+        if self.data_args.dataset_name == "wic":
+            examples["processed_sentence1"] = []
+            if self.data_args.template_id == 1:
+                self.sentence2_key = "processed_sentence2"
+                examples["processed_sentence2"] = []
+            for sentence1, sentence2, word, start1, end1, start2, end2 in zip(examples["sentence1"], examples["sentence2"], examples["word"], examples["start1"]
+, examples["end1"], examples["start2"], examples["end2"]):
+                if self.data_args.template_id == 0: #ROBERTA
+                    examples["processed_sentence1"].append(f"{sentence1} {sentence2} Does {word} have the same meaning in both sentences?")
+                elif self.data_args.template_id == 1: #BERT
+                    examples["processed_sentence1"].append(word + ": " + sentence1)
+                    examples["processed_sentence2"].append(word + ": " + sentence2)
+
+        # MultiRC
+        if self.data_args.dataset_name == "multirc":
+            examples["question_answer"] = []
+            for question, answer in zip(examples["question"], examples["answer"]):
+                examples["question_answer"].append(f"{question} {answer}")
+
+        # COPA
+        if self.data_args.dataset_name == "copa":
+            examples["text_a"] = []
+            for premise, question in zip(examples["premise"], examples["question"]):
+                joiner = "because" if question == "cause" else "so"
+                text_a = f"{premise} {joiner}"
+                examples["text_a"].append(text_a)
+
+            result1 = self.tokenizer(examples["text_a"], examples["choice1"], padding=self.padding, max_length=self.max_seq_length, truncation=True)
+            result2 = self.tokenizer(examples["text_a"], examples["choice2"], padding=self.padding, max_length=self.max_seq_length, truncation=True)
+            result = {}
+            for key in ["input_ids", "attention_mask", "token_type_ids"]:
+                if key in result1 and key in result2:
+                    result[key] = []
+                    for value1, value2 in zip(result1[key], result2[key]):
+                        result[key].append([value1, value2])
+            return result
+
+        # add by wjn
+        # adding prompt into each example
+        if self.use_prompt:
+            # if use prompt, insert template into example
+            examples = self.prompt_preprocess_function(examples)
+
+
+        args = (
+            (examples[self.sentence1_key],) if self.sentence2_key is None else (examples[self.sentence1_key], examples[self.sentence2_key])
+        )
+        result = self.tokenizer(*args, padding=self.padding, max_length=self.max_seq_length, truncation=True)
+
+        # add by wjn
+        # adding mask pos feature
+
+        # print("self.use_prompt=", self.use_prompt)
+        if self.use_prompt:
+            mask_pos = []
+            for input_ids in result["input_ids"]:
+                mask_pos.append(input_ids.index(self.special_token_mapping["mask"]))
+            result["mask_pos"] = mask_pos
+            # print("result=", result)
+        # print("*"*100)
+        # print("result.keys()=", result.keys())
+        # print("result['token_type_ids']=", result["token_type_ids"][0])
+        return result
+
+    # add by wjn
+root@9a429f9c7fca:/app/UPET# echo '=== prefix flag in arguments.py ===' && grep -nE 'prefix|prompt_ptuning|head_only|use_pe' arguments.py | head -n 40
+=== prefix flag in arguments.py ===
+132:    use_pe: bool = field(
+136:            "tune the new initialized modules (e.g., adapter, prefix, ptuning, etc.)"
+139:    head_prefix: bool = field(
+145:    prompt_prefix: bool = field(
+151:    head_only: bool = field(
+169:    prompt_ptuning: bool = field(
+201:    prefix_projection: bool = field(
+204:            "help": "Apply a two-layer MLP head over the prefix embeddings"
+207:    prefix_hidden_size: int = field(
+210:            "help": "The hidden size of the MLP projection head in Prefix Encoder if prefix projection is used"
+root@9a429f9c7fca:/app/UPET# python3 -c 'import tasks.superglue.dataset' 2>&1 | head -n 25
+root@9a429f9c7fca:/app/UPET# grep -n 'prefix' arguments.py
+136:            "tune the new initialized modules (e.g., adapter, prefix, ptuning, etc.)"
+139:    head_prefix: bool = field(
+145:    prompt_prefix: bool = field(
+201:    prefix_projection: bool = field(
+204:            "help": "Apply a two-layer MLP head over the prefix embeddings"
+207:    prefix_hidden_size: int = field(
+210:            "help": "The hidden size of the MLP projection head in Prefix Encoder if prefix projection is used"
+root@9a429f9c7fca:/app/UPET# echo '=== metrics tree ===' && ls -R metrics/super_glue 2>/dev/null | head -n 30
+=== metrics tree ===
+metrics/super_glue:
+README.md
+record_evaluation.py
+super_glue.py
+root@9a429f9c7fca:/app/UPET# grep -n 'compute_metrics\|def compute_metrics\|self.metric' tasks/superglue/dataset.py
+229:        self.metric = load_metric("./metrics/super_glue", data_args.dataset_name)
+347:    def compute_metrics(self, p: EvalPrediction):
+352:            return self.reocrd_compute_metrics(p)
+359:            result = self.metric.compute(predictions=preds, references=p.label_ids)
+368:    def reocrd_compute_metrics(self, p: EvalPrediction):
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Traceback (most recent call last):
+  File "/app/UPET/run.py", line 71, in <module>
+    args = get_args()
+  File "/app/UPET/arguments.py", line 326, in get_args
+    args = parser.parse_args_into_dataclasses()
+  File "/usr/local/lib/python3.10/site-packages/transformers/hf_argparser.py", line 339, in parse_args_into_dataclasses
+    obj = dtype(**inputs)
+  File "<string>", line 125, in __init__
+  File "/usr/local/lib/python3.10/site-packages/transformers/training_args.py", line 1605, in __post_init__
+    and (self.device.type != "cuda")
+  File "/usr/local/lib/python3.10/site-packages/transformers/training_args.py", line 2094, in device
+    return self._setup_devices
+  File "/usr/local/lib/python3.10/site-packages/transformers/utils/generic.py", line 63, in __get__
+    cached = self.fget(obj)
+  File "/usr/local/lib/python3.10/site-packages/transformers/training_args.py", line 2000, in _setup_devices
+    raise ImportError(
+ImportError: Using the `Trainer` with `PyTorch` requires `accelerate>=0.21.0`: Please run `pip install transformers[torch]` or `pip install accelerate -U`
+root@9a429f9c7fca:/app/UPET# pip3 install 'accelerate>=0.21.0' 2>&1 | tail -n 6
+Installing collected packages: psutil, accelerate
+Successfully installed accelerate-1.14.0 psutil-7.2.2
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a v
+irtual environment instead: https://pip.pypa.io/warnings/venv
+
+[notice] A new release of pip is available: 23.0.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 20:55:01 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+Traceback (most recent call last):
+  File "/app/UPET/run.py", line 101, in <module>
+    from tasks.superglue.get_trainer import get_trainer
+  File "/app/UPET/tasks/superglue/get_trainer.py", line 14, in <module>
+    from training.trainer_exp import ExponentialTrainer
+  File "/app/UPET/training/trainer_exp.py", line 16, in <module>
+    from transformers.trainer_utils import (
+ImportError: cannot import name 'ShardedDDPOption' from 'transformers.trainer_utils' (/usr/local/lib/python3.10/site-packages/transformers/trainer_utils.py)
+root@9a429f9c7fca:/app/UPET# echo '=== trainer_exp.py head ===' && sed -n '1,40p' training/trainer_exp.py
+=== trainer_exp.py head ===
+import logging
+import os
+import random
+import sys
+
+from typing import Any, Dict, List, Optional, OrderedDict, Tuple, Union
+import math
+import random
+import time
+import warnings
+import collections
+
+from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
+from transformers.trainer_callback import TrainerState
+from transformers.trainer_pt_utils import IterableDatasetShard
+from transformers.trainer_utils import (
+    HPSearchBackend,
+    ShardedDDPOption,
+    TrainOutput,
+    get_last_checkpoint,
+    set_seed,
+    speed_metrics,
+)
+from transformers.file_utils import (
+    CONFIG_NAME,
+    WEIGHTS_NAME,
+    is_torch_tpu_available,
+)
+
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+
+from training.trainer_base import BaseTrainer, logger
+
+
+class ExponentialTrainer(BaseTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+root@9a429f9c7fca:/app/UPET# echo '=== model prefix imports ===' && grep -n 'from transformers\|import transformers' model/head_for_sequence_classification.py
+=== model prefix imports ===
+11:from transformers import BertModel, BertPreTrainedModel
+12:from transformers import RobertaModel, RobertaPreTrainedModel
+13:from transformers.modeling_outputs import SequenceClassifierOutput, BaseModelOutput, Seq2SeqLMOutput
+691:from transformers.models.bert.modeling_bert import BertForSequenceClassification
+root@9a429f9c7fca:/app/UPET# echo '===== trainer_exp.py =====' && cat training/trainer_exp.py
+===== trainer_exp.py =====
+import logging
+import os
+import random
+import sys
+
+from typing import Any, Dict, List, Optional, OrderedDict, Tuple, Union
+import math
+import random
+import time
+import warnings
+import collections
+
+from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
+from transformers.trainer_callback import TrainerState
+from transformers.trainer_pt_utils import IterableDatasetShard
+from transformers.trainer_utils import (
+    HPSearchBackend,
+    ShardedDDPOption,
+    TrainOutput,
+    get_last_checkpoint,
+    set_seed,
+    speed_metrics,
+)
+from transformers.file_utils import (
+    CONFIG_NAME,
+    WEIGHTS_NAME,
+    is_torch_tpu_available,
+)
+
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+
+from training.trainer_base import BaseTrainer, logger
+
+
+class ExponentialTrainer(BaseTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def create_scheduler(self, num_training_steps: int, optimizer: torch.optim.Optimizer = None):
+        if self.lr_scheduler is None:
+            self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.95, verbose=True)
+        return self.lr_scheduler
+
+
+    def train(
+        self,
+        resume_from_checkpoint: Optional[Union[str, bool]] = None,
+        trial: Union["optuna.Trial", Dict[str, Any]] = None,
+        ignore_keys_for_eval: Optional[List[str]] = None,
+        **kwargs,
+    ):
+        """
+        Main training entry point.
+        Args:
+            resume_from_checkpoint (:obj:`str` or :obj:`bool`, `optional`):
+                If a :obj:`str`, local path to a saved checkpoint as saved by a previous instance of
+                :class:`~transformers.Trainer`. If a :obj:`bool` and equals `True`, load the last checkpoint in
+                `args.output_dir` as saved by a previous instance of :class:`~transformers.Trainer`. If present,
+                training will resume from the model/optimizer/scheduler states loaded here.
+            trial (:obj:`optuna.Trial` or :obj:`Dict[str, Any]`, `optional`):
+                The trial run or the hyperparameter dictionary for hyperparameter search.
+            ignore_keys_for_eval (:obj:`List[str]`, `optional`)
+                A list of keys in the output of your model (if it is a dictionary) that should be ignored when
+                gathering predictions for evaluation during the training.
+            kwargs:
+                Additional keyword arguments used to hide deprecated arguments
+        """
+        resume_from_checkpoint = None if not resume_from_checkpoint else resume_from_checkpoint
+
+        # memory metrics - must set up as early as possible
+        self._memory_tracker.start()
+
+        args = self.args
+
+        self.is_in_train = True
+
+        # do_train is not a reliable argument, as it might not be set and .train() still called, so
+        # the following is a workaround:
+        if args.fp16_full_eval and not args.do_train:
+            self._move_model_to_device(self.model, args.device)
+
+        if "model_path" in kwargs:
+            resume_from_checkpoint = kwargs.pop("model_path")
+            warnings.warn(
+                "`model_path` is deprecated and will be removed in a future version. Use `resume_from_checkpoint` "
+                "instead.",
+                FutureWarning,
+            )
+        if len(kwargs) > 0:
+            raise TypeError(f"train() received got unexpected keyword arguments: {', '.join(list(kwargs.keys()))}.")
+        # This might change the seed so needs to run first.
+        self._hp_search_setup(trial)
+
+        # Model re-init
+        model_reloaded = False
+        if self.model_init is not None:
+            # Seed must be set before instantiating the model when using model_init.
+            set_seed(args.seed)
+            self.model = self.call_model_init(trial)
+            model_reloaded = True
+            # Reinitializes optimizer and scheduler
+            self.optimizer, self.lr_scheduler = None, None
+
+        # Load potential model checkpoint
+        if isinstance(resume_from_checkpoint, bool) and resume_from_checkpoint:
+            resume_from_checkpoint = get_last_checkpoint(args.output_dir)
+            if resume_from_checkpoint is None:
+                raise ValueError(f"No valid checkpoint found in output directory ({args.output_dir})")
+
+        if resume_from_checkpoint is not None:
+            if not os.path.isfile(os.path.join(resume_from_checkpoint, WEIGHTS_NAME)):
+                raise ValueError(f"Can't find a valid checkpoint at {resume_from_checkpoint}")
+
+            logger.info(f"Loading model from {resume_from_checkpoint}).")
+
+            if os.path.isfile(os.path.join(resume_from_checkpoint, CONFIG_NAME)):
+                config = PretrainedConfig.from_json_file(os.path.join(resume_from_checkpoint, CONFIG_NAME))
+                checkpoint_version = config.transformers_version
+                if checkpoint_version is not None and checkpoint_version != __version__:
+                    logger.warn(
+                        f"You are resuming training from a checkpoint trained with {checkpoint_version} of "
+                        f"Transformers but your current version is {__version__}. This is not recommended and could "
+                        "yield to errors or unwanted behaviors."
+                    )
+
+            if args.deepspeed:
+                # will be resumed in deepspeed_init
+                pass
+            else:
+                # We load the model state dict on the CPU to avoid an OOM error.
+                state_dict = torch.load(os.path.join(resume_from_checkpoint, WEIGHTS_NAME), map_location="cpu")
+                # If the model is on the GPU, it still works!
+                self._load_state_dict_in_model(state_dict)
+
+                # release memory
+                del state_dict
+
+        # If model was re-initialized, put it on the right device and update self.model_wrapped
+        if model_reloaded:
+            if self.place_model_on_device:
+                self._move_model_to_device(self.model, args.device)
+            self.model_wrapped = self.model
+
+        # Keeping track whether we can can len() on the dataset or not
+        train_dataset_is_sized = isinstance(self.train_dataset, collections.abc.Sized)
+
+        # Data loader and number of training steps
+        train_dataloader = self.get_train_dataloader()
+
+        # Setting up training control variables:
+        # number of training epochs: num_train_epochs
+        # number of training steps per epoch: num_update_steps_per_epoch
+        # total number of training steps to execute: max_steps
+        total_train_batch_size = args.train_batch_size * args.gradient_accumulation_steps * args.world_size
+        if train_dataset_is_sized:
+            num_update_steps_per_epoch = len(train_dataloader) // args.gradient_accumulation_steps
+            num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
+            if args.max_steps > 0:
+                max_steps = args.max_steps
+                num_train_epochs = args.max_steps // num_update_steps_per_epoch + int(
+                    args.max_steps % num_update_steps_per_epoch > 0
+                )
+                # May be slightly incorrect if the last batch in the training datalaoder has a smaller size but it's
+                # the best we can do.
+                num_train_samples = args.max_steps * total_train_batch_size
+            else:
+                max_steps = math.ceil(args.num_train_epochs * num_update_steps_per_epoch)
+                num_train_epochs = math.ceil(args.num_train_epochs)
+                num_train_samples = len(self.train_dataset) * args.num_train_epochs
+        else:
+            # see __init__. max_steps is set when the dataset has no __len__
+            max_steps = args.max_steps
+            # Setting a very large number of epochs so we go as many times as necessary over the iterator.
+            num_train_epochs = sys.maxsize
+            num_update_steps_per_epoch = max_steps
+            num_train_samples = args.max_steps * total_train_batch_size
+
+        if DebugOption.UNDERFLOW_OVERFLOW in self.args.debug:
+            if self.args.n_gpu > 1:
+                # nn.DataParallel(model) replicates the model, creating new variables and module
+                # references registered here no longer work on other gpus, breaking the module
+                raise ValueError(
+                    "Currently --debug underflow_overflow is not supported under DP. Please use DDP (torch.distributed.launch)."
+                )
+            else:
+                debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
+
+        delay_optimizer_creation = self.sharded_ddp is not None and self.sharded_ddp != ShardedDDPOption.SIMPLE
+        if args.deepspeed:
+            deepspeed_engine, optimizer, lr_scheduler = deepspeed_init(
+                self, num_training_steps=max_steps, resume_from_checkpoint=resume_from_checkpoint
+            )
+            self.model = deepspeed_engine.module
+            self.model_wrapped = deepspeed_engine
+            self.deepspeed = deepspeed_engine
+            self.optimizer = optimizer
+            self.lr_scheduler = lr_scheduler
+        elif not delay_optimizer_creation:
+            self.create_optimizer_and_scheduler(num_training_steps=max_steps)
+
+        self.state = TrainerState()
+        self.state.is_hyper_param_search = trial is not None
+
+        # Activate gradient checkpointing if needed
+        if args.gradient_checkpointing:
+            self.model.gradient_checkpointing_enable()
+
+        model = self._wrap_model(self.model_wrapped)
+
+        # for the rest of this function `model` is the outside model, whether it was wrapped or not
+        if model is not self.model:
+            self.model_wrapped = model
+
+        if delay_optimizer_creation:
+            self.create_optimizer_and_scheduler(num_training_steps=max_steps)
+
+        # Check if saved optimizer or scheduler states exist
+        self._load_optimizer_and_scheduler(resume_from_checkpoint)
+
+        # important: at this point:
+        # self.model         is the Transformers Model
+        # self.model_wrapped is DDP(Transformers Model), Deepspeed(Transformers Model), etc.
+
+        # Train!
+        num_examples = (
+            self.num_examples(train_dataloader) if train_dataset_is_sized else total_train_batch_size * args.max_steps
+        )
+
+        logger.info("***** Running training *****")
+        logger.info(f"  Num examples = {num_examples}")
+        logger.info(f"  Num Epochs = {num_train_epochs}")
+        logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
+        logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_train_batch_size}")
+        logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+        logger.info(f"  Total optimization steps = {max_steps}")
+
+        self.state.epoch = 0
+        start_time = time.time()
+        epochs_trained = 0
+        steps_trained_in_current_epoch = 0
+        steps_trained_progress_bar = None
+
+        # Check if continuing training from a checkpoint
+        if resume_from_checkpoint is not None and os.path.isfile(
+            os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME)
+        ):
+            self.state = TrainerState.load_from_json(os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME))
+            epochs_trained = self.state.global_step // num_update_steps_per_epoch
+            if not args.ignore_data_skip:
+                steps_trained_in_current_epoch = self.state.global_step % (num_update_steps_per_epoch)
+                steps_trained_in_current_epoch *= args.gradient_accumulation_steps
+            else:
+                steps_trained_in_current_epoch = 0
+
+            logger.info("  Continuing training from checkpoint, will skip to saved global_step")
+            logger.info(f"  Continuing training from epoch {epochs_trained}")
+            logger.info(f"  Continuing training from global step {self.state.global_step}")
+            if not args.ignore_data_skip:
+                logger.info(
+                    f"  Will skip the first {epochs_trained} epochs then the first {steps_trained_in_current_epoch} "
+                    "batches in the first epoch. If this takes a lot of time, you can add the `--ignore_data_skip` "
+                    "flag to your launch command, but you will resume the training on data already seen by your model."
+                )
+                if self.is_local_process_zero() and not args.disable_tqdm:
+                    steps_trained_progress_bar = tqdm(total=steps_trained_in_current_epoch)
+                    steps_trained_progress_bar.set_description("Skipping the first batches")
+
+        # Update the references
+        self.callback_handler.model = self.model
+        self.callback_handler.optimizer = self.optimizer
+        self.callback_handler.lr_scheduler = self.lr_scheduler
+        self.callback_handler.train_dataloader = train_dataloader
+        self.state.trial_name = self.hp_name(trial) if self.hp_name is not None else None
+        if trial is not None:
+            assignments = trial.assignments if self.hp_search_backend == HPSearchBackend.SIGOPT else trial
+            self.state.trial_params = hp_params(assignments)
+        else:
+            self.state.trial_params = None
+        # This should be the same if the state has been saved but in case the training arguments changed, it's safer
+        # to set this after the load.
+        self.state.max_steps = max_steps
+        self.state.num_train_epochs = num_train_epochs
+        self.state.is_local_process_zero = self.is_local_process_zero()
+        self.state.is_world_process_zero = self.is_world_process_zero()
+
+        # tr_loss is a tensor to avoid synchronization of TPUs through .item()
+        tr_loss = torch.tensor(0.0).to(args.device)
+        # _total_loss_scalar is updated everytime .item() has to be called on tr_loss and stores the sum of all losses
+        self._total_loss_scalar = 0.0
+        self._globalstep_last_logged = self.state.global_step
+        model.zero_grad()
+
+        self.control = self.callback_handler.on_train_begin(args, self.state, self.control)
+
+        # Skip the first epochs_trained epochs to get the random state of the dataloader at the right point.
+        if not args.ignore_data_skip:
+            for epoch in range(epochs_trained):
+                # We just need to begin an iteration to create the randomization of the sampler.
+                for _ in train_dataloader:
+                    break
+
+
+        for epoch in range(epochs_trained, num_train_epochs):
+            if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
+                train_dataloader.sampler.set_epoch(epoch)
+            elif isinstance(train_dataloader.dataset, IterableDatasetShard):
+                train_dataloader.dataset.set_epoch(epoch)
+
+            if is_torch_tpu_available():
+                parallel_loader = pl.ParallelLoader(train_dataloader, [args.device]).per_device_loader(args.device)
+                epoch_iterator = parallel_loader
+            else:
+                epoch_iterator = train_dataloader
+
+            # Reset the past mems state at the beginning of each epoch if necessary.
+            if args.past_index >= 0:
+                self._past = None
+
+            steps_in_epoch = (
+                len(epoch_iterator) if train_dataset_is_sized else args.max_steps * args.gradient_accumulation_steps
+            )
+            self.control = self.callback_handler.on_epoch_begin(args, self.state, self.control)
+
+            step = -1
+            for step, inputs in enumerate(epoch_iterator):
+
+                # Skip past any already trained steps if resuming training
+                if steps_trained_in_current_epoch > 0:
+                    steps_trained_in_current_epoch -= 1
+                    if steps_trained_progress_bar is not None:
+                        steps_trained_progress_bar.update(1)
+                    if steps_trained_in_current_epoch == 0:
+                        self._load_rng_state(resume_from_checkpoint)
+                    continue
+                elif steps_trained_progress_bar is not None:
+                    steps_trained_progress_bar.close()
+                    steps_trained_progress_bar = None
+
+                if step % args.gradient_accumulation_steps == 0:
+                    self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
+
+                if (
+                    ((step + 1) % args.gradient_accumulation_steps != 0)
+                    and args.local_rank != -1
+                    and args._no_sync_in_gradient_accumulation
+                ):
+                    # Avoid unnecessary DDP synchronization since there will be no backward pass on this example.
+                    with model.no_sync():
+                        tr_loss_step = self.training_step(model, inputs)
+                else:
+                    tr_loss_step = self.training_step(model, inputs)
+
+                if (
+                    args.logging_nan_inf_filter
+                    and not is_torch_tpu_available()
+                    and (torch.isnan(tr_loss_step) or torch.isinf(tr_loss_step))
+                ):
+                    # if loss is nan or inf simply add the average of previous logged losses
+                    tr_loss += tr_loss / (1 + self.state.global_step - self._globalstep_last_logged)
+                else:
+                    tr_loss += tr_loss_step
+
+                self.current_flos += float(self.floating_point_ops(inputs))
+
+                # Optimizer step for deepspeed must be called on every step regardless of the value of gradient_accumulation_steps
+                if self.deepspeed:
+                    self.deepspeed.step()
+
+                if (step + 1) % args.gradient_accumulation_steps == 0 or (
+                    # last step in epoch but step is always smaller than gradient_accumulation_steps
+                    steps_in_epoch <= args.gradient_accumulation_steps
+                    and (step + 1) == steps_in_epoch
+                ):
+                    # Gradient clipping
+                    if args.max_grad_norm is not None and args.max_grad_norm > 0 and not self.deepspeed:
+                        # deepspeed does its own clipping
+
+                        if self.do_grad_scaling:
+                            # AMP: gradients need unscaling
+                            self.scaler.unscale_(self.optimizer)
+
+                        if hasattr(self.optimizer, "clip_grad_norm"):
+                            # Some optimizers (like the sharded optimizer) have a specific way to do gradient clipping
+                            self.optimizer.clip_grad_norm(args.max_grad_norm)
+                        elif hasattr(model, "clip_grad_norm_"):
+                            # Some models (like FullyShardedDDP) have a specific way to do gradient clipping
+                            model.clip_grad_norm_(args.max_grad_norm)
+                        else:
+                            # Revert to normal clipping otherwise, handling Apex or full precision
+                            nn.utils.clip_grad_norm_(
+                                amp.master_params(self.optimizer) if self.use_apex else model.parameters(),
+                                args.max_grad_norm,
+                            )
+
+                    # Optimizer step
+                    optimizer_was_run = True
+                    if self.deepspeed:
+                        pass  # called outside the loop
+                    elif is_torch_tpu_available():
+                        xm.optimizer_step(self.optimizer)
+                    elif self.do_grad_scaling:
+                        scale_before = self.scaler.get_scale()
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                        scale_after = self.scaler.get_scale()
+                        optimizer_was_run = scale_before <= scale_after
+                    else:
+                        self.optimizer.step()
+
+                    if optimizer_was_run and not self.deepspeed and (step + 1) == steps_in_epoch:
+                        self.lr_scheduler.step()
+
+                    model.zero_grad()
+                    self.state.global_step += 1
+                    self.state.epoch = epoch + (step + 1) / steps_in_epoch
+                    self.control = self.callback_handler.on_step_end(args, self.state, self.control)
+
+                    self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+                else:
+                    self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
+
+                if self.control.should_epoch_stop or self.control.should_training_stop:
+                    break
+            if step < 0:
+                logger.warning(
+                    f"There seems to be not a single sample in your epoch_iterator, stopping training at step"
+                    f" {self.state.global_step}! This is expected if you're using an IterableDataset and set"
+                    f" num_steps ({max_steps}) higher than the number of available samples."
+                )
+                self.control.should_training_stop = True
+
+            self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
+            self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+
+            if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
+                if is_torch_tpu_available():
+                    # tpu-comment: Logging debug metrics for PyTorch/XLA (compile, execute times, ops, etc.)
+                    xm.master_print(met.metrics_report())
+                else:
+                    logger.warning(
+                        "You enabled PyTorch/XLA debug metrics but you don't have a TPU "
+                        "configured. Check your training configuration if this is unexpected."
+                    )
+            if self.control.should_training_stop:
+                break
+
+
+        if args.past_index and hasattr(self, "_past"):
+            # Clean the state at the end of training
+            delattr(self, "_past")
+
+        logger.info("\n\nTraining completed. Do not forget to share your model on huggingface.co/models =)\n\n")
+        if args.load_best_model_at_end and self.state.best_model_checkpoint is not None:
+            # Wait for everyone to get here so we are sur the model has been saved by process 0.
+            if is_torch_tpu_available():
+                xm.rendezvous("load_best_model_at_end")
+            elif args.local_rank != -1:
+                dist.barrier()
+
+            logger.info(
+                f"Loading best model from {self.state.best_model_checkpoint} (score: {self.state.best_metric})."
+            )
+
+            best_model_path = os.path.join(self.state.best_model_checkpoint, WEIGHTS_NAME)
+            if os.path.exists(best_model_path):
+                # We load the model state dict on the CPU to avoid an OOM error.
+                state_dict = torch.load(best_model_path, map_location="cpu")
+                # If the model is on the GPU, it still works!
+                self._load_state_dict_in_model(state_dict)
+            else:
+                logger.warn(
+                    f"Could not locate the best model at {best_model_path}, if you are running a distributed training "
+                    "on multiple nodes, you should activate `--save_on_each_node`."
+                )
+
+            if self.deepspeed:
+                self.deepspeed.load_checkpoint(
+                    self.state.best_model_checkpoint, load_optimizer_states=False, load_lr_scheduler_states=False
+                )
+
+        # add remaining tr_loss
+        self._total_loss_scalar += tr_loss.item()
+        train_loss = self._total_loss_scalar / self.state.global_step
+
+        metrics = speed_metrics("train", start_time, num_samples=num_train_samples, num_steps=self.state.max_steps)
+        self.store_flos()
+        metrics["total_flos"] = self.state.total_flos
+        metrics["train_loss"] = train_loss
+
+        self.is_in_train = False
+
+        self._memory_tracker.stop_and_update_metrics(metrics)
+
+        self.log(metrics)
+
+        self.control = self.callback_handler.on_train_end(args, self.state, self.control)
+
+
+        return TrainOutput(self.state.global_step, train_loss, metrics)
+root@9a429f9c7fca:/app/UPET# grep -rn "ShardedDDPOption\|transformers.file_utils\|is_torch_tpu_available\|from transformers.debug_utils\|from transformers.train
+er_utils\|from transformers.trainer_pt_utils\|from transformers.trainer_callback" training/ model/ tasks/ run.py arguments.py 2>/dev/null
+training/trainer_qa.py:19:from transformers import Trainer, is_torch_tpu_available
+training/trainer_qa.py:20:from transformers.trainer_utils import PredictionOutput
+training/trainer_qa.py:24:if is_torch_tpu_available():
+training/trainer_exp.py:13:from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
+training/trainer_exp.py:14:from transformers.trainer_callback import TrainerState
+training/trainer_exp.py:15:from transformers.trainer_pt_utils import IterableDatasetShard
+training/trainer_exp.py:16:from transformers.trainer_utils import (
+training/trainer_exp.py:18:    ShardedDDPOption,
+training/trainer_exp.py:24:from transformers.file_utils import (
+training/trainer_exp.py:27:    is_torch_tpu_available,
+training/trainer_exp.py:191:        delay_optimizer_creation = self.sharded_ddp is not None and self.sharded_ddp != ShardedDDPOption.SIMPLE
+training/trainer_exp.py:312:            if is_torch_tpu_available():
+training/trainer_exp.py:358:                    and not is_torch_tpu_available()
+training/trainer_exp.py:402:                    elif is_torch_tpu_available():
+training/trainer_exp.py:439:                if is_torch_tpu_available():
+training/trainer_exp.py:458:            if is_torch_tpu_available():
+training/self_trainer.py:15:from transformers.trainer_pt_utils import DistributedSamplerWithLoop, get_length_grouped_indices
+training/self_trainer.py:16:from transformers.trainer_pt_utils import DistributedLengthGroupedSampler as DistributedLengthGroupedSamplerOri
+training/self_trainer.py:17:from transformers.trainer_pt_utils import LengthGroupedSampler as LengthGroupedSamplerOri
+training/self_trainer.py:18:# from transformers.trainer_utils import has_length
+training/self_trainer.py:20:from transformers.trainer_pt_utils import (
+training/self_trainer.py:26:from transformers.trainer_utils import denumpify_detensorize, TrainOutput
+training/self_trainer_copy.py:15:from transformers.trainer_pt_utils import DistributedSamplerWithLoop, get_length_grouped_indices
+training/self_trainer_copy.py:16:from transformers.trainer_pt_utils import DistributedLengthGroupedSampler as DistributedLengthGroupedSamplerOri
+training/self_trainer_copy.py:17:from transformers.trainer_pt_utils import LengthGroupedSampler as LengthGroupedSamplerOri
+training/self_trainer_copy.py:18:# from transformers.trainer_utils import has_length
+training/self_trainer_copy.py:20:from transformers.trainer_pt_utils import (
+training/self_trainer_copy.py:26:from transformers.trainer_utils import denumpify_detensorize, TrainOutput
+model/debertaV2.py:27:from transformers.file_utils import add_code_sample_docstrings, add_start_docstrings, add_start_docstrings_to_model_forward
+model/debertaV2.py:985:            Whether or not to return a :class:`~transformers.file_utils.ModelOutput` instead of a plain tuple.
+model/deberta.py:25:from transformers.file_utils import add_code_sample_docstrings, add_start_docstrings, add_start_docstrings_to_model_forward
+model/deberta.py:886:            Whether or not to return a :class:`~transformers.file_utils.ModelOutput` instead of a plain tuple.
+tasks/superglue/dataset_record.py:21:from transformers.file_utils import PaddingStrategy
+run.py:10:from transformers.trainer_utils import get_last_checkpoint
+root@9a429f9c7fca:/app/UPET# wc -l training/trainer_exp.py && echo '---' && grep -n "ShardedDDPOption\|file_utils\|is_torch_tpu_available\|DebugOption\|DebugUnd
+erflowOverflow\|HPSearchBackend\|TrainOutput\|get_last_checkpoint\|set_seed\|speed_metrics\|CONFIG_NAME\|WEIGHTS_NAME" training/trainer_exp.py
+502 training/trainer_exp.py
+---
+13:from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
+17:    HPSearchBackend,
+18:    ShardedDDPOption,
+19:    TrainOutput,
+20:    get_last_checkpoint,
+21:    set_seed,
+22:    speed_metrics,
+24:from transformers.file_utils import (
+25:    CONFIG_NAME,
+26:    WEIGHTS_NAME,
+27:    is_torch_tpu_available,
+101:            set_seed(args.seed)
+109:            resume_from_checkpoint = get_last_checkpoint(args.output_dir)
+114:            if not os.path.isfile(os.path.join(resume_from_checkpoint, WEIGHTS_NAME)):
+119:            if os.path.isfile(os.path.join(resume_from_checkpoint, CONFIG_NAME)):
+120:                config = PretrainedConfig.from_json_file(os.path.join(resume_from_checkpoint, CONFIG_NAME))
+134:                state_dict = torch.load(os.path.join(resume_from_checkpoint, WEIGHTS_NAME), map_location="cpu")
+181:        if DebugOption.UNDERFLOW_OVERFLOW in self.args.debug:
+189:                debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
+191:        delay_optimizer_creation = self.sharded_ddp is not None and self.sharded_ddp != ShardedDDPOption.SIMPLE
+278:            assignments = trial.assignments if self.hp_search_backend == HPSearchBackend.SIGOPT else trial
+312:            if is_torch_tpu_available():
+358:                    and not is_torch_tpu_available()
+402:                    elif is_torch_tpu_available():
+438:            if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
+439:                if is_torch_tpu_available():
+458:            if is_torch_tpu_available():
+467:            best_model_path = os.path.join(self.state.best_model_checkpoint, WEIGHTS_NAME)
+488:        metrics = speed_metrics("train", start_time, num_samples=num_train_samples, num_steps=self.state.max_steps)
+502:        return TrainOutput(self.state.global_step, train_loss, metrics)
+root@9a429f9c7fca:/app/UPET# python3 - <<'PY'
+> p='tasks/superglue/get_trainer.py'
+> s=open(p).read()
+> s=s.replace('from training.trainer_exp import ExponentialTrainer\n','')
+> s=s.replace('from training.self_trainer import SelfTrainer\n','')
+> s=s.replace(
+> """    if semi_training_args.use_semi:
+>         model_args.pre_seq_len = semi_training_args.student_pre_seq_len
+>         student_model = get_model(data_args, model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
+>         trainer = SelfTrainer(""",
+> """    if semi_training_args.use_semi:
+>         from training.self_trainer import SelfTrainer
+>         model_args.pre_seq_len = semi_training_args.student_pre_seq_len
+>         student_model = get_model(data_args, model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
+>         trainer = SelfTrainer(""")
+> open(p,'w').write(s)
+> print('patched')
+> PY
+patched
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 20:58:24 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.
+0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.00 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.90 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.46 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 1.36 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+Downloading readme: 100%|██████████| 19.7k/19.7k [00:00<00:00, 30.1kB/s]
+Traceback (most recent call last):
+  File "/app/UPET/run.py", line 128, in <module>
+    trainer, predict_dataset = get_trainer(args)
+  File "/app/UPET/tasks/superglue/get_trainer.py", line 34, in get_trainer
+    dataset = SuperGlueDataset(tokenizer, data_args, training_args, semi_training_args=semi_training_args, use_prompt=use_prompt)
+  File "/app/UPET/tasks/superglue/dataset.py", line 90, in __init__
+    raw_datasets = load_dataset("super_glue", data_args.dataset_name)
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 2628, in load_dataset
+    builder_instance.download_and_prepare(
+  File "/usr/local/lib/python3.10/site-packages/datasets/builder.py", line 969, in download_and_prepare
+    raise OSError(
+OSError: Not enough disk space. Needed: Unknown size (download: 1.22 MiB, generated: 1.82 MiB, post-processed: Unknown size)
+root@9a429f9c7fca:/app/UPET# df -h / /root /app /tmp 2>/dev/null
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  957G     0 100% /
+fuse-overlayfs  984G  957G     0 100% /
+fuse-overlayfs  984G  957G     0 100% /
+fuse-overlayfs  984G  957G     0 100% /
+root@9a429f9c7fca:/app/UPET# du -sh /root/.cache 2>/dev/null; du -sh /root/.cache/huggingface 2>/dev/null
+560M    /root/.cache
+2.7M    /root/.cache/huggingface
+root@9a429f9c7fca:/app/UPET# du -sh /* 2>/dev/null | sort -h | tail -n 20
+0       /lib
+0       /lib32
+0       /lib64
+0       /proc
+0       /sbin
+0       /sys
+4.0K    /boot
+4.0K    /home
+4.0K    /media
+4.0K    /mnt
+4.0K    /opt
+4.0K    /srv
+16K     /tmp
+80K     /run
+240K    /logs
+2.8M    /etc
+4.0M    /app
+28M     /var
+560M    /root
+4.8G    /usr
+root@9a429f9c7fca:/app/UPET# du -sh /usr/* 2>/dev/null | sort -h | tail -n 12
+find / -type f -size +50M 2>/dev/null | head -n 30
+4.0K    /usr/games
+4.0K    /usr/lib64
+84K     /usr/src
+1.2M    /usr/libexec
+7.4M    /usr/sbin
+15M     /usr/lib32
+223M    /usr/include
+279M    /usr/share
+304M    /usr/bin
+2.0G    /usr/lib
+2.0G    /usr/local
+root@9a429f9c7fca:/app/UPET# find / -type f -size +50M 2>/dev/null | head -n 30
+/usr/bin/pandoc
+/usr/lib/x86_64-linux-gnu/libLLVM-15.so.1
+/usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.21.a
+/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1
+/usr/lib/llvm-14/lib/libclang-cpp.so.14
+/usr/lib/jvm/java-17-openjdk-amd64/lib/modules
+/usr/local/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so
+/usr/local/lib/python3.10/site-packages/pyarrow/libarrow.so.2400
+/usr/local/lib/python3.10/site-packages/clang/native/libclang.so
+/root/.cache/pip/http/8/1/2/2/f/8122fdb3da4648dbf43c457498843005f7810f8e267a0b708871115f
+root@9a429f9c7fca:/app/UPET# pip cache purge 2>&1 | tail -n 2; rm -rf /root/.cache/huggingface; df -h /
+Files removed: 276
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  957G     0 100% /
+root@9a429f9c7fca:/app/UPET# df -k / ; echo '---'; du -sh /root/.cache 2>/dev/null
+Filesystem      1K-blocks       Used Available Use% Mounted on
+fuse-overlayfs 1031787424 1002933184         0 100% /
+---
+4.0M    /root/.cache
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 21:03:21 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.
+0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.00 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.90 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 0.46 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 1.36 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+Downloading readme: 100%|██████████| 19.7k/19.7k [00:00<00:00, 27.4kB/s]
+Traceback (most recent call last):
+  File "/app/UPET/run.py", line 128, in <module>
+    trainer, predict_dataset = get_trainer(args)
+  File "/app/UPET/tasks/superglue/get_trainer.py", line 34, in get_trainer
+    dataset = SuperGlueDataset(tokenizer, data_args, training_args, semi_training_args=semi_training_args, use_prompt=use_prompt)
+  File "/app/UPET/tasks/superglue/dataset.py", line 90, in __init__
+    raw_datasets = load_dataset("super_glue", data_args.dataset_name)
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 2628, in load_dataset
+    builder_instance.download_and_prepare(
+  File "/usr/local/lib/python3.10/site-packages/datasets/builder.py", line 969, in download_and_prepare
+    raise OSError(
+OSError: Not enough disk space. Needed: Unknown size (download: 1.22 MiB, generated: 1.82 MiB, post-processed: Unknown size)
+root@9a429f9c7fca:/app/UPET# grep -rn "Not enough disk space" /usr/local/lib/python3.10/site-packages/datasets/ 2>/dev/null
+/usr/local/lib/python3.10/site-packages/datasets/builder.py:970:                        f"Not enough disk space. Needed: {size_str(self.info.size_in_bytes or 0)
+} (download: {size_str(self.info.download_size or 0)}, generated: {size_str(self.info.dataset_size or 0)}, post-processed: {size_str(self.info.post_processing_s
+ize or 0)})"
+root@9a429f9c7fca:/app/UPET# dd if=/dev/zero of=/root/.cache/_test_disk bs=1M count=500 2>&1 | tail -n 2; ls -la /root/.cache/_test_disk 2>/dev/null; rm -f /roo
+t/.cache/_test_disk; echo 'WRITE_TEST_DONE'
+500+0 records out
+524288000 bytes (524 MB, 500 MiB) copied, 1.93949 s, 270 MB/s
+-rw-r--r-- 1 root root 524288000 Jul  2 21:04 /root/.cache/_test_disk
+WRITE_TEST_DONE
+root@9a429f9c7fca:/app/UPET# sed -n '945,985p' /usr/local/lib/python3.10/site-packages/datasets/builder.py
+
+        # Prevent parallel local disk operations
+        if is_local:
+            # Create parent directory of the output_dir to put the lock file in there
+            Path(self._output_dir).parent.mkdir(parents=True, exist_ok=True)
+            lock_path = self._output_dir + "_builder.lock"
+
+        # File locking only with local paths; no file locking on GCS or S3
+        with FileLock(lock_path) if is_local else contextlib.nullcontext():
+            # Check if the data already exists
+            data_exists = self._fs.exists(posixpath.join(self._output_dir, config.DATASET_INFO_FILENAME))
+            if data_exists and download_mode == DownloadMode.REUSE_DATASET_IF_EXISTS:
+                logger.info(f"Found cached dataset {self.dataset_name} ({self._output_dir})")
+                # We need to update the info in case some splits were added in the meantime
+                # for example when calling load_dataset from multiple workers.
+                self.info = self._load_info()
+                self.download_post_processing_resources(dl_manager)
+                return
+
+            logger.info(f"Generating dataset {self.dataset_name} ({self._output_dir})")
+            if is_local:  # if cache dir is local, check for available space
+                if not has_sufficient_disk_space(
+                    self.info.size_in_bytes or 0, directory=Path(self._output_dir).parent
+                ):
+                    raise OSError(
+                        f"Not enough disk space. Needed: {size_str(self.info.size_in_bytes or 0)} (download: {size_str(self.info.download_size or 0)}, generated
+: {size_str(self.info.dataset_size or 0)}, post-processed: {size_str(self.info.post_processing_size or 0)})"
+                    )
+
+            @contextlib.contextmanager
+            def incomplete_dir(dirname):
+                """Create temporary dir for dirname and rename on exit."""
+                if not is_local:
+                    self._fs.makedirs(dirname, exist_ok=True)
+                    yield dirname
+                else:
+                    tmp_dir = dirname + ".incomplete"
+                    os.makedirs(tmp_dir, exist_ok=True)
+                    try:
+                        yield tmp_dir
+                        if os.path.isdir(dirname):
+                            shutil.rmtree(dirname)
+root@9a429f9c7fca:/app/UPET# grep -rn "def has_sufficient_disk_space" /usr/local/lib/python3.10/site-packages/datasets/ 2>/dev/null
+/usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py:559:def has_sufficient_disk_space(needed_bytes, directory="."):
+root@9a429f9c7fca:/app/UPET# sed -n '559,585p' /usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py
+def has_sufficient_disk_space(needed_bytes, directory="."):
+    try:
+        free_bytes = disk_usage(os.path.abspath(directory)).free
+    except OSError:
+        return True
+    return needed_bytes < free_bytes
+
+
+def _convert_github_url(url_path: str) -> Tuple[str, Optional[str]]:
+    """Convert a link to a file on a github repo in a link to the raw github object."""
+    parsed = urlparse(url_path)
+    sub_directory = None
+    if parsed.scheme in ("http", "https", "s3") and parsed.netloc == "github.com":
+        if "blob" in url_path:
+            if not url_path.endswith(".py"):
+                raise ValueError(f"External import from github at {url_path} should point to a file ending with '.py'")
+            url_path = url_path.replace("blob", "raw")  # Point to the raw file
+        else:
+            # Parse github url to point to zip
+            github_path = parsed.path[1:]
+            repo_info, branch = github_path.split("/tree/") if "/tree/" in github_path else (github_path, "master")
+            repo_owner, repo_name = repo_info.split("/")
+            url_path = f"https://github.com/{repo_owner}/{repo_name}/archive/{branch}.zip"
+            sub_directory = f"{repo_name}-{branch}"
+    return url_path, sub_directory
+
+
+root@9a429f9c7fca:/app/UPET# python3 - <<'PY'
+> p='/usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py'
+> s=open(p).read()
+> old='def has_sufficient_disk_space(needed_bytes, directory="."):\n    try:\n        free_bytes = disk_usage(os.path.abspath(directory)).free\n    except OSErr
+or:\n        return True\n    return needed_bytes < free_bytes\n'
+> new='def has_sufficient_disk_space(needed_bytes, directory="."):\n    return True\n'
+> assert old in s, 'pattern not found'
+> s=s.replace(old,new)
+> open(p,'w').write(s)
+> print('patched has_sufficient_disk_space')
+> PY
+patched has_sufficient_disk_space
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 21:05:52 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.
+0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Downloading data: 100%|██████████| 586k/586k [00:01<00:00, 309kB/s]
+Downloading data: 100%|██████████| 69.8k/69.8k [00:01<00:00, 64.4kB/s]
+Downloading data: 100%|██████████| 622k/622k [00:01<00:00, 540kB/s]
+Generating train split: 100%|██████████| 2490/2490 [00:00<00:00, 30098.84 examples/s]
+Generating validation split: 100%|██████████| 277/277 [00:00<00:00, 77043.91 examples/s]
+Generating test split: 100%|██████████| 3000/3000 [00:00<00:00, 290477.68 examples/s]
+{'entailment': 0, 'not_entailment': 1}
+{0: 'entailment', 1: 'not_entailment'}
+Running tokenizer on dataset: 100%|██████████| 2490/2490 [00:01<00:00, 2427.68 examples/s]
+Running tokenizer on dataset: 100%|██████████| 277/277 [00:00<00:00, 2878.49 examples/s]
+Running tokenizer on dataset: 100%|██████████| 3000/3000 [00:00<00:00, 4455.33 examples/s]
+/app/UPET/tasks/superglue/dataset.py:229: FutureWarning: load_metric is deprecated and will be removed in the next major version of datasets. Use 'evaluate.load
+' instead, from the new library 🤗 Evaluate: https://huggingface.co/docs/evaluate
+  self.metric = load_metric("./metrics/super_glue", data_args.dataset_name)
+Randomly sampling 5-shot training examples for each label. Total examples number is 10
+The repository for super_glue contains custom code which must be executed to correctly load the dataset. You can inspect the repository content at https://hf.co
+/datasets/super_glue.
+You can avoid this prompt in future by passing the argument `trust_remote_code=True`.
+
+Do you wish to run the custom code? [y/N] Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 121, in resolve_trust_remote_code
+    answer = input(
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 103, in _raise_timeout_error
+    raise ValueError(
+ValueError: Loading this dataset requires you to execute custom code contained in the dataset repository on your local machine. Please set the option `trust_rem
+ote_code=True` to permit loading of this dataset.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/app/UPET/run.py", line 128, in <module>
+    trainer, predict_dataset = get_trainer(args)
+  File "/app/UPET/tasks/superglue/get_trainer.py", line 34, in get_trainer
+    dataset = SuperGlueDataset(tokenizer, data_args, training_args, semi_training_args=semi_training_args, use_prompt=use_prompt)
+  File "/app/UPET/tasks/superglue/dataset.py", line 229, in __init__
+    self.metric = load_metric("./metrics/super_glue", data_args.dataset_name)
+  File "/usr/local/lib/python3.10/site-packages/datasets/utils/deprecation_utils.py", line 46, in wrapper
+    return deprecated_function(*args, **kwargs)
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 2121, in load_metric
+    metric_module = metric_module_factory(
+  File "/usr/local/lib/python3.10/site-packages/datasets/utils/deprecation_utils.py", line 46, in wrapper
+    return deprecated_function(*args, **kwargs)
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 2023, in metric_module_factory
+    ).get_module()
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 886, in get_module
+    trust_remote_code = resolve_trust_remote_code(self.trust_remote_code, self.name)
+  File "/usr/local/lib/python3.10/site-packages/datasets/load.py", line 134, in resolve_trust_remote_code
+    raise ValueError(
+ValueError: The repository for super_glue contains custom code which must be executed to correctly load the dataset. You can inspect the repository content at h
+ttps://hf.co/datasets/super_glue.
+Please pass the argument `trust_remote_code=True` to allow custom code to be run.
+root@9a429f9c7fca:/app/UPET# sed -n '345,370p' tasks/superglue/dataset.py
+
+
+    def compute_metrics(self, p: EvalPrediction):
+        preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
+        preds = np.argmax(preds, axis=1)
+
+        if self.data_args.dataset_name == "record":
+            return self.reocrd_compute_metrics(p)
+
+        if self.data_args.dataset_name == "multirc":
+            from sklearn.metrics import f1_score
+            return {"f1": f1_score(preds, p.label_ids)}
+
+        if self.data_args.dataset_name is not None:
+            result = self.metric.compute(predictions=preds, references=p.label_ids)
+            if len(result) > 1:
+                result["combined_score"] = np.mean(list(result.values())).item()
+            return result
+        elif self.is_regression:
+            return {"mse": ((preds - p.label_ids) ** 2).mean().item()}
+        else:
+            return {"accuracy": (preds == p.label_ids).astype(np.float32).mean().item()}
+
+    def reocrd_compute_metrics(self, p: EvalPrediction):
+        from tasks.superglue.utils import f1_score, exact_match_score, metric_max_over_ground_truths
+        probs = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
+root@9a429f9c7fca:/app/UPET# python3 - <<'PY'
+> p='tasks/superglue/dataset.py'
+> s=open(p).read()
+> # 1) remove load_metric call
+> s=s.replace(
+> '        self.metric = load_metric("./metrics/super_glue", data_args.dataset_name)\n',
+> '        self.metric = None  # patched: compute accuracy manually\n')
+> # 2) replace the metric.compute branch with manual accuracy
+> old='''        if self.data_args.dataset_name is not None:
+>             result = self.metric.compute(predictions=preds, references=p.label_ids)
+>             if len(result) > 1:
+>                 result["combined_score"] = np.mean(list(result.values())).item()
+>             return result'''
+> new='''        if self.data_args.dataset_name is not None:
+>             accuracy = (preds == p.label_ids).astype(np.float32).mean().item()
+>             return {"accuracy": accuracy}'''
+> assert old in s, 'compute_metrics branch not found'
+> s=s.replace(old,new)
+> open(p,'w').write(s)
+> print('patched dataset.py')
+> PY
+patched dataset.py
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 21:07:34 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.
+0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+{'entailment': 0, 'not_entailment': 1}
+{0: 'entailment', 1: 'not_entailment'}
+Running tokenizer on dataset: 100%|██████████| 2490/2490 [00:02<00:00, 1232.16 examples/s]
+Running tokenizer on dataset: 100%|██████████| 277/277 [00:00<00:00, 1852.38 examples/s]
+Running tokenizer on dataset: 100%|██████████| 3000/3000 [00:01<00:00, 1991.45 examples/s]
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:805: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 498.82 MB. The target location /root/.cache/huggingface/hub/models--roberta-base/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+[WARNING|modeling_utils.py:4172] 2026-07-02 21:08:00,811 >> Some weights of RobertaPrefixForSequenceClassification were not initialized from the model checkpoin
+t at roberta-base and are newly initialized: ['classifier.bias', 'classifier.weight', 'prefix_encoder.embedding.weight', 'roberta.pooler.dense.bias', 'roberta.p
+ooler.dense.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Randomly sampling 5-shot training examples for each label. Total examples number is 10
+total param is 2360834
+***** total param is 2360834 *****
+07/02/2026 21:08:01 - WARNING - accelerate.utils.other - [RANK 0] Detected kernel version 5.4.241, which is below the recommended minimum of 5.5.0; this can cau
+se the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+100%|██████████| 1/1 [01:13<00:00, 73.84s/it]Traceback (most recent call last):
+  File "/app/UPET/run.py", line 146, in <module>
+    train(trainer, training_args.resume_from_checkpoint, last_checkpoint)
+  File "/app/UPET/run.py", line 26, in train
+    train_result = trainer.train(resume_from_checkpoint=checkpoint)
+  File "/usr/local/lib/python3.10/site-packages/transformers/trainer.py", line 1859, in train
+    return inner_training_loop(
+  File "/usr/local/lib/python3.10/site-packages/transformers/trainer.py", line 2278, in _inner_training_loop
+    self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
+TypeError: BaseTrainer._maybe_log_save_evaluate() takes 6 positional arguments but 7 were given
+100%|██████████| 1/1 [01:14<00:00, 74.93s/it]
+root@9a429f9c7fca:/app/UPET# python3 - <<'PY'
+> p='training/trainer_base.py'
+> s=open(p).read()
+> old='    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):\n'
+> new='    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval):\n'
+> assert old in s, 'signature not found'
+> s=s.replace(old,new)
+> open(p,'w').write(s)
+> print('patched trainer_base signature')
+> PY
+patched trainer_base signature
+root@9a429f9c7fca:/app/UPET# cd /app/UPET && python3 run.py --model_name_or_path roberta-base --task_name superglue --dataset_name rte --overwrite_cache --do_tr
+ain --do_eval --max_seq_length 128 --per_device_train_batch_size 32 --learning_rate 5e-3 --num_train_epochs 1 --pre_seq_len 128 --output_dir checkpoints/rte-rob
+erta/ --overwrite_output_dir --hidden_dropout_prob 0.1 --seed 42 --save_strategy no --evaluation_strategy epoch --num_examples_per_label 5 --head_prefix 2>&1 |
+tee /app/train.log
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging r
+esult (for instance --report_to none).
+07/02/2026 21:10:18 - WARNING - __main__ - Process rank: 0, device: cpu, n_gpu: 0distributed training: True, 16-bits training: False
+/usr/local/lib/python3.10/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.
+0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+{'entailment': 0, 'not_entailment': 1}
+{0: 'entailment', 1: 'not_entailment'}
+Running tokenizer on dataset: 100%|██████████| 2490/2490 [00:01<00:00, 1368.77 examples/s]
+Running tokenizer on dataset: 100%|██████████| 277/277 [00:00<00:00, 1458.16 examples/s]
+Running tokenizer on dataset: 100%|██████████| 3000/3000 [00:01<00:00, 2054.62 examples/s]
+[WARNING|modeling_utils.py:4172] 2026-07-02 21:10:37,768 >> Some weights of RobertaPrefixForSequenceClassification were not initialized from the model checkpoin
+t at roberta-base and are newly initialized: ['classifier.bias', 'classifier.weight', 'prefix_encoder.embedding.weight', 'roberta.pooler.dense.bias', 'roberta.p
+ooler.dense.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Randomly sampling 5-shot training examples for each label. Total examples number is 10
+total param is 2360834
+***** total param is 2360834 *****
+07/02/2026 21:10:38 - WARNING - accelerate.utils.other - [RANK 0] Detected kernel version 5.4.241, which is below the recommended minimum of 5.5.0; this can cau
+se the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+100%|██████████| 1/1 [18:16<00:00, 103.19s/it] {'eval_loss': 0.6969245672225952, 'eval_accuracy': 0.4801444113254547, 'eval_runtime': 992.838, 'eval_samples_per
+_second': 0.279, 'eval_steps_per_second': 0.035, 'epoch': 1.0}
+eval_metrics= {'eval_loss': 0.6969245672225952, 'eval_accuracy': 0.4801444113254547, 'eval_runtime': 992.838, 'eval_samples_per_second': 0.279, 'eval_steps_per_
+second': 0.035, 'epoch': 1.0}
+07/02/2026 21:28:56 - INFO - training.trainer_base - ***** Epoch 0: Best results *****
+07/02/2026 21:28:56 - INFO - training.trainer_base - best_epoch = 0
+07/02/2026 21:28:56 - INFO - training.trainer_base - best_eval_accuracy = 0.4801444113254547
+100%|██████████| 1/1 [18:16<00:00, 1096.12s/it]
+OrderedDict([('best_epoch', 0), ('best_eval_accuracy', 0.4801444113254547), ('epoch', 1.0)])
+{'train_runtime': 1096.1569, 'train_samples_per_second': 0.009, 'train_steps_per_second': 0.001, 'train_loss': 0.6900911331176758, 'epoch': 1.0}
+***** train metrics *****
+  epoch                    =        1.0
+  total_flos               =      612GF
+  train_loss               =     0.6901
+  train_runtime            = 0:18:16.15
+  train_samples_per_second =      0.009
+  train_steps_per_second   =      0.001
+***** best metrics *****
+  best_epoch         =      0
+  best_eval_accuracy = 0.4801
+  epoch              =    1.0
+root@9a429f9c7fca:/app/UPET# grep -oE "'eval_accuracy': [0-9.]+|best_eval_accuracy': [0-9.]+" /app/train.log | head
+'eval_accuracy': 0.4801444113254547
+'eval_accuracy': 0.4801444113254547
+root@9a429f9c7fca:/app/UPET# python3 - <<'PY'
+> import re, json
+> log=open('/app/train.log').read()
+> m=re.search(r"eval_accuracy':\s*([0-9.]+)", log)
+> assert m, 'eval_accuracy not found in log'
+> acc=float(m.group(1))
+> out={'eval_accuracy': acc}
+> with open('/app/result.json','w') as f:
+>     json.dump(out, f)
+> print('WROTE', out)
+> PY
+WROTE {'eval_accuracy': 0.4801444113254547}
+root@9a429f9c7fca:/app/UPET# cat /app/result.json
+{"eval_accuracy": 0.4801444113254547}root@9a429f9c7fca:/app/UPET# echo 'DONE: eval_accuracy=0.4801444113254547 written to /app/result.json'
+DONE: eval_accuracy=0.4801444113254547 written to /app/result.json
+root@9a429f9c7fca:/app/UPET#

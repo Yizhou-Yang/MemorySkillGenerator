@@ -1,0 +1,12 @@
+The 2D peak fits well (RMS 256), but the G fit is poor: negative offset (-9527) and high RMS (4836). The problem is the G peak window (700) is too narrow — the true baseline is ~1200 units away, so the wing estimate was contaminated by the peak itself. Let me inspect the raw G-peak data and widen the window.
+
+{
+  "analysis": "The G fit is poor: offset came out negative (-9527) and RMS is 4836. The 2D fit is good (RMS 256). Root cause: my G window (half-width 700) is too narrow \u2014 the true baseline (~19600) is ~1200 units from the peak center, so the wing-based offset estimate was contaminated by the broad peak. I need to widen the G window so the wings land in the true baseline.",
+  "plan": "Print the raw G-peak data at the window edges to confirm baseline, then re-run the fit with a wider G window (half-width ~1500) so the offset and amplitude are physically sensible. Verify results.json is written.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/diag.py << 'EOF'\nimport numpy as np\ndata=[]\nfor line in open('/app/graphene.dat'):\n    line=line.strip()\n    if not line: continue\n    p=line.split()\n    if len(p)<2: continue\n    data.append((float(p[0].replace(',','.')), float(p[1].replace(',','.'))))\ndata=np.array(data)\nx=data[:,0]; y=data[:,1]\nfor c in (19139,):\n    m=(x>c-1500)&(x<c+1500)\n    xx=x[m]; yy=y[m]\n    print('G window edges:')\n    print('  low edge x=%.1f y=%.1f'%(xx[0],yy[0]))\n    print('  high edge x=%.1f y=%.1f'%(xx[-1],yy[-1]))\n    print('  max x=%.1f y=%.1f'%(xx[np.argmax(yy)], yy.max()))\nEOF\npython3 /tmp/diag.py\n",
+      "duration": 2.0
+    }
+  ]
+}

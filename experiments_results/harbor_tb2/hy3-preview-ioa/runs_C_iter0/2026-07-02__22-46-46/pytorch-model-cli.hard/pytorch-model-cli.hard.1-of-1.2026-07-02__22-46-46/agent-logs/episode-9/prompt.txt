@@ -1,0 +1,70 @@
+New Terminal Output:
+
+root@47eb447ae52d:/app# cat > extract.py <<'PYEOF'
+> import zipfile, struct, json, pickle, collections, io
+>
+> class Storage:
+>     def __init__(self, key, numel, data):
+>         self.key=key; self.numel=numel; self.data=data
+>
+> class Tensor:
+>     def __init__(self, data, shape):
+>         self.data=data; self.shape=list(shape)
+>
+> class Loader(pickle.Unpickler):
+>     def __init__(self, file, zf, bo):
+>         super().__init__(file)
+>         self.zf=zf; self.bo=bo
+>     def find_class(self, module, name):
+>         if module=='collections' and name=='OrderedDict':
+>             return collections.OrderedDict
+>         if module=='torch._utils' and name=='_rebuild_tensor_v2':
+>             return self._rebuild
+>         if module=='torch' and name=='FloatStorage':
+>             return object
+>         raise pickle.UnpicklingError('unknown '+module+' '+name)
+>     def persistent_load(self, pid):
+>         key=pid[2]; numel=pid[4]
+>         raw=self.zf.read('simple_mnist/data/'+key)
+>         fmt='<' if self.bo=='little' else '>'
+>         data=list(struct.unpack('%df'%numel, raw))
+>         return Storage(key, numel, data)
+>     def _rebuild(self, storage, offset, size, stride, requires_grad, hooks):
+>         total=1
+>         for s in size: total*=s
+>         return Tensor(storage.data[offset:offset+total], list(size))
+>
+> def reshape(data, shape):
+>     if len(shape)==1:
+>         return list(data[:shape[0]])
+>     inner=shape[1:]; step=1
+>     for s in inner: step*=s
+>     return [reshape(data[i*step:(i+1)*step], inner) for i in range(shape[0])]
+>
+> Z=zipfile.ZipFile('model.pth')
+> bo=Z.read('simple_mnist/byteorder').decode().strip()
+> pkl=Z.read('simple_mnist/data.pkl')
+> state=Loader(io.BytesIO(pkl), Z, bo).load()
+> out={'weights':{}}
+> for name,t in state.items():
+>     if name=='_metadata': continue
+>     out['weights'][name]=reshape(t.data, t.shape)
+> mi=state['input_layer.weight'].shape
+> mo=state['output_layer.weight'].shape
+> out['metadata']={'input_dim':mi[1],'hidden_dim':mi[0],'num_classes':mo[0]}
+> json.dump(out, open('weights.json','w'))
+> print('byteorder', bo)
+> print('metadata', out['metadata'])
+> for k,v in out['weights'].items():
+>     print(k, 'rows', len(v), 'cols', len(v[0]) if v and isinstance(v[0],list) else 0)
+> PYEOF
+root@47eb447ae52d:/app# python3 extract.py
+byteorder little
+metadata {'input_dim': 784, 'hidden_dim': 16, 'num_classes': 10}
+input_layer.weight rows 16 cols 784
+input_layer.bias rows 16 cols 0
+hidden_layer.weight rows 16 cols 16
+hidden_layer.bias rows 16 cols 0
+output_layer.weight rows 10 cols 16
+output_layer.bias rows 10 cols 0
+

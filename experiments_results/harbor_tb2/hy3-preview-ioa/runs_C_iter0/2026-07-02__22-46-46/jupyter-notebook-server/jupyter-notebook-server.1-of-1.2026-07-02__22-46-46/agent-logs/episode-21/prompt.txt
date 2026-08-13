@@ -1,0 +1,41 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@4737eecf794c:/app# curl -sk -o /dev/null -w 'noauth_status=%{http_code}\n' https://localhost:8888/api/contents
+python3 - << 'PYEOF'
+import requests, re
+s=requests.Session(); s.verify=False
+r=s.get('https://localhost:8888/login')
+tok=re.search(r'name="_xsrf"[^>]*value="([^"]+)"', r.text)
+xsrf=tok.group(1) if tok else ''
+r2=s.post('https://localhost:8888/login', data={'_xsrf':xsrf,'password':'benchmarkpass'}, headers={'X-XSRFToken':xsrf})
+print('login status', r2.status_code)
+r3=s.get('https://localhost:8888/api/contents')
+print('api status with pwd session', r3.status_code)
+PYEOF
+noauth_status=403
+root@4737eecf794c:/app# python3 - << 'PYEOF'
+> import requests, re
+> s=requests.Session(); s.verify=False
+> r=s.get('https://localhost:8888/login')
+> tok=re.search(r'name="_xsrf"[^>]*value="([^"]+)"', r.text)
+> xsrf=tok.group(1) if tok else ''
+> r2=s.post('https://localhost:8888/login', data={'_xsrf':xsrf,'password':'benchmarkpass'}, headers={'X-XSRFToken':xsrf})
+> print('login status', r2.status_code)
+> r3=s.get('https://localhost:8888/api/contents')
+> print('api status with pwd session', r3.status_code)
+> PYEOF
+/usr/local/lib/python3.13/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'localhost'. Addi
+ng certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/usr/local/lib/python3.13/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'localhost'. Addi
+ng certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+login status 401
+/usr/local/lib/python3.13/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'localhost'. Addi
+ng certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+api status with pwd session 403
+root@4737eecf794c:/app#

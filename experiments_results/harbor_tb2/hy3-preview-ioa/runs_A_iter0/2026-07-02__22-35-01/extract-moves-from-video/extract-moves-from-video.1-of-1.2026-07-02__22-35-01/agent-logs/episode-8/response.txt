@@ -1,0 +1,10 @@
+{
+  "analysis": "The /data overlay paths don't exist inside the container (they're host-side). The / is fuse-overlayfs and df reports 0 avail, yet I successfully wrote 50MB to /tmp — so the disk-space report is misleading (likely reflecting the read-only lower layer). I need to understand the real writable space before fighting apt's disk check. Let me inspect mounts and tmpfs, then decide on a strategy (likely: get yt-dlp as a standalone script, and install ffmpeg/tesseract somehow).",
+  "plan": "Check mount types (is /tmp tmpfs?), df on key dirs, and whether apt's disk check can be bypassed by setting the cache dir to a tmpfs. I'll also try a tiny real install to observe apt's actual behavior. Based on results I'll choose: (a) apt with cache on tmpfs, or (b) manual .deb download + dpkg, or (c) pure-python alternatives.",
+  "commands": [
+    {
+      "keystrokes": "mount | grep -E 'tmpfs|overlay| / ' | head; echo '=== df ==='; df -h /tmp /run /var / 2>&1; echo '=== apt test ==='; apt-get install -y --no-install-recommends hello 2>&1 | tail -8\n",
+      "duration": 8
+    }
+  ]
+}

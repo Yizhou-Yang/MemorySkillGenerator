@@ -1,0 +1,36 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@2739e611cf42:/app# cat > /tmp/exp.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> data=[]
+> for line in open('/app/graphene.dat'):
+>     line=line.strip()
+>     if not line: continue
+>     p=line.split()
+>     if len(p)<2: continue
+>     data.append((float(p[0].replace(',','.')), float(p[1].replace(',','.'))))
+> data=np.array(data)
+> x=data[:,0]; y=data[:,1]
+> def lor(x,x0,g,a,o): return o+a/(1+((x-x0)/g)**2)
+>
+> for name,c,hw in [('G',19139.0,1800.0),('2D',33245.0,2500.0)]:
+>     m=(x>c-hw)&(x<c+hw)
+>     xw,yw=x[m],y[m]
+>     if name=='G':
+>         p0=[c,150.0,60000.0,20000.0]
+>         b=([c-600,50,0,10000],[c+600,400,200000,40000])
+>     else:
+>         p0=[c,1500.0,4000.0,21000.0]
+>         b=([c-1000,200,0,10000],[c+1000,4000,100000,40000])
+>     popt,_=curve_fit(lor,xw,yw,p0=p0,bounds=b,maxfev=200000)
+>     rms=np.sqrt(np.mean((yw-lor(xw,*popt))**2))
+>     print('%s: x0=%.2f gamma=%.2f amp=%.2f off=%.2f rms=%.2f'%(name,popt[0],abs(popt[1]),popt[2],popt[3],rms))
+> EOF
+root@2739e611cf42:/app# python3 /tmp/exp.py
+G: x0=19197.87 gamma=400.00 amp=74773.50 off=11551.47 rms=5236.29
+2D: x0=33447.77 gamma=2146.20 amp=3942.24 off=17049.71 rms=255.91
+root@2739e611cf42:/app#

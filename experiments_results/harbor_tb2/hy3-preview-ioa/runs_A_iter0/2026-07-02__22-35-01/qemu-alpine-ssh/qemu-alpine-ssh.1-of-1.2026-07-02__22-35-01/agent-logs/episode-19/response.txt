@@ -1,0 +1,14 @@
+{
+  "analysis": "sshd is running and listening on 0.0.0.0:22 (confirmed by earlier netstat output and current ps showing the listener). The nc test didn't print because busybox nc may not support -z. Now I need to verify the full path works: host port 2222 -> qemu user-net -> guest:22. I'll test from the host using an expect script since sshpass may be absent.",
+  "plan": "1) Check if sshpass exists; if not, use expect to test 'ssh -p 2222 root@localhost' with password password123 and run a command (hostname) to confirm we get a shell. 2) If the expect test yields a shell prompt / command output, the task is complete. I'll also do a quick interactive verification to be safe.",
+  "commands": [
+    {
+      "keystrokes": "which sshpass; echo '---'\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "expect -c 'set timeout 20; spawn ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost; expect \"password:\"; send \"password123\\r\"; expect \"#\"; send \"hostname; id\\r\"; expect \"#\"; send \"exit\\r\"; expect eof' 2>&1 | tail -20\n",
+      "duration": 22.0
+    }
+  ]
+}

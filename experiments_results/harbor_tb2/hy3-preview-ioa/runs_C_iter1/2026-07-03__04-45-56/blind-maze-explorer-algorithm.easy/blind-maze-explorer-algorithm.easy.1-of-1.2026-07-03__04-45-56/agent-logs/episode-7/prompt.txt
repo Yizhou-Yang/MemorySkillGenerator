@@ -1,0 +1,95 @@
+New Terminal Output:
+
+root@5ea94665f8e2:/app# cat > /app/explorer.py << 'PYEOF'
+> import subprocess, os, sys
+>
+> OUTDIR = '/app/output'
+> GAME = '/app/maze_game.sh'
+> DIRS = [('N',-1,0),('E',0,1),('S',1,0),('W',0,-1)]
+> OPP = {'N':'S','S':'N','E':'W','W':'E'}
+>
+> def run_maze(mid):
+>     env = dict(os.environ)
+>     env['PYTHONUNBUFFERED'] = '1'
+>     p = subprocess.Popen([GAME, str(mid)], stdin=subprocess.PIPE,
+>                          stdout=subprocess.PIPE, text=True, env=env)
+>     for _ in range(4):
+>         p.stdout.readline()
+>
+>     def send(cmd):
+>         p.stdin.write(cmd+'\n')
+>         p.stdin.flush()
+>         return p.stdout.readline().strip()
+>
+>     start = (0,0)
+>     open_cells = {start}
+>     cell_type = {start:'S'}
+>     tried = {start: set()}
+>     stack = [(start, None)]
+>
+>     while stack:
+>         cur, enter_dir = stack[-1]
+>         untried = [d for d in DIRS if d[0] not in tried[cur]]
+>         if not untried:
+>             stack.pop()
+>             if stack:
+>                 send('move '+OPP[enter_dir])
+>             continue
+>         dname, dr, dc = untried[0]
+>         tried[cur].add(dname)
+>         res = send('move '+dname)
+>         nr, nc = cur[0]+dr, cur[1]+dc
+>         if res == 'hit wall':
+>             continue
+>         elif res == 'reached exit':
+>             open_cells.add((nr,nc))
+>             cell_type[(nr,nc)] = 'E'
+>             tried[(nr,nc)] = set()
+>             stack.append(((nr,nc), dname))
+>         else:
+>             if (nr,nc) in open_cells:
+>                 send('move '+OPP[dname])
+>             else:
+>                 open_cells.add((nr,nc))
+>                 cell_type.setdefault((nr,nc), ' ')
+>                 tried[(nr,nc)] = set()
+>                 stack.append(((nr,nc), dname))
+>
+>     send('exit')
+>     p.wait(timeout=10)
+>
+>     all_cells = open_cells
+>     minr = min(c[0] for c in all_cells)
+>     maxr = max(c[0] for c in all_cells)
+>     minc = min(c[1] for c in all_cells)
+>     maxc = max(c[1] for c in all_cells)
+>     rows = []
+>     for r in range(minr, maxr+1):
+>         row = []
+>         for c in range(minc, maxc+1):
+>             if (r,c) in open_cells:
+>                 row.append(cell_type.get((r,c), ' '))
+>             else:
+>                 row.append('#')
+>         rows.append(''.join(row))
+>     return rows
+>
+> def main():
+>     os.makedirs(OUTDIR, exist_ok=True)
+>     if len(sys.argv) > 1:
+>         ids = [int(x) for x in sys.argv[1:]]
+>     else:
+>         ids = list(range(1,11))
+>     for mid in ids:
+>         rows = run_maze(mid)
+>         path = os.path.join(OUTDIR, f'{mid}.txt')
+>         with open(path, 'w') as f:
+>             f.write('\n'.join(rows)+'\n')
+>         print(f'maze {mid}: {len(rows)}x{len(rows[0])} written')
+>
+> if __name__ == '__main__':
+>     main()
+> PYEOF
+root@5ea94665f8e2:/app# python3 /app/explorer.py 1 && echo '--- mine ---' && cat /app/output/1.txt && echo '--- truth ---' && python3 /protected/maze_helper.py
+1
+

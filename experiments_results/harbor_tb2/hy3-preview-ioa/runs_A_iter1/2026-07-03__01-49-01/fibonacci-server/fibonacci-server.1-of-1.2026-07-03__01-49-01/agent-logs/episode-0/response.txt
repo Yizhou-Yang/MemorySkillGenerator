@@ -1,0 +1,19 @@
+{
+  "analysis": "I'm at a fresh shell in /app. No files have been created yet. I need to build a server on port 3000 with a GET /fib endpoint that returns the nth Fibonacci number as JSON, and returns 400 for missing or non-integer 'n'.",
+  "plan": "I'll write a self-contained Python server using only the standard library (http.server) so no external dependencies are needed. It will parse the query param 'n', validate it's an integer, return 400 if missing/invalid, and return {'result': fib(n)} otherwise. Then run it in the background and verify with curl.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/fib_server.py << 'EOF'\nimport json\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\nfrom urllib.parse import urlparse, parse_qs\n\n\ndef fib(n):\n    if n < 0:\n        raise ValueError\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n\n\nclass Handler(BaseHTTPRequestHandler):\n    def _send(self, status, payload):\n        body = json.dumps(payload).encode()\n        self.send_response(status)\n        self.send_header('Content-Type', 'application/json')\n        self.send_header('Content-Length', str(len(body)))\n        self.end_headers()\n        self.wfile.write(body)\n\n    def do_GET(self):\n        if self.path.split('?')[0] != '/fib':\n            self._send(404, {'error': 'not found'})\n            return\n        parsed = urlparse(self.path)\n        qs = parse_qs(parsed.query)\n        if 'n' not in qs:\n            self._send(400, {'error': 'missing query param n'})\n            return\n        raw = qs['n'][0]\n        try:\n            n = int(raw)\n        except ValueError:\n            self._send(400, {'error': 'n must be an integer'})\n            return\n        try:\n            result = fib(n)\n        except ValueError:\n            self._send(400, {'error': 'n must be a non-negative integer'})\n            return\n        self._send(200, {'result': result})\n\n    def log_message(self, *args):\n        pass\n\n\ndef main():\n    server = HTTPServer(('0.0.0.0', 3000), Handler)\n    server.serve_forever()\n\n\nif __name__ == '__main__':\n    main()\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "nohup python3 /app/fib_server.py > /app/fib_server.log 2>&1 &\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 1; echo '--- test valid ---'; curl -s 'http://localhost:3000/fib?n=10'; echo; echo '--- test missing ---'; curl -s -o /dev/null -w '%{http_code}\\n' 'http://localhost:3000/fib'; echo '--- test non-integer ---'; curl -s -o /dev/null -w '%{http_code}\\n' 'http://localhost:3000/fib?n=abc'\n",
+      "duration": 2.0
+    }
+  ],
+  "task_complete": false
+}

@@ -1,0 +1,20 @@
+The pty capture mechanism itself works (the bash test captured output fine). The frotz capture came back empty, so I need a more robust driver — likely a timing/buffering issue. I'll use a writer thread plus a continuous reader that reads until the child exits.
+
+{
+  "analysis": "The pty capture works for bash (dbg.py captured LINE_A/B/C), so the mechanism is fine. The frotz run produced 0 bytes in the transcript, which is a timing/blocking issue in my read loop. I'll rewrite the driver: a thread writes the commands with delays while the main thread continuously reads the pty until the child exits (EOF) or a hard timeout. I'll also send a final newline to dismiss frotz's 'Hit any key to exit.' so the child terminates cleanly.",
+  "plan": "1) Write /app/play2.py with a producer thread (writes commands) and a consumer that reads until EOF. 2) Run it with cmds.txt. 3) Check the transcript line count and read it to verify frotz ran as player and the opening sequence reached the Cellar.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/play2.py <<'PYEOF'\nimport os, pty, sys, time, select, pwd, threading\n\ndef main():\n    cmds = [c for c in open(sys.argv[1]).read().split('\\n') if c.strip() != '']\n    uid = pwd.getpwnam('player').pw_uid\n    gid = pwd.getpwnam('player').pw_gid\n    pid, fd = pty.fork()\n    if pid == 0:\n        os.setgid(gid)\n        os.setuid(uid)\n        os.environ['TERM'] = 'dumb'\n        os.environ['LINES'] = '40'\n        os.environ['COLUMNS'] = '80'\n        os.execv('/app/frotz/frotz', ['frotz', '/app/frotz/zork1.z5'])\n    out = open('/app/transcript.txt', 'wb')\n    stop = threading.Event()\n    def writer():\n        time.sleep(0.8)\n        for c in cmds:\n            os.write(fd, (c + '\\n').encode())\n            time.sleep(0.2)\n        time.sleep(0.5)\n        os.write(fd, b'\\n')  # dismiss 'Hit any key to exit.'\n        time.sleep(0.3)\n        stop.set()\n    t = threading.Thread(target=writer)\n    t.start()\n    while True:\n        r, _, _ = select.select([fd], [], [], 0.4)\n        if r:\n            try:\n                d = os.read(fd, 65536)\n            except OSError:\n                break\n            if not d:\n                break\n            out.write(d)\n            out.flush()\n        if stop.is_set() and not r:\n            # give a moment for final output then stop\n            time.sleep(0.3)\n            break\n    out.close()\n    try:\n        os.waitpid(pid, 0)\n    except Exception:\n        pass\n\nmain()\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /app/play2.py /app/cmds.txt\n",
+      "duration": 8.0
+    },
+    {
+      "keystrokes": "echo RC=$?; wc -l /app/transcript.txt\n",
+      "duration": 0.3
+    }
+  ]
+}

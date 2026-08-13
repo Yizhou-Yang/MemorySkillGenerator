@@ -1,0 +1,35 @@
+New Terminal Output:
+
+root@252b2cdc5cd9:/app# cat > /tmp/probe.py << 'EOF'
+> import socket, json
+> hosts = [("localhost",8899,"http"),("localhost",80,"http"),("127.0.0.1",5000,"http")]
+> for h,p,t in hosts:
+>     try:
+>         s=socket.create_connection((h,p),timeout=2)
+>         print(f"OPEN {h}:{p}")
+>         s.close()
+>     except Exception as e:
+>         print(f"CLOSED {h}:{p} {e}")
+> EOF
+root@252b2cdc5cd9:/app# python3 /tmp/probe.py
+CLOSED localhost:8899 [Errno 111] Connection refused
+CLOSED localhost:80 [Errno 111] Connection refused
+CLOSED 127.0.0.1:5000 [Errno 111] Connection refused
+root@252b2cdc5cd9:/app# python3 - << 'EOF'
+> import urllib.request,json
+> def test(url,data=None):
+>     try:
+>         req=urllib.request.Request(url,data=data,headers={'Content-Type':'application/json'}) if data else urllib.request.Request(url)
+>         r=urllib.request.urlopen(req,timeout=8)
+>         print(url,"->",r.status, r.read()[:120])
+>     except Exception as e:
+>         print(url,"-> ERR", e)
+> test("https://api.devnet.solana.com", json.dumps({'jsonrpc':'2.0','id':1,'method':'getHealth'}).encode())
+> test("https://pypi.org/simple/")
+> test("https://raw.githubusercontent.com/")
+> EOF
+https://api.devnet.solana.com -> ERR <urlopen error _ssl.c:1001: The handshake operation timed out>
+https://pypi.org/simple/ -> 200 b'<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta name="pypi:repository-version" content="1.4">\n    <title>Simple inde'
+https://raw.githubusercontent.com/ -> 200 b'\n\n\n\n\n\n\n\n<!DOCTYPE html>\n<html\n  lang="en"\n  data-color-mode="dark" data-dark-theme="dark"\n  data-color-m
+ode="light" data'
+root@252b2cdc5cd9:/app#

@@ -1,0 +1,27 @@
+New Terminal Output:
+
+root@03270641b450:/app# head -c 30 high_res.ppm | od -c | head; echo '---'; which ffmpeg objdump gdb 2>/dev/null
+0000000   P   3  \n   8   8   0   0       6   6   0   0  \n   2   5   5
+0000020  \n   1   5   9       1   9   7       2   5   5  \n   1
+0000036
+---
+/usr/bin/ffmpeg
+/usr/bin/objdump
+root@03270641b450:/app# .venv/bin/python - << 'EOF'
+> import numpy as np
+> from PIL import Image
+> img=np.array(Image.open('image.ppm')).astype(float)
+> H,W,_=img.shape
+> # symmetry check L-R
+> print('L-R symmetric?', np.allclose(img[:,:W//2], img[:,W-1:W//2-1:-1], atol=2))
+> # sample a grid
+> for y in [0,150,300,450,599]:
+>     print('y',y, [img[y,x].astype(int) for x in [0,200,400,600,799]])
+> EOF
+L-R symmetric? False
+y 0 [array([159, 197, 255]), array([151, 193, 255]), array([146, 190, 255]), array([151, 193, 255]), array([159, 197, 255])]
+y 150 [array([173, 206, 255]), array([167, 202, 255]), array([163, 200, 255]), array([167, 202, 255]), array([173, 206, 255])]
+y 300 [array([121, 125, 130]), array([117, 119, 122]), array([51, 10, 10]), array([118, 120, 123]), array([120, 123, 129])]
+y 450 [array([74, 74, 74]), array([22, 22, 22]), array([79, 79, 79]), array([126, 126, 126]), array([146, 146, 146])]
+y 599 [array([102, 102, 102]), array([96, 96, 96]), array([145, 145, 145]), array([66, 66, 66]), array([119, 119, 119])]
+root@03270641b450:/app#

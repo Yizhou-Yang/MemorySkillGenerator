@@ -1,0 +1,50 @@
+New Terminal Output:
+
+root@d7c0d58138fd:/app# cat > /tmp/dl.py <<'PYEOF'
+> import concurrent.futures, re, os, urllib.request
+>
+> dest = '/app/aptcache'
+> os.makedirs(dest, exist_ok=True)
+> uris = []
+> with open('/tmp/uris.txt') as f:
+>     for line in f:
+>         line = line.strip()
+>         if not line.startswith("'http"):
+>             continue
+>         m = re.match(r"'([^']+)'\s+(\S+)\s+(\d+)\s", line)
+>         if m:
+>             uris.append((m.group(1), m.group(2), int(m.group(3))))
+>
+> print('urls', len(uris))
+>
+> def fetch(item):
+>     url, name, size = item
+>     path = os.path.join(dest, name)
+>     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+>     try:
+>         data = urllib.request.urlopen(req, timeout=90).read()
+>         with open(path, 'wb') as fh:
+>             fh.write(data)
+>         if len(data) != size:
+>             return name, 'SIZEMISMATCH %d!=%d' % (len(data), size)
+>         return name, 'ok'
+>     except Exception as e:
+>         return name, 'FAIL:%s' % e
+>
+> ok = 0
+> with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+>     for name, status in ex.map(fetch, uris):
+>         if status != 'ok':
+>             print('FAILED', name, status)
+>         else:
+>             ok += 1
+> print('done ok=', ok)
+> PYEOF
+root@d7c0d58138fd:/app# python3 /tmp/dl.py
+urls 215
+done ok= 215
+root@d7c0d58138fd:/app#
+exit
+asciinema: recording finished
+asciinema: asciicast saved to /logs/agent.cast
+root@d7c0d58138fd:/app#

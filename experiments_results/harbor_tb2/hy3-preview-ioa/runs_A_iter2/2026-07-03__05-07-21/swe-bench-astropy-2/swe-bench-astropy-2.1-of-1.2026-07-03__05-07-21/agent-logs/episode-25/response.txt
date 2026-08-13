@@ -1,0 +1,16 @@
+The `df` output is a fuse-overlayfs quirk (I successfully wrote 300MB to /tmp earlier), but apt refuses to install based on that bogus free-space report. Let me work around it.
+
+{
+  "analysis": "apt refuses to install gcc because of the misleading fuse-overlayfs df report (real writes to /tmp succeeded). I need gcc to build astropy's C extensions. Let me first check if any C compiler already exists on the system, and if not, try downloading the gcc .deb directly with `apt-get download` (which only fetches, avoiding the install space check) and install via dpkg.",
+  "plan": "1. Check for existing compilers (cc, clang, tcc, gcc). 2. If none, use `apt-get download` to fetch the gcc deb and its needed deps to /tmp, then dpkg -i them. dpkg's disk-space check is typically based on actual writes and may succeed where apt's pre-check failed. Then build astropy extensions in-place.",
+  "commands": [
+    {
+      "keystrokes": "ls /usr/bin | grep -E '^(gcc|cc|clang|tcc|gcc-.*)$'\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "apt-get download gcc 2>&1 | tail -4; ls -la *.deb 2>/dev/null\n",
+      "duration": 10.0
+    }
+  ]
+}

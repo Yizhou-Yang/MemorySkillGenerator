@@ -1,0 +1,25 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'cat /app/maze_game.sh\n'
+'cat /app/maze_1.txt\n'
+"ls -la /app/tests; echo '---'; cat /app/tests/* 2>/dev/null | head -50\n"
+"ls -la /protected 2>/dev/null; echo '---'; cat /protected/maze_server.py 2>/dev/null | head -80\n"
+"sed -n '80,200p' /protected/maze_server.py\n"
+"sed -n '200,260p' /protected/maze_server.py\n"
+'cat /app/tests/test_outputs.py\n'
+'ls -la /protected/mazes; echo \'---\'; for f in /protected/mazes/maze_*.txt; do echo -n "$f: "; wc -L < $f | tr -d \'\\n\'; echo -n \' x \'; wc -l < $f; done\n'
+'cat /protected/maze_helper.py\n'
+"cat /protected/mazes/maze_1.txt; echo '==='; cat /app/maze_1.txt\n"
+"cat > /app/explore.py << 'PYEOF'\n#!/usr/bin/env python3\nimport sys, os, subprocess\n\nDIRS = [('N', -1, 0), ('S', 1, 0), ('E', 0, 1), ('W', 0, -1)]\nOPP = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}\n\ndef explore(maze_id):\n    os.makedirs('/app/output', exist_ok=True)\n    env = dict(os.environ)\n    env['PYTHONUNBUFFERED'] = '1'\n    proc = subprocess.Popen(\n        [sys.executable, '/protected/maze_server.py', str(maze_id)],\n        stdin=subprocess.PIPE, stdout=subprocess.PIPE,\n        text=True, bufsize=1, env=env\n    )\n\n    while True:\n        line = proc.stdout.readline()\n        if not line:\n            break\n        if 'quit the game' in line:\n            break\n\n    def read_result():\n        line = proc.stdout.readline()\n        if not line:\n            return ''\n        s = line.strip()\n        if s.startswith('> '):\n            s = s[2:].strip()\n        return s\n\n    def send_move(d):\n        print('move ' + d, file=proc.stdin)\n        proc.stdin.flush()\n        return read_result()\n\n    grid = {}\n    visited = set()\n    start = (0, 0)\n    grid[start] = 'S'\n    sys.setrecursionlimit(100000)\n\n    def dfs(r, c, back):\n        visited.add((r, c))\n        for d, dr, dc in DIRS:\n            if d == back:\n                continue\n            nr, nc = r + dr, c + dc\n            res = send_move(d)\n            if res == 'hit wall':\n                grid[(nr, nc)] = '#'\n            elif res == 'reached exit':\n                grid[(nr, nc)] = 'E'\n                if (nr, nc) not in visited:\n                    dfs(nr, nc, OPP[d])\n                else:\n                    send_move(OPP[d])\n            else:\n                if (nr, nc) == start:\n                    grid[(nr, nc)] = 'S'\n                else:\n                    grid.setdefault((nr, nc), ' ')\n                if (nr, nc) not in visited:\n                    dfs(nr, nc, OPP[d])\n                else:\n                    send_move(OPP[d])\n        if back is not None:\n            send_move(back)\n\n    dfs(0, 0, None)\n\n    print('exit', file=proc.stdin)\n    proc.stdin.flush()\n    try:\n        proc.wait(timeout=5)\n    except subprocess.TimeoutExpired:\n        proc.kill()\n\n    min_r = min(k[0] for k in grid)\n    max_r = max(k[0] for k in grid)\n    min_c = min(k[1] for k in grid)\n    max_c = max(k[1] for k in grid)\n    NL = chr(10)\n    lines = []\n    for r in range(min_r, max_r + 1):\n        row = ''.join(grid.get((r, c), '#') for c in range(min_c, max_c + 1))\n        lines.append(row)\n    content = NL.join(lines) + NL\n    with open('/app/output/' + str(maze_id) + '.txt', 'w') as f:\n        f.write(content)\n    return content\n\nif __name__ == '__main__':\n    ids = sys.argv[1:] if len(sys.argv) > 1 else ['1']\n    for a in ids:\n        explore(int(a))\n        print('done ' + a)\nPYEOF\n"
+'python3 /app/explore.py 1\n'
+"echo '--- mine ---'; cat /app/output/1.txt; echo '--- truth ---'; cat /protected/mazes/maze_1.txt\n"
+'python3 /app/explore.py 1 2 3 4 5 6 7 8 9 10\n'
+'for i in $(seq 1 10); do a=$(cat /app/output/$i.txt | python3 -c \'import sys;print(sys.stdin.read().strip())\'); b=$(cat /protected/mazes/maze_$i.txt | python3 -c \'import sys;print(sys.stdin.read().strip())\'); if [ "$a" == "$b" ]; then echo "$i OK"; else echo "$i MISMATCH"; fi; done\n'
+'a=$(cat /app/output/10.txt | python3 -c \'import sys;print(sys.stdin.read().strip())\'); b=$(cat /protected/mazes/maze_10.txt | python3 -c \'import sys;print(sys.stdin.read().strip())\'); if [ "$a" == "$b" ]; then echo "10 OK"; else echo "10 MISMATCH"; fi\n'
+'ls -la /app/output/\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

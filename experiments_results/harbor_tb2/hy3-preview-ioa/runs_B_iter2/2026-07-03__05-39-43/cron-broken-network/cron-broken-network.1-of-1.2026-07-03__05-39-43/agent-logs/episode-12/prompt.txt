@@ -1,0 +1,28 @@
+New Terminal Output:
+
+root@a2ab31fe2429:/app# apt-get install --print-uris -y curl > /tmp/uris.txt 2>/dev/null; wc -l /tmp/uris.txt; head -n 3 /tmp/uris.txt
+39 /tmp/uris.txt
+Reading package lists...
+Building dependency tree...
+Reading state information...
+root@a2ab31fe2429:/app# mkdir -p /tmp/debs
+root@a2ab31fe2429:/app# python3 - <<'PY'
+> import re,urllib.request
+> out='/tmp/debs'
+> text=open('/tmp/uris.txt').read()
+> for m in re.finditer(r"'(http[^"]+)'\s+(\S+)\s+(\d+)", text):
+>     url,name,size=m.group(1),m.group(2),int(m.group(3))
+>     dst=f'{out}/{name}'
+>     print('GET',name,size)
+>     urllib.request.urlretrieve(url,dst)
+> print('done')
+> PY
+  File "<stdin>", line 4
+    for m in re.finditer(r"'(http[^"]+)'\s+(\S+)\s+(\d+)", text):
+                                    ^
+SyntaxError: closing parenthesis ']' does not match opening parenthesis '('
+root@a2ab31fe2429:/app# ls -la /tmp/debs | head -n 25
+total 8
+drwxr-xr-x 2 root root 4096 Jul  2 22:30 .
+drwxrwxrwt 5 root root 4096 Jul  2 22:30 ..
+root@a2ab31fe2429:/app#

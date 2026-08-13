@@ -1,0 +1,24 @@
+New Terminal Output:
+
+root@d158d1a80b24:/app# cat > /app/fittest.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> data = np.loadtxt('/app/graphene.dat', delimiter=None, dtype=str)
+> c1 = np.array([float(s.replace(',', '.')) for s in data[:,0]])
+> c2 = np.array([float(s.replace(',', '.')) for s in data[:,1]])
+> x = c2; y = c1
+> def lor(x, x0, gamma, amp, off):
+>     return off + amp/(1.0 + ((x-x0)/gamma)**2)
+> for name, lo, hi, x0g in [('G',1500,1700,1580),('2D',2600,2800,2700)]:
+>     m=(x>lo)&(x<hi); xf,yf=x[m],y[m]
+>     off0=np.median(yf); amp0=yf.max()-yf.min()
+>     p0=[x0g,30,amp0,off0]
+>     popt,_=curve_fit(lor,xf,yf,p0=p0,maxfev=200000)
+>     x0,gamma,amp,off=popt
+>     pred=lor(xf,*popt)
+>     ss_res=np.sum((yf-pred)**2); ss_tot=np.sum((yf-yf.mean())**2)
+>     r2=1-ss_res/ss_tot
+>     print(f'{name}: x0={x0:.2f} gamma={gamma:.2f} amp={amp:.2f} off={off:.2f} R2={r2:.3f} n={len(xf)}')
+> EOF
+root@d158d1a80b24:/app# python3 /app/fittest.py
+

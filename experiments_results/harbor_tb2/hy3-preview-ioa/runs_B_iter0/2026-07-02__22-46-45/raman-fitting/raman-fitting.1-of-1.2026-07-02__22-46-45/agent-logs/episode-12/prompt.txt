@@ -1,0 +1,41 @@
+New Terminal Output:
+
+root@94dc529617e0:/app# cat > fit.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+>
+> data = []
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line = line.strip()
+>         if not line: continue
+>         p = line.replace(',', '.').split()
+>         if len(p) < 2: continue
+>         data.append((float(p[0]), float(p[1])))
+> d = np.array(data)
+> x = d[:,0]; y = d[:,1]
+> order = np.argsort(x); x = x[order]; y = y[order]
+>
+> def lor(x, x0, gamma, amp, offset):
+>     return offset + amp / (1.0 + ((x - x0)/gamma)**2)
+>
+> def fit_peak(x0_guess, xwin, gam0, amp0, off0):
+>     m = (x > x0_guess - xwin) & (x < x0_guess + xwin)
+>     xx = x[m]; yy = y[m]
+>     p0 = [x0_guess, gam0, amp0, off0]
+>     popt, pcov = curve_fit(lor, xx, yy, p0=p0,
+>                            bounds=([x0_guess-200, 1, 0, -1e4],
+>                                    [x0_guess+200, 500, 1e6, 1e6]))
+>     resid = yy - lor(xx, *popt)
+>     rms = np.sqrt(np.mean(resid**2))
+>     return popt, rms, len(xx)
+>
+> print('=== G peak ===')
+> pG, rmsG, nG = fit_peak(3745, 300, 35, 11000, 2000)
+> print('x0=%.3f gamma=%.3f amp=%.3f offset=%.3f rms=%.1f n=%d' % (pG[0], pG[1], pG[2], pG[3], rmsG, nG))
+> print('=== 2D peak ===')
+> p2D, rms2D, n2D = fit_peak(6356, 350, 70, 8000, 6000)
+> print('x0=%.3f gamma=%.3f amp=%.3f offset=%.3f rms=%.1f n=%d' % (p2D[0], p2D[1], p2D[2], p2D[3], rms2D, n2D))
+> EOF
+root@94dc529617e0:/app# python3 fit.py
+

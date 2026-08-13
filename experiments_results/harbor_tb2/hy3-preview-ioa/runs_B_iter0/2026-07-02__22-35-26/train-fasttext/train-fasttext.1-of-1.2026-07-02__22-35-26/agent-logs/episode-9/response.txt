@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: the filesystem is fuse-overlayfs and reports 'Avail 0' (100%) in df, but my 50MB dd write to /tmp succeeded — so the 0-available is a statfs reporting quirk, and there's actually ~29GB free. apt's install aborted on its own space check (which reads the same bogus statfs). The g++ build needs a compiler. I need to (a) confirm real free space, and (b) bypass apt's buggy space check to install g++ so fasttext-wheel can build.",
+  "plan": "First confirm we can actually allocate a few hundred MB (write 400MB, check, then remove). Then attempt to install g++ by downloading the .deb packages directly with apt-get download into /tmp and installing with dpkg -i, which may be more lenient. If apt still blocks, I'll fetch debs via wget from deb.debian.org and dpkg -i them manually.",
+  "commands": [
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmp/bigfile bs=1M count=400 2>&1 | tail -1; ls -la /tmp/bigfile; df -B1 / | tail -1; rm -f /tmp/bigfile\n",
+      "duration": 5.0
+    },
+    {
+      "keystrokes": "apt-get download g++ 2>&1 | tail -5\n",
+      "duration": 5.0
+    }
+  ]
+}

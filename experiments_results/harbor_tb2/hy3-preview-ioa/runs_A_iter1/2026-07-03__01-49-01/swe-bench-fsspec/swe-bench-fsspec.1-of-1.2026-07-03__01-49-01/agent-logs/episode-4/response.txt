@@ -1,0 +1,14 @@
+{
+  "analysis": "Confirmed: `open_async(self, path, mode=\"rb\", **kwargs)` is the base signature. The DirFileSystem should override it to delegate to the underlying filesystem with the joined path. I'll add the method after the existing `open()` method at the end of the file.",
+  "plan": "Use Edit to add an `open_async` method to DirFileSystem. I'll append it after the `open()` method. Then verify the file and run a quick test to confirm the fix works.",
+  "commands": [
+    {
+      "keystrokes": "cat >> fsspec/implementations/dirfs.py << 'EOF'\n\n    async def open_async(self, path, mode=\"rb\", **kwargs):\n        return await self.fs.open_async(\n            self._join(path),\n            mode=mode,\n            **kwargs,\n        )\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "tail -20 fsspec/implementations/dirfs.py\n",
+      "duration": 0.3
+    }
+  ]
+}

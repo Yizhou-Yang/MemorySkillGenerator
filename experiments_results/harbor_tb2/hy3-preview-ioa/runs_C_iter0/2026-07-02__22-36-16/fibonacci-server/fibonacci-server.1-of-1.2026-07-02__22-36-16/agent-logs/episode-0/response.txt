@@ -1,0 +1,18 @@
+{
+  "analysis": "We have a fresh shell at /app. Nothing has been created yet. I need to build a web server on port 3000 with a /fib GET endpoint that validates the query param 'n' and returns the nth Fibonacci number as JSON.",
+  "plan": "1. Write a Python (http.server based) script implementing the /fib endpoint with proper 400 handling for missing or non-integer 'n'. 2. Run it in the background on port 3000. 3. Test with curl for valid, missing, and invalid cases to verify behavior.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/fib_server.py << 'PYEOF'\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\nfrom urllib.parse import urlparse, parse_qs\nimport json\n\ndef fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n\nclass Handler(BaseHTTPRequestHandler):\n    def do_GET(self):\n        parsed = urlparse(self.path)\n        if parsed.path != '/fib':\n            self.send_response(404)\n            self.end_headers()\n            self.wfile.write(b'{\"error\":\"not found\"}')\n            return\n        qs = parse_qs(parsed.query)\n        if 'n' not in qs:\n            self.send_response(400)\n            self.send_header('Content-Type', 'application/json')\n            self.end_headers()\n            self.wfile.write(b'{\"error\":\"n is required\"}')\n            return\n        n_val = qs['n'][0]\n        try:\n            n = int(n_val)\n        except ValueError:\n            self.send_response(400)\n            self.send_header('Content-Type', 'application/json')\n            self.end_headers()\n            self.wfile.write(b'{\"error\":\"n must be an integer\"}')\n            return\n        result = fib(n)\n        self.send_response(200)\n        self.send_header('Content-Type', 'application/json')\n        self.end_headers()\n        self.wfile.write(json.dumps({'result': result}).encode())\n\nif __name__ == '__main__':\n    HTTPServer(('0.0.0.0', 3000), Handler).serve_forever()\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "nohup python3 /app/fib_server.py > /app/server.log 2>&1 &\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "sleep 1; echo '--- valid n=10 ---'; curl -s http://localhost:3000/fib?n=10; echo; echo '--- missing n ---'; curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:3000/fib; echo '--- non-integer n=abc ---'; curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:3000/fib?n=abc\n",
+      "duration": 2.0
+    }
+  ]
+}

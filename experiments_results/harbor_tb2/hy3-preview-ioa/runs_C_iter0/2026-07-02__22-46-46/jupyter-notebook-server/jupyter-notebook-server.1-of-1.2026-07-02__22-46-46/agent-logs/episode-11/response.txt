@@ -1,0 +1,14 @@
+{
+  "analysis": "The notebook file is missing at /app/test_notebook.ipynb even though gen.py printed 'setup done' earlier — likely the heredoc content for the notebook portion got corrupted. The config file is correct though. I'll recreate the notebook cleanly and verify it immediately.",
+  "plan": "Write a fresh, simple Python script to generate the notebook, run it, and verify the file exists and is valid JSON with 2 cells. Use a clean heredoc and check right away.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/gen_nb.py << 'PYEOF'\nimport json\nnb = {\n  \"cells\": [\n    {\"cell_type\":\"markdown\",\"metadata\":{},\"source\":[\"# What is Jupyter Notebook\\n\\nJupyter Notebook is an open-source web application that allows you to create and share documents containing live code, equations, visualizations, and narrative text.\"]},\n    {\"cell_type\":\"code\",\"execution_count\":None,\"metadata\":{},\"outputs\":[],\"source\":[\"import numpy as np\\nimport matplotlib.pyplot as plt\\n\\nx = np.linspace(0, 2 * np.pi, 100)\\ny = np.sin(x)\\n\\nplt.figure(figsize=(8, 4))\\nplt.plot(x, y)\\nplt.title('Sine Wave')\\nplt.xlabel('x')\\nplt.ylabel('sin(x)')\\nplt.grid(True)\\nplt.show()\"]}\n  ],\n  \"metadata\": {\"kernelspec\": {\"display_name\":\"Python 3\",\"language\":\"python\",\"name\":\"python3\"},\"language_info\": {\"name\":\"python\"}},\n  \"nbformat\":4,\"nbformat_minor\":5\n}\nwith open('/app/test_notebook.ipynb','w') as f:\n    json.dump(nb, f, indent=1)\nprint('nb written')\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /app/gen_nb.py && python3 -c \"import json; d=json.load(open('/app/test_notebook.ipynb')); print('nb ok', len(d['cells']))\"\n",
+      "duration": 0.5
+    }
+  ]
+}

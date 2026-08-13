@@ -1,0 +1,111 @@
+root@93623c4c47d7:/app/astropy# python3 - <<'PYEOF'
+> import re
+> sep = r"\s+"
+> _dec = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+> _cmd = r"(?i:READ [TS]ERR(\s+[0-9]+)+"
+> _new = rf"NO({sep}NO)+"
+> _data = rf"({_dec}|NO|[-+]?nan)({sep}({_dec}|NO|[-+]?nan))*)\s*"
+> _t = rf"^\s*((?P<command>{_cmd})|(?P<new>{_new})|(?P<data>{_data})?\s*(\!(?P<comment>.*))?\s*$"
+> rx = re.compile(_t)
+> for line in ["read serr 1 2", "READ SERR 1 2", "Read Terr 1", "1 0.5 1 0.5", "NO NO NO"]:
+>     m = rx.match(line.strip())
+>     kind = [k for k,v in (m.groupdict().items() if m else []) if v is not None]
+>     print(repr(line), '->', kind)
+> PYEOF
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "/usr/local/lib/python3.9/re.py", line 252, in compile
+    return _compile(pattern, flags)
+  File "/usr/local/lib/python3.9/re.py", line 304, in _compile
+    p = sre_compile.compile(pattern, flags)
+  File "/usr/local/lib/python3.9/sre_compile.py", line 788, in compile
+    p = sre_parse.parse(p, flags)
+  File "/usr/local/lib/python3.9/sre_parse.py", line 955, in parse
+    p = _parse_sub(source, state, flags & SRE_FLAG_VERBOSE, 0)
+  File "/usr/local/lib/python3.9/sre_parse.py", line 444, in _parse_sub
+    itemsappend(_parse(source, state, verbose, nested + 1,
+  File "/usr/local/lib/python3.9/sre_parse.py", line 843, in _parse
+    raise source.error("missing ), unterminated subpattern",
+re.error: missing ), unterminated subpattern at position 4
+root@93623c4c47d7:/app/astropy# python3 - <<'PYEOF'
+> import re
+> sep = r"\s+"
+> _dec = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+> _cmd = r"(?i:READ [TS]ERR(\s+[0-9]+)+)"
+> _new = rf"NO({sep}NO)+"
+> _data = rf"({_dec}|NO|[-+]?nan)({sep}({_dec}|NO|[-+]?nan))*)\s*"
+> _t = rf"^\s*((?P<command>{_cmd})|(?P<new>{_new})|(?P<data>{_data})?\s*(\!(?P<comment>.*))?\s*$"
+> rx = re.compile(_t)
+> for line in ["read serr 1 2", "READ SERR 1 2", "Read Terr 1", "1 0.5 1 0.5", "NO NO NO"]:
+>     m = rx.match(line.strip())
+>     kind = [k for k,v in (m.groupdict().items() if m else []) if v is not None]
+>     print(repr(line), '->', kind)
+> PYEOF
+'read serr 1 2' -> ['command']
+'READ SERR 1 2' -> ['command']
+'Read Terr 1' -> ['command']
+'1 0.5 1 0.5' -> ['data']
+'NO NO NO' -> ['new']
+root@93623c4c47d7:/app/astropy# python3 - <<'PYEOF'
+> import re, ast
+> src = open('/app/astropy/astropy/io/ascii/qdp.py').read()
+> # Extract the _command_re assignment line and compile a regex from it via exec of a minimal snippet
+> ns = {}
+> exec('import re\n' + '\n'.join(l for l in src.splitlines() if l.startswith('    _') or l.startswith('_') and 're' in l), ns)
+> print('compiled ok, _command_re =', ns.get('_command_re'))
+> PYEOF
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+  File "<string>", line 2
+    _decimal_re = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+IndentationError: unexpected indent
+root@93623c4c47d7:/app/astropy# python3 -c 'import numpy; print("numpy", numpy.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'numpy'
+root@93623c4c47d7:/app/astropy# pip install --break-system-packages packaging 2>&1 | tail -3
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+root@93623c4c47d7:/app/astropy# which python python3; ls /opt 2>/dev/null; ls /usr/local/bin | grep -i py; python3 -c 'import sys; print(sys.executable)'
+/usr/local/bin/python
+/usr/local/bin/python3
+python3 -c 'import packaging; print("packaging ok")' 2>&1 | tail -2
+pydoc
+pydoc3
+pydoc3.9
+python
+python-config
+python3
+python3-config
+python3.9
+python3.9-config
+/usr/local/bin/python3
+root@93623c4c47d7:/app/astropy# python3 -c 'import packaging; print("packaging ok")' 2>&1 | tail -2
+packaging ok
+root@93623c4c47d7:/app/astropy# python3 -c 'import numpy; print("numpy", numpy.__version__)' 2>&1 | tail -2
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'numpy'
+root@93623c4c47d7:/app/astropy# pip install --break-system-packages numpy 2>&1 | tail -3
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+root@93623c4c47d7:/app/astropy# python3 -c 'import numpy; print("numpy", numpy.__version__)' 2>&1 | tail -2
+numpy 2.0.2
+root@93623c4c47d7:/app/astropy# python3 -c 'import astropy; print(astropy.__version__)' 2>&1 | tail -5
+  File "/app/astropy/astropy/utils/decorators.py", line 13, in <module>
+    from .exceptions import (
+  File "/app/astropy/astropy/utils/exceptions.py", line 11, in <module>
+    from erfa import ErfaError, ErfaWarning  # noqa: F401
+ModuleNotFoundError: No module named 'erfa'
+root@93623c4c47d7:/app/astropy# pip install --break-system-packages pyerfa 2>&1 | tail -3
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+root@93623c4c47d7:/app/astropy# python3 -c 'import astropy; print(astropy.__version__)' 2>&1 | tail -5
+or
+
+  python setup.py build_ext --inplace
+
+to make sure the extension modules are built
+root@93623c4c47d7:/app/astropy#

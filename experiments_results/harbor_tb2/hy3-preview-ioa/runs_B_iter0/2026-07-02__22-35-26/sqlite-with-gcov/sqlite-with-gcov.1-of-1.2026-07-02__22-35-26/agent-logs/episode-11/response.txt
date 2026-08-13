@@ -1,0 +1,10 @@
+{
+  "analysis": "Mount is denied (container lacks privileges), but writes succeed since root can use reserved blocks. apt's statvfs-based free-space pre-check is the only blocker. dpkg does not do a pre-install statvfs check (that's apt's job), so I'll download the .deb packages directly with python3 (using apt-get --print-uris to list them) and install via dpkg -i, bypassing apt's check entirely.",
+  "plan": "1) Use `apt-get --print-uris install -y gcc make` to list all required .deb URLs, parse them with python3, and download to /tmp/debs. 2) Install with `dpkg -i /tmp/debs/*.deb`. dpkg will write to the root fs which works (reserved blocks). 3) Verify gcc/gcov/make work.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'EOF'\nimport os, urllib.request, subprocess\nos.makedirs('/tmp/debs', exist_ok=True)\nout=subprocess.check_output(['apt-get','--print-uris','install','-y','gcc','make']).decode()\nurls=[]\nfor line in out.splitlines():\n    line=line.strip()\n    if line.startswith(\"'\"):\n        urls.append(line.split()[0].strip(\"'\"))\nprint('total',len(urls))\nfor u in urls:\n    fn=os.path.basename(u)\n    urllib.request.urlretrieve(u,'/tmp/debs/'+fn)\n    print('got',fn)\nEOF\n",
+      "duration": 30.0
+    }
+  ]
+}

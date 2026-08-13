@@ -1,0 +1,9 @@
+{
+  "analysis": "Ubuntu 26.04 with git, nginx, sshd, ssh-keygen, openssl all available. No git user and no /git directory yet. I need to: create a git user with password auth, configure and start sshd, create a bare repo at /git/project, write a post-receive hook that deploys main->/var/www and dev->/var/www/dev, generate a self-signed cert, and configure nginx on 8443 to serve those dirs as the two endpoints.",
+  "plan": "Batch 1: create the git user (password 'password'), generate SSH host keys and start sshd with password auth enabled, and create the bare repo plus deployment dirs. I'll verify the git user and sshd listening.",
+  "commands": [
+    {"keystrokes": "useradd -m -s /bin/bash git 2>/dev/null; echo 'git:password' | chpasswd; id git\n", "duration": 0.3},
+    {"keystrokes": "ssh-keygen -A >/dev/null 2>&1; mkdir -p /run/sshd; sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config; sed -i 's/^#*UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config; /usr/sbin/sshd; sleep 0.5; (ss -tlnp 2>/dev/null | grep ':22 ' || echo 'sshd-started')\n", "duration": 1.5},
+    {"keystrokes": "mkdir -p /git /var/www/dev /etc/nginx/ssl; git init --bare -b main /git/project >/dev/null; chown -R git:git /git /var/www; ls -la /git/project\n", "duration": 0.5}
+  ]
+}

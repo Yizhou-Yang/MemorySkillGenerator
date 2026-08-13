@@ -1,0 +1,56 @@
+New Terminal Output:
+
+root@7d8b33f0d254:/app# sed -n '935,985p' /usr/local/lib/python3.10/site-packages/datasets/builder.py
+        is_local = not is_remote_filesystem(self._fs)
+
+        if (
+            isinstance(dl_manager, MockDownloadManager)
+            or not is_local
+            or file_format != "arrow"
+            or max_shard_size is not None
+        ):
+            try_from_hf_gcs = False
+        self.dl_manager = dl_manager
+
+        # Prevent parallel local disk operations
+        if is_local:
+            # Create parent directory of the output_dir to put the lock file in there
+            Path(self._output_dir).parent.mkdir(parents=True, exist_ok=True)
+            lock_path = self._output_dir + "_builder.lock"
+
+        # File locking only with local paths; no file locking on GCS or S3
+        with FileLock(lock_path) if is_local else contextlib.nullcontext():
+            # Check if the data already exists
+            data_exists = self._fs.exists(posixpath.join(self._output_dir, config.DATASET_INFO_FILENAME))
+            if data_exists and download_mode == DownloadMode.REUSE_DATASET_IF_EXISTS:
+                logger.info(f"Found cached dataset {self.dataset_name} ({self._output_dir})")
+                # We need to update the info in case some splits were added in the meantime
+                # for example when calling load_dataset from multiple workers.
+                self.info = self._load_info()
+                self.download_post_processing_resources(dl_manager)
+                return
+
+            logger.info(f"Generating dataset {self.dataset_name} ({self._output_dir})")
+            if is_local:  # if cache dir is local, check for available space
+                if not has_sufficient_disk_space(
+                    self.info.size_in_bytes or 0, directory=Path(self._output_dir).parent
+                ):
+                    raise OSError(
+                        f"Not enough disk space. Needed: {size_str(self.info.size_in_bytes or 0)} (download: {size_str(self.info.download_size or 0)}, generated
+: {size_str(self.info.dataset_size or 0)}, post-processed: {size_str(self.info.post_processing_size or 0)})"
+                    )
+
+            @contextlib.contextmanager
+            def incomplete_dir(dirname):
+                """Create temporary dir for dirname and rename on exit."""
+                if not is_local:
+                    self._fs.makedirs(dirname, exist_ok=True)
+                    yield dirname
+                else:
+                    tmp_dir = dirname + ".incomplete"
+                    os.makedirs(tmp_dir, exist_ok=True)
+                    try:
+                        yield tmp_dir
+                        if os.path.isdir(dirname):
+                            shutil.rmtree(dirname)
+root@7d8b33f0d254:/app#

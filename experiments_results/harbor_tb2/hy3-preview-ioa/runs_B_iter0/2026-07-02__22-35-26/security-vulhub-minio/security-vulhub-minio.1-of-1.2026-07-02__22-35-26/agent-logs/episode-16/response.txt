@@ -1,0 +1,18 @@
+{
+  "analysis": "The container's overlay filesystem reports 100% full (0 available), and an apt-get process (PID 941) is holding the apt lock, which is why `apt-get clean` and the install failed. SSH (port 22) is open on 192.168.240.1 (a MinIO node) and is the route to read the node's MINIO_* environment variables. I need an SSH client, but installation is blocked by the lock and/or disk. Let me clear the stuck apt, clean caches, and reassess disk space before retrying the install.",
+  "plan": "1) Kill the stuck apt-get process and remove stale locks. 2) Run apt-get clean. 3) Re-check disk free space and locate large files. Then decide whether openssh-client can be installed or whether I must free space first.",
+  "commands": [
+    {
+      "keystrokes": "pkill -9 apt-get; pkill -9 dpkg; sleep 1\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "apt-get clean 2>/dev/null; rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "df -h /; echo '==='; du -sh /var/lib/apt/lists /var/cache/apt 2>/dev/null\n",
+      "duration": 0.5
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "analysis": "The blocker is clear: apt refuses because the fuse-overlayfs reports 0 available via statfs, and even /dev/shm (a real tmpfs, 64M free) is just under the 67.4MB download needed for gcc/g++. Moreover, gcc unpacking needs ~258MB which the host disk (~50MB real free) can't provide. The lightweight solution is the Tiny C Compiler (tcc): its .deb is tiny, needs only libc6 (already present), and can compile a pure-C tool and link against the existing libz and libc directly — no heavy binutils/libc6-dev needed. I'll install tcc.",
+  "plan": "Attempt to install tcc with the cache on /dev/shm so apt's free-space check passes. tcc is small and should fit. If it installs, I'll verify it can compile a hello-world, then build a pure-C tool: a minimal zlib-based PNG decoder (28x28 grayscale), cJSON for weights.json, and the MLP forward pass. First, check tcc's download size and install it.",
+  "commands": [
+    {
+      "keystrokes": "apt-get -o Dir::Cache=/dev/shm/aptcache --no-install-recommends --print-uris install tcc 2>&1 | head\n",
+      "duration": 3.0
+    }
+  ]
+}

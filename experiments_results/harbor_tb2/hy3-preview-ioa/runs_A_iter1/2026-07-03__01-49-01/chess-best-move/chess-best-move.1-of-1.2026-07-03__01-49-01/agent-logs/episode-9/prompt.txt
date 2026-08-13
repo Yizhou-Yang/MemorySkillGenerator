@@ -1,0 +1,58 @@
+New Terminal Output:
+
+root@2258d9f3f571:/app# cat > /app/clust.py << 'EOF'
+> import numpy as np
+> from PIL import Image
+> SQ=80
+> img=Image.open('/app/chess_puzzle.png').convert('RGB')
+> gray=np.asarray(img).astype(np.float64).mean(axis=2)
+> def sq(r,c): return gray[r*SQ:(r+1)*SQ, c*SQ:(c+1)*SQ]
+> occ={}; col={}; feat={}
+> for r in range(8):
+>   for c in range(8):
+>     s=sq(r,c)
+>     corner=np.median(np.concatenate([s[4:12,4:12].ravel(),s[4:12,68:76].ravel(),s[68:76,4:12].ravel(),s[68:76,68:76].ravel()]))
+>     m=np.abs(s-corner)>30
+>     if m.sum()>150:
+>       pv=s[m]; bright=pv.mean()
+>       col[(r,c)]='W' if bright>corner else 'B'
+>       occ[(r,c)]=True
+>       ys,xs=np.where(m); y0,y1,x0,x1=ys.min(),ys.max()+1,xs.min(),xs.max()+1
+>       cr=(m[y0:y1,x0:x1]*255).astype(np.uint8)
+>       cr=Image.fromarray(cr).resize((34,34))
+>       feat[(r,c)]=np.asarray(cr).astype(np.float64)/255.0
+> def name(r,c): return '%s%d'%(chr(97+c),8-r)
+> clusters=[]
+> def d(f,g): return np.abs(f-g).sum()
+> for (r,c),f in occ.items():
+>   cc=col[(r,c)]; best=None;bd=1e9
+>   for cl in clusters:
+>     if cl['c']!=cc: continue
+>     dd=d(f,cl['f'])
+>     if dd<bd: bd=dd;best=cl
+>   if best is not None and bd<70:
+>     best['m'].append((r,c))
+>   else:
+>     clusters.append({'c':cc,'f':f,'m':[(r,c)]})
+> print('clusters:',len(clusters))
+> def show(f):
+>   for y in range(34): print(''.join('#' if f[y,x]>0.5 else ' ' for x in range(34)))
+> for i,cl in enumerate(clusters):
+>   mem=sorted([name(*p) for p in cl['m']])
+>   print('### cluster %d color=%s n=%d %s'%(i,cl['c'],len(cl['m']),mem))
+>   show(cl['f'])
+> EOF
+root@2258d9f3f571:/app# python3 /app/clust.py > /tmp/cl.txt 2>&1; sed -n '1,120p' /tmp/cl.txt
+clusters: 2
+### cluster 0 color=B n=13 ['a6', 'a8', 'b7', 'c6', 'c8', 'd5', 'd8', 'e6', 'f5', 'f7', 'f8', 'g5', 'g7']
+Traceback (most recent call last):
+  File "/app/clust.py", line 40, in <module>
+    show(cl['f'])
+  File "/app/clust.py", line 36, in show
+    for y in range(34): print(''.join('#' if f[y,x]>0.5 else ' ' for x in range(34)))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/clust.py", line 36, in <genexpr>
+    for y in range(34): print(''.join('#' if f[y,x]>0.5 else ' ' for x in range(34)))
+                                             ~^^^^^
+TypeError: 'bool' object is not subscriptable
+root@2258d9f3f571:/app#

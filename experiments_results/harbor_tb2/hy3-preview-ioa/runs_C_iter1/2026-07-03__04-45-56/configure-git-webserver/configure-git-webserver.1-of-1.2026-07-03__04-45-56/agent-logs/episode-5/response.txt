@@ -1,0 +1,8 @@
+{
+  "analysis": "Interesting: `du -x /` shows only ~183MB actually used on the overlay, yet `df` reports the filesystem 100% full with 0 available. This is a fuse-overlayfs quirk — the 'Used 966G' reflects shared/host backing, but the local writable layer is small. apt refused the install claiming no space for its ~48MB download. apt-get update already wrote ~49MB of lists successfully, so writes of that size DO work. I need to verify whether larger writes succeed and reduce the install footprint. Let me test actual write capability and inspect the overlay mount.",
+  "plan": "1. Test writing a 50MB file to confirm whether disk is genuinely the blocker. 2. Inspect the overlay mount to understand the constraint. 3. If writes work, retry install with --no-install-recommends to shrink footprint, and clean apt lists to reclaim space. If writes fail, I'll need an alternative (e.g., minimal footprint or locate free space).",
+  "commands": [
+    {"keystrokes": "mount | grep -i overlay; df -i /\n", "duration": 0.1},
+    {"keystrokes": "dd if=/dev/zero of=/tmp/big bs=1M count=50 status=none && echo WROTE_OK && rm -f /tmp/big\n", "duration": 2.0}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "analysis": "I've decoded the data constants. Vector is a 4-float struct {x,y,z,w} where w is often carried along but not used for output (RGB uses x,y,z). sky_color(dir) = {1 - 0.5t, 1 - 0.3t, 1 - 0.5t} with t=(dir.y+1)*0.5. Camera forward = normalize({1,1,-1}). Now I need the call graph, the middle of trace, and write_image/allocate_image to finalize the algorithm before writing C.",
+  "plan": "1) Map the call graph by grepping call instructions. 2) Read the middle of trace (1240-1388). 3) Read write_image/allocate_image/free_image (1388-1564). Then I'll reconstruct mystery.c and iterate against the reference image.",
+  "commands": [
+    {
+      "keystrokes": "grep -nE 'call' /tmp/disasm.txt | grep -iE 'trace|write_image|alloc|sphere|plane|main>:'\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "grep -n 'call ' /tmp/disasm.txt | awk -F: '{print $1\" \"$2}' | sed -n '1,200p' | grep -iE '21[0-9][0-9]|1[0-9][0-9][0-9]' | head -80\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "sed -n '1240,1388p' /tmp/disasm.txt\n",
+      "duration": 0.1
+    }
+  ]
+}

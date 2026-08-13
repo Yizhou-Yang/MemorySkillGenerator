@@ -1,0 +1,41 @@
+New Terminal Output:
+
+COUNTS
+30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 3
+0 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 10
+root@3bded9ad04d7:/app# python3 - << 'PREPEOF'
+> import os, shutil
+> src = 'c4_sample'
+> dst = 'c4_reshard'
+> os.makedirs(dst, exist_ok=True)
+> per = 30
+>
+> def part_for(i):
+>     return os.path.join(dst, 'part_%06d' % i)
+>
+> # find highest existing part index
+> idx = -1
+> for e in os.listdir(dst):
+>     if e.startswith('part_'):
+>         try:
+>             n = int(e.split('_')[1])
+>             idx = max(idx, n)
+>         except ValueError:
+>             pass
+> if idx < 0:
+>     idx = 0
+>     os.makedirs(part_for(idx), exist_ok=True)
+>
+> files = sorted(os.listdir(src))
+> moved = 0
+> for f in files:
+>     cur = part_for(idx)
+>     if len(os.listdir(cur)) >= per:
+>         idx += 1
+>         cur = part_for(idx)
+>         os.makedirs(cur, exist_ok=True)
+>     shutil.move(os.path.join(src, f), os.path.join(cur, f))
+>     moved += 1
+> print('continued, moved', moved, 'files; last part idx', idx)
+> PREPEOF
+

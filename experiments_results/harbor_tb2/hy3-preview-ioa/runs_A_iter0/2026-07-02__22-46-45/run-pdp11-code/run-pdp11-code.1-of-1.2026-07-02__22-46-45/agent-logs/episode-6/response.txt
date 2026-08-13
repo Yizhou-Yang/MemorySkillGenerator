@@ -1,0 +1,10 @@
+{
+  "analysis": "I mis-scanned: `sys` opcode is 0o104400 = 0x8900, not 0x4900, which is why my earlier scan found nothing. The symbol values I printed were also from the wrong section offset (the symbol/string table actually starts at file offset 1108, right after the 30-byte data segment). The data segment (30 bytes at file 1078) contains the format string '%d ' and a float constant region; the symbol nlist+string table is the final 276 bytes. To determine scope for writing an emulator, I need the high-byte histogram of text words (to detect FPU usage) and the locations/args of the `sys` instructions (to implement write/exit).",
+  "plan": "Run a scope script that: (1) prints a high-byte histogram of the text words to reveal whether PDP-11 FPU instructions (0x70-0x77 range) are used; (2) finds every `sys` instruction (0x8900 mask) with its syscall number and the literal words following it (to learn the argument convention). Based on this I'll decide how complex the emulator must be (FPU vs integer-only).",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/scope.py << 'EOF'\nimport struct\nfrom collections import Counter\nd=open('/app/data.bin','rb').read()\ndef w(off): return struct.unpack_from('<H',d,off)[0]\na_text=w(2); a_data=w(4); a_bss=w(6); a_syms=w(8)\ntext_off=16\ntext=d[text_off:text_off+a_text]\nwords=[int.from_bytes(text[i:i+2],'little') for i in range(0,len(text),2)]\nhb=Counter(x>>8 for x in words)\nprint('text words:', len(words))\nprint('high byte histogram:')\nfor k in sorted(hb): print('  %s : %d'%(hex(k), hb[k]))\nprint('sys instructions (opcode 0x89xx):')\nfor i,x in enumerate(words):\n    if (x & 0xFF00)==0x8900:\n        n=x&0x7F\n        after=[hex(words[i+1+j]) for j in range(min(5,len(words)-i-1))]\n        print('  textidx %4d (file %04x) sys %d  after: %s'%(i, text_off+2*i, n, after))\nEOF\npython3 /app/scope.py\n",
+      "duration": 0.3
+    }
+  ]
+}

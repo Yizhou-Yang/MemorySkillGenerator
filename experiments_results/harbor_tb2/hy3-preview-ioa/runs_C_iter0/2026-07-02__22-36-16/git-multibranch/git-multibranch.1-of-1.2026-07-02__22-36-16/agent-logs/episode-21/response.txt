@@ -1,0 +1,14 @@
+{
+  "analysis": "The debug sshd log reveals the root cause: `PAM: pam_open_session(): Cannot make/remove an entry for the specified session`. The command session is launched but fails — the child produced 41 bytes on stderr (likely a 'command not found' style error, indicating the shell/environment failed to initialize) and exited 254 with no usable stdout. This is a PAM session failure in the container. The fix is to bypass the broken PAM session handling by setting `UsePAM no` in sshd (sshd has built-in password auth that reads /etc/shadow directly). I'll re-test after that.",
+  "plan": "1) Kill the debug sshd. 2) Add `UsePAM no` to the sshd drop-in config (it's included before the main config's UsePAM yes, so it wins). 3) Restart the main sshd. 4) Re-run the push via expect and time it. If password auth still works, the command should now execute properly and trigger the hook.",
+  "commands": [
+    {
+      "keystrokes": "pkill -f 'sshd -ddd'; sleep 1; printf 'UsePAM no\\n' >> /etc/ssh/sshd_config.d/99-git.conf; pkill -x sshd; sleep 1; /usr/sbin/sshd; sleep 1; pgrep -a sshd\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "cd /tmp/testrepo && time expect /tmp/push.exp\n",
+      "duration": 6.0
+    }
+  ]
+}

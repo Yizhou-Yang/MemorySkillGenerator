@@ -1,0 +1,137 @@
+root@73d34d941234:/app# which python python3; python --version; python3 --version
+/usr/local/bin/python
+/usr/local/bin/python3
+Python 3.13.1
+Python 3.13.1
+root@73d34d941234:/app# python -c 'import fasttext; print(fasttext.__file__)'
+/usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+root@73d34d941234:/app# pip show fasttext 2>/dev/null; pip show fasttext-wheel 2>/dev/null
+ls -la /usr/local/lib/python3.13/site-packages/fasttext/
+Name: fasttext
+Version: 0.9.3
+Summary: fasttext Python bindings
+Home-page: https://github.com/facebookresearch/fastText
+Author: Onur Celebi
+Author-email: celebio@fb.com
+License: MIT
+Location: /usr/local/lib/python3.13/site-packages
+Requires: numpy, pybind11, setuptools
+Required-by:
+root@73d34d941234:/app# ls -la /usr/local/lib/python3.13/site-packages/fasttext/
+total 44
+drwxr-xr-x  5 root root  4096 Jul  2 14:51 .
+drwxr-xr-x 14 root root  4096 Jul  2 15:38 ..
+-rw-r--r--  1 root root 19636 Jul  2 14:51 FastText.py
+-rw-r--r--  1 root root   659 Jul  2 14:51 __init__.py
+drwxr-xr-x  2 root root  4096 Jul  2 14:51 __pycache__
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 tests
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 util
+root@73d34d941234:/app# pip show fasttext
+Name: fasttext
+Version: 0.9.3
+Summary: fasttext Python bindings
+Home-page: https://github.com/facebookresearch/fastText
+Author: Onur Celebi
+Author-email: celebio@fb.com
+License: MIT
+Location: /usr/local/lib/python3.13/site-packages
+Requires: numpy, pybind11, setuptools
+Required-by:
+root@73d34d941234:/app# cat /usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+# Copyright (c) 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from .FastText import train_supervised
+from .FastText import train_unsupervised
+from .FastText import load_model
+from .FastText import tokenize
+from .FastText import EOS
+from .FastText import BOW
+from .FastText import EOW
+
+from .FastText import cbow
+from .FastText import skipgram
+from .FastText import supervised
+root@73d34d941234:/app# python -c 'import fasttext; print([x for x in dir(fasttext) if not x.startswith("__")])'
+['BOW', 'EOS', 'EOW', 'FastText', 'absolute_import', 'cbow', 'division', 'load_model', 'print_function', 'skipgram', 'supervised', 'tokenize', 'train_supervised
+', 'train_unsupervised', 'unicode_literals']
+root@73d34d941234:/app# grep -n '_fasttext\|import' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py | head -40
+7:from __future__ import absolute_import
+8:from __future__ import division
+9:from __future__ import print_function
+10:from __future__ import unicode_literals
+12:import fasttext_pybind as fasttext
+13:import numpy as np
+14:import multiprocessing
+15:from itertools import chain
+root@73d34d941234:/app# python -c 'import fasttext; print(fasttext.tokenize("hello world"))'
+['hello', 'world']
+root@73d34d941234:/app# python -c 'import fasttext_pybind; print(fasttext_pybind.__file__)'
+/usr/local/lib/python3.13/site-packages/fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+root@73d34d941234:/app# ls -la /usr/local/lib/python3.13/site-packages/ | grep -i fast
+drwxr-xr-x  5 root root     4096 Jul  2 14:51 fasttext
+drwxr-xr-x  3 root root     4096 Jul  2 14:51 fasttext-0.9.3.dist-info
+-rwxr-xr-x  1 root root 15435352 Jul  2 14:51 fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+root@73d34d941234:/app# printf '__label__pos this is good\n__label__neg this is bad\n' > /tmp/ft_train.txt
+root@73d34d941234:/app# python -c 'import fasttext; m=fasttext.train_supervised("/tmp/ft_train.txt"); print(m.predict("this is good"))'
+Read 0M words
+Number of words:  5
+Number of labels: 2
+Progress: 100.0% words/sec/thread:      54 lr:  0.000000 avg.loss:  0.694452 ETA:   0h 0m 0s
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; m=fasttext.train_supervised("/tmp/ft_train.txt"); print(m.predict("this is good"))
+                                                                             ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 239, in predict
+    return labels, np.array(probs, copy=False)
+                   ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+ValueError: Unable to avoid copy while creating an array as requested.
+If using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).
+For more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.
+root@73d34d941234:/app# grep -n 'np.array(' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+136:        return np.array(b)
+151:        return np.array(b)
+184:        return pair[0], np.array(pair[1])
+193:        return np.array(b)
+239:            return labels, np.array(probs, copy=False)
+248:        return np.array(self.f.getInputMatrix())
+257:        return np.array(self.f.getOutputMatrix())
+268:            return (pair[0], np.array(pair[1]))
+284:                return (pair[0], np.array(pair[1]))
+root@73d34d941234:/app# sed -i -E 's/np\.array\(([^,]*), copy=False\)/np.asarray(\1)/g' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@73d34d941234:/app# grep -n 'np.array(' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+136:        return np.array(b)
+151:        return np.array(b)
+184:        return pair[0], np.array(pair[1])
+193:        return np.array(b)
+248:        return np.array(self.f.getInputMatrix())
+257:        return np.array(self.f.getOutputMatrix())
+268:            return (pair[0], np.array(pair[1]))
+284:                return (pair[0], np.array(pair[1]))
+root@73d34d941234:/app# python -c 'import fasttext; m=fasttext.train_supervised("/tmp/ft_train.txt"); print(m.predict("this is good")); print("OK")'
+Read 0M words
+Number of words:  5
+Number of labels: 2
+Progress: 100.0% words/sec/thread:      92 lr:  0.000000 avg.loss:      -nan ETA:   0h 0m 0s
+(('__label__pos',), array([0.50005245]))
+OK
+root@73d34d941234:/app# python -c 'import fasttext; m=fasttext.train_supervised("/tmp/ft_train.txt", epoch=5); m.save_model("/tmp/ft.bin"); m2=fasttext.load_mod
+el("/tmp/ft.bin"); print(m2.predict("this is bad")); print("words", len(m2.get_words())); print("DONE")'
+Read 0M words
+Number of words:  5
+Number of labels: 2
+Progress: 100.0% words/sec/thread:     105 lr:  0.000000 avg.loss:      -nan ETA:   0h 0m 0s
+(('__label__neg',), array([0.50006217]))
+words 5
+DONE
+root@73d34d941234:/app#

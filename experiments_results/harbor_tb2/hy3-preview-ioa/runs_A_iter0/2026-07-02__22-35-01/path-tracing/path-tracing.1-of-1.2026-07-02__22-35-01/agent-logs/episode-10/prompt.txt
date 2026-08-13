@@ -1,0 +1,66 @@
+New Terminal Output:
+
+root@a258f96ffde1:/app# cat > /tmp/meas.py << 'EOF'
+> import sys
+> f=open('image.ppm','rb')
+> f.read(15)
+> data=f.read()
+> w,h=800,600
+> def px(x,y):
+>     o=(y*w+x)*3
+>     return data[o],data[o+1],data[o+2]
+> # find red sphere box
+> x0=y0=x1=y1=-1
+> for y in range(h):
+>     for x in range(w):
+>         r,g,b=px(x,y)
+>         if r>80 and r-b>40 and g<80:
+>             if x0<0: x0=x0
+>             if x0<0: x0=x
+>             x0=min(x0,x) if x0>=0 else x
+> # simpler:
+> minx=miny=999; maxx=maxy=-1
+> cnt=0
+> for y in range(h):
+>     for x in range(w):
+>         r,g,b=px(x,y)
+>         if r>80 and r-b>40 and g<80:
+>             minx=min(minx,x);maxx=max(maxx,x)
+>             miny=min(miny,y);maxy=max(maxy,y)
+>             cnt+=1
+> print('sphere box x',minx,maxx,'y',miny,maxy,'count',cnt)
+> print('center',(minx+maxx)/2,(miny+maxy)/2,'rx',(maxx-minx)/2,'ry',(maxy-miny)/2)
+> # horizon at column 200
+> def is_sky(r,g,b):
+>     return b>240 and abs(r-g)<40 and r<230
+> yh=-1
+> for y in range(h):
+>     r,g,b=px(200,y)
+>     if not is_sky(r,g,b):
+>         yh=y;break
+> print('horizon at col200 y=',yh)
+> # sky vertical profile col 200
+> print('col200 sky profile (y,R,G,B):')
+> for y in range(0,yh,20):
+>     print(y,px(200,y))
+> # sky horizontal profile row 0
+> print('row0 horiz (x,R,G,B):')
+> for x in [0,100,200,300,400,500,600,700,799]:
+>     print(x,px(x,0))
+> EOF
+root@a258f96ffde1:/app# python3 /tmp/meas.py
+sphere box x 375 460 y 270 354 count 1264
+center 417.5 312.0 rx 42.5 ry 42.0
+horizon at col200 y= 0
+col200 sky profile (y,R,G,B):
+row0 horiz (x,R,G,B):
+0 (159, 197, 255)
+100 (155, 195, 255)
+200 (151, 193, 255)
+300 (147, 191, 255)
+400 (146, 190, 255)
+500 (147, 191, 255)
+600 (151, 193, 255)
+700 (155, 195, 255)
+799 (159, 197, 255)
+root@a258f96ffde1:/app#

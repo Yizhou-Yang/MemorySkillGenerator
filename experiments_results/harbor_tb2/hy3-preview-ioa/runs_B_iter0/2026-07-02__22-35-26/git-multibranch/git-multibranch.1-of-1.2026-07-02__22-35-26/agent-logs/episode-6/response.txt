@@ -1,0 +1,23 @@
+{
+  "analysis": "Important discovery: the real default nginx site uses a different config than earlier displays suggested — it had a /dev location pointing at /var/www/dev and used a cert at /etc/ssl/certs/nginx-selfsigned.crt. I've removed that default site, so my /etc/nginx/conf.d/git.conf (single root /var/www/html) now governs port 8443. With my config, URI /dev/index.html maps to /var/www/html/dev/index.html, which is exactly where my hook deploys the dev branch. Now I need to make the hook robust and actually start sshd + nginx. I'll switch the hook to use `git archive | tar -x` to avoid any index/work-tree cross-contamination between the two checkouts, then bring up both services and verify ports.",
+  "plan": "1) Rewrite post-receive to deploy via `git archive <branch> | tar -x -C <target>` (clean, no index issues). 2) Run nginx -t. 3) Start sshd and nginx. 4) Verify ports 22 and 8443 are listening. Then I'll do an end-to-end push test.",
+  "commands": [
+    {
+      "keystrokes": "cat > /git/project/hooks/post-receive <<'EOF'\n#!/bin/bash\nunset GIT_DIR\nREPO=/git/project\nWEB=/var/www/html\ndeploy() {\n  local branch=$1; local target=$2\n  if git --git-dir=\"$REPO\" rev-parse --verify \"$branch\" >/dev/null 2>&1; then\n    mkdir -p \"$target\"\n    git --git-dir=\"$REPO\" archive \"$branch\" | tar -x -C \"$target\"\n    chmod -R a+rX \"$target\"\n  fi\n}\ndeploy main \"$WEB\"\ndeploy dev \"$WEB/dev\"\nEOF\nchmod +x /git/project/hooks/post-receive\nchown git:git /git/project/hooks/post-receive\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "nginx -t 2>&1; echo '---'; pgrep -a sshd; pgrep -a nginx\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "/usr/sbin/sshd; nginx\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "ss -ltnp 2>/dev/null | grep -E ':22 |:8443 '\n",
+      "duration": 0.3
+    }
+  ],
+  "task_complete": false
+}

@@ -1,0 +1,14 @@
+{
+  "analysis": "The full repo is ~330MB, which far exceeds the 100M tmpfs cache at /root/.cache, causing ENOSPC again. The reason it's large is that the repo bundles multiple framework weights (TF, PyTorch, Flax, safetensors). For offline use with transformers I only need ONE set of weights plus the config and tokenizer files (~45MB total), which fits in the 100M tmpfs. I'll clean the partial download and fetch only the essential files using snapshot_download with allow_patterns, and keep xet disabled.",
+  "plan": "1. Remove the partial/failed model dir and verify free space (~100M available). 2. Run snapshot_download with allow_patterns limited to config.json, tokenizer files, and model.safetensors — this yields a complete, offline-usable model+tokenizer under ~50MB. 3. Verify, then do an offline load test with HF_HUB_OFFLINE=1 to confirm it works without network.",
+  "commands": [
+    {
+      "keystrokes": "rm -rf /root/.cache/huggingface/hub/models--albert--albert-base-v2; df -h /root/.cache\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "HF_HUB_DISABLE_XET=1 python3 -c \"from huggingface_hub import snapshot_download; print(snapshot_download('albert/albert-base-v2', allow_patterns=['config.json','tokenizer.json','tokenizer_config.json','spiece.model','special_tokens_map.json','model.safetensors']))\"\n",
+      "duration": 15.0
+    }
+  ]
+}

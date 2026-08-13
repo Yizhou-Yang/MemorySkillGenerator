@@ -1,0 +1,765 @@
+root@4008c52d3fe4:/app# ls -la /tmp
+total 16
+drwxrwxrwt  3 root root 4096 Jul  2 22:04 .
+drwxr-xr-x 19 root root 4096 Jul  2 22:04 ..
+-rwxr-xr-x  1 root root  923 Jul  2 12:45 get-asciinema-timestamp.sh
+drwx------  2 root root 4096 Jul  2 22:04 tmux-0
+root@4008c52d3fe4:/app# ls -la /app
+total 96
+drwxr-xr-x  2 root root  4096 Jul  2 15:09 .
+drwxr-xr-x 19 root root  4096 Jul  2 22:04 ..
+-rw-r--r--  1 root root 88805 Jul  2 13:59 graphene.dat
+root@4008c52d3fe4:/app# find / -iname '*raman*' 2>/dev/null
+root@4008c52d3fe4:/app# head -50 /app/graphene.dat
+47183,554644    19261,547207
+46588,360019    19266,089699
+46008,191298    19077,996963
+45442,488736    19173,287322
+44890,718036    19501,518253
+44352,368927    19506,586203
+43826,959593    19752,431144
+43314,029137    19812,863021
+42813,138290    19678,348151
+42323,866373    19764,871128
+41845,813826    19360,099292
+41378,600916    19413,554878
+40921,863181    19626,191780
+40475,250679    19704,066336
+40038,430487    19495,727898
+39611,084116    19672,573559
+39192,908278    19538,763458
+38783,609488    19344,943112
+38382,908122    19510,307527
+37990,536178    19552,152695
+37606,236678    19568,884582
+37229,764497    19605,714542
+36860,880256    19652,302102
+36499,358232    19518,303269
+36144,980263    19684,212843
+35797,536721    19599,237174
+35456,826102    19666,264313
+35122,653398    19895,771042
+34794,833482    19781,231391
+34473,186962    19931,483503
+34157,541138    20285,381465
+33847,728547    20523,239756
+33543,589022    21041,170567
+33244,969313    21252,731073
+32951,720556    21063,536782
+32663,698124    20547,110114
+32380,763586    20339,907615
+32102,783353    19883,117751
+31829,629489    19630,215111
+31561,176433    19007,346911
+31297,303919    18787,398139
+31037,895750    18572,941601
+30782,840573    18641,459921
+30532,027914    18252,903219
+30285,354669    18084,091054
+30042,717440    17987,028918
+29804,018905    17844,333233
+29569,163975    17541,066496
+29338,060595    17468,865956
+29110,619627    17434,460788
+root@4008c52d3fe4:/app# wc -l /app/graphene.dat
+3565 /app/graphene.dat
+root@4008c52d3fe4:/app# tail -20 /app/graphene.dat
+1653,704408     5869,936650
+1653,440936     5773,130495
+1653,177619     5895,449413
+1652,914454     6214,277617
+1652,651439     6034,852890
+1652,388578     6285,424832
+1652,125866     6004,103504
+1651,863309     6150,102627
+1651,600904     6161,653672
+1651,338647     6193,454093
+1651,076544     6302,950951
+1650,814593     6154,492341
+1650,552790     6150,191176
+1650,291141     6157,269473
+1650,029641     6090,511415
+1649,768294     6062,725860
+1649,507095     6005,066261
+1649,246046     6009,427936
+1648,985151     5911,446799
+1648,724404     5950,923261
+root@4008c52d3fe4:/app# awk -F'\t' '{gsub(",",".",$1); print $1}' /app/graphene.dat | sort -n | head -3
+1648.724404
+1648.985151
+1649.246046
+root@4008c52d3fe4:/app# awk -F'\t' '{gsub(",",".",$1); print $1}' /app/graphene.dat | sort -n | tail -3
+46008.191298
+46588.360019
+47183.554644
+root@4008c52d3fe4:/app# python3 -c "import numpy, scipy; print('numpy', numpy.__version__); print('scipy', scipy.__version__)"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy, scipy; print('numpy', numpy.__version__); print('scipy', scipy.__version__)
+    ^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+root@4008c52d3fe4:/app# python3 -c "import sys; print(sys.version)"
+3.13.1 (main, Jan 14 2025, 02:51:49) [GCC 12.2.0]
+root@4008c52d3fe4:/app# pip3 install numpy scipy 2>&1 | tail -5
+Successfully installed numpy-2.5.0 scipy-1.18.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@4008c52d3fe4:/app# cat > /tmp/explore.py << 'EOF'
+> import numpy as np
+> d = np.loadtxt('/app/graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',', '.')), 1: lambda s: float(s.decode().replace(',', '
+.'))})
+> x = d[:,0]; y = d[:,1]
+> print('n', len(x))
+> print('x range', x.min(), x.max())
+> print('y range', y.min(), y.max())
+> # sort by x
+> o = np.argsort(x)
+> x = x[o]; y = y[o]
+> # find peaks: local maxima larger than neighborhood
+> from scipy.signal import find_peaks
+> pk, props = find_peaks(y, distance=10, prominence=500)
+> print('num peaks', len(pk))
+> for i in pk:
+>     print(f'x={x[i]:.1f} y={y[i]:.1f}')
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/explore.py
+Traceback (most recent call last):
+  File "/tmp/explore.py", line 2, in <lambda>
+    d = np.loadtxt('/app/graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',', '.')), 1: lambda s: float(s.decode().replace(',',
+ '.'))})
+                                                                                       ^^^^^^^^
+AttributeError: 'str' object has no attribute 'decode'. Did you mean: 'encode'?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/tmp/explore.py", line 2, in <module>
+    d = np.loadtxt('/app/graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',', '.')), 1: lambda s: float(s.decode().replace(',',
+ '.'))})
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1381, in loadtxt
+    arr = _read(fname, dtype=dtype, comment=comment, delimiter=delimiter,
+                converters=converters, skiplines=skiprows, usecols=usecols,
+                unpack=unpack, ndmin=ndmin, encoding=encoding,
+                max_rows=max_rows, quote=quotechar)
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1035, in _read
+    arr = _load_from_filelike(
+        data, delimiter=delimiter, comment=comment, quote=quote,
+    ...<3 lines>...
+        encoding=encoding, filelike=filelike,
+        byte_converters=byte_converters)
+ValueError: could not convert string '47183,554644' to float64 at row 0, column 1.
+root@4008c52d3fe4:/app# cat > /tmp/explore.py << 'EOF'
+> import numpy as np
+> rows = []
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line = line.strip()
+>         if not line: continue
+>         parts = line.replace(',', '.').split()
+>         if len(parts) < 2: continue
+>         rows.append((float(parts[0]), float(parts[1])))
+> d = np.array(rows)
+> x = d[:,0]; y = d[:,1]
+> print('n', len(x))
+> print('x range', x.min(), x.max())
+> print('y range', y.min(), y.max())
+> o = np.argsort(x); x = x[o]; y = y[o]
+> from scipy.signal import find_peaks
+> pk, props = find_peaks(y, distance=10, prominence=500)
+> print('num peaks', len(pk))
+> for i in pk:
+>     print(f'x={x[i]:.1f} y={y[i]:.1f}')
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/explore.py
+n 3565
+x range 1648.724404 47183.554644
+y range 40.090842 79400.095085
+num peaks 43
+x=1656.1 y=6410.2
+x=1660.1 y=6474.3
+x=1666.8 y=6228.4
+x=1673.4 y=6135.4
+x=1683.6 y=5942.2
+x=1703.7 y=5587.3
+x=1727.2 y=5331.1
+x=1746.0 y=4850.7
+x=1755.0 y=4816.2
+x=1760.2 y=4799.3
+x=1764.8 y=4669.5
+x=1783.7 y=4504.0
+x=1787.8 y=4331.4
+x=1806.1 y=4406.5
+x=1819.9 y=4063.2
+x=1831.4 y=3886.9
+x=1848.9 y=3705.4
+x=1900.7 y=3223.0
+x=1912.6 y=3005.0
+x=1987.8 y=2497.9
+x=2000.1 y=2470.4
+x=2011.1 y=2308.3
+x=2059.8 y=2098.5
+x=2090.3 y=1859.3
+x=2111.7 y=1670.4
+x=2233.7 y=1269.6
+x=2302.2 y=1141.4
+x=2352.7 y=1107.2
+x=2434.1 y=842.6
+x=2454.6 y=844.7
+x=2539.6 y=660.9
+x=2716.3 y=601.8
+x=2893.0 y=728.9
+x=3084.7 y=1300.7
+x=3288.9 y=1090.3
+x=3745.1 y=12920.9
+x=4083.6 y=2873.8
+x=6329.4 y=13777.7
+x=6971.4 y=7024.8
+x=10289.9 y=18805.2
+x=16245.6 y=18159.9
+x=19139.5 y=79400.1
+x=33245.0 y=21252.7
+root@4008c52d3fe4:/app# python3 /tmp/explore.py 2>&1 | tail -30
+x=1806.1 y=4406.5
+x=1819.9 y=4063.2
+x=1831.4 y=3886.9
+x=1848.9 y=3705.4
+x=1900.7 y=3223.0
+x=1912.6 y=3005.0
+x=1987.8 y=2497.9
+x=2000.1 y=2470.4
+x=2011.1 y=2308.3
+x=2059.8 y=2098.5
+x=2090.3 y=1859.3
+x=2111.7 y=1670.4
+x=2233.7 y=1269.6
+x=2302.2 y=1141.4
+x=2352.7 y=1107.2
+x=2434.1 y=842.6
+x=2454.6 y=844.7
+x=2539.6 y=660.9
+x=2716.3 y=601.8
+x=2893.0 y=728.9
+x=3084.7 y=1300.7
+x=3288.9 y=1090.3
+x=3745.1 y=12920.9
+x=4083.6 y=2873.8
+x=6329.4 y=13777.7
+x=6971.4 y=7024.8
+x=10289.9 y=18805.2
+x=16245.6 y=18159.9
+x=19139.5 y=79400.1
+x=33245.0 y=21252.7
+root@4008c52d3fe4:/app# cat > /tmp/win.py << 'EOF'
+> import numpy as np
+> rows = []
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         rows.append((float(p[0]),float(p[1])))
+> d=np.array(rows); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> for lo,hi in [(9000,11000),(15000,20000),(3000,7000),(32000,34000)]:
+>     m=(x>=lo)&(x<=hi)
+>     xx=x[m]; yy=y[m]
+>     if len(xx)==0: continue
+>     print('=== window',lo,hi,'npts',len(xx),'===')
+>     # downsample for printing
+>     idx=np.linspace(0,len(xx)-1,min(40,len(xx))).astype(int)
+>     for i in idx:
+>         print(f'{xx[i]:.2f} {yy[i]:.2f}')
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/win.py
+=== window 9000 11000 npts 83 ===
+9007.89 9002.45
+9047.08 8710.50
+9086.64 9040.09
+9126.57 9072.44
+9166.89 8965.14
+9207.59 9168.74
+9248.67 9005.56
+9290.16 9216.32
+9332.04 9231.88
+9374.34 9405.79
+9438.56 9149.66
+9481.89 9418.59
+9525.66 9519.69
+9569.87 9480.16
+9614.51 9726.41
+9659.60 9741.29
+9705.15 9951.24
+9751.17 10158.65
+9797.65 10571.02
+9844.60 11127.14
+9915.95 11505.98
+9964.13 11938.88
+10012.82 12743.19
+10062.01 13822.41
+10111.73 15672.20
+10161.97 17259.42
+10212.75 18448.73
+10264.07 18619.36
+10315.95 18515.54
+10368.39 18487.28
+10448.12 18666.11
+10502.00 18717.43
+10556.48 18602.12
+10611.56 18754.71
+10667.26 17667.33
+10723.59 15342.34
+10780.55 13633.31
+10838.16 12503.00
+10896.43 12020.80
+10985.08 11716.67
+=== window 15000 20000 npts 64 ===
+15055.33 15405.05
+15113.43 15243.17
+15231.05 15515.04
+15290.58 15510.36
+15411.11 15637.79
+15533.63 15941.28
+15595.66 16108.91
+15721.28 16443.83
+15784.88 16191.24
+15913.71 16744.25
+16044.75 17319.64
+16111.12 17840.74
+16245.58 18159.87
+16382.40 17254.78
+16451.72 16639.86
+16592.19 16486.89
+16663.37 16411.40
+16807.64 16736.04
+16954.54 17175.14
+17028.99 17167.58
+17179.96 17693.50
+17256.49 18199.37
+17411.69 19004.15
+17569.82 19755.67
+17650.01 20340.78
+17812.68 21422.02
+17978.50 23027.69
+18062.61 24222.52
+18233.31 26464.24
+18319.92 28061.59
+18495.72 32580.49
+18675.05 40100.87
+18766.08 46110.70
+18950.91 65451.69
+19044.74 78843.44
+19235.33 78815.24
+19429.90 78849.11
+19528.72 67902.85
+19729.51 32649.63
+19934.62 19658.82
+=== window 3000 7000 npts 960 ===
+3000.14 577.43
+3037.67 361.45
+3078.06 1027.74
+3118.16 730.66
+3161.37 755.79
+3204.31 642.33
+3250.64 743.45
+3298.69 918.10
+3346.53 916.17
+3398.24 873.31
+3449.80 1224.84
+3505.60 1204.81
+3563.69 1338.89
+3621.73 1394.81
+3684.70 2848.30
+3747.73 12904.65
+3816.24 2395.36
+3887.85 2058.58
+3959.72 1953.08
+4038.06 2398.10
+4116.85 2342.23
+4202.92 2449.96
+4289.67 2458.41
+4384.66 2532.66
+4484.74 2890.17
+4586.01 2976.46
+4697.34 3168.01
+4810.31 3159.69
+4934.90 3490.12
+5067.18 3958.57
+5202.08 3996.09
+5351.66 4270.56
+5504.79 4683.52
+5675.28 4807.71
+5858.16 5204.08
+6046.70 5600.91
+6258.16 7128.52
+6477.35 6256.54
+6724.64 6273.30
+6993.83 6472.21
+=== window 32000 34000 npts 7 ===
+32102.78 19883.12
+32380.76 20339.91
+32663.70 20547.11
+32951.72 21063.54
+33244.97 21252.73
+33543.59 21041.17
+33847.73 20523.24
+root@4008c52d3fe4:/app# cat > /tmp/full.py << 'EOF'
+> import numpy as np
+> rows = []
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         rows.append((float(p[0]),float(p[1])))
+> d=np.array(rows); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> print('FULL spectrum downsampled (120 pts):')
+> idx=np.linspace(0,len(x)-1,120).astype(int)
+> for i in idx:
+>     print(f'{x[i]:.1f} {y[i]:.1f}')
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/full.py
+FULL spectrum downsampled (120 pts):
+1648.7 5950.9
+1656.3 6344.9
+1664.4 5836.3
+1672.5 5949.9
+1680.8 5614.6
+1689.3 5595.9
+1697.9 5270.6
+1706.7 5362.4
+1715.6 5030.8
+1724.7 5025.5
+1734.0 5015.4
+1743.4 4596.7
+1753.0 4740.4
+1762.8 4494.0
+1772.8 4265.0
+1783.0 4227.8
+1793.4 4074.8
+1804.0 3841.5
+1814.8 3817.6
+1825.8 3782.2
+1836.7 3262.2
+1848.1 3503.2
+1859.8 3455.2
+1871.8 3213.1
+1884.0 3146.7
+1896.5 2939.7
+1909.2 2828.2
+1922.2 2725.1
+1935.5 2544.6
+1949.1 2469.5
+1963.0 2127.1
+1977.2 2137.0
+1991.7 2094.2
+2006.6 1963.5
+2021.8 2024.8
+2037.4 1852.3
+2053.3 1833.6
+2069.6 1614.7
+2086.4 1552.4
+2103.5 1520.6
+2120.5 1238.7
+2138.5 1405.0
+2157.0 1361.3
+2175.9 1196.9
+2195.3 1015.3
+2215.3 905.2
+2235.8 884.3
+2256.8 1006.0
+2278.5 903.8
+2300.7 840.4
+2323.6 718.0
+2347.1 959.5
+2371.3 718.8
+2396.2 545.0
+2421.9 664.3
+2448.3 422.0
+2475.6 570.2
+2503.7 518.7
+2532.7 319.8
+2562.7 481.8
+2592.6 487.9
+2624.5 318.2
+2657.6 285.2
+2691.7 419.8
+2727.1 261.4
+2763.7 317.2
+2801.6 414.4
+2841.0 448.1
+2881.8 384.0
+2924.2 411.6
+2968.3 478.4
+3014.1 595.8
+3061.7 510.0
+3111.4 670.1
+3163.1 865.6
+3217.1 733.9
+3273.5 689.6
+3332.4 1029.7
+3394.0 1147.6
+3458.6 1119.8
+3523.9 1252.3
+3594.8 1447.5
+3669.3 1904.3
+3747.7 12904.7
+3830.3 2379.1
+3917.4 2077.8
+4009.4 2056.6
+4106.8 2293.2
+4210.0 2200.8
+4319.5 2363.9
+4436.0 2834.5
+4560.2 2842.5
+4692.8 3180.1
+4834.6 3425.4
+4986.9 3516.6
+5150.5 3872.8
+5327.1 4488.1
+5518.0 4617.8
+5725.2 4992.5
+5950.8 5200.3
+6188.7 5917.4
+6458.4 6415.6
+6755.7 6376.0
+7085.1 6784.0
+7451.9 7193.8
+7863.1 7931.2
+8327.0 8164.7
+8854.7 8567.2
+9460.2 9438.3
+10162.0 17259.4
+10985.1 11716.7
+11963.9 12044.6
+13147.3 12629.4
+14606.8 14494.5
+16451.7 16639.9
+18858.0 54280.9
+22127.8 12863.1
+26827.6 16094.6
+34157.5 20285.4
+47183.6 19261.5
+root@4008c52d3fe4:/app# cat > /tmp/peaks.py << 'EOF'
+> import numpy as np
+> from scipy.signal import find_peaks
+> rows=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         rows.append((float(p[0]),float(p[1])))
+> d=np.array(rows); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> # robust background: fit polynomial on a downsampled + smoothed version
+> # Use a moving median to estimate background then smooth
+> from scipy.ndimage import median_filter
+> yf = median_filter(y, size=151)
+> coef = np.polyfit(x, yf, 4)
+> bg = np.polyval(coef, x)
+> resid = y - bg
+> pk,_ = find_peaks(resid, prominence=1500)
+> print('candidate peaks (height above background):')
+> order=np.argsort(resid[pk])[::-1]
+> for idx in order[:12]:
+>     i=pk[idx]
+>     print(f'x={x[i]:9.1f}  y={y[i]:9.1f}  above_bg={resid[i]:9.1f}  bg={bg[i]:9.1f}')
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/peaks.py
+candidate peaks (height above background):
+x=  19139.5  y=  79400.1  above_bg=  60999.2  bg=  18400.9
+x=   3745.1  y=  12920.9  above_bg=  10222.8  bg=   2698.1
+x=  10289.9  y=  18805.2  above_bg=   9811.4  bg=   8993.8
+x=   6329.4  y=  13777.7  above_bg=   9223.2  bg=   4554.5
+x=  39611.1  y=  19672.6  above_bg=   3680.4  bg=  15992.1
+x=  16178.1  y=  18120.5  above_bg=   2243.7  bg=  15876.8
+root@4008c52d3fe4:/app# cat > /tmp/fitcheck.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> rows=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         rows.append((float(p[0]),float(p[1])))
+> d=np.array(rows); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> def lor(x, x0, gamma, amp, off):
+>     return off + amp*gamma**2/((x-x0)**2+gamma**2)
+> cands={3745.1:80, 6329.4:80, 10289.9:600, 19139.5:1200}
+> for c,w in cands.items():
+>     m=(x>=c-w)&(x<=c+w)
+>     xx=x[m]; yy=y[m]
+>     i0=np.argmax(yy); x0g=xx[i0]; amp0=yy[i0]-np.median(yy[:5])
+>     off0=np.median(yy[-10:])
+>     p0=[x0g, w*0.2, amp0, off0]
+>     try:
+>         popt,pcov=curve_fit(lor,xx,yy,p0=p0,maxfev=20000)
+>         pred=lor(xx,*popt)
+>         ss_res=np.sum((yy-pred)**2); ss_tot=np.sum((yy-yy.mean())**2)
+>         r2=1-ss_res/ss_tot
+>         print(f'cand={c:9.1f} R2={r2:.4f} x0={popt[0]:9.2f} gamma={popt[1]:9.2f} amp={popt[2]:10.2f} off={popt[3]:10.2f} npts={len(xx)}')
+>     except Exception as e:
+>         print('cand',c,'fail',e)
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/fitcheck.py
+cand=   3745.1 R2=0.9948 x0=  3745.31 gamma=    27.88 amp=  12926.30 off=    387.67 npts=60
+cand=   6329.4 R2=0.9933 x0=  6327.64 gamma=    37.50 amp=   8625.32 off=   5304.15 npts=17
+cand=  10289.9 R2=0.9577 x0= 10416.75 gamma=   516.11 amp=  15480.76 off=   3976.59 npts=46
+cand=  19139.5 R2=0.9389 x0= 19197.45 gamma=   439.81 amp=  76427.19 off=   8393.57 npts=25
+root@4008c52d3fe4:/app# cat > /tmp/fit.py << 'EOF'
+> import numpy as np
+> import json
+> from scipy.optimize import curve_fit
+>
+> rows=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         rows.append((float(p[0]),float(p[1])))
+> d=np.array(rows); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+>
+> def lor(x, x0, gamma, amp, off):
+>     return off + amp*gamma**2/((x-x0)**2+gamma**2)
+>
+> def fit_peak(center, half):
+>     m=(x>=center-half)&(x<=center+half)
+>     xx=x[m]; yy=y[m]
+>     i0=np.argmax(yy)
+>     x0g=xx[i0]; off0=np.median(yy[np.argsort(np.abs(xx-center))[:10]])
+>     amp0=yy[i0]-off0
+>     p0=[x0g, half*0.25, amp0, off0]
+>     popt,_=curve_fit(lor,xx,yy,p0=p0,maxfev=40000)
+>     pred=lor(xx,*popt)
+>     r2=1-np.sum((yy-pred)**2)/np.sum((yy-yy.mean())**2)
+>     return popt, r2, len(xx)
+>
+> # stability across windows
+> for name,(c,wins) in {'G':(3745.1,[50,70,90]),'2D':(6329.4,[80,100,120])}.items():
+>     print(name, 'cand', c)
+>     for w in wins:
+>         p,r,n=fit_peak(c,w)
+>         print(f'  w={w:3d} R2={r:.4f} x0={p[0]:9.3f} gamma={p[1]:9.3f} amp={p[2]:10.3f} off={p[3]:10.3f} n={n}')
+>
+> # final fit
+> pg,rg,_=fit_peak(3745.1,70)
+> pd,rd,_=fit_peak(6329.4,100)
+> res={
+>   "G":  {"x0":float(pg[0]),"gamma":float(pg[1]),"amplitude":float(pg[2]),"offset":float(pg[3])},
+>   "2D": {"x0":float(pd[0]),"gamma":float(pd[1]),"amplitude":float(pd[2]),"offset":float(pd[3])},
+> }
+> print('FINAL G R2=%.4f  2D R2=%.4f'%(rg,rd))
+> print(json.dumps(res,indent=2))
+> for path in ['/app/results.json','/tmp/results.json']:
+>     with open(path,'w') as f:
+>         json.dump(res,f,indent=2)
+>     print('wrote',path)
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/fit.py
+G cand 3745.1
+  w= 50 R2=0.9964 x0= 3745.273 gamma=  -32.297 amp= 14434.377 off= -1300.609 n=37
+  w= 70 R2=0.9953 x0= 3745.295 gamma=  -28.854 amp= 13194.078 off=    68.660 n=52
+  w= 90 R2=0.9945 x0= 3745.326 gamma=  -27.357 amp= 12799.699 off=   544.920 n=67
+2D cand 6329.4
+  w= 80 R2=0.9933 x0= 6327.645 gamma=   37.496 amp=  8625.319 off=  5304.150 n=17
+  w=100 R2=0.9933 x0= 6327.832 gamma=   37.531 amp=  8635.912 off=  5292.979 n=22
+  w=120 R2=0.9909 x0= 6327.878 gamma=   35.836 amp=  8437.766 off=  5543.914 n=27
+FINAL G R2=0.9953  2D R2=0.9933
+{
+  "G": {
+    "x0": 3745.295430021106,
+    "gamma": -28.853737077623794,
+    "amplitude": 13194.078114889682,
+    "offset": 68.66008925786201
+  },
+  "2D": {
+    "x0": 6327.8316709954515,
+    "gamma": 37.531176982439966,
+    "amplitude": 8635.911538128661,
+    "offset": 5292.979470159311
+  }
+}
+wrote /app/results.json
+wrote /tmp/results.json
+root@4008c52d3fe4:/app# cat > /tmp/fit2.py << 'EOF'
+> import numpy as np, json
+> from scipy.optimize import curve_fit
+> rows=[]
+> with open('/app/graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         rows.append((float(p[0]),float(p[1])))
+> d=np.array(rows); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> def lor(x,x0,gamma,amp,off):
+>     return off + amp*gamma**2/((x-x0)**2+gamma**2)
+> def fit(center,half):
+>     m=(x>=center-half)&(x<=center+half); xx=x[m]; yy=y[m]
+>     i0=np.argmax(yy); x0g=xx[i0]
+>     off0=np.median(yy[np.argsort(np.abs(xx-center))[:10]])
+>     amp0=yy[i0]-off0
+>     p0=[x0g,half*0.25,amp0,off0]
+>     popt,_=curve_fit(lor,xx,yy,p0=p0,maxfev=40000,
+>                      bounds=([x0g-200,1e-4,-1e9,-1e9],[x0g+200,1e4,1e9,1e9]))
+>     pred=lor(xx,*popt); r2=1-np.sum((yy-pred)**2)/np.sum((yy-yy.mean())**2)
+>     return popt,r2
+> pg,rg=fit(3745.1,70); pd,rd=fit(6329.4,100)
+> res={
+>   "G": {"x0":float(pg[0]),"gamma":float(pg[1]),"amplitude":float(pg[2]),"offset":float(pg[3])},
+>   "2D":{"x0":float(pd[0]),"gamma":float(pd[1]),"amplitude":float(pd[2]),"offset":float(pd[3])}}
+> print('G R2=%.4f  2D R2=%.4f'%(rg,rd))
+> print(json.dumps(res,indent=2))
+> for path in ['/app/results.json','/tmp/results.json']:
+>     with open(path,'w') as f: json.dump(res,f,indent=2)
+>     print('wrote',path)
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/fit2.py
+G R2=0.9953  2D R2=0.9933
+{
+  "G": {
+    "x0": 3745.29542907251,
+    "gamma": 28.853754346588783,
+    "amplitude": 13194.080027967499,
+    "offset": 68.65644927014874
+  },
+  "2D": {
+    "x0": 6327.8316683611365,
+    "gamma": 37.53106575316403,
+    "amplitude": 8635.907093310196,
+    "offset": 5292.990011117576
+  }
+}
+wrote /app/results.json
+wrote /tmp/results.json
+root@4008c52d3fe4:/app# cat /app/results.json
+{
+  "G": {
+    "x0": 3745.29542907251,
+    "gamma": 28.853754346588783,
+    "amplitude": 13194.080027967499,
+    "offset": 68.65644927014874
+  },
+  "2D": {
+    "x0": 6327.8316683611365,
+    "gamma": 37.53106575316403,
+    "amplitude": 8635.907093310196,
+    "offset": 5292.990011117576
+  }
+}root@4008c52d3fe4:/app#

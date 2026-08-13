@@ -1,0 +1,135 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@78f59cefca90:/app# cat > /app/make_parquet.py << 'PYEOF'
+> import csv, struct
+>
+> def write_varint(buf, n):
+>     while True:
+>         b = n & 0x7F
+>         n >>= 7
+>         if n:
+>             buf.append(b | 0x80)
+>         else:
+>             buf.append(b); break
+>
+'> def zigzag32(n):
+>     return ((n << 1) ^ (n >> 31)) & 0xFFFFFFFF
+> def zigzag64(n):
+>     return ((n << 1) ^ (n >> 63)) & 0xFFFFFFFFFFFFFFFF
+>
+s> CT_I32=5; CT_I64=6; CT_BINARY=8; CT_LIST=9; CT_STRUCT=12
+>
+> class S:
+>     def __init__(self): self.f=[]
+>     def sc(self,fid,ct,v): self.f.append((fid,ct,'s',v))
+>     def lst(self,fid,elem,vals): self.f.append((fid,CT_LIST,'l',(elem,vals)))
+>     def st(self,fid,val): self.f.append((fid,CT_STRUCT,'t',val))
+>
+> def write_value(buf,kind,ct,payload):
+>     if kind=='s':
+>         if ct==CT_I32: write_varint(buf, zigzag32(payload))
+>         elif ct==CT_I64: write_varint(buf, zigzag64(payload))
+>         elif ct==CT_BINARY:
+>             if isinstance(payload,str): payload=payload.encode()
+>             write_varint(buf, len(payload)); buf.extend(payload)
+>     elif kind=='l':
+>         elem,vals=payload; n=len(vals)
+>         if n<=14: buf.append((n<<4)|elem)
+>         else: buf.append(0xF0|elem); write_varint(buf,n)
+>         for v in vals:
+>             if elem==CT_I32: write_varint(buf, zigzag32(v))
+>             elif elem==CT_I64: write_varint(buf, zigzag64(v))
+>             elif elem==CT_BINARY:
+>                 vb=v if isinstance(v,bytes) else v.encode()
+>                 write_varint(buf,len(vb)); buf.extend(vb)
+>             elif elem==CT_STRUCT: write_struct(buf,v)
+>     elif kind=='t':
+>         write_struct(buf,payload)
+>
+> def write_struct(buf,s):
+>     last=0
+>     for fid,ct,kind,payload in s.f:
+>         delta=fid-last
+>         if 0<delta<=15: buf.append((delta<<4)|ct)
+>         else: buf.append(ct); write_varint(buf, zigzag32(fid))
+>         last=fid
+>         write_value(buf,kind,ct,payload)
+>     buf.append(0)
+>
+> with open('/app/data.csv','r',encoding='utf-8') as fh:
+>     lines=[ln for ln in fh.read().splitlines() if ln.strip()!='']
+> header=lines[0].split(',')
+> rows=[ln.split(',') for ln in lines[1:]]
+> ncols=len(header); nrows=len(rows)
+>
+> col_types=[]
+> for j in range(ncols):
+>     isint=True
+>     for r in rows:
+>         try: int(r[j])
+>         except: isint=False; break
+>     col_types.append('INT32' if isint else 'BYTE_ARRAY')
+>
+> def col_values(j):
+>     if col_types[j]=='INT32': return [int(rows[r][j]) for r in range(nrows)]
+>     return [rows[r][j].encode('utf-8') for r in range(nrows)]
+>
+> file_data=bytearray(b'PAR1')
+> offsets=[]; meta=[]; total_sizes=[]
+> for j in range(ncols):
+>     vals=col_values(j)
+>     page=bytearray()
+>     if col_types[j]=='INT32':
+>         for v in vals: page+=struct.pack('<i',v)
+>     else:
+>         for v in vals: page+=struct.pack('<i',len(v))+v
+>     dph=S()
+>     dph.sc(1,CT_I32,0)        # DATA_PAGE
+>     dph.sc(2,CT_I32,nrows)
+>     dph.sc(3,CT_I32,0)        # PLAIN
+>     dph.sc(4,CT_I32,3)        # def_level RLE
+>     dph.sc(5,CT_I32,3)        # rep_level RLE
+>     ph=S()
+>     ph.sc(1,CT_I32,0)         # PageHeader.type = DATA_PAGE
+>     ph.sc(2,CT_I32,len(page))
+>     ph.sc(3,CT_I32,len(page))
+>     ph.st(6,dph)              # data_page_header is field 6
+>     phb=bytearray(); write_struct(phb,ph)
+>     off=len(file_data)
+>     file_data+=phb; file_data+=page
+>     offsets.append(off); total_sizes.append(len(phb)+len(page))
+>     cm=S()
+>     cm.sc(1,CT_I32,1 if col_types[j]=='INT32' else 6)
+>     cm.lst(2,CT_I32,[0,3])    # PLAIN, RLE
+>     cm.lst(3,CT_BINARY,[header[j]])
+>     cm.sc(4,CT_I32,0)
+>     cm.sc(5,CT_I64,nrows)
+>     cm.sc(6,CT_I64,total_sizes[-1])
+>     cm.sc(7,CT_I64,total_sizes[-1])
+>     cm.sc(9,CT_I64,off)
+>     meta.append(cm)
+>
+> root=S(); root.sc(1,CT_BINARY,'schema'); root.sc(4,CT_I32,0); root.sc(5,CT_I32,ncols)
+> schema=[root]
+> for j in range(ncols):
+>     se=S(); se.sc(1,CT_BINARY,header[j]); se.sc(2,CT_I32,1 if col_types[j]=='INT32' else 6); se.sc(4,CT_I32,0)
+>     if col_types[j]=='BYTE_ARRAY': se.sc(6,CT_I32,1)
+>     schema.append(se)
+>
+> cols=[]
+> for j in range(ncols):
+>     cc=S(); cc.sc(2,CT_I64,offsets[j]); cc.st(3,meta[j]); cols.append(cc)
+> rg=S(); rg.lst(1,CT_STRUCT,cols); rg.sc(2,CT_I64,sum(total_sizes)); rg.sc(3,CT_I64,nrows)
+>
+> fm=S(); fm.sc(1,CT_I32,1); fm.lst(2,CT_STRUCT,schema); fm.lst(3,CT_STRUCT,[rg]); fm.sc(5,CT_BINARY,'parquet-tools')
+> fmb=bytearray(); write_struct(fmb,fm)
+> out=bytearray(); out+=file_data; out+=fmb; out+=struct.pack('<I',len(fmb)); out+=b'PAR1'
+> with open('/app/data.parquet','wb') as fh: fh.write(out)
+> print('wrote', len(out), 'bytes;', nrows,'rows,',ncols,'cols; types=',col_types)
+> PYEOF
+root@78f59cefca90:/app# python3 /app/make_parquet.py
+wrote 360 bytes; 5 rows, 3 cols; types= ['BYTE_ARRAY', 'INT32', 'BYTE_ARRAY']
+root@78f59cefca90:/app#

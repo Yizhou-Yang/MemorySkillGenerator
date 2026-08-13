@@ -1,0 +1,72 @@
+New Terminal Output:
+
+                <div class="book-title">The Catcher in troot@7d68f18641a2:/app# cat > /app/scrape.py << 'EOF'
+> import re
+> import requests
+> from bs4 import BeautifulSoup
+> import pandas as pd
+>
+> URL = "http://server:8000"
+>
+> def main():
+>     resp = requests.get(URL, timeout=30)
+>     resp.raise_for_status()
+>     soup = BeautifulSoup(resp.text, "html.parser")
+>
+>     books = []
+>     for book in soup.find_all("div", class_="book"):
+>         title_el = book.find("div", class_="book-title")
+>         author_el = book.find("div", class_="book-author")
+>         year_el = book.find("span", class_="book-year")
+>         rating_el = book.find("span", class_="book-rating")
+>         price_el = book.find("span", class_="book-price")
+>
+>         title = title_el.get_text(strip=True) if title_el else ""
+>         author = ""
+>         if author_el:
+>             author = re.sub(r"^by\s+", "", author_el.get_text(strip=True))
+>         year = ""
+>         if year_el:
+>             m = re.search(r"(\d{4})", year_el.get_text())
+>             year = int(m.group(1)) if m else None
+>         rating = None
+>         if rating_el:
+>             m = re.search(r"([\d.]+)/\s*5", rating_el.get_text())
+>             rating = float(m.group(1)) if m else None
+>         price = None
+>         if price_el:
+>             m = re.search(r"\$?\s*([\d.]+)", price_el.get_text())
+>             price = float(m.group(1)) if m else None
+>
+>         books.append({
+>             "title": title,
+>             "author": author,
+>             "year": year,
+>             "rating": rating,
+>             "price": price,
+>         })
+>
+>     df = pd.DataFrame(books, columns=["title", "author", "year", "rating", "price"])
+>     df.to_csv("books.csv", index=False)
+>
+>     total = len(df)
+>     avg_price = df["price"].mean()
+>     highest = df.loc[df["rating"].idxmax()]
+>
+>     lines = []
+>     lines.append("Book Store Scraping Summary Report")
+>     lines.append("=" * 40)
+>     lines.append(f"Total number of books scraped: {total}")
+>     lines.append(f"Average book price: ${avg_price:.2f}")
+>     lines.append(f"Highest rated book: {highest['title']} (Rating: {highest['rating']}/5, by {highest['author']})")
+>
+>     with open("report.txt", "w") as f:
+>         f.write("\n".join(lines) + "\n")
+>
+>     print("\n".join(lines))
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@7d68f18641a2:/app# cd /app && python3 scrape.py
+

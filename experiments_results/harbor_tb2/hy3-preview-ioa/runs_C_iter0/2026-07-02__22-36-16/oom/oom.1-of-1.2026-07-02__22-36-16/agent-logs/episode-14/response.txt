@@ -1,0 +1,12 @@
+The remount failed (no privileges). But I can work around it: the `/root/.cache` tmpfs is only 100M, but `/tmp`/`/app` (overlay) can actually hold large writes. I'll point the default HF cache location at a writable path using a symlink, so the standard offline lookup still works.
+
+{
+  "analysis": "remount failed with permission denied — /root/.cache is stuck at 100M tmpfs, too small for the 205MB model. The overlay fs (/tmp, /app) can write large files (dd wrote 50MB fine) despite df reporting 0 avail. Solution: write the cache to a writable location (e.g. /tmp/hf_cache) and symlink it into the default HF cache path so offline from_pretrained still finds it. First I'll confirm /tmp can actually hold ~250MB.",
+  "plan": "1. Test writing 250MB to /tmp to confirm capacity. 2. If OK, create /tmp/hf_cache and symlink /root/.cache/huggingface -> /tmp/hf_cache. 3. Re-run the cache script. 4. Verify the download and that offline loading works.",
+  "commands": [
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmp/testfile bs=1M count=250 2>&1; ls -lh /tmp/testfile; rm -f /tmp/testfile\n",
+      "duration": 3.0
+    }
+  ]
+}

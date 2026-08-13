@@ -1,0 +1,18 @@
+{
+  "analysis": "All assets are in place: vmlinuz-lts, initramfs-lts, intel_ucode.img, amd_ucode.img, relay.py, and launch.sh. Now I'll launch the relay + QEMU in the background and verify QEMU starts cleanly. QEMU will wait for the relay to connect to its serial port (tcp 4545), the relay connects immediately, so the relay captures all boot output. I then poll for the login prompt (ready file).",
+  "plan": "1) Run launch.sh to start relay and QEMU. 2) Check relay.log (should say listening) and qemu.log (should have no fatal errors). 3) Confirm processes are running and port 6665 is listening. Then I'll poll for readiness in subsequent turns.",
+  "commands": [
+    {
+      "keystrokes": "bash /app/run/launch.sh\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "echo '--- relay.log'; cat /app/run/relay.log; echo '--- qemu.log'; cat /app/run/qemu.log\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "ps aux | grep -E 'qemu|relay' | grep -v grep; echo '---'; (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E '6665|4545'\n",
+      "duration": 0.3
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "analysis": "Local push as the git user works perfectly (both branches pushed, exit 0) — so the repo, git-receive-pack, and (when re-enabled) the hook all work server-side. The remaining failure is purely on the SSH transport edge using my askpass/setsid harness. I now have key-based root→git auth set up, so I can test the exact SSH path cleanly without askpass/setsid.",
+  "plan": "1) Run a git push over SSH using key auth (no askpass/setsid) to see if the SSH path itself is healthy. 2) If it works, the problem was my harness, and I'll restore the hook and do a final clean verification. 3) If it still fails with 254, I'll dig into server-side SSH environment.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/sshpush.sh <<'EOF'\n#!/bin/bash\ncd /app\nrm -rf /tmp/sw; mkdir -p /tmp/sw; cd /tmp/sw\ngit init -q -b main\ngit config user.email t@t.com; git config user.name t\necho '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main\ngit checkout -q -b dev\necho '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev\ngit remote add origin git@localhost:/git/project\ngit push -v origin main dev\necho \"SSH_PUSH_EXIT=$?\"\nEOF\nssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null git@localhost 'echo SSH_OK' 2>&1\nbash /tmp/sshpush.sh > /tmp/sshpush.out 2>&1; echo DONE\n",
+      "duration": 5.0
+    },
+    {
+      "keystrokes": "grep -nE 'fatal|error|Could not|SSH_PUSH_EXIT|remote:|new branch|rejected|<h1>|404|SSH_OK' /tmp/sshpush.out\n",
+      "duration": 0.3
+    }
+  ],
+  "task_complete": false
+}

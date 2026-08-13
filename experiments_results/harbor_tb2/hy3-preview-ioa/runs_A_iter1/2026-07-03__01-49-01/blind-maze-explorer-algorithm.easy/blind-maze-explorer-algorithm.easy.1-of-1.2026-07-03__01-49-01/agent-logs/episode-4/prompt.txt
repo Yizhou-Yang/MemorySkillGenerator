@@ -1,0 +1,100 @@
+New Terminal Output:
+
+root@0712b8587756:/app# cat > /app/solve.py << 'PYEOF'
+> import sys, subprocess, os
+>
+> DIRS = [('N',-1,0),('S',1,0),('E',0,1),('W',0,-1)]
+> OPP = {'N':'S','S':'N','E':'W','W':'E'}
+>
+> def solve(maze_id):
+>     proc = subprocess.Popen(
+>         ['bash','/app/maze_game.sh', str(maze_id)],
+>         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+>         text=True, bufsize=1
+>     )
+>     def send_move(d):
+>         proc.stdin.write('move %s\n' % d)
+>         proc.stdin.flush()
+>         while True:
+>             line = proc.stdout.readline()
+>             if line == '':
+>                 return 'hit wall'
+>             s = line.strip()
+>             if s.startswith('> '):
+>                 s = s[2:]
+>             if s in ('hit wall','moved','reached exit'):
+>                 return s
+>
+>     known = {(0,0):'S'}
+>     stack = [(0,0,0,None)]
+>
+>     while stack:
+>         r,c,di,ad = stack[-1]
+>         if di >= 4:
+>             stack.pop()
+>             if ad is not None:
+>                 send_move(OPP[ad])
+>             continue
+>         stack[-1] = (r,c,di+1,ad)
+>         d,dr,dc = DIRS[di]
+>         nr, nc = r+dr, c+dc
+>         if (nr,nc) in known:
+>             continue
+>         res = send_move(d)
+>         if res == 'hit wall':
+>             known[(nr,nc)] = '#'
+>         else:
+>             t = 'E' if res == 'reached exit' else ' '
+>             known[(nr,nc)] = t
+>             stack.append((nr,nc,0,d))
+>
+>     try:
+>         proc.stdin.write('exit\n')
+>         proc.stdin.flush()
+>     except Exception:
+>         pass
+>     try:
+>         proc.wait(timeout=5)
+>     except Exception:
+>         proc.kill()
+>
+>     rs = [p[0] for p in known]
+>     cs = [p[1] for p in known]
+>     min_r, max_r = min(rs), max(rs)
+>     min_c, max_c = min(cs), max(cs)
+>     H = max_r - min_r + 1
+>     W = max_c - min_c + 1
+>     grid = [['#']*W for _ in range(H)]
+>     for (r,c),t in known.items():
+>         grid[r-min_r][c-min_c] = t
+>     lines = [''.join(row) for row in grid]
+>     out = '\n'.join(lines) + '\n'
+>     os.makedirs('/app/output', exist_ok=True)
+>     with open('/app/output/%d.txt' % maze_id,'w') as f:
+>         f.write(out)
+>     return out
+>
+> if __name__ == '__main__':
+>     if len(sys.argv) > 1:
+>         ids = [int(x) for x in sys.argv[1:]]
+>     else:
+>         ids = list(range(1,11))
+>     for mid in ids:
+>         out = solve(mid)
+>         print('maze %d:' % mid)
+>         print(out)
+> PYEOF
+root@0712b8587756:/app# python3 /app/solve.py 1
+maze 1:
+####
+#S #
+#E##
+####
+
+root@0712b8587756:/app# diff /app/output/1.txt /app/maze_1.txt && echo MATCH
+4c4
+< ####
+---
+> ####
+\ No newline at end of file
+root@0712b8587756:/app#

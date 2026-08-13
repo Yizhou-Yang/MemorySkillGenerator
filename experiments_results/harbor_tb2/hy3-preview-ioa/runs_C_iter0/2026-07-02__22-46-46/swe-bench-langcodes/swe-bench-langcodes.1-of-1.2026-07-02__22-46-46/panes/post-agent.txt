@@ -1,0 +1,41 @@
+root@969998fc3fe7:/app/langcodes# grep -n "__hash__" /app/langcodes/langcodes/__init__.py
+1503:    def __hash__(self) -> int:
+root@969998fc3fe7:/app/langcodes# sed -n '1495,1510p' /app/langcodes/langcodes/__init__.py
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, Language):
+            return False
+        return self._str_tag == other._str_tag
+
+    def __hash__(self) -> int:
+        return hash(id(self))
+
+    def __getitem__(self, key: str) -> Optional[Union[str, List[str]]]:
+        if key in self.ATTRIBUTES:
+            return getattr(self, key)
+        else:
+            raise KeyError(key)
+root@969998fc3fe7:/app/langcodes# sed -i '1504s/.*/        return hash(self._str_tag)/' /app/langcodes/langcodes/__init__.py
+root@969998fc3fe7:/app/langcodes# sed -n '1503,1505p' /app/langcodes/langcodes/__init__.py
+    def __hash__(self) -> int:
+        return hash(self._str_tag)
+
+root@969998fc3fe7:/app/langcodes# cd /app/langcodes && python3 -c "
+> import pickle
+> from langcodes import Language
+> print(id(Language.get('en')) == id(Language.get('en')))
+> print(hash(Language.get('en')) == hash(Language.get('en')))
+> with open('/tmp/test_file','wb') as f:
+>     pickle.dump(Language.get('en'), f)
+> with open('/tmp/test_file','rb') as f:
+>     fc = pickle.load(f)
+> print(id(fc) == id(Language.get('en')))
+> print(hash(fc) == hash(Language.get('en')))
+> "
+True
+True
+False
+True
+root@969998fc3fe7:/app/langcodes#

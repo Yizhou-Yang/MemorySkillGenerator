@@ -1,0 +1,95 @@
+New Terminal Output:
+
+root@f09414803dab:/app# cat > /app/serial_proxy.py << 'PYEOF'
+> import socket, threading, time
+>
+> QEMU_SOCK = '/tmp/qemu-serial.sock'
+> HOST = '127.0.0.1'
+> PORT = 6665
+> LOG = '/app/serial.log'
+>
+> logf = open(LOG, 'ab', buffering=0)
+> buf = bytearray()
+> buf_lock = threading.Lock()
+> clients = []
+> qemu = None
+>
+> def connect_qemu():
+>     while True:
+>         try:
+>             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+>             s.connect(QEMU_SOCK)
+>             return s
+>         except Exception:
+>             time.sleep(0.2)
+>
+> def qemu_reader():
+>     global qemu
+>     qemu = connect_qemu()
+>     while True:
+>         try:
+>             data = qemu.recv(4096)
+>         except Exception:
+>             break
+>         if not data:
+>             break
+>         with buf_lock:
+>             buf.extend(data)
+>         try:
+>             logf.write(data)
+>         except Exception:
+>             pass
+>         for c in list(clients):
+>             try:
+>                 c.sendall(data)
+>             except Exception:
+>                 pass
+>
+> def handle_client(conn):
+>     global qemu
+>     with buf_lock:
+>         hist = bytes(buf)
+>     try:
+>         conn.sendall(hist)
+>     except Exception:
+>         return
+>     while qemu is None:
+>         time.sleep(0.1)
+>     while True:
+>         try:
+>             d = conn.recv(4096)
+>         except Exception:
+>             break
+>         if not d:
+>             break
+>         try:
+>             qemu.sendall(d)
+>         except Exception:
+>             break
+>
+> def server():
+>     ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+>     ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+>     ls.bind((HOST, PORT))
+>     ls.listen(5)
+>     while True:
+>         conn, addr = ls.accept()
+>         clients.append(conn)
+>         threading.Thread(target=handle_client, args=(conn,), daemon=True).start()
+>
+> threading.Thread(target=qemu_reader, daemon=True).start()
+> server()
+> PYEOF
+root@f09414803dab:/app# rm -f /tmp/qemu-serial.sock
+root@f09414803dab:/app# nohup qemu-system-x86_64 -m 512 -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 -net none -boot d -disp
+lay none -vga none -monitor none -serial unix:/tmp/qemu-serial.sock,server,nowait >> /app/qemu.log 2>&1 &
+[1] 245
+root@f09414803dab:/app# sleep 1
+root@f09414803dab:/app# nohup python3 /app/serial_proxy.py >> /app/proxy.log 2>&1 &
+[2] 247
+root@f09414803dab:/app# sleep 1
+root@f09414803dab:/app# echo LAUNCHED
+LAUNCHED
+root@f09414803dab:/app# python3 -m py_compile /app/serial_proxy.py && echo SCRIPT_OK; echo '--- qemu.log ---'; cat /app/qemu.log; echo '--- proxy.log ---'; cat
+/app/proxy.log; echo '--- procs ---'; pgrep -a qemu-system 2>/dev/null; pgrep -af serial_proxy 2>/dev/null
+

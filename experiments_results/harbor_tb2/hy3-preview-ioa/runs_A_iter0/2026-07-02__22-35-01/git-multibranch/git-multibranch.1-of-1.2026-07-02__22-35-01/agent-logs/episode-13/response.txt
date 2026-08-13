@@ -1,0 +1,22 @@
+{
+  "analysis": "Critical clue: even a trivial `ssh git@localhost 'echo PATH=$PATH'` produces NO output, and `git-receive-pack` over SSH also yields zero bytes. Authentication succeeds (key or password), but the remote command's stdout/stderr is completely empty. This means whatever ssd runs as the git user isn't actually executing our command normally — most likely something in the sshd config or the shell environment is swallowing the command/output. I need to pinpoint why the remote command produces nothing before fixing git.",
+  "plan": "Run focused diagnostics: confirm the git user's shell, test a few different remote commands (plain echo, /bin/echo, id), and inspect sshd_config for any Match/ForceCommand/Command/Restrict directives that could alter command execution. This will reveal why output is empty.",
+  "commands": [
+    {
+      "keystrokes": "getent passwd git\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ssh -o StrictHostKeyChecking=no git@localhost 'echo OUT_TEST123; id; pwd'\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "ssh -o StrictHostKeyChecking=no git@localhost '/bin/echo DIRECT_ECHO'\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "grep -niE 'match|forcecommand|command|restrict|chroot' /etc/ssh/sshd_config\n",
+      "duration": 0.2
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "analysis": "Critical insight: I CAN write files (dd created 20MB fine), so the disk actually has space — df's 'Avail=0' is a fuse-overlayfs statfs reporting quirk. apt's pre-flight free-space guard is fooled by this and refuses to install, even with Acquire::Check-Free-Space=false (that only affects the download preflight, not the install's own check). The cleanest reliable workaround is to download the .deb with `apt-get download` (which fetches to cwd and skips dpkg's space check) and then extract it with `dpkg -x`, which does NOT run dpkg's disk-space check or maintainer scripts. I only need a 7z binary; with it I can brute-force the 4-digit password directly (10000 tries) without even needing john or the perl module.",
+  "plan": "1) cd /tmp and use `apt-get download p7zip-full` to fetch the .deb (bypasses the install free-space check). 2) Extract it with `dpkg -x` to '/' so the 7z binary lands in /usr/bin. 3) Verify 7z works. 4) Brute-force the 4-digit password by looping 0000-9999 against the archive. 5) Extract secrete_file.txt and write its contents to /app/solution.txt.",
+  "commands": [
+    {
+      "keystrokes": "cd /tmp && apt-get -o Acquire::Check-Free-Space=false download p7zip-full 2>&1 | tail -5; ls -la *.deb\n",
+      "duration": 15.0
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+The G peak is tall, asymmetric, and sits on a sloping background. My earlier fit allowed a degenerate solution (very wide gamma + negative offset). I need to constrain the fit with good initial guesses and reasonable bounds so it recovers the narrow peak. Let me test this approach.
+
+{
+  "analysis": "The G peak (x0\u224819139, height ~79400) sits on a sloping background and is mildly asymmetric. My first fit converged to a degenerate solution: a very wide Lorentzian (gamma=556) plus a negative offset. The 2D fit (RMS 256) is good. I need to constrain the G fit with good initial guesses and bounds on gamma (narrow) and a positive offset to recover the real narrow peak. Let me test constrained fits before finalizing.",
+  "plan": "Write a diagnostic that fits the G peak with a 4-parameter Lorentzian using good initial guesses (gamma~150, amplitude~60000, offset~20000) and reasonable bounds (gamma 50-400, offset positive). Compare RMS. Also test the 2D fit. Then write the final fit.py with these constraints and verify results.json is produced.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/exp.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\ndata=[]\nfor line in open('/app/graphene.dat'):\n    line=line.strip()\n    if not line: continue\n    p=line.split()\n    if len(p)<2: continue\n    data.append((float(p[0].replace(',','.')), float(p[1].replace(',','.'))))\ndata=np.array(data)\nx=data[:,0]; y=data[:,1]\ndef lor(x,x0,g,a,o): return o+a/(1+((x-x0)/g)**2)\n\nfor name,c,hw in [('G',19139.0,1800.0),('2D',33245.0,2500.0)]:\n    m=(x>c-hw)&(x<c+hw)\n    xw,yw=x[m],y[m]\n    if name=='G':\n        p0=[c,150.0,60000.0,20000.0]\n        b=([c-600,50,0,10000],[c+600,400,200000,40000])\n    else:\n        p0=[c,1500.0,4000.0,21000.0]\n        b=([c-1000,200,0,10000],[c+1000,4000,100000,40000])\n    popt,_=curve_fit(lor,xw,yw,p0=p0,bounds=b,maxfev=200000)\n    rms=np.sqrt(np.mean((yw-lor(xw,*popt))**2))\n    print('%s: x0=%.2f gamma=%.2f amp=%.2f off=%.2f rms=%.2f'%(name,popt[0],abs(popt[1]),popt[2],popt[3],rms))\nEOF\npython3 /tmp/exp.py\n",
+      "duration": 3.0
+    }
+  ]
+}

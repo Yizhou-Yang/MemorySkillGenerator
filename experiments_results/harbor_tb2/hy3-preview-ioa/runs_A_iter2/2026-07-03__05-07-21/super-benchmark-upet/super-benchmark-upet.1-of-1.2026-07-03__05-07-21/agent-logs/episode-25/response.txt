@@ -1,0 +1,18 @@
+{
+  "analysis": "The prefix model passes `past_key_values` as a tuple of per-layer (k,v) pairs to RobertaModel under transformers 4.40.2. The main compatibility blockers are: (1) `from datasets.load import load_dataset, load_metric` (load_metric removed in datasets 2.x), and (2) whether the raw past_key_values tuple works in transformers 4.40.2. The env has transformers 4.40.2 + torch 2.2.1 fixed, so I'll adapt the code rather than downgrade. Let me create a compatibility shim for load_metric and run a smoke test for both the metric loading and the prefix model forward pass before the real run.",
+  "plan": "1. Create tasks/compat.py exposing load_dataset (from datasets) and load_metric (via evaluate.load). 2. sed-replace all `from datasets.load import` with `from tasks.compat import` across the repo. 3. Write and run a smoke test: load the super_glue rte metric and run a forward pass of RobertaPrefixForSequenceClassification with a tiny config. This validates compatibility fast without downloading roberta-base.",
+  "commands": [
+    {
+      "keystrokes": "cat > tasks/compat.py <<'EOF'\nimport sys, os\n# Compatibility shim: datasets 2.x removed datasets.load.load_metric.\nfrom datasets import load_dataset\n\ndef load_metric(*args, **kwargs):\n    from evaluate import load as _eval_load\n    return _eval_load(*args, **kwargs)\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "grep -rl 'from datasets.load import' --include=*.py . | while read f; do sed -i 's/from datasets.load import/from tasks.compat import/' \"$f\"; done; grep -rn 'from datasets.load import\\|from tasks.compat import' --include=*.py . | head\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > _smoke.py <<'EOF'\nimport sys\nsys.path.insert(0, '.')\nfrom tasks.compat import load_metric, load_dataset\nm = load_metric(\"./metrics/super_glue\", \"rte\")\nprint(\"METRIC_COMPUTE:\", m.compute(predictions=[0,1,1], references=[0,1,0]))\n\nfrom transformers import RobertaConfig\nfrom model.head_for_sequence_classification import RobertaPrefixForSequenceClassification\nimport torch\ncfg = RobertaConfig(hidden_size=32, num_hidden_layers=2, num_attention_heads=2, intermediate_size=64, hidden_dropout_prob=0.1, num_labels=2, pre_seq_len=10, prefix_projection=False, prefix_hidden_size=16, use_return_dict=False)\ncfg.problem_type = \"single_label_classification\"\nmodel = RobertaPrefixForSequenceClassification(cfg)\nx = torch.randint(0, 30, (2, 8)); am = torch.ones(2, 8)\nout = model(input_ids=x, attention_mask=am, labels=torch.tensor([0,1]))\nloss = out[0] if isinstance(out, tuple) else out.loss\nprint(\"MODEL_OK loss=\", float(loss))\nEOF\npython3 _smoke.py\n",
+      "duration": 20.0
+    }
+  ]
+}

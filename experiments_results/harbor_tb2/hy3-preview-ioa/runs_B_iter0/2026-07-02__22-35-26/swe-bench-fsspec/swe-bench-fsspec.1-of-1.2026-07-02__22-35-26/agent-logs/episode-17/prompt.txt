@@ -1,0 +1,37 @@
+New Terminal Output:
+
+root@1627bb88184e:/app/filesystem_spec# cat > /tmp/verify.py << 'EOF'
+> import asyncio
+> import fsspec
+> from fsspec.asyn import AsyncFileSystem
+> from fsspec.implementations.dirfs import DirFileSystem
+>
+>
+> class FakeAsyncFS(AsyncFileSystem):
+>     sep = '/'
+>     protocol = 'fake'
+>     async_impl = True
+>
+>     def __init__(self, *a, **k):
+>         super().__init__(*a, **k)
+>
+>     async def open_async(self, path, mode='rb', **kwargs):
+>         return ('OPENED', path, mode, kwargs)
+>
+>
+> async def main():
+>     fs = FakeAsyncFS(asynchronous=True)
+>     d = DirFileSystem('base', fs, asynchronous=True)
+>     res = await d.open_async('rel.txt', 'wb', compress=None)
+>     print('result:', res)
+>     assert res[1] == 'base/rel.txt', res
+>     assert res[2] == 'wb'
+>     print('OK: open_async delegates with joined path')
+>
+>
+> asyncio.run(main())
+> EOF
+root@1627bb88184e:/app/filesystem_spec# python /tmp/verify.py
+result: ('OPENED', 'base/rel.txt', 'wb', {'compress': None})
+OK: open_async delegates with joined path
+root@1627bb88184e:/app/filesystem_spec#

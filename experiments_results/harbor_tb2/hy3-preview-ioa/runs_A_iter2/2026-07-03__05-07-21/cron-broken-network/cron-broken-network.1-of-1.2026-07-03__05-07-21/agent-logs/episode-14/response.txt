@@ -1,0 +1,14 @@
+{
+  "analysis": "The terminal display of the heredoc is visually scrambled, and `curl --version` STILL prints the old 'DNS resolution error' — which is the original fake script's output, not anything my Python would print. That means either (a) the heredoc didn't actually replace /usr/bin/curl with valid Python, or (b) `curl` resolves to something other than /usr/bin/curl. My Python wrapper would never emit 'DNS resolution error', so the file almost certainly was not overwritten correctly. I need to inspect the actual on-disk content and how curl is resolved before retrying.",
+  "plan": "Run diagnostics: (1) `type -a curl` and `which -a curl` to confirm where curl resolves; (2) use python3 to print the raw first bytes of /usr/bin/curl to see if it's still the old shell script or got corrupted. Based on that, I'll re-create the replacement reliably — likely by writing the Python to a temp file, verifying it compiles, then copying it into place.",
+  "commands": [
+    {
+      "keystrokes": "type -a curl; which -a curl\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 -c \"s=open('/usr/bin/curl').read(); print('LEN',len(s)); print(repr(s[:120]))\"\n",
+      "duration": 0.5
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+New Terminal Output:
+
+root@f7af256768ff:/app# cat > /tmp/strings.py << 'EOF'
+> import re
+> data={}
+> with open('/tmp/rodata.txt') as f:
+>     for line in f:
+>         m=re.match(r'\s*([0-9a-f]+)\s+((?:[0-9a-f]{8}\s*)*)',line)
+>         if not m: continue
+>         addr=int(m.group(1),16); hexs=m.group(2).replace(' ',''); b=bytes.fromhex(hexs)
+>         for i in range(len(b)): data[addr+i]=b[i]
+> addrs=sorted(data)
+> lo,hi=addrs[0],addrs[-1]
+> buf=bytes(data[a] for a in range(lo,hi+1))
+> base=lo
+> i=0
+> while i<len(buf):
+>     c=buf[i]
+>     if 32<=c<127:
+>         j=i
+>         while j<len(buf) and (32<=buf[j]<127):
+>             j+=1
+>         if j-i>=3:
+>             s=buf[i:j]
+>             esc=s.replace(b'\r',b'<CR>').replace(b'\n',b'<LF>')
+>             print(f'{base+i:#x}: {esc.decode()!r}')
+>         i=j
+>     else:
+>         i+=1
+> EOF
+root@f7af256768ff:/app# python3 /tmp/strings.py
+wc -l /tmp/fun_trace.txt; wc -l /tmp/fun_main.txt
+0x3012: 'L>fff?'
+0x304d: '%d %d'
+0x3053: '255'
+0x3058: '%d %d %d'
+0x3062: 'Wrote image to %s'
+0x3076: 'Progress: %.1f%%'
+0x3088: 'Rendering complete'
+0x309c: 'image.ppm'
+0x30a6: 'Done.'
+0x30b0: 'Error: Could not open file %s for writing'
+0x30e0: 'Creating high-resolution image: %dx%d'
+0x3108: 'This will be downsampled with ffmpeg after rendering'
+0x3140: 'Rendering high-resolution image...'
+0x3173: '?333?'
+root@f7af256768ff:/app# wc -l /tmp/fun_trace.txt; wc -l /tmp/fun_main.txt
+293 /tmp/fun_trace.txt
+440 /tmp/fun_main.txt
+root@f7af256768ff:/app#

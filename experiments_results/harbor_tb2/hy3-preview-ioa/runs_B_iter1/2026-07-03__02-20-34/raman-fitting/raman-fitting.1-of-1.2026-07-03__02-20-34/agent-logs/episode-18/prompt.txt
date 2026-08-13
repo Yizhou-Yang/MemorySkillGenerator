@@ -1,0 +1,37 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@be7c189382c3:/app# cat > gtest.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> def lor(x,x0,gamma,amp,offset):
+>     return offset + amp/(1.0+((x-x0)/gamma)**2)
+> def fit(xmin,xmax):
+>     m=(x>=xmin)&(x<=xmax); xb=x[m]; yb=y[m]
+>     off=float(np.median(yb)); i=int(np.argmax(yb)); x0c=xb[i]; a0=yb[i]-off
+>     popt,_=curve_fit(lor,xb,yb,p0=[x0c,300,a0,off],maxfev=200000)
+>     r=1-np.sum((yb-lor(xb,*popt))**2)/np.sum((yb-yb.mean())**2)
+>     print(f'[{xmin},{xmax}] x0={popt[0]:.1f} gam={popt[1]:.1f} amp={popt[2]:.1f} off={popt[3]:.1f} R2={r:.4f}')
+> for w in [(15450,17050),(15600,16900),(15700,16700),(15800,16600),(15850,16550),(15900,16500)]:
+>     fit(*w)
+> EOF
+root@be7c189382c3:/app# python3 gtest.py
+[15450,17050] x0=16211.1 gam=-146.4 amp=1985.5 off=16340.5 R2=0.7462
+[15600,16900] x0=16208.9 gam=-154.7 amp=2016.5 off=16291.8 R2=0.8999
+[15700,16700] x0=16205.7 gam=196.5 amp=2279.8 off=15966.4 R2=0.9749
+[15800,16600] x0=16204.6 gam=-211.3 amp=2384.0 off=15843.0 R2=0.9807
+[15850,16550] x0=16202.9 gam=-225.0 amp=2506.4 off=15707.4 R2=0.9777
+[15900,16500] x0=16202.5 gam=-230.0 amp=2562.0 off=15648.5 R2=0.9718
+root@be7c189382c3:/app#

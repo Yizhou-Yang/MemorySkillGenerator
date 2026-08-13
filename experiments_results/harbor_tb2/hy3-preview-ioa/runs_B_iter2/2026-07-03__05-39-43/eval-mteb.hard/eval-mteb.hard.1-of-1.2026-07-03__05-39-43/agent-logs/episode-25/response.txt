@@ -1,0 +1,14 @@
+{
+  "analysis": "Root cause confirmed: the filesystem is fuse-overlayfs which reports 0 bytes available via statvfs, so datasets' has_sufficient_disk_space() returns False and raises OSError. The fix is to make has_sufficient_disk_space always return True. Let me inspect how builder.py calls it, then patch the function.",
+  "plan": "1. Look at builder.py lines 960-975 to confirm the call. 2. Patch has_sufficient_disk_space in py_utils.py to always return True. 3. Re-run the evaluation. The model already downloaded, so the dataset should download and evaluate.",
+  "commands": [
+    {
+      "keystrokes": "sed -n '960,975p' /usr/local/lib/python3.10/site-packages/datasets/builder.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 - <<'EOF'\np='/usr/local/lib/python3.10/site-packages/datasets/utils/py_utils.py'\ns=open(p).read()\nold='''def has_sufficient_disk_space(needed_bytes, directory=\".\"):\n    try:\n        free_bytes = disk_usage(os.path.abspath(directory)).free\n    except OSError:\n        return True\n    return needed_bytes < free_bytes'''\nnew='''def has_sufficient_disk_space(needed_bytes, directory=\".\"):\n    return True'''\nassert old in s, 'pattern not found'\ns=s.replace(old,new)\nopen(p,'w').write(s)\nprint('patched disk space check')\nEOF\n",
+      "duration": 0.5
+    }
+  ]
+}

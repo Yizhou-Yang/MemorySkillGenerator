@@ -236,12 +236,19 @@ def _protocol_dict() -> dict:
         "c_repair_thresh": os.environ.get("C_REPAIR_THRESH", "0.6"),
         "c_repair_gate": os.environ.get("C_REPAIR_GATE", "stability"),
         "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
+        # Both of these decide whether a chain gets a store at all, so a run
+        # that leaves them unrecorded cannot be told apart from one that had
+        # them off -- which is how a sweep spent two hours exporting
+        # C_ENDORSE_RELATIVE=1 into code that never read it.
+        "c_endorse_relative": os.environ.get("C_ENDORSE_RELATIVE", "1"),
+        "c_dead_chain_lesson": os.environ.get("C_DEAD_CHAIN_LESSON", "0"),
         "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
         "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),
         "c_no_partition": os.environ.get("C_NO_PARTITION", "0"),
         "w_c_disabled": os.environ.get("W_C_DISABLED", "0"),
         "reprompt_control": os.environ.get("REPROMPT_CONTROL", "0"),
         "passk": os.environ.get("PASSK", "0"),
+        "passk_final": os.environ.get("PASSK_FINAL", "0"),
         "external_mems": os.environ.get("EXTERNAL_MEMS", "(none)"),
     }
 
@@ -386,6 +393,23 @@ def _is_transient(err: str) -> bool:
     return any(k in err for k in _TRANSIENT_MARKERS)
 
 
+# A response that is really the transport describing its own failure. Matched on
+# the response text because that is where it arrives: these never set an error
+# field, which is exactly what made them dangerous.
+_INFRA_PLACEHOLDER_PAT = __import__("re").compile(
+    r"^\s*(empty stream\b"
+    r"|upstream gateway\b"
+    r"|.{0,80}?placeholder chunks\b"
+    r"|.{0,80}?without any model output\b"
+    r"|no response from (the )?(model|upstream|gateway)\b"
+    r"|request failed with status\b)", __import__("re").I)
+
+
+def _INFRA_PLACEHOLDER(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(t) and bool(_INFRA_PLACEHOLDER_PAT.match(t))
+
+
 async def _build_with_retry(build_coro, task: dict) -> dict:
     """Retry wrapper + infra accounting. Beyond `_build_with_retry_inner`'s
     per-task retries, this (a) marks a still-empty result as an explicit infra
@@ -400,6 +424,16 @@ async def _build_with_retry(build_coro, task: dict) -> dict:
         # No answer, no actions, no recorded error: the loop never engaged.
         # That is an infra zero, not a task result — mark it as such.
         r["error"] = err = "empty_response_after_retries"
+    elif not err and _INFRA_PLACEHOLDER(resp):
+        # The check above only catches an EMPTY string. When a gateway fails it
+        # often hands back a sentence describing its own failure, and that
+        # sentence is a non-empty response, so it sailed through here, got
+        # scored as the model's answer, and produced a 300-row GAIA trace with
+        # error=0 on every row while 87%, 99% and 35% of the three iterations
+        # were the string "Empty stream: upstream gateway sent only placeholder
+        # chunks without any model output". Every gate passed. The arm looked
+        # measured. Anything shaped like an infra message is infra.
+        r["error"] = err = "gateway_placeholder_response"
     if _is_transient(err) or err == "empty_response_after_retries":
         _api_down_streak += 1
         if _api_down_streak >= API_DOWN_LIMIT:
@@ -948,6 +982,15 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 fb = None
                 if mem is not None and isinstance(r, dict):
                     try:
+                        # evaluate_task ran just above and extracted the final
+                        # answer; record() only ever saw `r`, which lacks it.
+                        # That gap is why verified blocks led with a mid-sentence
+                        # response tail instead of the answer ("Verified answer:
+                        # confirms the answer. **Carnivore Loan Specialists**...")
+                        # -- the fallback had nothing better to offer.
+                        if isinstance(ev, dict) and ev.get("extracted_answer"):
+                            r.setdefault("extracted_answer",
+                                         ev["extracted_answer"])
                         fb = await _feedback_score(cur_task, r, ev, benchmark)
                         await mem.record(cur_task, r, fb)
                     except Exception:
@@ -965,6 +1008,12 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                            score=ev.get("score", 0.0),
                            extra={"em": ev.get("em", 0.0),
                                   "method": ev.get("method", ""),
+                                  # the normalised answer, not the whole
+                                  # transcript: a deployable selection rule
+                                  # over resamples needs something two
+                                  # attempts can agree on, and full responses
+                                  # match verbatim only 11% of the time.
+                                  "extracted_answer": ev.get("extracted_answer", ""),
                                   "execution_mode": exec_mode,
                                   "error": str(r.get("error") or "")[:200],
                                   # category/type and difficulty (when provided)
@@ -1012,19 +1061,43 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                       "cmds_executed", "pre_test_passed")
                                      if isinstance(r, dict) and k in r},
                                   **{f"prof_{k}": v for k, v in prof.items()}})
-                # ── FINAL-ITERATION resampling for the raw-patch arm
-                # (PASSK_FINAL=k): after the chain's last iteration, draw k-1
-                # extra independent solves of the SAME variant with the SAME
-                # frozen memory state (no record between samples), logged as
-                # groups raw_patch_passk_s1..s{k-1}; the normal final row is
-                # sample 0. This is the fair counterpart to the no-memory
-                # pass@k control: B keeps its chain advantage and spends the
-                # extra calls on resampling, exactly the budget C spends on
-                # curation. Set PASSK_FINAL from the START of the B run —
-                # RESUME skips completed chains and will not backfill samples.
-                _PKF = int(os.environ.get("PASSK_FINAL", "0"))
-                if (_PKF > 1 and group_key == "raw_patch"
-                        and _it == ITER_CHAIN - 1):
+                # ── FINAL-ITERATION resampling, any arm (PASSK_FINAL=k):
+                # after the chain's last iteration, draw k-1 extra independent
+                # solves of the SAME variant with the SAME frozen memory state
+                # (no record between samples), logged as <group>_passk_s1..
+                # s{k-1}; the normal final row is sample 0. This is what makes
+                # the cost comparison answerable: every arm's score is then
+                # available at a budget of one, two or three attempts, so
+                # curation's extra write-time calls can be weighed against what
+                # the cheaper arms buy by simply trying again. It used to apply
+                # to raw_patch alone, which left the external layers with no
+                # pass@k of their own. Set PASSK_FINAL from the START of the run
+                # — RESUME skips completed chains and will not backfill samples.
+                # Per-group budgets: "no_mem:4,raw_patch:4,curated_patch:2" gives
+                # each arm its own attempt count, which is what lets the
+                # comparison be budget-matched rather than attempt-matched. A
+                # curated attempt costs more than an uncurated one, so equal
+                # attempts would hand the cheaper arms a smaller total; equal
+                # totals is the constraint that answers the cost question. A bare
+                # integer in PASSK_FINAL still applies to every listed group.
+                _PKF_DEFAULT = int(os.environ.get("PASSK_FINAL", "0"))
+                _PK_SPEC = {}
+                for _g in os.environ.get(
+                        "PASSK_FINAL_GROUPS",
+                        "no_mem,raw_patch,curated_patch,mem0,amem").split(","):
+                    _g = _g.strip()
+                    if not _g:
+                        continue
+                    if ":" in _g:
+                        _name, _k = _g.split(":", 1)
+                        try:
+                            _PK_SPEC[_name.strip()] = int(_k)
+                        except ValueError:
+                            _PK_SPEC[_name.strip()] = _PKF_DEFAULT
+                    else:
+                        _PK_SPEC[_g] = _PKF_DEFAULT
+                _PKF = _PK_SPEC.get(group_key, 0)
+                if _PKF > 1 and _it == ITER_CHAIN - 1:
                     for _s in range(1, _PKF):
                         if needs_docker and docker_sem is not None:
                             async with docker_sem:
@@ -1035,7 +1108,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                 _rs = await _run_bounded(build_coro, cur_task, False)
                         _evs = await evaluate_task(_rs, benchmark)
                         _trace.log(
-                            benchmark=benchmark, group=f"raw_patch_passk_s{_s}",
+                            benchmark=benchmark, group=f"{group_key}_passk_s{_s}",
                             phase="test", task_id=_rs.get("task_id", tid),
                             task_desc=cur_task.get("description", ""),
                             augmented_prompt=_rs.get("_aug_prompt", ""),
@@ -1044,6 +1117,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                             extra={"em": _evs.get("em", 0.0),
                                    "iteration": _it, "iter_total": ITER_CHAIN,
                                    "sample_idx": _s,
+                                   "extracted_answer": _evs.get("extracted_answer", ""),
                                    "patch_injected": bool(_rs.get("_aug_prompt")),
                                    "aug_len": len(_rs.get("_aug_prompt") or ""),
                                    **({k: v for k, v in (_rs.get("_wc") or {}).items()}

@@ -1,0 +1,114 @@
+New Terminal Output:
+
+root@363eb338e0dd:/app# cat > /app/explore.py << 'EOF'
+> import subprocess, sys
+>
+> DIRS = ['N','S','E','W']
+> DELTA = {'N':(-1,0),'S':(1,0),'E':(0,1),'W':(0,-1)}
+> OPP = {'N':'S','S':'N','E':'W','W':'E'}
+>
+> def main():
+>     proc = subprocess.Popen(
+>         ["python3","/protected/maze_server.py"],
+>         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+>         text=True, bufsize=1,
+>     )
+>
+>     # consume the 4 welcome lines (prompt has no newline, so it won't be read yet)
+>     for _ in range(4):
+>         proc.stdout.readline()
+>
+>     def send(cmd):
+>         proc.stdin.write(cmd+"\n")
+>         proc.stdin.flush()
+>         line = proc.stdout.readline()
+>         if line == '':
+>             return ''
+>         line = line.strip()
+>         if line.startswith("> "):
+>             line = line[2:]
+>         elif line == ">":
+>             line = ''
+>         return line
+>
+>     start = (0,0)
+>     visited = set([start])
+>     walls = set()
+>     exit_cell = None
+>
+>     path = [start]
+>     enter_dir = {start: None}
+>     idx = {start: 0}
+>
+>     while path:
+>         cell = path[-1]
+>         if idx[cell] < 4:
+>             d = DIRS[idx[cell]]
+>             idx[cell] += 1
+>             dr, dc = DELTA[d]
+>             nbr = (cell[0]+dr, cell[1]+dc)
+>             if nbr in visited or nbr in walls:
+>                 continue
+>             res = send("move "+d)
+>             if res in ("moved","reached exit"):
+>                 visited.add(nbr)
+>                 if res == "reached exit":
+>                     exit_cell = nbr
+>                 path.append(nbr)
+>                 enter_dir[nbr] = d
+>                 idx[nbr] = 0
+>             elif res == "hit wall":
+>                 walls.add(nbr)
+>             else:
+>                 sys.stderr.write("UNEXPECTED: %r\n" % res)
+>                 walls.add(nbr)
+>         else:
+>             path.pop()
+>             if path:
+>                 d = enter_dir[cell]
+>                 send("move "+OPP[d])
+>
+>     send("exit")
+>     try:
+>         proc.wait(timeout=5)
+>     except Exception:
+>         proc.kill()
+>
+>     min_r = min(r for r,c in visited)
+>     max_r = max(r for r,c in visited)
+>     min_c = min(c for r,c in visited)
+>     max_c = max(c for r,c in visited)
+>     R0, R1 = min_r-1, max_r+1
+>     C0, C1 = min_c-1, max_c+1
+>
+>     grid = []
+>     for r in range(R0, R1+1):
+>         row = []
+>         for c in range(C0, C1+1):
+>             if (r,c) in visited:
+>                 if (r,c) == start:
+>                     row.append('S')
+>                 elif exit_cell is not None and (r,c) == exit_cell:
+>                     row.append('E')
+>                 else:
+>                     row.append(' ')
+>             else:
+>                 row.append('#')
+>         grid.append(''.join(row))
+>
+>     out = "\n".join(grid)
+>     with open("/app/maze_map.txt","w") as f:
+>         f.write(out+"\n")
+>     sys.stderr.write("open=%d walls=%d grid=%dx%d\n" % (len(visited),len(walls),len(grid),len(grid[0]) if grid else 0))
+>     print(out)
+>
+> main()
+> EOF
+root@363eb338e0dd:/app# python3 /app/explore.py
+open=7 walls=13 grid=5x5
+#####
+# #S#
+#E# #
+#   #
+#####
+root@363eb338e0dd:/app#

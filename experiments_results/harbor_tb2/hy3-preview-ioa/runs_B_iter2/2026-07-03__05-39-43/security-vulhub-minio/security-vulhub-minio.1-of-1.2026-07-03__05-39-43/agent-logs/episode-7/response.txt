@@ -1,0 +1,18 @@
+{
+  "analysis": "SSH on node1:22 is refused. No docker socket, no SSH client, only python3 with raw sockets. /etc has no MinIO config, and grepping my local filesystem found no MinIO strings. node1 (192.168.16.3) only has :9000 open running MinIO. The creds are truly on node1. Before theorizing further, I should (a) confirm no process on THIS node holds the creds in its environ, (b) look for any shared/network mounts that might bridge to node1, and (c) examine node1:9000's MinIO surface (GET /) to understand what's exposed.",
+  "plan": "1) Dump all /proc/*/environ on this node and grep for MinIO-related keys (in case the creds are local in another process). 2) Inspect /proc/mounts for any shared or network filesystem that could bridge to node1. 3) Do a targeted HTTP GET / to node1:9000 to see the MinIO console/version. This gives concrete data to decide the access path.",
+  "commands": [
+    {
+      "keystrokes": "for p in /proc/[0-9]*; do tr '\\0' '\\n' < $p/environ 2>/dev/null | grep -iE 'MINIO|ROOT_USER|ROOT_PASS|ACCESS_KEY|SECRET' && echo \"   (from $p)\"; done\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "grep -Ei 'nfs|cifs|sshfs|9p|fuse|overlay' /proc/mounts | grep -v 'fuse-overlayfs / ' | head\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('192.168.16.3',9000)); s.sendall(b'GET / HTTP/1.1\\r\\nHost: node1\\r\\nConnection: close\\r\\n\\r\\n'); print(s.recv(2000).decode(errors='replace'))\"\n",
+      "duration": 4.0
+    }
+  ]
+}

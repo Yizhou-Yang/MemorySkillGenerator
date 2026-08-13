@@ -1,0 +1,40 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@411fe746526f:/app# cat > /app/test_ssh.py <<'PY'
+> import pty, os, time, sys, select
+> cmd=['ssh','-p','2222','-o','StrictHostKeyChecking=no','-o','UserKnownHostsFile=/dev/null','-o','PreferredAuthentications=password','-o','PubkeyAuthentication
+=no','root@localhost','id; hostname; echo MARKER_DONE']
+> pid, fd = pty.fork()
+> if pid==0:
+>     os.execvp('ssh', cmd)
+> buf=b''
+> end=time.time()+30
+> sent=False
+> while time.time()<end:
+>     r,_,_=select.select([fd],[],[],0.5)
+>     if r:
+>         try:
+>             d=os.read(fd,4096)
+>         except OSError:
+>             break
+>         if d:
+>             buf+=d
+>             sys.stdout.buffer.write(d); sys.stdout.buffer.flush()
+>             if (not sent) and b'assword:' in buf:
+>                 os.write(fd,b'password123\n'); sent=True
+>             if b'MARKER_DONE' in buf:
+>                 break
+> print('\n=== TEST_DONE sent_password=%s ===' % sent)
+> PY
+root@411fe746526f:/app# python3 /app/test_ssh.py
+Warning: Permanently added '[localhost]:2222' (ECDSA) to the list of known hosts.
+root@localhost's password:
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+localhost
+MARKER_DONE
+
+=== TEST_DONE sent_password=True ===
+root@411fe746526f:/app#

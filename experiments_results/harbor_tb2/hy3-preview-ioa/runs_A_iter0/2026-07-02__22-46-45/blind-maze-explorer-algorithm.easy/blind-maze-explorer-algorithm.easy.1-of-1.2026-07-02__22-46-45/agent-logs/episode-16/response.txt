@@ -1,0 +1,14 @@
+{
+  "analysis": "The debug reveals the server sent only 'W' then stopped for 5 seconds (select timeout). This is odd — the welcome banner should flush all at once with `python3 -u`. It seems output arrives/flushes slowly or the reader is mis-timed. I need to see the actual byte stream behavior. Let me accumulate characters with shorter timeouts to observe whether more bytes arrive eventually.",
+  "plan": "Write dbg2.py that spawns the server and reads character-by-character with a 0.3s select timeout, accumulating up to ~12 chars or until the '> ' prompt appears, printing each char's repr with timing. This will tell me whether the rest of the welcome arrives and how the prompt is terminated, so I can build a reliable reader.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/dbg2.py << 'PYEOF'\nimport subprocess, select, sys, time\np = subprocess.Popen(['python3','-u','/protected/maze_server.py','1'],\n    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)\nbuf=''\nstart=time.time()\nwhile time.time()-start < 8:\n    r,_,_=select.select([p.stdout],[],[],0.3)\n    if not r:\n        sys.stdout.write('[wait] '); sys.stdout.flush(); continue\n    ch=p.stdout.read(1)\n    if ch=='':\n        sys.stdout.write('[EOF] '); break\n    buf+=ch\n    sys.stdout.write(repr(ch)+' '); sys.stdout.flush()\n    if len(buf)>=2 and buf[-2:]=='> ':\n        sys.stdout.write('[PROMPT]'); break\nprint('\\nFINAL buf=',repr(buf))\np.terminate()\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /app/dbg2.py\n",
+      "duration": 10.0
+    }
+  ]
+}

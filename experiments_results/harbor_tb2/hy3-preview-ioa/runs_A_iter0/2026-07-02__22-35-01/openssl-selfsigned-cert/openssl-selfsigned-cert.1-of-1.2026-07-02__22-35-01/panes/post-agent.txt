@@ -1,0 +1,129 @@
+root@c838908af06e:/app# mkdir -p /app/ssl
+root@c838908af06e:/app# openssl genrsa -out /app/ssl/server.key 2048
+chmod 600 /app/ssl/server.key
+root@c838908af06e:/app# chmod 600 /app/ssl/server.key
+root@c838908af06e:/app# openssl req -new -x509 -key /app/ssl/server.key -out /app/ssl/server.crt -days 365 -subj "/O=DevOps Team/CN=dev-internal.company.local"
+root@c838908af06e:/app# cat /app/ssl/server.key /app/ssl/server.crt > /app/ssl/server.pem
+root@c838908af06e:/app# openssl x509 -in /app/ssl/server.crt -noout -subject -dates -fingerprint -sha256 > /app/ssl/verification.txt
+root@c838908af06e:/app# cat > /app/check_cert.py << 'PYEOF'
+> #!/usr/bin/env python3
+> import ssl
+> import subprocess
+> import os
+> import sys
+> from datetime import datetime
+>
+> CERT_PATH = "/app/ssl/server.crt"
+>
+>
+> def main():
+>     if not os.path.exists(CERT_PATH):
+>         print(f"Certificate not found at {CERT_PATH}")
+>         sys.exit(1)
+>
+>     result = subprocess.run(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject", "-dates"],
+>         capture_output=True, text=True,
+>     )
+>     if result.returncode != 0 or not result.stdout.strip():
+>         print("Failed to load certificate")
+>         sys.exit(1)
+>
+>     cn = None
+>     exp_date = None
+>     for line in result.stdout.splitlines():
+>         if line.startswith("subject") and "CN=" in line:
+>             cn = line.split("CN=")[1].strip().rstrip(",")
+>         if line.startswith("notAfter"):
+>             date_str = line.split("=", 1)[1].strip()
+>             parts = date_str.rsplit(None, 1)
+>             if len(parts) == 2 and parts[1] in ("GMT", "UTC"):
+>                 date_str = parts[0]
+>             dt = datetime.strptime(date_str, "%b %d %H:%M:%S %Y")
+>             exp_date = dt.strftime("%Y-%m-%d")
+>
+>     print(f"Common Name: {cn}")
+>     print(f"Expiration Date: {exp_date}")
+>     print("Certificate verification successful")
+>
+>
+> if __name__ == "__main__":
+>     main()
+> PYEOF
+root@c838908af06e:/app# python3 /app/check_cert.py
+ls -la /app/ssl/ && echo '---' && cat /app/ssl/verification.txt
+Common Name: None
+Expiration Date: 2027-07-02
+Certificate verification successful
+root@c838908af06e:/app# ls -la /app/ssl/ && echo '---' && cat /app/ssl/verification.txt
+total 24
+drwxr-xr-x 2 root root 4096 Jul  2 17:19 .
+drwxr-xr-x 3 root root 4096 Jul  2 17:19 ..
+-rw-r--r-- 1 root root 1220 Jul  2 17:19 server.crt
+-rw------- 1 root root 1704 Jul  2 17:19 server.key
+-rw-r--r-- 1 root root 2924 Jul  2 17:19 server.pem
+-rw-r--r-- 1 root root  241 Jul  2 17:19 verification.txt
+---
+subject=O = DevOps Team, CN = dev-internal.company.local
+notBefore=Jul  2 17:19:04 2026 GMT
+notAfter=Jul  2 17:19:04 2027 GMT
+sha256 Fingerprint=06:0F:9C:34:3C:F1:B8:D2:84:60:FD:44:C7:AD:CB:1B:65:B4:46:CD:99:0B:4C:E4:10:0E:5B:E6:31:51:05:93
+root@c838908af06e:/app# python3 -c "import subprocess; r=subprocess.run(['openssl','x509','-in','/app/ssl/server.crt','-noout','-subject','-dates'],capture_outp
+ut=True,text=True); print(repr(r.stdout))"
+'subject=O = DevOps Team, CN = dev-internal.company.local\nnotBefore=Jul  2 17:19:04 2026 GMT\nnotAfter=Jul  2 17:19:04 2027 GMT\n'
+root@c838908af06e:/app# cat > /app/check_cert.py << 'PYEOF'
+> #!/usr/bin/env python3
+> import ssl
+> import subprocess
+> import os
+> import re
+> import sys
+> from datetime import datetime
+>
+> CERT_PATH = "/app/ssl/server.crt"
+>
+>
+> def main():
+>     if not os.path.exists(CERT_PATH):
+>         print(f"Certificate not found at {CERT_PATH}")
+>         sys.exit(1)
+>
+>     result = subprocess.run(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject", "-dates"],
+>         capture_output=True, text=True,
+>     )
+>     if result.returncode != 0 or not result.stdout.strip():
+>         print("Failed to load certificate")
+>         sys.exit(1)
+>
+>     output = result.stdout
+>
+>     cn_match = re.search(r"CN\s*=\s*([^,]+)", output)
+>     cn = cn_match.group(1).strip() if cn_match else None
+>
+>     exp_match = re.search(r"notAfter\s*=\s*(.+)", output)
+>     exp_date = None
+>     if exp_match:
+>         date_str = exp_match.group(1).strip()
+>         date_str = re.sub(r"\s+(GMT|UTC)$", "", date_str)
+>         try:
+>             dt = datetime.strptime(date_str, "%b %d %H:%M:%S %Y")
+>             exp_date = dt.strftime("%Y-%m-%d")
+>         except ValueError:
+>             exp_date = date_str
+>
+>     print(f"Common Name: {cn}")
+>     print(f"Expiration Date: {exp_date}")
+>     print("Certificate verification successful")
+>
+>
+> if __name__ == "__main__":
+>     main()
+> PYEOF
+root@c838908af06e:/app# python3 /app/check_cert.py
+Common Name: dev-internal.company.local
+notBefore=Jul  2 17:19:04 2026 GMT
+notAfter=Jul  2 17:19:04 2027 GMT
+Expiration Date: 2027-07-02
+Certificate verification successful
+root@c838908af06e:/app#

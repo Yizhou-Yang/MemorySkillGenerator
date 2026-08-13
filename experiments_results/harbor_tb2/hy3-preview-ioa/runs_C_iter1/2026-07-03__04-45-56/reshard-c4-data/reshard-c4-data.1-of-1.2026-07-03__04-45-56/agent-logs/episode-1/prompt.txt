@@ -1,0 +1,41 @@
+New Terminal Output:
+root@82d2829cde94:/app# C4=$(find / -maxdepth 6 -type d -name c4_sample 2>/dev/null | head -1); echo "C4=$C4"; python3 - "$C4" <<'EOF'
+> import sys, os
+> from collections import Counter
+> root = sys.argv[1]
+> files = []
+> total = 0
+> for dp, dn, fn in os.walk(root):
+>     for f in fn:
+>         p = os.path.join(dp, f)
+>         try:
+>             s = os.path.getsize(p)
+>         except OSError:
+>             continue
+>         files.append((p, s)); total += s
+> nf = len(files)
+> sizes = [s for _, s in files]
+> big = [x for x in files if x[1] > 15000000]
+> print('total files:', nf)
+> print('total size MB:', round(total/1e6, 3))
+> print('max file size MB:', round((max(sizes) if sizes else 0)/1e6, 3))
+> print('files > 15MB:', len(big))
+> for p, s in sorted(big, key=lambda x:-x[1])[:20]:
+>     print('   %.2f MB  %s' % (s/1e6, os.path.relpath(p, root)))
+> c = Counter(os.path.dirname(p) for p, s in files)
+> print('--- dirs with most files ---')
+> for d, n in c.most_common(10):
+>     print('   %d  %s' % (n, os.path.relpath(d, root)))
+> print('max files in any single dir:', max(c.values()) if c else 0)
+> EOF
+C4=/app/c4_sample
+
+
+
+
+
+
+
+
+
+

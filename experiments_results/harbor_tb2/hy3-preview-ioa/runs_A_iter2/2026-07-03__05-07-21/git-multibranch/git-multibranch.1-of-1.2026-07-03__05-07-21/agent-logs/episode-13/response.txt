@@ -1,0 +1,14 @@
+{
+  "analysis": "Even with bash as git's shell, the server-side `git-receive-pack /git/project` exits 254 and git reports 'Could not read from remote repository'. pam_motd corruption is gone; this is now a genuine server-side error I need to see. I'll run the exact receive-pack command via ssh and capture its stderr, and inspect the bare repo's state.",
+  "plan": "1) Inspect /git/project ownership/permissions. 2) Run `ssh git@localhost git-receive-pack /git/project` via expect to surface the actual server-side error. That will tell me whether it's a repo/permissions, missing command, or protocol issue.",
+  "commands": [
+    {
+      "keystrokes": "ls -la /git /git/project; echo '---'; stat -c '%U:%G %a %n' /git/project /git/project/HEAD\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /tmp/diag.exp << 'EOF'\n#!/usr/bin/expect -f\nset timeout 30\nspawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost \"git-receive-pack /git/project\"\nexpect {\n  -re \"(?i)password:\" { send \"password\\r\"; exp_continue }\n  eof\n}\nEOF\nchmod +x /tmp/diag.exp; expect /tmp/diag.exp 2>&1 | tail -20\n",
+      "duration": 4.0
+    }
+  ]
+}

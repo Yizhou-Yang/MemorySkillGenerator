@@ -1,0 +1,18 @@
+{
+  "analysis": "Local test shows git-receive-pack on the bare repo does produce a ref advertisement, so the repo is valid. But the actual push fails ('Could not read from remote repository') and my SSH diagnostics showed NO command output at all — not even from 'echo START'. That means SSH command execution for the git user produces no stdout, which is the real problem. I need to inspect sshd_config for any ForceCommand/restrict/git-shell and test a trivial SSH command to confirm whether command execution works at all.",
+  "plan": "1) Inspect sshd_config and the drop-in for ForceCommand/Subsystem/Match blocks. 2) Check the git user's .bashrc/.profile for anything that exits or prints. 3) Run a clean expect test executing 'whoami' over SSH and capture output to a file. This will tell me if SSH command exec is fundamentally broken or git-receive-pack-specific.",
+  "commands": [
+    {
+      "keystrokes": "cat /etc/ssh/sshd_config.d/99-local.conf; echo '=== main config relevant lines ==='; grep -vE '^\\s*#|^\\s*$' /etc/ssh/sshd_config\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "ls -la /home/git/.bashrc /home/git/.profile /home/git/.bash_profile 2>/dev/null; echo '---'; cat /home/git/.bashrc 2>/dev/null\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /app/t2.exp <<'OUTER'\n#!/usr/bin/expect -f\nlog_file /app/sshout.txt\nset timeout 20\nspawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost whoami\nexpect {\n  -re {(?i)password} { send \"password\\r\"; exp_continue }\n  eof {}\n}\nOUTER\nchmod +x /app/t2.exp; : > /app/sshout.txt; /app/t2.exp; echo '=== sshout ==='; cat /app/sshout.txt\n",
+      "duration": 4.0
+    }
+  ]
+}

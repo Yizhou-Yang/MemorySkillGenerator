@@ -1,0 +1,10 @@
+{
+  "analysis": "Found a working source: https://codeload.github.com/torvalds/linux/tar.gz/refs/tags/v6.9 returns 200 with application/x-gzip (streaming, no content-length). GitHub release tarballs extract to a top-level directory named linux-6.9/, which matches the required layout. The 429 on the github.com archive URL is rate-limiting; codeload is fine. I'll stream-download it.",
+  "plan": "Download the v6.9 tarball from codeload.github.com to /app/linux-6.9.tgz, streaming in chunks and reporting final size. Then verify it's a valid gzip tar before extracting.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/getk.py << 'EOF'\nimport urllib.request\nu='https://codeload.github.com/torvalds/linux/tar.gz/refs/tags/v6.9'\nreq=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'})\nr=urllib.request.urlopen(req,timeout=60)\ntotal=0\nwith open('/app/linux-6.9.tgz','wb') as f:\n    while True:\n        b=r.read(1<<20)\n        if not b: break\n        f.write(b); total+=len(b)\n        if total%(20<<20)<(1<<20): print('...',total>>20,'MB')\nprint('DONE',total,'bytes')\nEOF\npython3 /tmp/getk.py\n",
+      "duration": 60.0
+    }
+  ]
+}

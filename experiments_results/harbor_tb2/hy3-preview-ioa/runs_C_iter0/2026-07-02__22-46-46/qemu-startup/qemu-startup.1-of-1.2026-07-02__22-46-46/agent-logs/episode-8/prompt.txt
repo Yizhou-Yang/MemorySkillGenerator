@@ -1,0 +1,149 @@
+New Terminal Output:
+
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/grab.py
+> import struct, os
+> ISO='/app/alpine.iso'; OUT='/app/run'
+> def rs(f,lba,c):
+>     f.seek(lba*2048); return f.read(2048*c)
+> def pe(rec):
+>     if rec[0]==0: return None
+>     ext=struct.unpack_from('<I',rec,2)[0]; dl=struct.unpack_from('<I',rec,10)[0]
+>     fl=rec[25]; nl=rec[32]; nm=rec[33:33+nl].split(b';')[0]
+>     return (ext,dl,bool(fl&2),nm)
+> def ld(f,lba,lg):
+>     buf=rs(f,lba,(lg+2047)//2048); out=[]; off=0
+>     while off<len(buf):
+>         rl=buf[off]
+>         if rl==0: break
+>         e=pe(buf[off:off+rl])
+>         if e: out.append(e)
+>         off+=rl
+>     return out
+> f=open(ISO,'rb')
+> lba=16; pvd=None
+> while True:
+>     vd=rs(f,lba,1)
+>     if vd[1:6]!=b'CD001': break
+>     if vd[0]==1: pvd=vd; break
+>     if vd[0]==255: break
+>     lba+=1
+> root=pe(pvd[156:156+34])
+> boot=None
+> for e in ld(f,root[0],root[1]):
+>     if e[3].decode('latin1').upper()=='BOOT': boot=e; break
+> for nm in ['INTEL_UCODE.IMG','AMD_UCODE.IMG']:
+>     found=False
+>     for e in ld(f,boot[0],boot[1]):
+>         if e[3].decode('latin1').upper()==nm:
+>             f.seek(e[0]*2048); data=f.read(e[1])
+>             open(os.path.join(OUT,nm.lower()),'wb').write(data)
+>             print('wrote',nm.lower(),e[1]); found=True; break
+>     if not found: print('WARN missing',nm)
+> PYEOF
+root@fb781a110bd4:/app# python3 /app/run/grab.py
+cat << 'PYEOF' > /app/run/relay.py
+import socket, threading, time, os
+QHOST='127.0.0.1'; QPORT=4545; LPORT=6665
+READY='/app/run/ready'
+BUF=bytearray()
+buf_lock=threading.Lock()
+state={'client':None}
+state_lock=threading.Lock()
+qc=None
+def escape_iac(d): return d.replace(b'\xff', b'\xff\xff')
+def connect_qemu():
+    while True:
+        try:
+            s=socket.create_connection((QHOST,QPORT),timeout=5); s.settimeout(0.5); return s
+        except Exception:
+            time.sleep(0.3)
+def qemu_loop():
+    global qc
+    while True:
+        if qc is None:
+            try: qc=connect_qemu(); print('relay: connected to qemu serial', flush=True)
+            except Exception: time.sleep(0.3); continue
+        try: data=qc.recv(65536)
+        except socket.timeout: continue
+        except Exception: qc=None; continue
+        if not data: qc=None; continue
+        with buf_lock:
+            BUF.extend(data); buf=bytes(BUF)
+        with state_lock: c=state['client']
+        if c is not None:
+            try: c.sendall(escape_iac(data))
+            except Exception:
+                with state_lock: state['client']=None
+        if not os.path.exists(READY) and b'login:' in buf.lower():
+            try: open(READY,'w').write('ready\n')
+            except Exception: pass
+            print('relay: READY login prompt seen', flush=True)
+def client_loop(conn):
+    with state_lock: state['client']=conn
+    with buf_lock: hist=bytes(BUF)
+    try: conn.sendall(escape_iac(hist))
+    except Exception: pass
+    iac=False; iac_cmd=None; sub=False
+    while True:
+        try: chunk=conn.recv(4096)
+        except Exception: break
+        if not chunk: break
+        out=bytearray()
+        for b in chunk:
+            if sub:
+                if b==240: sub=False
+                continue
+            if iac:
+                if iac_cmd is None:
+                    iac_cmd=b
+                    if b==250: sub=True; iac=False
+                    elif b in (240,241,242,243,244): iac=False
+                else:
+                    opt=b
+                    try:
+                        if iac_cmd in (251,252): conn.sendall(bytes([255,253,opt]))
+                        elif iac_cmd in (253,254): conn.sendall(bytes([255,251,opt]))
+                    except Exception: pass
+                    iac=False; iac_cmd=None
+                continue
+            if b==255: iac=True; iac_cmd=None; continue
+            out.append(b)
+        if out and qc is not None:
+            try: qc.sendall(bytes(out))
+            except Exception: pass
+    with state_lock:
+        if state['client'] is conn: state['client']=None
+    try: conn.close()
+    except Exception: pass
+def main():
+    threading.Thread(target=qemu_loop, daemon=True).start()
+    ls=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR,1)
+    ls.bind((QHOST,LPORT)); ls.listen(1)
+    print('relay: listening on %d' % LPORT, flush=True)
+    while True:
+        conn,_=ls.accept()
+        threading.Thread(target=client_loop, args=(conn,), daemon=True).start()
+main()
+PYEOF
+cat << 'EOF' > /app/run/launch.sh
+#!/bin/bash
+cd /app/run
+rm -f /app/run/ready
+nohup python3 /app/run/relay.py > /app/run/relay.log 2>&1 &
+echo "relay pid $!"
+sleep 1
+KVM=''
+[ -e /dev/kvm ] && KVM='-enable-kvm'
+nohup qemu-system-x86_64 $KVM -m 512 -no-reboot \
+  -display none -vga none -monitor none \
+  -kernel /app/run/vmlinuz-lts \
+  -initrd /app/run/intel-ucode.img,/app/run/amd-ucode.img,/app/run/initramfs-lts \
+  -append "modules=loop,squashfs,sd-mod,usb-storage console=ttyS0" \
+  -cdrom /app/alpine.iso \
+  -serial tcp:127.0.0.1:4545,server \
+  > /app/run/qemu.log 2>&1 &
+echo "qemu pid $!"
+EOF
+ls -la /app/run
+

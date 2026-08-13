@@ -1,0 +1,18 @@
+{
+  "analysis": "No large files exist yet df reports 966G used / 0 available — a contradiction that suggests the overlayfs is reporting the host's actual disk usage, OR there are deleted files held open. My earlier /proc loop found no deleted fds. I need to definitively determine whether I can write files at all before troubleshooting further.",
+  "plan": "Test writing a file to /tmp and to /var/cache/apt/archives to see the actual error. Also check /proc for any large deleted open files more thoroughly with lsof if available. This tells me if the disk is truly full or if it's a reporting artifact.",
+  "commands": [
+    {
+      "keystrokes": "df -h /tmp /var/cache/apt/archives\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "echo test > /tmp/writetest 2>&1; echo exit=$?\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "which lsof; lsof 2>/dev/null | awk '$5==\"REG\" && $7>100000000 {print $7, $1, $2, $9}' | head\n",
+      "duration": 1.0
+    }
+  ]
+}

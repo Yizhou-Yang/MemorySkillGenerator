@@ -1,0 +1,17 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'pwd && ls -la\n'
+"curl -s http://server:8000 -o /tmp/page.html && echo '---FETCHED---' && wc -l /tmp/page.html\n"
+'head -c 2000 /tmp/page.html\n'
+'cat > /app/scrape.py << \'EOF\'\nimport re\nimport requests\nfrom bs4 import BeautifulSoup\nimport pandas as pd\n\nURL = "http://server:8000"\n\ndef main():\n    resp = requests.get(URL, timeout=30)\n    resp.raise_for_status()\n    soup = BeautifulSoup(resp.text, "html.parser")\n\n    books = []\n    for book in soup.find_all("div", class_="book"):\n        title_el = book.find("div", class_="book-title")\n        author_el = book.find("div", class_="book-author")\n        year_el = book.find("span", class_="book-year")\n        rating_el = book.find("span", class_="book-rating")\n        price_el = book.find("span", class_="book-price")\n\n        title = title_el.get_text(strip=True) if title_el else ""\n        author = ""\n        if author_el:\n            author = re.sub(r"^by\\s+", "", author_el.get_text(strip=True))\n        year = ""\n        if year_el:\n            m = re.search(r"(\\d{4})", year_el.get_text())\n            year = int(m.group(1)) if m else None\n        rating = None\n        if rating_el:\n            m = re.search(r"([\\d.]+)/\\s*5", rating_el.get_text())\n            rating = float(m.group(1)) if m else None\n        price = None\n        if price_el:\n            m = re.search(r"\\$?\\s*([\\d.]+)", price_el.get_text())\n            price = float(m.group(1)) if m else None\n\n        books.append({\n            "title": title,\n            "author": author,\n            "year": year,\n            "rating": rating,\n            "price": price,\n        })\n\n    df = pd.DataFrame(books, columns=["title", "author", "year", "rating", "price"])\n    df.to_csv("books.csv", index=False)\n\n    total = len(df)\n    avg_price = df["price"].mean()\n    highest = df.loc[df["rating"].idxmax()]\n\n    lines = []\n    lines.append("Book Store Scraping Summary Report")\n    lines.append("=" * 40)\n    lines.append(f"Total number of books scraped: {total}")\n    lines.append(f"Average book price: ${avg_price:.2f}")\n    lines.append(f"Highest rated book: {highest[\'title\']} (Rating: {highest[\'rating\']}/5, by {highest[\'author\']})")\n\n    with open("report.txt", "w") as f:\n        f.write("\\n".join(lines) + "\\n")\n\n    print("\\n".join(lines))\n\nif __name__ == "__main__":\n    main()\nEOF\n'
+'cd /app && python3 scrape.py\n'
+''
+'\n'
+'ls -la /app\n'
+''
+"echo '=== books.csv ===' && cat /app/books.csv && echo '=== report.txt ===' && cat /app/report.txt\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

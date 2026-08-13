@@ -1,0 +1,8 @@
+{
+  "analysis": "The ISO is laid out with all files at root level names uppercased (no Joliet). The debug walk printed APKS/... and earlier saw EFI/BOOT/BOOTX64.EFI. The kernel/initramfs (per grub.cfg: /boot/vmlinuz-lts, /boot/initramfs-lts) were just beyond the 'head -60' truncation. My extract2 failed because of the uppercase names — 'VLINUZ-LTS'.lower() should match, so more likely the walk didn't reach them. Let me directly locate the kernel/initramfs entries by name.",
+  "plan": "Run a script that prints every entry whose basename contains 'vmlinuz', 'initramfs', 'ucode', or is a 'boot' directory, with full path. This confirms exact names/extents so I can extract them.",
+  "commands": [
+    {"keystrokes": "cat > /tmp/find.py <<'EOF'\nimport struct\nISO='/app/alpine.iso'; SECTOR=2048\nf=open(ISO,'rb'); f.seek(16*SECTOR)\npvd=f.read(SECTOR); root=pvd[156:190]\ndef pr(dr): return (struct.unpack('<I',dr[2:6])[0],struct.unpack('<I',dr[10:14])[0],dr[25],dr[33:33+dr[32]])\nhits=[]\ndef walk(ext,length,path):\n    f.seek(ext*SECTOR); data=f.read(length); off=0\n    while off<len(data):\n        rl=data[off]\n        if rl==0: off=(off//SECTOR+1)*SECTOR; continue\n        e,d,fl,nm=pr(data[off:off+rl])\n        if nm in (b'\\x00',b'\\x01'): off+=rl; continue\n        nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm\n        if fl&2: walk(e,d,full)\n        else:\n            u=nm.upper()\n            if any(k in u for k in ['VMLINUZ','INITRAMFS','UCODE','BOOT']):\n                hits.append((full,d))\n        off+=rl\next,dl,fl,nm=pr(root); walk(ext,dl,'')\nfor h in hits: print(h)\nEOF\n", "duration": 0.2},
+    {"keystrokes": "python3 /tmp/find.py\n", "duration": 4.0}
+  ]
+}

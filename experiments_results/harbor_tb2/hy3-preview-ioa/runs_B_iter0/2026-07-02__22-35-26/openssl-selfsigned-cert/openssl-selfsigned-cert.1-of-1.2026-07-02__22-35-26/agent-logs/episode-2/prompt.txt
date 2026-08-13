@@ -1,0 +1,71 @@
+New Terminal Output:
+
+root@94259556c57f:/app# cat /app/ssl/verification.txt
+subject=O = DevOps Team, CN = dev-internal.company.local
+notBefore=Jul  2 17:40:57 2026 GMT
+notAfter=Jul  2 17:40:57 2027 GMT
+sha256 Fingerprint=6D:27:BB:53:FC:5C:45:C0:34:B2:EF:2E:72:05:1E:80:FF:6B:15:BF:96:51:88:28:D9:A6:E5:FB:98:61:6A:9A
+root@94259556c57f:/app# ls -la /app/ssl
+total 24
+drwxr-xr-x 2 root root 4096 Jul  2 17:40 .
+drwxr-xr-x 3 root root 4096 Jul  2 17:40 ..
+-rw-r--r-- 1 root root 1220 Jul  2 17:40 server.crt
+-rw------- 1 root root 1704 Jul  2 17:40 server.key
+-rw-r--r-- 1 root root 2924 Jul  2 17:40 server.pem
+-rw-r--r-- 1 root root  241 Jul  2 17:40 verification.txt
+root@94259556c57f:/app# cat > /app/check_cert.py << 'EOF'
+> #!/usr/bin/env python3
+> import ssl
+> import subprocess
+> import sys
+> from datetime import datetime
+>
+> CERT_PATH = "/app/ssl/server.crt"
+>
+>
+> def main():
+>     # Verify the certificate exists and can be loaded
+>     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+>     context.load_cert_chain(certfile=CERT_PATH)
+>
+>     # Use openssl to get subject (Common Name) and dates
+>     subject = subprocess.check_output(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject"],
+>         text=True,
+>     ).strip()
+>
+>     dates = subprocess.check_output(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout", "-dates"],
+>         text=True,
+>     ).strip()
+>
+>     print("Certificate subject:")
+>     print(subject)
+>
+>     # Extract Common Name
+>     cn = ""
+>     for part in subject.replace("/", " ").split():
+>         if part.startswith("CN="):
+>             cn = part[3:]
+>     print("Common Name:", cn)
+>
+>     # Extract expiration date (notAfter)
+>     not_after = ""
+>     for line in dates.splitlines():
+>         if line.startswith("notAfter="):
+>             not_after = line.split("=", 1)[1]
+>     exp_date = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").strftime("%Y-%m-%d")
+>     print("Expiration date:", exp_date)
+>
+>     print("Certificate verification successful")
+>
+>
+> if __name__ == "__main__":
+>     try:
+>         main()
+>     except Exception as e:
+>         print("Certificate verification failed:", e, file=sys.stderr)
+>         sys.exit(1)
+> EOF
+root@94259556c57f:/app# python3 /app/check_cert.py
+

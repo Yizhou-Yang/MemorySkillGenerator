@@ -30,6 +30,7 @@ import contextlib
 import contextvars
 import os
 import re
+import threading
 from pathlib import Path
 
 # mem0's constructor opens a SECOND qdrant store for telemetry at a path shared
@@ -341,6 +342,132 @@ class Mem0Memory:
         return 0
 
 
+# -- A-Mem internal-LLM hardening ---------------------------------------------
+# A-Mem builds every memory note through one LLM call, and its get_completion
+# swallows EVERY exception and returns a JSON object with all fields blank
+# (_generate_empty_response). A flaky gateway therefore does not crash the arm --
+# it quietly files notes with no keywords, no context and no tags, and the
+# baseline still looks like it ran.
+#
+# The note LLM is deliberately the critic rather than the backbone, so the
+# baseline stays comparable across rows. That endpoint is the flaky one: probing
+# gpt-5.6-terra three times returned a body, an EMPTY body, then a body, and both
+# the HY3 and the DeepSeek amem arms died on the same "model unavailable" string
+# from it.
+#
+# Retry on the exception AND on the all-blank object, because the blank object is
+# exactly what the swallow turns an exception into. Whatever still fails is
+# counted and printed: a degraded amem arm has to be visible now, not inferred
+# later from a number that looks a little low.
+_AMEM_LLM_RETRIES = int(os.environ.get("AMEM_LLM_RETRIES", "4"))
+_AMEM_LLM_BACKOFF = (2, 8, 20)
+_AMEM_LLM_STATS = {"calls": 0, "retried": 0, "gave_up": 0}
+
+
+def _amem_blank_response(raw) -> bool:
+    """True when this is A-Mem's swallowed-exception placeholder."""
+    import json as _json
+    if raw is None:
+        return True
+    try:
+        d = _json.loads(raw)
+    except Exception:
+        return True
+    if not isinstance(d, dict) or not d:
+        return True
+    return all(v in ("", [], {}, 0, False, None) for v in d.values())
+
+
+def _harden_amem_llm(sys_):
+    ctrl = getattr(sys_, "llm_controller", None)
+    inner = getattr(ctrl, "llm", None) if ctrl is not None else None
+    target = inner if (inner is not None and hasattr(inner, "get_completion")) else ctrl
+    if target is None or not hasattr(target, "get_completion"):
+        print("[baseline:amem] no llm_controller to harden -- note LLM is unretried",
+              flush=True)
+        return sys_
+    if getattr(target, "_msg_hardened", False):
+        return sys_
+    _orig = target.get_completion
+
+    def _retrying(prompt, response_format, temperature: float = 0.7, **kw):
+        import time as _time
+        out = None
+        _AMEM_LLM_STATS["calls"] += 1
+        for i in range(_AMEM_LLM_RETRIES):
+            try:
+                out = _orig(prompt, response_format, temperature, **kw)
+            except Exception:
+                out = None
+            if not _amem_blank_response(out):
+                if i:
+                    _AMEM_LLM_STATS["retried"] += 1
+                return out
+            if i < _AMEM_LLM_RETRIES - 1:
+                _time.sleep(_AMEM_LLM_BACKOFF[min(i, len(_AMEM_LLM_BACKOFF) - 1)])
+        _AMEM_LLM_STATS["gave_up"] += 1
+        print("[baseline:amem] note LLM blank after %d attempts "
+              "(%d of %d calls degraded so far)"
+              % (_AMEM_LLM_RETRIES, _AMEM_LLM_STATS["gave_up"],
+                 _AMEM_LLM_STATS["calls"]), flush=True)
+        return out
+
+    target.get_completion = _retrying
+    target._msg_hardened = True
+    return sys_
+
+
+# Serialising A-Mem's own construction was not enough. After that lock went in,
+# the gpt-5.5 amem rerun still logged 17 failures -- and they sat in exactly two
+# bursts (9 in a row, then 8), at the two iteration boundaries where many threads
+# rehydrate the store at once. The lock held for A-Mem; what it could not hold was
+# memlayer's retriever building ITS SentenceTransformer at the same moment. Two
+# components, two code paths, one shared torch failure mode.
+#
+# So the lock belongs on the constructor itself rather than on any one caller.
+# Every SentenceTransformer in this process now builds one at a time, whoever asks.
+# Idempotent, and a no-op if sentence_transformers is not installed.
+_ST_GLOBAL_LOCK = threading.Lock()
+
+
+def _serialise_sentence_transformer_init() -> bool:
+    try:
+        import sentence_transformers as _st
+    except Exception:
+        return False
+    cls = getattr(_st, "SentenceTransformer", None)
+    if cls is None or getattr(cls, "_msg_load_serialised", False):
+        return False
+    _orig_init = cls.__init__
+
+    def _locked_init(self, *a, **kw):
+        with _ST_GLOBAL_LOCK:
+            return _orig_init(self, *a, **kw)
+
+    cls.__init__ = _locked_init
+    cls._msg_load_serialised = True
+    return True
+
+
+_serialise_sentence_transformer_init()
+
+# Building A-Mem loads a SentenceTransformer, and concurrent loads inside one
+# process land every one of them on meta tensors:
+#
+#   8 threads constructing AgenticMemorySystem at once -> 8/8 raise
+#   "Cannot copy out of meta tensor; no data!"   (1 thread: fine)
+#
+# tau2 runs 16-64 simulations concurrently and each rehydrates the store lazily,
+# so every construction raced and every construction failed. The arm then ran to
+# completion with NO memory system and still reported a number: gpt-5.5 amem
+# logged 1770 of these and scored 0.775/0.812/0.812, which is the memory-free
+# condition wearing the baseline's name. hy3 and DeepSeek did the same. Nothing
+# in the score gave it away -- only the log did.
+#
+# One lock. A load takes seconds and happens once per store, so serialising them
+# costs little against having a baseline that exists at all.
+_AMEM_BUILD_LOCK = threading.Lock()
+
 class AMemMemory:
     """A-Mem (Agentic Memory, Xu et al. 2025) as a baseline arm, using its
     AgenticMemorySystem (note construction + link generation + evolution)."""
@@ -359,6 +486,11 @@ class AMemMemory:
 
     @staticmethod
     def _build_sys():
+        with _AMEM_BUILD_LOCK:
+            return AMemMemory._build_sys_locked()
+
+    @staticmethod
+    def _build_sys_locked():
         amem_path = os.environ.get("AMEM_PATH")
         if amem_path:
             import sys
@@ -420,17 +552,17 @@ class AMemMemory:
                     os.environ[k] = v
         try:
             try:
-                return AgenticMemorySystem(
+                return _harden_amem_llm(AgenticMemorySystem(
                     model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
                     llm_backend="openai", llm_model=_int_model,
-                    api_key=_int_key, api_base=_int_base)
+                    api_key=_int_key, api_base=_int_base))
             except TypeError:
                 try:
-                    return AgenticMemorySystem(
+                    return _harden_amem_llm(AgenticMemorySystem(
                         model_name=os.environ.get("AMEM_EMBED_MODEL", "all-MiniLM-L6-v2"),
-                        llm_backend="openai", llm_model=_int_model)
+                        llm_backend="openai", llm_model=_int_model))
                 except TypeError:
-                    return AgenticMemorySystem()
+                    return _harden_amem_llm(AgenticMemorySystem())
         finally:
             _restore()
 

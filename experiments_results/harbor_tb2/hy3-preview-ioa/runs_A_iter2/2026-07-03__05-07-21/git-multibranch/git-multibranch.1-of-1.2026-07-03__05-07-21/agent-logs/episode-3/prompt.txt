@@ -1,0 +1,32 @@
+New Terminal Output:
+
+root@52e1bb54e013:/app# grep -nE "include|conf.d|sites-enabled" /etc/nginx/nginx.conf
+6:include /etc/nginx/modules-enabled/*.conf;
+27:	include /etc/nginx/mime.types;
+60:	include /etc/nginx/conf.d/*.conf;
+61:	include /etc/nginx/sites-enabled/*;
+root@52e1bb54e013:/app# mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -days 3
+650 -subj "/CN=localhost" 2>&1 | tail -2
+..+.+.................+.+..+............+.+............+.........+........+............+.+..+.+......+++++++++++++++++++++++++++++++++++++++*...............+...
++...+........+.+.........+..+.......+..+.+..+..........+........+............+...+....+++++++++++++++++++++++++++++++++++++++*....+...........+.........+.+.....
+.........+.+..+...+.......+............+......++++++
+-----
+root@52e1bb54e013:/app# cat > /etc/nginx/conf.d/git.conf << 'EOF'
+> server {
+>     listen 8443 ssl;
+>     listen [::]:8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/cert.pem;
+>     ssl_certificate_key /etc/nginx/ssl/key.pem;
+>     root /var/www/html;
+>     index index.html;
+>     location / {
+>         try_files $uri $uri/ =404;
+>     }
+> }
+> EOF
+root@52e1bb54e013:/app# nginx -t
+2026/07/02 21:55:36 [warn] 289#289: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@52e1bb54e013:/app#

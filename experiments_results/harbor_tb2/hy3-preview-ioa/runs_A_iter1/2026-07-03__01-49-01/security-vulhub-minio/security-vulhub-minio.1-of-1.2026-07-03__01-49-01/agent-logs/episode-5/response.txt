@@ -1,0 +1,14 @@
+{
+  "analysis": "MinIO on node1:9000 returns 403 Forbidden on anonymous request. The credentials live in environment variables on node1. I need to discover how to access node1's environment. There's no ssh/curl/docker client installed, but I have python3 and bash /dev/tcp. Let me do reconnaissance on node1's open ports and check what tools are actually available on this box.",
+  "plan": "1) List available network/admin tools more thoroughly (ssh, nc, socat, nmap, python modules). 2) Scan node1 for open ports (22 ssh, 9001 console, 2375 docker, etc.). This determines our path to reading node1's env vars.",
+  "commands": [
+    {
+      "keystrokes": "ls /usr/bin | grep -iE 'ssh|nc|ncat|socat|nmap|telnet|ftp|redis|postgres|mysql' ; echo '---python mods---'; python3 -c \"import paramiko; print('paramiko ok')\" 2>&1 | head -1\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cat > /tmp/scan.py << 'EOF'\nimport socket\nhost='node1'\nports=[21,22,23,80,443,2375,2376,4000,5000,8000,8080,8443,9000,9001,9002,9100,9200,11211,27017]\nfor p in ports:\n    s=socket.socket(); s.settimeout(0.4)\n    try:\n        s.connect((host,p)); print('OPEN',p)\n    except Exception as e:\n        pass\n    s.close()\nprint('scan done')\nEOF\npython3 /tmp/scan.py\n",
+      "duration": 10
+    }
+  ]
+}

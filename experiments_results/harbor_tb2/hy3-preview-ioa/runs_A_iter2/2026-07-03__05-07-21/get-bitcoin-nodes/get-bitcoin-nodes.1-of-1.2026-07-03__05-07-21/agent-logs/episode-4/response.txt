@@ -1,0 +1,13 @@
+curl is not available. I'll test the endpoints using Python's urllib instead.
+
+{
+  "analysis": "curl is not installed, so my curl-based tests failed. The service is still running. I'll verify the endpoints using Python's urllib (which is always available).",
+  "plan": "Run a small inline Python script that hits each endpoint and reports the HTTP status code and response body. This confirms: /status returns 503, malformed /block and /transaction return 404, and valid-hex requests return 503 since no Bitcoin node is present. This satisfies the required error-handling contract.",
+  "commands": [
+    {
+      "keystrokes": "python3 - << 'PY'\nimport urllib.request\n\ndef hit(path):\n    url = 'http://127.0.0.1:5000' + path\n    try:\n        r = urllib.request.urlopen(url, timeout=15)\n        code = r.getcode()\n        body = r.read().decode()\n    except urllib.error.HTTPError as e:\n        code = e.code\n        body = e.read().decode()\n    print(path, '->', code)\n    print('   ', body.strip())\n\nhit('/status')\nhit('/block/zzz')\nhit('/transaction/zzz')\nhit('/block/0000000000000000000000000000000000000000000000000000000000000000')\nhit('/transaction/0000000000000000000000000000000000000000000000000000000000000000')\nPY\n",
+      "duration": 15.0
+    }
+  ],
+  "task_complete": false
+}

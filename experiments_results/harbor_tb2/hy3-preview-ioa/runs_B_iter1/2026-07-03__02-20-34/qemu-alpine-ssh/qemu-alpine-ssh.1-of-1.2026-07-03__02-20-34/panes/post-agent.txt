@@ -1,0 +1,214 @@
+root@31dadb18c35a:/app# asciinema rec --stdin /logs/agent.cast
+asciinema: recording asciicast to /logs/agent.cast
+asciinema: press <ctrl-d> or type "exit" when you're done
+root@31dadb18c35a:/app# clear
+root@31dadb18c35a:/app# ls -la /app
+total 980176
+drwxr-xr-x  2 root root       4096 Jul  2 15:14 .
+drwxr-xr-x 23 root root       4096 Jul  2 19:01 ..
+-rw-r--r--  1 root root     197120 Jul  2 15:14 alpine-disk.qcow2
+-rw-r--r--  1 root root 1003487232 Dec  7  2023 alpine.iso
+root@31dadb18c35a:/app# which qemu-system-x86_64 expect ssh sshpass
+/usr/bin/qemu-system-x86_64
+/usr/bin/expect
+/usr/bin/ssh
+root@31dadb18c35a:/app# cat > /app/run_vm.sh << 'EOF'
+> #!/bin/sh
+> qemu-system-x86_64 \
+>   -m 1024 \
+>   -smp 2 \
+>   -cdrom /app/alpine.iso \
+>   -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 \
+>   -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+>   -device virtio-net-pci,netdev=net0 \
+>   -display none \
+>   -serial tcp:127.0.0.1:9999,server,nowait \
+>   -pidfile /app/qemu.pid \
+>   > /app/qemu.log 2>&1 &
+> EOF
+root@31dadb18c35a:/app# chmod +x /app/run_vm.sh
+root@31dadb18c35a:/app# sh /app/run_vm.sh
+root@31dadb18c35a:/app# sleep 2; cat /app/qemu.log; echo '--- pid ---'; cat /app/qemu.pid
+--- pid ---
+147
+root@31dadb18c35a:/app# ps -p 147 -o pid,comm; echo '---'; (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E '9999|2222'
+bash: ps: command not found
+---
+root@31dadb18c35a:/app# cat /proc/147/comm 2>/dev/null; echo '---'; (exec 3<>/dev/tcp/127.0.0.1/9999) 2>/dev/null && echo '9999 OPEN' || echo '9999 closed'
+qemu-system-x86
+---
+9999 OPEN
+root@31dadb18c35a:/app# which nc ncat socat telnet
+/bin/nc
+/usr/bin/telnet
+root@31dadb18c35a:/app# cat > /app/setup.exp << 'EXPEOF'
+> #!/usr/bin/expect -f
+> set timeout 240
+> log_file -a /app/setup.log
+> spawn nc 127.0.0.1 9999
+> send "\r"
+> expect {
+>     "login:" { send "root\r" }
+>     -re {# $} {}
+>     timeout { send "\r"; exp_continue }
+> }
+> expect {
+>     -re "Password:" { send "\r" }
+>     -re {# $} {}
+>     timeout { send "\r"; exp_continue }
+> }
+> expect -re {# $}
+> proc cmd {c} {
+>     send "$c\r"
+>     expect -re {# $}
+> }
+> cmd "ip link set eth0 up"
+> cmd "udhcpc -i eth0"
+> cmd "echo nameserver 8.8.8.8 > /etc/resolv.conf"
+> cmd "apk add openssh"
+> cmd "ssh-keygen -A"
+> cmd "echo 'root:password123' | chpasswd"
+> send "cat > /etc/ssh/sshd_config << 'EOF'\r"
+> send "PermitRootLogin yes\r"
+> send "PasswordAuthentication yes\r"
+> send "PubkeyAuthentication yes\r"
+> send "EOF\r"
+> expect -re {# $}
+> cmd "/usr/sbin/sshd"
+> cmd "echo SETUP_DONE_OK"
+> expect "SETUP_DONE_OK"
+> EXPEOF
+root@31dadb18c35a:/app# cat > /app/test_ssh.exp << 'EXPEOF'
+> #!/usr/bin/expect -f
+> set timeout 40
+> spawn ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost
+> expect {
+>     "password:" { send "password123\r" }
+>     timeout { puts "NO_PROMPT"; exit 1 }
+> }
+> expect {
+>     -re {# $} {}
+>     timeout { puts "NO_SHELL"; exit 1 }
+> }
+> send "echo SSH_OK_RESULT; exit\r"
+> expect "SSH_OK_RESULT"
+> EXPEOF
+root@31dadb18c35a:/app# chmod +x /app/setup.exp /app/test_ssh.exp; echo written; which nc
+written
+/bin/nc
+root@31dadb18c35a:/app# expect /app/setup.exp
+spawn nc 127.0.0.1 9999
+
+cat /app/setup.log 2>/dev/null | tail -30
+
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login: root
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# ^[[40;14R^Croot@31dadb18c35a:/app# echo '--- back to host ---'; tail -40 /app/setup.log
+--- back to host ---
+spawn nc 127.0.0.1 9999
+
+
+Welcome to Alpine Linux 3.19
+Kernel 6.6.4-1-lts on an x86_64 (/dev/ttyS0)
+
+localhost login: root
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# root@31dadb18c35a:/app# ;14Rcat > /app/setup2.exp << 'EXPEOF'
+bash: syntax error near unexpected token `;'
+root@31dadb18c35a:/app# #!/usr/bin/expect -f
+root@31dadb18c35a:/app# set timeout 30
+root@31dadb18c35a:/app# log_file -a /app/setup2.log
+bash: log_file: command not found
+root@31dadb18c35a:/app# spawn nc 127.0.0.1 9999
+bash: spawn: command not found
+root@31dadb18c35a:/app# expect {
+expect /app/setup2.exp
+couldn't read file "{": no such file or directory
+root@31dadb18c35a:/app#     "login:" { send "root\r"; exp_continue }
+bash: login:: command not found
+bash: exp_continue: command not found
+root@31dadb18c35a:/app#     -re {# $} {}
+bash: -re: command not found
+root@31dadb18c35a:/app#     eof { puts "CONNECT_FAILED"; exit 1 }
+bash: eof: command not found
+exit
+bash: exit: too many arguments
+root@31dadb18c35a:/app#     timeout { send "\r"; exp_continue }
+timeout: invalid time interval ‘{’
+Try 'timeout --help' for more information.
+bash: exp_continue: command not found
+root@31dadb18c35a:/app# }
+bash: syntax error near unexpected token `}'
+root@31dadb18c35a:/app# proc runcmd {c} {
+bash: proc: command not found
+root@31dadb18c35a:/app#     send "$c; echo ZZENDZZ\r"
+bash: send: command not found
+root@31dadb18c35a:/app#     expect {
+couldn't read file "{": no such file or directory
+root@31dadb18c35a:/app#         "ZZENDZZ" {}
+bash: ZZENDZZ: command not found
+root@31dadb18c35a:/app#         eof { puts "CMD_EOF"; exit 1 }
+bash: eof: command not found
+exit
+bash: exit: too many arguments
+root@31dadb18c35a:/app#         timeout { send "\003"; exp_continue }
+timeout: invalid time interval ‘{’
+Try 'timeout --help' for more information.
+bash: exp_continue: command not found
+root@31dadb18c35a:/app#     }
+bash: syntax error near unexpected token `}'
+root@31dadb18c35a:/app# }
+bash: syntax error near unexpected token `}'
+root@31dadb18c35a:/app# set timeout 60
+root@31dadb18c35a:/app# runcmd "ip link set eth0 up"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# set timeout 120
+root@31dadb18c35a:/app# runcmd "udhcpc -i eth0 -q"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# runcmd "echo nameserver 8.8.8.8 > /etc/resolv.conf"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# set timeout 300
+root@31dadb18c35a:/app# runcmd "apk add openssh"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# runcmd "ssh-keygen -A"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# runcmd "echo 'root:password123' | chpasswd"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# runcmd "printf 'PermitRootLogin yes\\nPasswordAuthentication yes\\nPubkeyAuthentication yes\\n' > /etc/ssh/sshd_config"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# runcmd "cat /etc/ssh/sshd_config"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# runcmd "/usr/sbin/sshd"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# runcmd "echo SETUP_COMPLETE_FINAL"
+bash: runcmd: command not found
+root@31dadb18c35a:/app# expect "SETUP_COMPLETE_FINAL"
+couldn't read file "SETUP_COMPLETE_FINAL": no such file or directory
+root@31dadb18c35a:/app# EXPEOF
+bash: EXPEOF: command not found
+root@31dadb18c35a:/app# expect /app/setup2.exp
+couldn't read file "/app/setup2.exp": no such file or directory
+root@31dadb18c35a:/app#

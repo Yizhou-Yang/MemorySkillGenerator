@@ -1,0 +1,29 @@
+New Terminal Output:
+
+root@5800c03d8045:/tmp/work# cd /app
+root@5800c03d8045:/app# cat > /tmp/diag.sh <<'EOF'
+> #!/bin/bash
+> cd /app
+> rm -rf /tmp/work2; mkdir -p /tmp/work2; cd /tmp/work2
+> git init -q -b main
+> echo '<h1>MAIN</h1>' > index.html; git add -A; git commit -qm main
+> git checkout -q -b dev
+> echo '<h1>DEV</h1>' > index.html; git add -A; git commit -qm dev
+> git remote add origin git@localhost:/git/project
+> export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -v'
+> export SSH_ASKPASS=/tmp/askpass.sh
+> export SSH_ASKPASS_REQUIRE=force
+> export DISPLAY=:0
+> setsid git push -v origin main dev
+> echo "PUSH_EXIT=$?"
+> EOF
+root@5800c03d8045:/app# bash /tmp/diag.sh > /tmp/diag.out 2>&1; echo DONE
+DONE
+root@5800c03d8045:/app# grep -nE 'Welc|motd|Permission|denied|fatal|error|remote:|PUSH_EXIT|refusing|Hello' /tmp/diag.out | head -40
+13:fatal: unable to auto-detect email address (got 'root@5800c03d8045.(none)')
+26:fatal: unable to auto-detect email address (got 'root@5800c03d8045.(none)')
+28:error: src refspec main does not match any
+29:error: src refspec dev does not match any
+30:error: failed to push some refs to 'localhost:/git/project'
+31:PUSH_EXIT=1
+root@5800c03d8045:/app#

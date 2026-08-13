@@ -1,0 +1,47 @@
+New Terminal Output:
+
+root@efd9ca4f7707:/app# cat > /tmp/dl.py << 'PYEOF'
+> import os, sys, urllib.request
+> os.makedirs('/tmp/debs', exist_ok=True)
+> urls=[]
+> for line in open('/tmp/uris.txt'):
+>     line=line.strip()
+>     if line.startswith("'http"):
+>         parts=line.split("'")
+>         u=parts[1]
+>         f=parts[2].split()[0]
+>         urls.append((u,f))
+> print('total', len(urls), file=sys.stderr)
+> ok=0
+> for i,(u,f) in enumerate(urls):
+>     dest='/tmp/debs/'+f
+>     if os.path.exists(dest) and os.path.getsize(dest)>0:
+>         ok+=1; continue
+>     for attempt in range(4):
+>         try:
+>             req=urllib.request.Request(u, headers={'User-Agent':'Debian APT'})
+>             data=urllib.request.urlopen(req, timeout=60).read()
+>             open(dest,'wb').write(data)
+>             ok+=1
+>             break
+>         except Exception as e:
+>             if attempt==3: print('FAIL', f, e, file=sys.stderr)
+>     if (i+1)%50==0: print('progress', i+1, ok, file=sys.stderr)
+> print('done ok', ok, file=sys.stderr)
+> PYEOF
+root@efd9ca4f7707:/app# python3 /tmp/dl.py 2>&1 | tail -20
+total 412
+progress 50 50
+progress 100 100
+progress 150 150
+progress 200 200
+progress 250 250
+progress 300 300
+progress 350 350
+progress 400 400
+done ok 412
+root@efd9ca4f7707:/app#
+exit
+asciinema: recording finished
+asciinema: asciicast saved to /logs/agent.cast
+root@efd9ca4f7707:/app#

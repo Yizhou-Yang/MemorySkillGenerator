@@ -1,0 +1,18 @@
+{
+  "analysis": "Verification confirms the build is correct: 330 shards, max 30 files/shard, 9898 total files, max file size 0.29 MB (well under 15MB), and c4_sample is intact at 9898 files. The manifest exists. However, revert.py does NOT exist — the earlier heredoc for it was lost during the terminal stuck state. I need to recreate /app/revert.py. I will NOT run it.",
+  "plan": "1) Write /app/revert.py via a heredoc to a file. 2) Verify it parses and exists. 3) Clean up the helper script /app/build_reshard.py to keep things tidy. Then the task is complete.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/revert.py << 'PYEOF'\n#!/usr/bin/env python3\n\"\"\"Revert c4_reshard/ back to the original flat layout that matches c4_sample/.\n\nThe build step placed the original files (and, for any oversized file, its\nsplit parts) into shard_* sub-folders inside c4_reshard/ and recorded the\nmapping in c4_reshard_manifest.json. Running this script reads that manifest\nand reconstructs the original flat file set directly inside c4_reshard/,\nremoving the shard sub-folders. After running, the contents of c4_reshard/\nmatch what was originally in c4_sample/.\n\"\"\"\nimport json\nimport os\nimport shutil\nimport sys\n\nSCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))\nRESHARD_DIR = os.path.join(SCRIPT_DIR, \"c4_reshard\")\nMANIFEST_PATH = os.path.join(SCRIPT_DIR, \"c4_reshard_manifest.json\")\n\n\ndef main():\n    if not os.path.isdir(RESHARD_DIR):\n        print(\"error: %s does not exist\" % RESHARD_DIR, file=sys.stderr)\n        return 1\n    if not os.path.isfile(MANIFEST_PATH):\n        print(\"error: manifest %s not found\" % MANIFEST_PATH, file=sys.stderr)\n        return 1\n\n    with open(MANIFEST_PATH) as f:\n        manifest = json.load(f)\n\n    for entry in manifest[\"entries\"]:\n        orig = entry[\"orig\"]\n        parts = entry[\"parts\"]  # list of paths relative to RESHARD_DIR\n        dest = os.path.join(RESHARD_DIR, orig)\n        if len(parts) == 1:\n            src = os.path.join(RESHARD_DIR, parts[0])\n            if os.path.abspath(src) != os.path.abspath(dest):\n                shutil.move(src, dest)\n        else:\n            tmp = dest + \".tmp\"\n            with open(tmp, \"wb\") as out:\n                for p in parts:\n                    with open(os.path.join(RESHARD_DIR, p), \"rb\") as inp:\n                        shutil.copyfileobj(inp, out)\n            os.replace(tmp, dest)\n            for p in parts:\n                os.remove(os.path.join(RESHARD_DIR, p))\n\n    # remove now-empty shard folders\n    for name in os.listdir(RESHARD_DIR):\n        full = os.path.join(RESHARD_DIR, name)\n        if os.path.isdir(full):\n            try:\n                os.rmdir(full)\n            except OSError:\n                pass\n\n    print(\"reverted c4_reshard/ to original layout\")\n    return 0\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 -c \"import ast; ast.parse(open('/app/revert.py').read()); print('revert.py syntax OK')\"\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "rm -f /app/build_reshard.py && ls -la /app\n",
+      "duration": 0.2
+    }
+  ]
+}

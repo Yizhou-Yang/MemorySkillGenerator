@@ -1,0 +1,22 @@
+{
+  "analysis": "Key anomaly: even `curl --version` prints 'DNS resolution error', which a normal curl never does on --version (no network). getent resolves example.com fine via NSS (files/dns), so the system resolver works. This strongly suggests /usr/bin/curl is not a normal curl binary, or is a wrapper that does a DNS probe/check before doing anything. I need to inspect the actual binary.",
+  "plan": "Inspect /usr/bin/curl: its type, whether it's a script or ELF, its dynamic libraries, and run it directly with an explicit path. This will reveal if curl is a wrapper script that fails on a DNS preflight check, or a custom build. Based on that I can determine the real fix.",
+  "commands": [
+    {
+      "keystrokes": "ls -la /usr/bin/curl\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "file /usr/bin/curl\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "head -c 300 /usr/bin/curl | cat -v; echo; echo '---END---'\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ldd /usr/bin/curl 2>&1 | head -n 20\n",
+      "duration": 0.3
+    }
+  ]
+}

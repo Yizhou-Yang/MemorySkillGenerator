@@ -1,0 +1,215 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@252b2cdc5cd9:/app# cat > /app/server.py << 'PYEOF'
+> #!/usr/bin/env python3
+> import os
+> import requests
+> from flask import Flask, jsonify, request
+>
+> app = Flask(__name__)
+>
+> RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.devnet.solana.com").strip()
+> NETWORK = os.environ.get("SOLANA_NETWORK", "devnet").strip()
+>
+> session = requests.Session()
+>
+>
+> class RpcError(Exception):
+>     pass
+>
+>
+> class NetworkError(Exception):
+>     pass
+>
+>
+> def rpc_call(method, params=None, timeout=60):
+>     payload = {"jsonrpc": "2.0", "id": 1, "method": method}
+>     if params is not None:
+>         payload["params"] = params
+>     try:
+>         resp = session.post(RPC_URL, json=payload, timeout=timeout)
+>         resp.raise_for_status()
+>     except requests.RequestException as e:
+>         raise NetworkError("network error: %s" % e)
+>     try:
+>         data = resp.json()
+>     except ValueError:
+>         raise NetworkError("invalid JSON response from RPC")
+>     err = data.get("error")
+>     if err:
+>         msg = err.get("message") if isinstance(err, dict) else str(err)
+>         raise RpcError(msg)
+>     return data.get("result")
+>
+>
+> def extract_token_transfers(tx):
+>     meta = tx.get("meta") or {}
+>     pre = meta.get("preTokenBalances") or []
+>     post = meta.get("postTokenBalances") or []
+>     pre_by = {b["accountIndex"]: b for b in pre}
+>     post_by = {b["accountIndex"]: b for b in post}
+>     transfers = []
+>     for idx, pb in post_by.items():
+>         if idx in pre_by:
+>             pre_b = pre_by[idx]
+>             pre_amt = int((pre_b.get("uiTokenAmount") or {}).get("amount") or 0)
+>             post_amt = int((pb.get("uiTokenAmount") or {}).get("amount") or 0)
+>             delta = post_amt - pre_amt
+>             if delta != 0:
+>                 transfers.append({
+>                     "account": pre_b.get("owner") or pb.get("owner"),
+>                     "mint": pb.get("mint"),
+>                     "amount": abs(delta),
+>                 })
+>     return transfers
+>
+>
+> @app.route("/status")
+> def status():
+>     try:
+>         try:
+>             rpc_call("getHealth")
+>             online = "online"
+>         except Exception:
+>             online = "offline"
+>         try:
+>             slot = rpc_call("getSlot")
+>         except Exception:
+>             slot = None
+>         try:
+>             nodes = rpc_call("getClusterNodes")
+>             node_count = len(nodes) if isinstance(nodes, list) else None
+>         except Exception:
+>             node_count = None
+>         try:
+>             ver = rpc_call("getVersion")
+>             version = ver.get("solana-core") if isinstance(ver, dict) else None
+>         except Exception:
+>             version = None
+>         return jsonify({
+>             "status": online,
+>             "network": NETWORK,
+>             "current_slot": slot,
+>             "node_count": node_count,
+>             "version": version,
+>         })
+>     except Exception as e:
+>         return jsonify({"error": str(e)})
+>
+>
+> @app.route("/block/<int:slot>")
+> def block(slot):
+>     try:
+>         res = rpc_call("getBlock", [slot, {"encoding": "json",
+>                                           "transactionDetails": "none",
+>                                           "rewards": False}])
+>         if res is None:
+>             return jsonify({"error": "block not found at slot %d" % slot}), 404
+>         return jsonify({
+>             "blockhash": res.get("blockhash"),
+>             "parent_slot": res.get("parentSlot"),
+>             "previous_blockhash": res.get("previousBlockhash"),
+>             "block_height": res.get("blockHeight"),
+>             "block_time": res.get("blockTime"),
+>         })
+>     except (RpcError, NetworkError) as e:
+>         return jsonify({"error": str(e)}), 404
+>     except Exception as e:
+>         return jsonify({"error": str(e)})
+>
+>
+> @app.route("/transaction/<signature>")
+> def transaction(signature):
+>     try:
+>         res = rpc_call("getTransaction",
+>                        [signature, {"encoding": "json",
+>                                     "maxSupportedTransactionVersion": 0}])
+>         if res is None:
+>             return jsonify({"error": "transaction not found"}), 404
+>         meta = res.get("meta") or {}
+>         err = meta.get("err")
+>         return jsonify({
+>             "signature": res.get("transaction", {}).get("signatures", [None])[0]
+>                           if isinstance(res.get("transaction"), dict) else signature,
+>             "slot": res.get("slot"),
+>             "block_time": res.get("blockTime"),
+>             "success": err is None,
+>             "fee": meta.get("fee"),
+>             "token_transfers": extract_token_transfers(res),
+>         })
+>     except (RpcError, NetworkError) as e:
+>         return jsonify({"error": str(e)}), 404
+>     except Exception as e:
+>         return jsonify({"error": str(e)})
+>
+>
+> @app.route("/account/<address>")
+> def account(address):
+>     try:
+>         res = rpc_call("getAccountInfo", [address, {"encoding": "base64"}])
+>         val = (res or {}).get("value") if isinstance(res, dict) else None
+>         if val is None:
+>             return jsonify({"error": "account not found"})
+>         return jsonify({
+>             "address": address,
+>             "executable": val.get("executable"),
+>             "lamports": val.get("lamports"),
+>             "owner": val.get("owner"),
+>             "rent_epoch": val.get("rentEpoch"),
+>         })
+>     except (RpcError, NetworkError) as e:
+>         return jsonify({"error": str(e)})
+>     except Exception as e:
+>         return jsonify({"error": str(e)})
+>
+>
+> @app.route("/program/<program_id>/accounts")
+> def program_accounts(program_id):
+>     try:
+>         limit = request.args.get("limit", default=10, type=int)
+>         offset = request.args.get("offset", default=0, type=int)
+>         if limit is None or limit < 0:
+>             limit = 10
+>         if offset is None or offset < 0:
+>             offset = 0
+>         accounts = rpc_call("getProgramAccounts",
+>                             [program_id, {"encoding": "base64",
+>                                           "commitment": "confirmed"}]) or []
+>         total = len(accounts)
+>         page = accounts[offset:offset + limit]
+>         out = []
+>         for a in page:
+>             acc = a.get("account", {}) or {}
+>             out.append({
+>                 "pubkey": a.get("pubkey"),
+>                 "account": {
+>                     "executable": acc.get("executable"),
+>                     "lamports": acc.get("lamports"),
+>                     "owner": acc.get("owner"),
+>                     "rent_epoch": acc.get("rentEpoch"),
+>                 },
+>             })
+>         return jsonify({
+>             "program_id": program_id,
+>             "total_accounts": total,
+>             "limit": limit,
+>             "offset": offset,
+>             "accounts": out,
+>         })
+>     except (RpcError, NetworkError) as e:
+>         return jsonify({"error": str(e)})
+>     except Exception as e:
+>         return jsonify({"error": str(e)})
+>
+>
+> if __name__ == "__main__":
+>     app.run(host="0.0.0.0", port=5000)
+> PYEOF
+root@252b2cdc5cd9:/app# echo written
+written
+root@252b2cdc5cd9:/app# python3 -c "import ast; ast.parse(open('/app/server.py').read()); print('syntax ok')"
+syntax ok
+root@252b2cdc5cd9:/app#

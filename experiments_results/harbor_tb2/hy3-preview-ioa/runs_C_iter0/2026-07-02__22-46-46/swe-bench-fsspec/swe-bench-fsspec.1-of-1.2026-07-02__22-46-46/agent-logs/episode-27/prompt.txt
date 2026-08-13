@@ -1,0 +1,50 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@4f69551eb38a:/app/filesystem_spec# cat > /tmp/test_open_async.py <<'EOF'
+> import asyncio
+> import fsspec
+> from fsspec.asyn import AsyncFileSystem
+>
+>
+> class MyAsync(AsyncFileSystem):
+>     protocol = "myasync"
+>     async_impl = True
+>
+>     async def open_async(self, path, mode="rb", **kwargs):
+>         # record that we were called
+>         MyAsync.last_called = (path, mode)
+>         # delegate to a real local file so we get a usable file object
+>         return await fsspec.filesystem("file").open_async(path, mode=mode, **kwargs)
+>
+>
+> async def main():
+>     fs = MyAsync()
+>     dirfs = fsspec.filesystem("dir", path="/tmp", fs=fs, asynchronous=True)
+>     f = await dirfs.open_async("hello_async_x", "wb")
+>     await f.close()
+>     assert MyAsync.last_called[0].endswith("hello_async_x"), MyAsync.last_called
+>     print("PASS: open_async delegated to underlying fs with joined path", MyAsync.last_called)
+>
+> asyncio.run(main())
+> EOF
+root@4f69551eb38a:/app/filesystem_spec# python3 /tmp/test_open_async.py
+Traceback (most recent call last):
+  File "/tmp/test_open_async.py", line 25, in <module>
+    asyncio.run(main())
+  File "/usr/local/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/local/lib/python3.9/asyncio/base_events.py", line 647, in run_until_complete
+    return future.result()
+  File "/tmp/test_open_async.py", line 19, in main
+    dirfs = fsspec.filesystem("dir", path="/tmp", fs=fs, asynchronous=True)
+  File "/app/filesystem_spec/fsspec/registry.py", line 303, in filesystem
+    return cls(**storage_options)
+  File "/app/filesystem_spec/fsspec/spec.py", line 81, in __call__
+    obj = super().__call__(*args, **kwargs)
+  File "/app/filesystem_spec/fsspec/implementations/dirfs.py", line 47, in __init__
+    raise ValueError("both dirfs and fs should be in the same sync/async mode")
+ValueError: both dirfs and fs should be in the same sync/async mode
+root@4f69551eb38a:/app/filesystem_spec#

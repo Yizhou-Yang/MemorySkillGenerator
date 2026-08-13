@@ -1,0 +1,180 @@
+root@a1c701ec22aa:/app# df -h
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  960G     0 100% /
+tmpfs            64M     0   64M   0% /dev
+tmpfs            32G     0   32G   0% /sys/fs/cgroup
+shm              64M   24K   64M   1% /dev/shm
+/dev/vdb        984G  960G     0 100% /logs
+tmpfs           100M   75M   25M  75% /root/.cache
+overlay         984G  960G     0 100% /etc/hosts
+tmpfs            32G     0   32G   0% /proc/acpi
+tmpfs            32G     0   32G   0% /proc/scsi
+tmpfs            32G     0   32G   0% /sys/firmware
+root@a1c701ec22aa:/app# echo HOME=$HOME; ls -la ~/.cache 2>/dev/null | head
+HOME=/root
+total 4
+drwxr-xr-x 3 root root   60 Jul  2 21:58 .
+drwx------ 4 root root 4096 Jul  2 21:58 ..
+drwxr-xr-x 3 root root   60 Jul  2 21:58 huggingface
+root@a1c701ec22aa:/app# python3 --version; python3 -c "import huggingface_hub; print('hub', huggingface_hub.__version__)" 2>&1 | head
+Python 3.13.1
+hub 1.21.0
+root@a1c701ec22aa:/app# du -sh /root/.cache/huggingface 2>/dev/null; ls -la /root/.cache/huggingface/
+75M     /root/.cache/huggingface
+total 0
+drwxr-xr-x 3 root root 60 Jul  2 21:58 .
+drwxr-xr-x 3 root root 60 Jul  2 21:58 ..
+drwxr-xr-x 2 root root 60 Jul  2 21:58 hub
+root@a1c701ec22aa:/app# free -h
+bash: free: command not found
+root@a1c701ec22aa:/app# python3 -c "import transformers; print('transformers', transformers.__version__)" 2>&1 | head -1
+curl -sI --max-time 10 https://huggingface.co/albert/albert-base-v2/resolve/main/config.json | head -3
+transformers 5.12.1
+root@a1c701ec22aa:/app# curl -sI --max-time 10 https://huggingface.co/albert/albert-base-v2/resolve/main/config.json | head -3
+bash: curl: command not found
+root@a1c701ec22aa:/app# grep -E 'MemTotal|MemAvailable|MemFree' /proc/meminfo
+MemTotal:       65579940 kB
+MemFree:        12326424 kB
+MemAvailable:   44358224 kB
+root@a1c701ec22aa:/app# rm -rf /root/.cache/huggingface/hub
+root@a1c701ec22aa:/app# mount -o remount,size=2G /root/.cache 2>&1; echo exit=$?
+mount: /root/.cache: permission denied.
+       dmesg(1) may have more information after failed mount system call.
+exit=32
+root@a1c701ec22aa:/app# df -h /root/.cache
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs           100M     0  100M   0% /root/.cache
+root@a1c701ec22aa:/app# mkdir -p /root/.cache/hfcache && mount -t tmpfs -o size=2G tmpfs /root/.cache/hfcache 2>&1; echo exit=$?
+mount: /root/.cache/hfcache: permission denied.
+       dmesg(1) may have more information after failed mount system call.
+exit=32
+root@a1c701ec22aa:/app# df -h /root/.cache/hfcache
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs           100M     0  100M   0% /root/.cache
+root@a1c701ec22aa:/app# mount | grep -E 'tmpfs|overlay' | head -20
+fuse-overlayfs on / type fuse.fuse-overlayfs (rw,nodev,noatime,user_id=0,group_id=0,default_permissions,allow_other)
+tmpfs on /dev type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /sys/fs/cgroup type tmpfs (rw,nosuid,nodev,noexec,relatime,mode=755)
+shm on /dev/shm type tmpfs (rw,nosuid,nodev,noexec,relatime,size=65536k)
+tmpfs on /root/.cache type tmpfs (rw,nosuid,nodev,noexec,relatime,size=102400k,mode=755)
+overlay on /etc/resolv.conf type overlay (rw,relatime,lowerdir=/data/docker/lib/overlay2/l/Z7JS6ETMS2VDGZ65E27D26ACLM:/data/docker/lib/overlay2/l/HFIRD6RSHD7GCW
+JUF734Q3EF7U:/data/docker/lib/overlay2/l/2CRUUIDJYU77CNTYJU5KOSA26D:/data/docker/lib/overlay2/l/B32L6WPFVJBXU2CE7R4UZPRI6K:/data/docker/lib/overlay2/l/KSOWSTRJ3
+JYZD4XFQE3JESZNTX:/data/docker/lib/overlay2/l/JRY2YVYFDMXF7SHN73ZMPCXEFS:/data/docker/lib/overlay2/l/GJDTRU2YO4DIMG5J5KHNGPDKKV:/data/docker/lib/overlay2/l/JDPG
+EGY6LNZBCQPZB2ISKKMGEO:/data/docker/lib/overlay2/l/VK4OJKALNN6VXBPFVH3I5CHIQJ:/data/docker/lib/overlay2/l/4GOQQ2CSBLUQAOQMC73BDT2DFS:/data/docker/lib/overlay2/l
+/RMBWQ5MPLXHHLZOESN7YLCPSCO:/data/docker/lib/overlay2/l/K47BRVJR7EWEOMBS7DLGCQ2UJJ,upperdir=/data/docker/lib/overlay2/2d1d09b3abeeafaccb876cf1d0466adaa6c7bd9d89
+83e1f5f230cbab01f190a4/diff,workdir=/data/docker/lib/overlay2/2d1d09b3abeeafaccb876cf1d0466adaa6c7bd9d8983e1f5f230cbab01f190a4/work,index=off)
+overlay on /etc/hostname type overlay (rw,relatime,lowerdir=/data/docker/lib/overlay2/l/Z7JS6ETMS2VDGZ65E27D26ACLM:/data/docker/lib/overlay2/l/HFIRD6RSHD7GCWJUF
+734Q3EF7U:/data/docker/lib/overlay2/l/2CRUUIDJYU77CNTYJU5KOSA26D:/data/docker/lib/overlay2/l/B32L6WPFVJBXU2CE7R4UZPRI6K:/data/docker/lib/overlay2/l/KSOWSTRJ3JYZ
+D4XFQE3JESZNTX:/data/docker/lib/overlay2/l/JRY2YVYFDMXF7SHN73ZMPCXEFS:/data/docker/lib/overlay2/l/GJDTRU2YO4DIMG5J5KHNGPDKKV:/data/docker/lib/overlay2/l/JDPGEGY
+6LNZBCQPZB2ISKKMGEO:/data/docker/lib/overlay2/l/VK4OJKALNN6VXBPFVH3I5CHIQJ:/data/docker/lib/overlay2/l/4GOQQ2CSBLUQAOQMC73BDT2DFS:/data/docker/lib/overlay2/l/RM
+BWQ5MPLXHHLZOESN7YLCPSCO:/data/docker/lib/overlay2/l/K47BRVJR7EWEOMBS7DLGCQ2UJJ,upperdir=/data/docker/lib/overlay2/2d1d09b3abeeafaccb876cf1d0466adaa6c7bd9d8983e
+1f5f230cbab01f190a4/diff,workdir=/data/docker/lib/overlay2/2d1d09b3abeeafaccb876cf1d0466adaa6c7bd9d8983e1f5f230cbab01f190a4/work,index=off)
+overlay on /etc/hosts type overlay (rw,relatime,lowerdir=/data/docker/lib/overlay2/l/Z7JS6ETMS2VDGZ65E27D26ACLM:/data/docker/lib/overlay2/l/HFIRD6RSHD7GCWJUF734
+Q3EF7U:/data/docker/lib/overlay2/l/2CRUUIDJYU77CNTYJU5KOSA26D:/data/docker/lib/overlay2/l/B32L6WPFVJBXU2CE7R4UZPRI6K:/data/docker/lib/overlay2/l/KSOWSTRJ3JYZD4X
+FQE3JESZNTX:/data/docker/lib/overlay2/l/JRY2YVYFDMXF7SHN73ZMPCXEFS:/data/docker/lib/overlay2/l/GJDTRU2YO4DIMG5J5KHNGPDKKV:/data/docker/lib/overlay2/l/JDPGEGY6LN
+ZBCQPZB2ISKKMGEO:/data/docker/lib/overlay2/l/VK4OJKALNN6VXBPFVH3I5CHIQJ:/data/docker/lib/overlay2/l/4GOQQ2CSBLUQAOQMC73BDT2DFS:/data/docker/lib/overlay2/l/RMBWQ
+5MPLXHHLZOESN7YLCPSCO:/data/docker/lib/overlay2/l/K47BRVJR7EWEOMBS7DLGCQ2UJJ,upperdir=/data/docker/lib/overlay2/2d1d09b3abeeafaccb876cf1d0466adaa6c7bd9d8983e1f5
+f230cbab01f190a4/diff,workdir=/data/docker/lib/overlay2/2d1d09b3abeeafaccb876cf1d0466adaa6c7bd9d8983e1f5f230cbab01f190a4/work,index=off)
+tmpfs on /proc/acpi type tmpfs (ro,relatime)
+tmpfs on /proc/kcore type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/keys type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/latency_stats type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/timer_list type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/sched_debug type tmpfs (rw,nosuid,size=65536k,mode=755)
+tmpfs on /proc/scsi type tmpfs (ro,relatime)
+tmpfs on /sys/firmware type tmpfs (ro,relatime)
+root@a1c701ec22aa:/app# touch /sys/fs/cgroup/testfile 2>&1 && echo 'cgroup Writable' && rm -f /sys/fs/cgroup/testfile || echo 'cgroup NOT writable'
+cgroup Writable
+root@a1c701ec22aa:/app# touch /root/.cache/testfile 2>&1 && echo '/root/.cache Writable' && rm -f /root/.cache/testfile || echo 'NOT writable'
+/root/.cache Writable
+root@a1c701ec22aa:/app# mkdir -p /sys/fs/cgroup/hfcache && df -h /sys/fs/cgroup
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs            32G     0   32G   0% /sys/fs/cgroup
+root@a1c701ec22aa:/app# export HF_HOME=/sys/fs/cgroup/hfcache; echo HF_HOME=$HF_HOME
+HF_HOME=/sys/fs/cgroup/hfcache
+root@a1c701ec22aa:/app# cat > /tmp/cache_model.py << 'EOF'
+> import os
+> from huggingface_hub import snapshot_download
+> from transformers import AutoTokenizer, AutoModel
+>
+> REPO = "albert/albert-base-v2"
+>
+> # 1) Pull ALL repo files so the cache is fully offline-capable
+> dl = snapshot_download(repo_id=REPO, local_dir=None)
+> print("snapshot_download ->", dl)
+>
+> # 2) Materialize tokenizer and model into the cache explicitly
+> AutoTokenizer.from_pretrained(REPO)
+> print("tokenizer cached")
+> AutoModel.from_pretrained(REPO)
+> print("model cached")
+> print("DONE")
+> EOF
+root@a1c701ec22aa:/app# HF_HOME=/sys/fs/cgroup/hfcache python3 /tmp/cache_model.py
+Downloading (incomplete total...): 0.00B [00:00, ?B/s]                                                                                                         W
+arning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.| 0/12 [00:00<?, ?it/s]
+Fetching 12 files: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████| 12/12 [00:04<00:00,  2.47it/s]
+Download complete: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████| 268M/268M [00:04<00:00, 62.0MB/s]s
+napshot_download -> /sys/fs/cgroup/hfcache/hub/models--albert--albert-base-v2/snapshots/8e2f239c5f8a2c0f253781ca60135db913e5c80c
+Download complete: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████| 268M/268M [00:07<00:00, 34.8MB/s]
+tokenizer cached
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████| 25/25 [00:00<00:00, 12733.16it/s]
+[transformers] AlbertModel LOAD REPORT from: albert/albert-base-v2
+Key                          | Status     |  |
+-----------------------------+------------+--+-
+predictions.dense.weight     | UNEXPECTED |  |
+predictions.LayerNorm.weight | UNEXPECTED |  |
+predictions.bias             | UNEXPECTED |  |
+predictions.LayerNorm.bias   | UNEXPECTED |  |
+predictions.decoder.bias     | UNEXPECTED |  |
+predictions.dense.bias       | UNEXPECTED |  |
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+model cached
+DONE
+root@a1c701ec22aa:/app# du -sh /sys/fs/cgroup/hfcache/hub; ls /sys/fs/cgroup/hfcache/hub/models--albert--albert-base-v2/snapshots/*/
+256M    /sys/fs/cgroup/hfcache/hub
+README.md    flax_model.msgpack  pytorch_model.bin  spiece.model  tokenizer.json         with-prefix-tf_model.h5
+config.json  model.safetensors   rust_model.ot      tf_model.h5   tokenizer_config.json
+root@a1c701ec22aa:/app# HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HOME=/sys/fs/cgroup/hfcache python3 -c "from transformers import AutoTokenizer, AutoModel; t=
+AutoTokenizer.from_pretrained('albert/albert-base-v2'); m=AutoModel.from_pretrained('albert/albert-base-v2'); print('OFFLINE LOAD OK', t.__class__.__name__, m._
+_class__.__name__)"
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████| 25/25 [00:00<00:00, 7059.22it/s]
+[transformers] AlbertModel LOAD REPORT from: albert/albert-base-v2
+Key                          | Status     |  |
+-----------------------------+------------+--+-
+predictions.bias             | UNEXPECTED |  |
+predictions.decoder.bias     | UNEXPECTED |  |
+predictions.LayerNorm.weight | UNEXPECTED |  |
+predictions.LayerNorm.bias   | UNEXPECTED |  |
+predictions.dense.weight     | UNEXPECTED |  |
+predictions.dense.bias       | UNEXPECTED |  |
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+OFFLINE LOAD OK AlbertTokenizer AlbertModel
+root@a1c701ec22aa:/app# rmdir /root/.cache/huggingface 2>/dev/null; ln -s /sys/fs/cgroup/hfcache /root/.cache/huggingface; ls -la /root/.cache/
+total 4
+drwxr-xr-x 3 root root   80 Jul  2 22:02 .
+drwx------ 4 root root 4096 Jul  2 21:58 ..
+drwxr-xr-x 2 root root   40 Jul  2 22:00 hfcache
+lrwxrwxrwx 1 root root   22 Jul  2 22:02 huggingface -> /sys/fs/cgroup/hfcache
+root@a1c701ec22aa:/app# HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 -c "from transformers import AutoTokenizer, AutoModel; t=AutoTokenizer.from_pretrained('
+albert/albert-base-v2'); m=AutoModel.from_pretrained('albert/albert-base-v2'); print('DEFAULT-CACHE OFFLINE LOAD OK', t.__class__.__name__, m.__class__.__name__
+)"
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████| 25/25 [00:00<00:00, 13623.18it/s]
+[transformers] AlbertModel LOAD REPORT from: albert/albert-base-v2
+Key                          | Status     |  |
+-----------------------------+------------+--+-
+predictions.decoder.bias     | UNEXPECTED |  |
+predictions.LayerNorm.weight | UNEXPECTED |  |
+predictions.dense.weight     | UNEXPECTED |  |
+predictions.bias             | UNEXPECTED |  |
+predictions.LayerNorm.bias   | UNEXPECTED |  |
+predictions.dense.bias       | UNEXPECTED |  |
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+DEFAULT-CACHE OFFLINE LOAD OK AlbertTokenizer AlbertModel
+root@a1c701ec22aa:/app#

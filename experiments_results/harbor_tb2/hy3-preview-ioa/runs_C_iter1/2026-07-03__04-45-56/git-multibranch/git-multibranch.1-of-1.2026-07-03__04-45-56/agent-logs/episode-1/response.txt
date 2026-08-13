@@ -1,0 +1,35 @@
+{
+  "analysis": "Environment is Ubuntu 26.04 with git, sshd, nginx, openssl, and ssh all present. No services are running yet. I need to build: a git bare repo at /git/project owned by a 'git' user with password 'password', sshd configured for password auth (UsePAM no), an Nginx HTTPS server on 8443 with a self-signed cert serving /var/www/main at / and /var/www/dev at /dev/, and a post-receive hook that deploys the pushed branch into the right webroot. I'll set this up in one batch, then test in the next.",
+  "plan": "Batch A: create the git user with password, generate ssh host keys, create the bare repo and the post-receive hook, write a minimal sshd_config (UsePAM no, PasswordAuthentication yes), relax host-key checking for localhost, generate a self-signed cert, and write the nginx 8443 SSL server block. Then start sshd and nginx. I'll verify listening ports afterward.",
+  "commands": [
+    {
+      "keystrokes": "useradd -m -s /bin/bash git 2>/dev/null; echo 'git:password' | chpasswd; mkdir -p /git /run/sshd /etc/nginx/ssl /var/www/main /var/www/dev; git init --bare /git/project; echo '<h1>main placeholder</h1>' > /var/www/main/index.html; echo '<h1>dev placeholder</h1>' > /var/www/dev/index.html; chown -R git:git /git /var/www; ssh-keygen -A\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "cat > /git/project/hooks/post-receive <<'EOF'\n#!/bin/bash\numask 022\nGIT_DIR=/git/project\nwhile read oldrev newrev refname; do\n    branch=\"${refname#refs/heads/}\"\n    case \"$branch\" in\n        main) target=/var/www/main ;;\n        dev)  target=/var/www/dev ;;\n        *) continue ;;\n    esac\n    mkdir -p \"$target\"\n    git --git-dir=\"$GIT_DIR\" archive \"$branch\" 2>/dev/null | tar -x -C \"$target\"\ndone\nEOF\nchmod +x /git/project/hooks/post-receive\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /etc/ssh/sshd_config <<'EOF'\nPort 22\nAddressFamily inet\nListenAddress 0.0.0.0\nHostKey /etc/ssh/ssh_host_rsa_key\nHostKey /etc/ssh/ssh_host_ecdsa_key\nHostKey /etc/ssh/ssh_host_ed25519_key\nUsePAM no\nPasswordAuthentication yes\nPubkeyAuthentication yes\nAuthorizedKeysFile .ssh/authorized_keys\nPermitRootLogin prohibit-password\nSubsystem sftp /usr/lib/openssh/sftp-server\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "printf 'Host localhost\\n    StrictHostKeyChecking no\\n    UserKnownHostsFile /dev/null\\n    LogLevel ERROR\\n\\n' | cat - /etc/ssh/ssh_config > /tmp/ssh_config.new && mv /tmp/ssh_config.new /etc/ssh/ssh_config\nmkdir -p /etc/ssh/ssh_config.d\ncat > /etc/ssh/ssh_config.d/99-localhost.conf <<'EOF'\nHost localhost\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    LogLevel ERROR\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.crt -days 365 -subj \"/CN=localhost\" 2>/dev/null\ncat > /etc/nginx/conf.d/ssl.conf <<'EOF'\nserver {\n    listen 8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/nginx.crt;\n    ssl_certificate_key /etc/nginx/ssl/nginx.key;\n    root /var/www/main;\n    index index.html;\n    location /dev/ {\n        alias /var/www/dev/;\n        index index.html;\n    }\n}\nEOF\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "pkill sshd 2>/dev/null; sleep 0.3; /usr/sbin/sshd; nginx -t && (nginx -s reload 2>/dev/null || nginx)\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "sleep 1; ss -tlnp 2>/dev/null | grep -E ':(22|8443)'; echo '---procs---'; ps aux | grep -E 'sshd|nginx' | grep -v grep\n",
+      "duration": 1.0
+    }
+  ],
+  "task_complete": false
+}

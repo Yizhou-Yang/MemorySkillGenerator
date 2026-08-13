@@ -1,0 +1,116 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@6ebe3529d47e:/app# cat > /app/verify2.py << 'PYEOF'
+> import struct, csv
+>
+> def rd_varint(b, i):
+>     shift=0; val=0
+>     while True:
+>         x=b[i]; i+=1
+>         val |= (x & 0x7f) << shift
+>         if not (x & 0x80): break
+>         shift += 7
+>     return val, i
+>
+> def zz(n):
+>     return (n >> 1) ^ -(n & 1)
+>
+> def parse_struct(b, i):
+>     fields={}; prev=0
+>     while i < len(b):
+>         t=b[i]; i+=1
+>         if t==0: break
+>         ft=t&0x0f; did=t>>4
+>         if did==0:
+>             fv,i=rd_varint(b,i); fid=zz(fv)
+>         else:
+>             fid=prev+did
+>         prev=fid
+>         if ft in (5,6):
+>             v,i=rd_varint(b,i); fields[fid]=zz(v)
+>         elif ft==8:
+>             ln,i=rd_varint(b,i); fields[fid]=b[i:i+ln]; i+=ln
+>         elif ft==9:
+>             h=b[i]; i+=1
+>             if (h>>4)==15:
+>                 cnt,i=rd_varint(b,i)
+>             else:
+>                 cnt=h>>4
+>             et=h&0x0f
+>             items=[]
+>             for _ in range(cnt):
+>                 if et in (5,6):
+>                     v,i=rd_varint(b,i); items.append(zz(v))
+>                 elif et==8:
+>                     ln,i=rd_varint(b,i); items.append(b[i:i+ln]); i+=ln
+>                 elif et==12:
+>                     sub,i=parse_struct(b,i); items.append(sub)
+>                 else:
+>                     raise ValueError('unhandled list et %d'%et)
+>             fields[fid]=items
+>         elif ft==12:
+>             sub,i=parse_struct(b,i); fields[fid]=sub
+>         else:
+>             raise ValueError('unhandled ft %d'%ft)
+>     return fields, i
+>
+> with open('/app/data.csv','rb') as f:
+>     raw=f.read()
+> assert raw[:4]==b'PAR1' and raw[-4:]==b'PAR1'
+> flen=struct.unpack('<I', raw[-8:-4])[0]
+> footer=raw[-8-flen:-8]
+> fm,_=parse_struct(footer,0)
+> num_rows=fm[3]
+> print('num_rows =', num_rows, ' version =', fm[1])
+> schema_list=fm[2]  # list of SchemaElement structs (pre-order)
+> cols=[]
+> for el in schema_list[1:]:  # skip root
+>     name=el[1].decode(); typ=el[2]; cols.append((name,typ))
+> print('columns:', [(n, {1:'INT32',6:'BYTE_ARRAY'}.get(t,str(t))) for n,t in cols])
+>
+> # read CSV expected
+> with open('/app/data.csv', newline='') as f:
+>     rows=list(csv.reader(f))
+> hdr=rows[0]; data=rows[1:]
+> assert len(data)==num_rows, 'row count mismatch'
+>
+> tc={1:'INT32',6:'BYTE_ARRAY'}
+> rgs=fm[4]
+> ok=True
+> for rg in rgs:
+>     ccs=rg[1]  # list of ColumnChunk
+>     for ci,cc in enumerate(ccs):
+>         cm=cc[3]  # ColumnMetaData
+>         typ=cm[1]; offset=cm[9]; path=cm[3][0].decode()
+>         ph,pos=parse_struct(raw, offset)
+>         ptype=ph[1]; upsz=ph[2]; cpsz=ph[3]
+>         dph=ph[5]; nv=dph[1]; enc=dph[2]
+>         pdata=raw[pos:pos+cpsz]
+>         if typ==1:
+>             vals=[struct.unpack('<i', pdata[k:k+4])[0] for k in range(0,len(pdata),4)]
+>         elif typ==6:
+>             vals=[]; k=0
+>             while k<len(pdata):
+>                 ln=struct.unpack('<I', pdata[k:k+4])[0]; k+=4
+>                 vals.append(pdata[k:k+ln].decode()); k+=ln
+>         else:
+>             raise ValueError('type')
+>         expected=[ (int(r[ci]) if typ==1 else r[ci]) for r in data ]
+>         match = vals == expected
+>         ok = ok and match
+>         print('col %-12s type=%s enc=%d nv=%d match=%s'%(path, tc[typ], enc, nv, match))
+>         if not match:
+>             print('  got   ', vals)
+>             print('  expect', expected)
+> print('RESULT:', 'ALL MATCH' if ok else 'MISMATCH')
+> PYEOF
+root@6ebe3529d47e:/app# python3 /app/verify2.py
+Traceback (most recent call last):
+  File "/app/verify2.py", line 56, in <module>
+    assert raw[:4]==b'PAR1' and raw[-4:]==b'PAR1'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+root@6ebe3529d47e:/app#

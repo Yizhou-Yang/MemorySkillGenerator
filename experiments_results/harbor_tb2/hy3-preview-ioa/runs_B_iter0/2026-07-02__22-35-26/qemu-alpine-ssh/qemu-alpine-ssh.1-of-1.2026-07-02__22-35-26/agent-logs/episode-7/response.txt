@@ -1,0 +1,18 @@
+{
+  "analysis": "My extractor failed to find the config for an unclear reason, but more importantly I realize I may not need to extract anything — I can boot the ISO directly as a cdrom and drive a serial console. The key question is whether Alpine's isolinux outputs to the serial port (so expect can see the login prompt). I need to read SYSLINUX.CFG/GRUB.CFG to confirm the console setting, and check if openssh is available (on ISO or via network). I'll also test host internet connectivity since the live ISO may need network to `apk add openssh`.",
+  "plan": "1) Write a robust `dump.py` that re-parses the ISO, finds config files by suffix, prints their contents, and lists the /APKS directory. 2) Run it to learn the console/append config and confirm whether openssh is local. 3) Test host internet connectivity and presence of curl/wget. This determines the exact boot/setup strategy.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/dump.py << 'EOF'\nimport sys, struct, os\nsys.setrecursionlimit(100000)\nSECTOR=2048\nISO='/app/alpine.iso'\ndef parse_dr(data):\n    if len(data)<34: return None\n    rl=data[0]\n    if rl==0: return None\n    ext=struct.unpack('<I',data[2:6])[0]\n    dlen=struct.unpack('<I',data[10:14])[0]\n    flags=data[25]; nl=data[32]\n    name=data[33:33+nl].split(b';')[0].decode('latin1')\n    return {'ext':ext,'dlen':dlen,'is_dir':bool(flags&2),'name':name}\ndef read_dir(f,lba,length):\n    recs=[]; off=0\n    while off<length:\n        f.seek(lba*SECTOR+off)\n        try: rl=f.read(1)[0]\n        except: break\n        if rl==0:\n            off=(off//SECTOR+1)*SECTOR; continue\n        f.seek(lba*SECTOR+off); rec=f.read(rl); dr=parse_dr(rec)\n        if dr: recs.append(dr)\n        off+=rl\n    return recs\nf=open(ISO,'rb'); f.seek(16*SECTOR)\npvd=f.read(SECTOR); root=parse_dr(pvd[156:156+34])\nresults=[]; visited=set()\ndef walk(entries,path):\n    for dr in entries:\n        if dr['name'] in ('.','..'): continue\n        if dr['ext'] in visited: continue\n        full=path+'/'+dr['name'] if path else dr['name']\n        results.append((full,dr))\n        if dr['is_dir']:\n            visited.add(dr['ext']); walk(read_dir(f,dr['ext'],dr['dlen']),full)\nwalk(read_dir(f,root['ext'],root['dlen']),'')\nwanted=('SYSLINUX.CFG','GRUB.CFG')\nfor w in wanted:\n    for full,dr in results:\n        if full.upper().endswith(w):\n            f.seek(dr['ext']*SECTOR); data=f.read(dr['dlen'])\n            print('==== '+full+' ('+str(dr['dlen'])+' bytes) ====')\n            print(data.decode('latin1'))\n            break\nprint('---- /APKS entries ----')\nfor full,_ in results:\n    if full.upper().startswith('/APKS/'):\n        print(full)\nf.close()\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /tmp/dump.py\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "which curl wget 2>/dev/null; echo '---'; timeout 8 curl -sI http://dl-cdn.alpinelinux.org 2>&1 | head -3; echo \"curl_exit=$?\"\n",
+      "duration": 9.0
+    }
+  ]
+}

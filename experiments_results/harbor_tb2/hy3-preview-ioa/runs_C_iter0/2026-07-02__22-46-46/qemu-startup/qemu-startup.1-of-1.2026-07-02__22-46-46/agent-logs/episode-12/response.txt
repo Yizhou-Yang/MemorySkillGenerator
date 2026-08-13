@@ -1,0 +1,18 @@
+{
+  "analysis": "Key finding: the relay is alive (pid 429) and connected to QEMU's serial, but the QEMU process (pid 431) is GONE — it exited after the relay connected. An `nc` to 6665 dumped nothing because the relay's history buffer is empty (QEMU died before emitting serial output). qemu.log was empty earlier. I need to find out why QEMU exited. Most likely: KVM permission failure (the launch script adds `-enable-kvm` if /dev/kvm exists), or some immediate error. I'll check qemu.log and run a short foreground QEMU with `-serial stdio` redirected to a file to capture the actual error/boot output.",
+  "plan": "1) Check /dev/kvm and current qemu.log. 2) Run QEMU in foreground for ~6s with `-serial stdio` (output to /tmp/q.out) WITHOUT -enable-kvm to avoid KVM permission issues, to see whether it boots or errors. 3) Inspect /tmp/q.out to diagnose. This determines the correct launch parameters.",
+  "commands": [
+    {
+      "keystrokes": "ls -la /dev/kvm 2>&1; echo '--- qemu.log:'; cat /app/run/qemu.log; echo '=== end ==='\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "timeout 8 qemu-system-x86_64 -m 512 -display none -vga none -monitor none -kernel /app/run/vmlinuz-lts -initrd /app/run/intel-ucode.img,/app/run/amd-ucode.img,/app/run/initramfs-lts -append \"modules=loop,squashfs,sd-mod,usb-storage console=ttyS0\" -cdrom /app/alpine.iso -serial stdio > /tmp/q.out 2>&1; echo \"exit=$?\"\n",
+      "duration": 9.0
+    },
+    {
+      "keystrokes": "echo '=== q.out tail ==='; tail -40 /tmp/q.out\n",
+      "duration": 0.3
+    }
+  ]
+}

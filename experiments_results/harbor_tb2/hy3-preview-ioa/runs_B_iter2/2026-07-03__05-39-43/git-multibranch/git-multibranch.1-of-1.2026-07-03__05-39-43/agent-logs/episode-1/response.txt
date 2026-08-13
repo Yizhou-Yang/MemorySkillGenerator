@@ -1,0 +1,50 @@
+{
+  "analysis": "Environment is Ubuntu 26.04 with git, nginx, sshd all installed. No 'git' user exists yet. Nothing is running. I need to: create a git user with password auth, create a bare repo at /git/project with a post-receive hook that deploys main/dev branches to /var/www, generate a self-signed cert, configure nginx on 8443 with HTTPS, and start sshd + nginx.",
+  "plan": "Run a sequence of setup commands: (1) create git user with password 'password'; (2) init bare repo /git/project; (3) install post-receive hook; (4) chown dirs; (5) generate self-signed cert; (6) write nginx config for 8443 with root /var/www/main and alias /dev -> /var/www/dev; (7) enable sshd password auth; (8) start sshd and nginx; (9) seed main and dev branches by pushing to the bare repo (triggers hook/deploy); (10) verify services listening and both URLs serve content.",
+  "commands": [
+    {
+      "keystrokes": "useradd -m -s /bin/bash git 2>/dev/null; echo 'git:password' | chpasswd; id git\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "mkdir -p /git /var/www/main /var/www/dev; git init --bare -b main /git/project >/dev/null; ls /git/project\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "cat > /git/project/hooks/post-receive <<'EOF'\n#!/bin/bash\nwhile read oldrev newrev refname; do\n  [ \"$newrev\" = \"0000000000000000000000000000000000000000\" ] && continue\n  branch=\"${refname#refs/heads/}\"\n  case \"$branch\" in\n    main) target=/var/www/main ;;\n    dev) target=/var/www/dev ;;\n    *) continue ;;\n  esac\n  mkdir -p \"$target\"\n  find \"$target\" -mindepth 1 -delete\n  git --git-dir=/git/project archive \"$newrev\" | tar -x -C \"$target\"\ndone\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "chmod +x /git/project/hooks/post-receive; chown -R git:git /git /var/www; ls -la /git/project/hooks/\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "mkdir -p /etc/nginx/ssl; openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.crt -subj \"/CN=localhost\" 2>/dev/null; ls -la /etc/nginx/ssl/\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "cat > /etc/nginx/conf.d/git.conf <<'EOF'\nserver {\n    listen 8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/nginx.crt;\n    ssl_certificate_key /etc/nginx/ssl/nginx.key;\n    root /var/www/main;\n    index index.html;\n    location /dev {\n        alias /var/www/dev;\n    }\n}\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "mkdir -p /etc/ssh/sshd_config.d\ncat > /etc/ssh/sshd_config.d/99-git.conf <<'EOF'\nPasswordAuthentication yes\nPubkeyAuthentication yes\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "mkdir -p /run/sshd && /usr/sbin/sshd && nginx -t && nginx\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "cd /tmp && rm -rf seed && git init -q -b main seed && cd seed && git config user.email t@t && git config user.name t && echo '<h1>MAIN</h1>' > index.html && git add index.html && git commit -qm main && git checkout -q -b dev && echo '<h1>DEV</h1>' > index.html && git add index.html && git commit -qm dev && git push -q /git/project main && git push -q /git/project dev && cd / && rm -rf /tmp/seed\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "chown -R git:git /git /var/www\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "ss -tln 2>/dev/null | grep -E ':22|:8443'; echo '--- procs ---'; ps -ef | grep -v grep | grep -E 'sshd|nginx' | wc -l; echo '--- MAIN ---'; curl -sk https://localhost:8443/index.html; echo '--- DEV ---'; curl -sk https://localhost:8443/dev/index.html\n",
+      "duration": 1.0
+    }
+  ]
+}

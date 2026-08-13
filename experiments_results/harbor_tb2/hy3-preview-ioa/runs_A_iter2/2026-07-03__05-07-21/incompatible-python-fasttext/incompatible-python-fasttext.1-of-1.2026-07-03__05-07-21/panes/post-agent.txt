@@ -1,0 +1,205 @@
+root@89cd64252008:/app# which python python3; python --version
+/usr/local/bin/python
+/usr/local/bin/python3
+Python 3.13.1
+root@89cd64252008:/app# python -c 'import fasttext; print(fasttext.__file__)'
+/usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+root@89cd64252008:/app# python -c 'import fasttext; print(dir(fasttext))'
+['BOW', 'EOS', 'EOW', 'FastText', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__', '__spec__', 'absolut
+e_import', 'cbow', 'division', 'load_model', 'print_function', 'skipgram', 'supervised', 'tokenize', 'train_supervised', 'train_unsupervised', 'unicode_literals
+']
+root@89cd64252008:/app# python -c 'import fasttext, fasttext.util; print([x for x in dir(fasttext.util) if not x.startswith("_")])'
+['absolute_import', 'division', 'download_model', 'find_nearest_neighbor', 'print_function', 'reduce_model', 'test', 'unicode_literals', 'util']
+root@89cd64252008:/app# python -c 'import fasttext, _fasttext; print(fasttext.__version__); print(_fasttext.__file__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext, _fasttext; print(fasttext.__version__); print(_fasttext.__file__)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named '_fasttext'
+root@89cd64252008:/app# printf 'hello world\nfoo bar\nhello foo\n' > /tmp/t.txt; python -c 'import fasttext; m=fasttext.train_unsupervised("/tmp/t.txt"); print(
+m.get_words()[:5])'
+Read 0M words
+Number of words:  0
+Number of labels: 0
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; m=fasttext.train_unsupervised("/tmp/t.txt"); print(m.get_words()[:5])
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 604, in train_unsupervised
+    fasttext.train(ft.f, a)
+    ~~~~~~~~~~~~~~^^^^^^^^^
+ValueError: Empty vocabulary. Try a smaller -minCount value.
+root@89cd64252008:/app# ls -la /usr/local/lib/python3.13/site-packages/ | grep -i fast
+drwxr-xr-x  5 root root     4096 Jul  2 14:51 fasttext
+drwxr-xr-x  3 root root     4096 Jul  2 14:51 fasttext-0.9.3.dist-info
+-rwxr-xr-x  1 root root 15435352 Jul  2 14:51 fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+root@89cd64252008:/app# ls -la /usr/local/lib/python3.13/site-packages/fasttext/
+total 44
+drwxr-xr-x  5 root root  4096 Jul  2 14:51 .
+drwxr-xr-x 14 root root  4096 Jul  2 14:51 ..
+-rw-r--r--  1 root root 19636 Jul  2 14:51 FastText.py
+-rw-r--r--  1 root root   659 Jul  2 14:51 __init__.py
+drwxr-xr-x  2 root root  4096 Jul  2 14:51 __pycache__
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 tests
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 util
+root@89cd64252008:/app# grep -n '_fasttext' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py | head -n 20
+root@89cd64252008:/app# cat /usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+# Copyright (c) 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from .FastText import train_supervised
+from .FastText import train_unsupervised
+from .FastText import load_model
+from .FastText import tokenize
+from .FastText import EOS
+from .FastText import BOW
+from .FastText import EOW
+
+from .FastText import cbow
+from .FastText import skipgram
+from .FastText import supervised
+root@89cd64252008:/app# grep -n 'import\|pybind\|fasttext_pybind' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py | head -n 30
+7:from __future__ import absolute_import
+8:from __future__ import division
+9:from __future__ import print_function
+10:from __future__ import unicode_literals
+12:import fasttext_pybind as fasttext
+13:import numpy as np
+14:import multiprocessing
+15:from itertools import chain
+root@89cd64252008:/app# python -c 'import fasttext_pybind as f; print("pybind OK", f.__file__)'
+pybind OK /usr/local/lib/python3.13/site-packages/fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+root@89cd64252008:/app# python - <<'EOF'
+> import random
+> random.seed(1)
+> labels=['__label__pos','__label__neg']
+> words=['good','bad','great','terrible','nice','awful','love','hate']
+> with open('/tmp/data.txt','w') as fh:
+>     for i in range(2000):
+>         lab=random.choice(labels)
+>         ws=' '.join(random.choice(words) for _ in range(random.randint(3,8)))
+>         fh.write(f'{lab} {ws}\n')
+> print('wrote data')
+> EOF
+wrote data
+root@89cd64252008:/app# python -c 'import fasttext; m=fasttext.train_supervised("/tmp/data.txt", epoch=5); print("vocab", m.get_words()[:3]); print(m.test("/tmp
+/data.txt"))'
+Read 0M words
+Number of words:  9
+Number of labels: 2
+Progress: 100.0% words/sec/thread:   22710 lr:  0.000000 avg.loss:  0.694506 ETA:   0h 0m 0s
+vocab ['</s>', 'great', 'love']
+(2000, 0.5235, 0.5235)
+root@89cd64252008:/app# ls -la /app
+total 104296
+drwxr-xr-x  2 root root      4096 Jul  2 14:51 .
+drwxr-xr-x 19 root root      4096 Jul  2 21:43 ..
+-rw-r--r--  1 root root 106785163 Jul  2 14:51 model.bin
+root@89cd64252008:/app# pip show fasttext 2>/dev/null | head -n 20
+python -c 'import numpy; print("numpy", numpy.__version__)'
+Name: fasttext
+Version: 0.9.3
+Summary: fasttext Python bindings
+Home-page: https://github.com/facebookresearch/fastText
+Author: Onur Celebi
+Author-email: celebio@fb.com
+License: MIT
+Location: /usr/local/lib/python3.13/site-packages
+Requires: numpy, pybind11, setuptools
+Required-by:
+root@89cd64252008:/app# python -c 'import numpy; print("numpy", numpy.__version__)'
+numpy 2.5.0
+root@89cd64252008:/app# python -c 'import fasttext; m=fasttext.load_model("/app/model.bin"); print("loaded", type(m)); print(m.get_words()[:5])'
+loaded <class 'fasttext.FastText._FastText'>
+['the', 'and', 'a', 'I', 'to']
+root@89cd64252008:/app# python -c 'import sys; print(sys.executable)'
+/usr/local/bin/python
+root@89cd64252008:/app# find / -name 'fasttext*.py' -not -path '*/site-packages/*' 2>/dev/null; echo '---'; find / -name '_fasttext*.so' 2>/dev/null
+python - <<'EOF'
+import fasttext
+m=fasttext.load_model('/app/model.bin')
+print('predict:', m.predict('the movie was good', k=1))
+print('svec:', type(m.get_sentence_vector('hello')), m.get_sentence_vector('hello').shape)
+try:
+    print('nn:', m.get_nearest_neighbors('good', k=3))
+except Exception as e:
+    print('NN ERROR:', repr(e))
+try:
+    m.quantize(input='/tmp/data.txt')
+    print('quantize ok')
+except Exception as e:
+    print('QUANTIZE ERROR:', repr(e))
+EOF
+---
+root@89cd64252008:/app# python - <<'EOF'
+> import fasttext
+> m=fasttext.load_model('/app/model.bin')
+> print('predict:', m.predict('the movie was good', k=1))
+> print('svec:', type(m.get_sentence_vector('hello')), m.get_sentence_vector('hello').shape)
+> try:
+>     print('nn:', m.get_nearest_neighbors('good', k=3))
+> except Exception as e:
+>     print('NN ERROR:', repr(e))
+> try:
+>     m.quantize(input='/tmp/data.txt')
+>     print('quantize ok')
+> except Exception as e:
+>     print('QUANTIZE ERROR:', repr(e))
+> EOF
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 239, in predict
+    return labels, np.array(probs, copy=False)
+                   ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+ValueError: Unable to avoid copy while creating an array as requested.
+If using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).
+For more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.
+root@89cd64252008:/app# grep -n 'copy=False\|np.array' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+136:        return np.array(b)
+151:        return np.array(b)
+184:        return pair[0], np.array(pair[1])
+193:        return np.array(b)
+239:            return labels, np.array(probs, copy=False)
+248:        return np.array(self.f.getInputMatrix())
+257:        return np.array(self.f.getOutputMatrix())
+268:            return (pair[0], np.array(pair[1]))
+284:                return (pair[0], np.array(pair[1]))
+root@89cd64252008:/app# grep -rn 'copy=False' /usr/local/lib/python3.13/site-packages/fasttext/
+/usr/local/lib/python3.13/site-packages/fasttext/FastText.py:41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+/usr/local/lib/python3.13/site-packages/fasttext/FastText.py:56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+/usr/local/lib/python3.13/site-packages/fasttext/FastText.py:239:            return labels, np.array(probs, copy=False)
+root@89cd64252008:/app# sed -i -E 's/np\.array\(([^)]*), copy=False\)/np.asarray(\1)/g' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@89cd64252008:/app# grep -n 'copy=False\|np.asarray' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.asarray(y_scores), np.asarray(y_true)
+56:        return np.asarray(precision), np.asarray(recall)
+239:            return labels, np.asarray(probs)
+root@89cd64252008:/app# cd /tmp && python - <<'EOF'
+> import fasttext
+> m=fasttext.load_model('/app/model.bin')
+> print('predict:', m.predict('the movie was good', k=1))
+> print('svec shape:', m.get_sentence_vector('hello').shape)
+> print('nn:', m.get_nearest_neighbors('good', k=3))
+> print('test:', m.test('/tmp/data.txt'))
+> m.quantize(input='/tmp/data.txt')
+> print('quantize ok')
+> EOF
+predict: (('__label__2',), array([0.89353156]))
+svec shape: (5,)
+nn: [(0.9994587302207947, "H&C's."), (0.9987114667892456, 'Bellagio.'), (0.9986928701400757, 'attentive.')]
+test: (0, nan, nan)
+quantize ok
+root@89cd64252008:/tmp# grep -n 'np.asarray' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.asarray(y_scores), np.asarray(y_true)
+56:        return np.asarray(precision), np.asarray(recall)
+239:            return labels, np.asarray(probs)
+root@89cd64252008:/tmp#

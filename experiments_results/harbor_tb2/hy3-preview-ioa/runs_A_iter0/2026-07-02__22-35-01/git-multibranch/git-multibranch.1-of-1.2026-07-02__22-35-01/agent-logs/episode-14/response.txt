@@ -1,0 +1,18 @@
+{
+  "analysis": "Even `ssh git@localhost 'echo OUT_TEST123; id; pwd'` returns NOTHING — no output at all, despite successful auth. The shell is /bin/bash, no ForceCommand/Match restrictions in sshd_config. This means the remote command's stdout is being swallowed before it reaches us. I need to find why: check the git user's home/shell startup files, /etc/ssh/sshrc, and test the shell locally via `su` to isolate whether it's sshd or the shell.",
+  "plan": "Run diagnostics: (1) test the shell locally as git via `su git -c`; (2) check for /etc/ssh/sshrc; (3) list git home and check .bashrc/.profile/.bash_profile; (4) run an ssh command with -v to see session setup. This should reveal the cause of the swallowed stdout.",
+  "commands": [
+    {
+      "keystrokes": "su git -c 'echo HI_FROM_SU; id'\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "ls -la /etc/ssh/sshrc 2>/dev/null; echo '---'; cat /etc/ssh/sshrc 2>/dev/null; echo END\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ls -la /home/git/; echo '--- bashrc ---'; cat /home/git/.bashrc 2>/dev/null; cat /home/git/.profile 2>/dev/null; cat /home/git/.bash_profile 2>/dev/null\n",
+      "duration": 0.2
+    }
+  ]
+}

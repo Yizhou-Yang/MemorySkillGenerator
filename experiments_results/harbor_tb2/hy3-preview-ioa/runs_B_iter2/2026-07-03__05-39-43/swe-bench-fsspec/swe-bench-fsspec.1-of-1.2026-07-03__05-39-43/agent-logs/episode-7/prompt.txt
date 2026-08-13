@@ -1,0 +1,23 @@
+New Terminal Output:
+
+root@20099aa7046e:/app/filesystem_spec# cat > /tmp/add_open_async.py << 'EOF'
+> path = './fsspec/implementations/dirfs.py'
+> with open(path) as f:
+>     content = f.read()
+>
+> marker = '    def open('
+> idx = content.index(marker)
+> assert idx != -1
+>
+> new_method = ('    async def open_async(self, path, mode="rb", **kwargs):\n'
+>              '        return await self.fs.open_async(self._join(path), mode=mode, **kwargs)\n\n')
+>
+> content = content[:idx] + new_method + content[idx:]
+>
+> with open(path, 'w') as f:
+>     f.write(content)
+> print('done')
+> EOF
+root@20099aa7046e:/app/filesystem_spec# python3 /tmp/add_open_async.py
+done
+root@20099aa7046e:/app/filesystem_spec#

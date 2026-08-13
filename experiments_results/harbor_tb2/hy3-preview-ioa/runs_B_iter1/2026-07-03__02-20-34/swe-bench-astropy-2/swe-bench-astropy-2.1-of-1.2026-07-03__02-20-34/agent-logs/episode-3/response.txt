@@ -1,0 +1,14 @@
+{
+  "analysis": "I understand the issue. In `_line_type`, the regex `_command_re = r\"READ [TS]ERR(\\s+[0-9]+)+\"` requires uppercase 'READ'. The command is later parsed with `command[1].lower()`, so only the regex matching is the bottleneck. Since QDP itself is case-insensitive, the cleanest fix is to compile the regex with `re.IGNORECASE`, which makes the whole line-type detection case-insensitive (consistent with QDP semantics and also helps 'NO'/'nan' variants).",
+  "plan": "1. Edit qdp.py to add `re.IGNORECASE` to the `re.compile(_type_re)` call.\n2. Write a quick test using the example from the issue to verify it reads correctly.\n3. Run the existing test suite for qdp if available.",
+  "commands": [
+    {
+      "keystrokes": "sed -i 's/    _line_type_re = re.compile(_type_re)/    _line_type_re = re.compile(_type_re, re.IGNORECASE)/' /app/astropy/astropy/io/ascii/qdp.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "grep -n 're.compile' /app/astropy/astropy/io/ascii/qdp.py\n",
+      "duration": 0.2
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "analysis": "The apt free-space check keeps failing. The fuse-overlayfs reports bfree (free blocks for root) = 6.5M blocks (~26GB) but bavail (available) = 0, a known statvfs quirk that makes apt refuse. I previously added a config file but my last command did not pass the NoCheck-Space flag explicitly. I need to confirm real free space by writing a test file, then retry apt with the explicit `-o APT::NoCheck-Space=true` flag.",
+  "plan": "1) Test whether I can actually write ~200MB to /app (diagnoses if disk is genuinely full or it's just the bavail quirk). 2) Retry the install with both the explicit NoCheck-Space flag and the relocated cache dir. If it succeeds, I'll then install yt-dlp via pip.",
+  "commands": [
+    {
+      "keystrokes": "df /app; dd if=/dev/zero of=/app/_t bs=1M count=200 2>&1 | tail -2; rm -f /app/_t; echo TESTDONE\n",
+      "duration": 5.0
+    },
+    {
+      "keystrokes": "apt-get -o APT::NoCheck-Space=true -o Dir::Cache=/app/aptcache install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng python3-pip\n",
+      "duration": 60.0
+    }
+  ]
+}

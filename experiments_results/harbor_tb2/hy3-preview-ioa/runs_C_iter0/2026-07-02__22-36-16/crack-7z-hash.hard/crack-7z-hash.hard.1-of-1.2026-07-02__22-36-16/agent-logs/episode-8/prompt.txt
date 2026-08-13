@@ -1,0 +1,166 @@
+New Terminal Output:
+
+root@855119ff551c:/app# cat > /dev/shm/p.py << 'EOF'
+> import struct, lzma
+>
+> data = open('/app/secrets.7z','rb').read()
+>
+> class R:
+>     def __init__(self, d, pos=0):
+>         self.d=d; self.p=pos
+>     def u8(self):
+>         v=self.d[self.p]; self.p+=1; return v
+>     def read(self,n):
+>         b=self.d[self.p:self.p+n]; self.p+=n; return b
+>     def varint(self):
+>         r=0; s=0
+>         while True:
+>             b=self.d[self.p]; self.p+=1
+>             r|=(b&0x7f)<<s
+>             if not(b&0x80): break
+>             s+=7
+>         return r
+>
+> def get_packed(rel,n):
+>     return data[32+rel:32+rel+n]
+>
+> def lzma2_dict(p):
+>     return (2|(p&1))<<((p>>1)+11)
+>
+> def decomp(cid, props, blob, usize):
+>     if cid==b'\x03\x01\x01':
+>         hdr=props+struct.pack('<Q', usize)
+>         return lzma.decompress(hdr+blob, format=lzma.FORMAT_ALONE)
+>     if cid[0]==0x21:
+>         f=lzma.LZMADecompressor(format=lzma.FORMAT_RAW, filters=[{'id':lzma.FILTER_LZMA2,'dict_size':lzma2_dict(props[0])}])
+>         return f.decompress(blob)
+>     raise Exception('unknown coder '+cid.hex())
+>
+> def parse_pack(r):
+>     num=r.varint(); sizes=[]; startpos=0
+>     while True:
+>         id=r.u8()
+>         if id==0: break
+>         if id==0x09:
+>             sizes=[r.varint() for _ in range(num)]
+>         elif id==0x0A:
+>             flag=r.u8()
+>             if flag==1:
+>                 for _ in range(num): r.read(4)
+>         elif id==0x18:
+>             startpos=r.varint()
+>         else:
+>             raise Exception('pack prop %x'%id)
+>     return {'num':num,'sizes':sizes,'startpos':startpos}
+>
+> def parse_unpack(r):
+>     assert r.u8()==0x0B
+>     num_folders=r.varint(); folders=[]
+>     for _ in range(num_folders):
+>         nc=r.varint(); coders=[]; tin=0; tout=0
+>         for _ in range(nc):
+>             b=r.u8(); isc=(b&0x10)!=0; hasp=(b&0x20)!=0; ids=(b&0x0F)+1
+>             cid=r.read(ids)
+>             if isc: ni=r.varint(); no=r.varint()
+>             else: ni=1; no=1
+>             if hasp: ps=r.varint(); pr=r.read(ps)
+>             else: pr=b''
+>             coders.append({'id':cid,'props':pr,'ni':ni,'no':no})
+>             tin+=ni; tout+=no
+>         bind=[]
+>         if tin>num_folders:
+>             for _ in range(tin-num_folders):
+>                 bi=r.varint(); bo=r.varint(); bind.append((bi,bo))
+>         npk = tin-len(bind)
+>         pidx=[r.varint() for _ in range(npk)]
+>         folders.append({'coders':coders,'tin':tin,'tout':tout,'bind':bind,'pidx':pidx})
+>     assert r.u8()==0x0C
+>     for f in folders:
+>         f['unpack_sizes']=[r.varint() for _ in range(f['tout'])]
+>     id=r.u8()
+>     if id==0x0A:
+>         flag=r.u8()
+>         if flag==1:
+>             for _ in range(num_folders): r.read(4)
+>         id=r.u8()
+>     assert id==0
+>     return folders
+>
+> def parse_main_streams(r):
+>     pack=unpack=sub=None
+>     while True:
+>         id=r.u8()
+>         if id==0: break
+>         if id==0x06: pack=parse_pack(r)
+>         elif id==0x07: unpack=parse_unpack(r)
+>         elif id==0x08: r.varint()  # substreams skip
+>         else: raise Exception('ms prop %x'%id)
+>     return pack,unpack,sub
+>
+> def parse_header(r):
+>     pack=unpack=None
+>     while True:
+>         id=r.u8()
+>         if id==0: break
+>         if id==0x04:
+>             p,u,s=parse_main_streams(r); pack,unpack=p,u
+>         elif id==0x02:
+>             while True:
+>                 pid=r.u8()
+>                 if pid==0: break
+>                 r.u8(); sz=r.varint(); r.read(sz)
+>         elif id==0x05:
+>             break
+>         else:
+>             break
+>     return pack,unpack
+>
+> def decode_folders(pack,unpack):
+>     sizes=pack['sizes']; startpos=pack.get('startpos',0)
+>     offs=[]; o=startpos
+>     for s in sizes:
+>         offs.append(o); o+=s
+>     out=[]
+>     for f in unpack:
+>         blob=b''
+>         for pi in f['pidx']:
+>             blob+=get_packed(offs[pi], sizes[pi])
+>         cd=f['coders'][0]; usize=sum(f['unpack_sizes'])
+>         print(' coder',cd['id'].hex(),'props',cd['props'].hex(),'usize',usize,'bloblen',len(blob))
+>         out.append(decomp(cd['id'],cd['props'],blob,usize))
+>     return out
+>
+> # start header
+> ver=data[6:8]
+> next_off=struct.unpack('<Q',data[12:20])[0]
+> next_size=struct.unpack('<Q',data[20:28])[0]
+> print('ver',ver.hex(),'next_off',next_off,'next_size',next_size)
+> nh=data[32+next_off:32+next_off+next_size]
+> print('encoded header:',nh.hex())
+> r=R(nh)
+> assert r.u8()==0x17
+> p,u,s=parse_main_streams(r)
+> print('enc pack',p)
+> real=decode_folders(p,u)[0]
+> print('real header len',len(real), real[:60].hex())
+> r2=R(real)
+> p2,u2=parse_header(r2)
+> print('file pack',p2)
+> contents=decode_folders(p2,u2)
+> for i,c in enumerate(contents):
+>     print('FOLDER',i,'len',len(c),'repr',repr(c[:120]))
+> EOF
+root@855119ff551c:/app# python3 /dev/shm/p.py
+ver 0004 next_off 149 next_size 34
+encoded header: 1706100109808500070b01000123030101055d001000000c80a60a01224c2d3a0000
+Traceback (most recent call last):
+  File "/dev/shm/p.py", line 139, in <module>
+    p,u,s=parse_main_streams(r)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/dev/shm/p.py", line 91, in parse_main_streams
+    if id==0x06: pack=parse_pack(r)
+                      ^^^^^^^^^^^^^
+  File "/dev/shm/p.py", line 50, in parse_pack
+    raise Exception('pack prop %x'%id)
+Exception: pack prop 1
+root@855119ff551c:/app#

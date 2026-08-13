@@ -1,0 +1,16 @@
+The cause is clear: NumPy 2.0 removed `copy=False` from `np.array`, and fasttext uses it. The fix is to replace `np.array(x, copy=False)` with `np.asarray(x)`. Let me patch the file.
+
+{
+  "analysis": "Confirmed: three usages of `np.array(..., copy=False)` in FastText.py (lines 41, 56, 239) break under NumPy 2.0. The recommended fix is to use `np.asarray(...)` which doesn't take copy=False. I'll patch all three.",
+  "plan": "Use sed to replace `np.array(X, copy=False)` with `np.asarray(X)` globally in the file, then verify with grep, then re-test loading the model and predicting.",
+  "commands": [
+    {
+      "keystrokes": "sed -i -E 's/np\\.array\\(([^,]*), copy=False\\)/np.asarray(\\1)/g' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "grep -n 'copy=False\\|np.asarray' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py\n",
+      "duration": 0.2
+    }
+  ]
+}

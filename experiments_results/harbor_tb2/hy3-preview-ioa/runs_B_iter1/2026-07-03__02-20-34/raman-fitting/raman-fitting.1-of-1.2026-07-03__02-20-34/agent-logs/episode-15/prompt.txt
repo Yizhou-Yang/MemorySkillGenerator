@@ -1,0 +1,28 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@be7c189382c3:/app# cat > peaks.py << 'EOF'
+> import numpy as np
+> from scipy.signal import find_peaks
+> data=[]
+> with open('graphene.dat') as f:
+>     for line in f:
+>         line=line.strip()
+>         if not line: continue
+>         p=line.replace(',','.').split()
+>         if len(p)<2: continue
+>         data.append((float(p[0]),float(p[1])))
+> d=np.array(data); x=d[:,0]; y=d[:,1]
+> o=np.argsort(x); x=x[o]; y=y[o]
+> # smooth
+> from scipy.ndimage import uniform_filter1d
+> ys=uniform_filter1d(y,size=9)
+> pk,props=find_peaks(ys,prominence=500,width=2)
+> print('detected peaks (smoothed):')
+> for xi in pk:
+>     print(f'  x={x[xi]:.1f} yraw={y[xi]:.0f} ysm={ys[xi]:.0f} prom={props["prominences"][list(pk).index(xi)]:.0f}')
+> EOF
+root@be7c189382c3:/app# python3 peaks.py
+

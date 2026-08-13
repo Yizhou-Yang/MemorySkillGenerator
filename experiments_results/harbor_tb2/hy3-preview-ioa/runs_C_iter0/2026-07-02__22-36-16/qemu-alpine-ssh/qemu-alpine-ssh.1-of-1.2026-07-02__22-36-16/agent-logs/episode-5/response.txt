@@ -1,0 +1,14 @@
+{
+  "analysis": "No /dev/kvm (qemu will use TCG software emulation — slower but functional). QEMU 5.2.0, internet works. I can't mount the ISO. I'll do an empirical boot test: launch qemu with the ISO as a CD, a virtio disk, and user-mode networking with hostfwd tcp::2222->:22, exposing the serial console over a TCP socket. Then I'll connect and see whether a root login prompt appears on the serial console. This determines whether I can configure the VM via serial or must use the kernel-extract approach.",
+  "plan": "1) Launch qemu in background with -display none, serial on TCP 127.0.0.1:4555 (server,nowait), CD boot, disk, and hostfwd. 2) Write a small python client to connect and capture serial output (with the ability to send newlines) to confirm we get a login prompt. This test will reveal the serial console behavior.",
+  "commands": [
+    {
+      "keystrokes": "nohup qemu-system-x86_64 -m 512 -smp 2 -boot d -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2,if=virtio -netdev user,id=net0,hostfwd=tcp::2222-:22 -device virtio-net-pci,netdev=net0 -display none -serial tcp:127.0.0.1:4555,server,nowait > /tmp/qemu.log 2>&1 &\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 2; cat /tmp/qemu.log; echo '---'; ss -ltnp 2>/dev/null | grep 4555 || netstat -ltnp 2>/dev/null | grep 4555\n",
+      "duration": 3.0
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+The `cpp_flag` failure is because `dpkg-deb -x` doesn't run maintainer scripts, so the `/usr/bin/c++` symlink (which distutils uses as the default C++ compiler) wasn't created. Let me fix that.
+
+{
+  "analysis": "fasttext-wheel still fails the C++11 detection. The cause: I installed g++ via 'dpkg-deb -x' which does NOT run maintainer scripts, so the /usr/bin/c++ symlink was never created. distutils' default C++ compiler on Unix is 'c++', which doesn't exist, so the test compile fails and setup.py raises 'Unsupported compiler'. I need to create the c++ (and gcc) symlinks manually, then rebuild.",
+  "plan": "Create /usr/bin/c++ -> /usr/bin/g++ symlink (and gcc -> g++ for safety). Also set CXX=g++ env var. Then retry pip install fasttext-wheel. The compiler now present, the build should succeed.",
+  "commands": [
+    {
+      "keystrokes": "ls -la /usr/bin/ | grep -E 'c\\+\\+|g\\+\\+|gcc' ; echo '---'\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "ln -sf /usr/bin/g++ /usr/bin/c++; ln -sf /usr/bin/g++ /usr/bin/gcc; ls -la /usr/bin/c++ /usr/bin/gcc\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "CXX=g++ pip3 install fasttext-wheel 2>&1 | tail -15\n",
+      "duration": 90.0
+    }
+  ]
+}

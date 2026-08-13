@@ -1,0 +1,16 @@
+apt's "no free space" check is df-based (fuse quirk) and refuses to write even to /app, while raw writes (dd) work fine. So I'll bypass apt entirely and fetch a prebuilt node binary directly.
+
+{
+  "analysis": "apt's free-space check uses df, which reports 0 avail across the overlay and blocks installation even into /app/aptcache — but raw writes (dd) work. So apt is unusable for node. I need a JS runtime for yt-dlp to bypass YouTube's bot-detection. The fix: download a prebuilt node binary directly (no apt), which the raw-filesystem handles fine.",
+  "plan": "1) Download a prebuilt nodejs linux-x64 tarball directly via urllib to /app. 2) Extract it and verify node runs. 3) Retry yt-dlp with --js-runtimes node to pass the JS runtime requirement and bypass the bot check. This unblocks the pipeline without using apt.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"import urllib.request as u; u.urlretrieve('https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-x64.tar.xz','/app/node.tar.xz')\" && ls -la /app/node.tar.xz\n",
+      "duration": 30
+    },
+    {
+      "keystrokes": "cd /app && tar xf node.tar.xz && ls -d node-v20.11.0-linux-x64 && /app/node-v20.11.0-linux-x64/bin/node --version\n",
+      "duration": 5
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: even a plain `ssh git@localhost 'echo PATH=$PATH'` produced NO output, and `git-receive-pack /git/project` also produced nothing. So remote command execution isn't returning output at all — this is why the push fails with a generic 'Could not read from remote repository'. The shell is /bin/bash, key auth works (no password prompt), so something prevents the command's stdout from coming back. I need to capture the real cause with verbose ssh and a simple echo test.",
+  "plan": "Run focused diagnostics: (1) a trivial `ssh git@localhost 'echo TEST123'` to confirm whether ANY output returns; (2) `ssh -v` to see the session negotiation; (3) check git user's shell/login shell behavior. This will reveal whether the issue is the shell, an sshd ForceCommand/Match block, or output being swallowed.",
+  "commands": [
+    {
+      "keystrokes": "ssh git@localhost 'echo TEST123' ; echo \"RC=$?\"\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "ssh -v git@localhost 'echo VTEST' 2>&1 | tail -25\n",
+      "duration": 2.0
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@b539af01810d:/app# cat > /tmp/rpctest2.py << 'EOF'
+> import urllib.request, json
+>
+> def post(url, body, proxy=None, timeout=15):
+>     data = json.dumps(body).encode()
+>     req = urllib.request.Request(url, data=data, headers={'Content-Type':'application/json'})
+>     handlers = []
+>     if proxy:
+>         ph = urllib.request.ProxyHandler({'http': proxy, 'https': proxy})
+>         handlers.append(ph)
+>     opener = urllib.request.build_opener(*handlers)
+>     try:
+>         r = opener.open(req, timeout=timeout)
+>         return r.status, r.read().decode()
+>     except Exception as e:
+>         return 'ERR', repr(e)
+>
+> body = {'jsonrpc':'2.0','id':1,'method':'getHealth'}
+> print('=== CONNECT proxy via 185.45.7.185:80 ===')
+> print('devnet', post('https://api.devnet.solana.com', body, proxy='http://185.45.7.185:80')[:2])
+> print('mainnet', post('https://api.mainnet-beta.solana.com', body, proxy='http://185.45.7.185:80')[:2])
+>
+> print('=== direct (no proxy) HTTPS ===')
+> print('devnet', post('https://api.devnet.solana.com', body)[:2])
+>
+> print('=== try public RPCs direct ===')
+> for u in ['https://api.testnet.solana.com','https://rpc.ankr.com/solana']:
+>     print(u, post(u, body)[:2])
+> EOF
+root@b539af01810d:/app# python3 /tmp/rpctest2.py
+=== CONNECT proxy via 185.45.7.185:80 ===
+devnet ('ERR', "URLError(OSError('Tunnel connection failed: 502 Server UnReachable'))")
+mainnet ('ERR', "URLError(OSError('Tunnel connection failed: 502 Server UnReachable'))")
+=== direct (no proxy) HTTPS ===
+devnet ('ERR', "URLError(SSLError(1, '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1018)'))")
+=== try public RPCs direct ===
+https://api.testnet.solana.com ('ERR', "URLError(SSLError(1, '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1018)'))")
+https://rpc.ankr.com/solana ('ERR', "<HTTPError 403: 'Forbidden'>")
+root@b539af01810d:/app#

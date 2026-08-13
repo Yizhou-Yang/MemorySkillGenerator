@@ -1,0 +1,576 @@
+root@5b4c9697ea7f:/app# ls -la /app
+total 588
+drwxr-xr-x  2 root root   4096 Jul  2 13:59 .
+drwxr-xr-x 19 root root   4096 Jul  2 15:49 ..
+-rw-r--r--  1 root root  79506 Jul  2 13:59 cJSON.c
+-rw-r--r--  1 root root  16393 Jul  2 13:59 cJSON.h
+-rw-r--r--  1 root root    389 Jul  2 13:59 image.png
+-rw-r--r--  1 root root 311873 Jul  2 13:59 lodepng.cpp
+-rw-r--r--  1 root root 107788 Jul  2 13:59 lodepng.h
+-rw-r--r--  1 root root  54714 Jul  2 13:59 model.pth
+-rw-r--r--  1 root root    681 Jul  2 13:59 model.py
+root@5b4c9697ea7f:/app# find /app -type f | head -50
+/app/cJSON.c
+/app/cJSON.h
+/app/lodepng.cpp
+/app/model.py
+/app/lodepng.h
+/app/image.png
+/app/model.pth
+root@5b4c9697ea7f:/app# cat /app/model.py
+import torch
+import torch.nn as nn
+
+
+class MnistModel(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        num_classes: int,
+    ) -> torch.nn.Module:
+        super().__init__()
+
+        self.input_layer = nn.Linear(input_dim, hidden_dim)
+        self.hidden_layer = nn.Linear(hidden_dim, hidden_dim)
+        self.output_layer = nn.Linear(hidden_dim, num_classes)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        x = self.input_layer(x)
+        x = self.activation(x)
+
+        x = self.hidden_layer(x)
+        x = self.activation(x)
+
+        x = self.output_layer(x)
+        return x
+root@5b4c9697ea7f:/app# python3 -c 'import torch; print(torch.__version__)' 2>&1 | head
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import torch; print(torch.__version__)
+    ^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'torch'
+root@5b4c9697ea7f:/app# file /app/model.pth; xxd /app/model.pth | head -5
+bash: file: command not found
+bash: xxd: command not found
+root@5b4c9697ea7f:/app# python3 --version; python3 -c 'import numpy; print(numpy.__version__)' 2>&1 | head
+Python 3.13.1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy; print(numpy.__version__)
+    ^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+root@5b4c9697ea7f:/app# python3 -c "d=open('/app/model.pth','rb').read(8); print(d, d[:2])"
+b'PK\x03\x04\x00\x00\x08\x08' b'PK'
+root@5b4c9697ea7f:/app# python3 -c "import zipfile; z=zipfile.ZipFile('/app/model.pth'); [print(n) for n in z.namelist()]"
+simple_mnist/data.pkl
+simple_mnist/byteorder
+simple_mnist/data/0
+simple_mnist/data/1
+simple_mnist/data/2
+simple_mnist/data/3
+simple_mnist/data/4
+simple_mnist/data/5
+simple_mnist/version
+simple_mnist/.data/serialization_id
+root@5b4c9697ea7f:/app# python3 << 'EOF'
+> import zipfile
+> z=zipfile.ZipFile('/app/model.pth')
+> for n in z.namelist():
+>     print(repr(n), z.getinfo(n).file_size)
+> EOF
+'simple_mnist/data.pkl' 728
+'simple_mnist/byteorder' 6
+'simple_mnist/data/0' 50176
+'simple_mnist/data/1' 64
+'simple_mnist/data/2' 1024
+'simple_mnist/data/3' 64
+'simple_mnist/data/4' 640
+'simple_mnist/data/5' 40
+'simple_mnist/version' 2
+'simple_mnist/.data/serialization_id' 40
+root@5b4c9697ea7f:/app# cat > /app/diag.py << 'PYEOF'
+> import pickle, io, zipfile
+> z = zipfile.ZipFile('/app/model.pth')
+> pkldata = z.read('simple_mnist/data.pkl')
+> class U(pickle.Unpickler):
+>     def persistent_load(self, pid):
+>         print("PERSISTENT:", type(pid), repr(pid)[:200])
+>         return ('STORAGE', pid)
+>     def find_class(self, module, name):
+>         print("CLASS:", module, name)
+>         if name == '_rebuild_tensor_v2':
+>             def f(*a):
+>                 print("  REBUILD args:", [type(x) for x in a], a[2] if len(a)>2 else None)
+>                 return ('TENSOR', a)
+>             return f
+>         if 'Storage' in name:
+>             def f(*a):
+>                 print("  STORG", name, a)
+>                 return ('SOBJ', name)
+>             return f
+>         return object
+> U(io.BytesIO(pkldata)).load()
+> PYEOF
+root@5b4c9697ea7f:/app# python3 /app/diag.py 2>&1 | head -60
+CLASS: collections OrderedDict
+CLASS: torch._utils _rebuild_tensor_v2
+CLASS: torch FloatStorage
+PERSISTENT: <class 'tuple'> ('storage', <function U.find_class.<locals>.f at 0x7f3e4f8a6520>, '0', 'cpu', 12544)
+  REBUILD args: [<class 'tuple'>, <class 'int'>, <class 'tuple'>, <class 'tuple'>, <class 'bool'>, <class 'object'>] (16, 784)
+PERSISTENT: <class 'tuple'> ('storage', <function U.find_class.<locals>.f at 0x7f3e4f8a6520>, '1', 'cpu', 16)
+  REBUILD args: [<class 'tuple'>, <class 'int'>, <class 'tuple'>, <class 'tuple'>, <class 'bool'>, <class 'object'>] (16,)
+PERSISTENT: <class 'tuple'> ('storage', <function U.find_class.<locals>.f at 0x7f3e4f8a6520>, '2', 'cpu', 256)
+  REBUILD args: [<class 'tuple'>, <class 'int'>, <class 'tuple'>, <class 'tuple'>, <class 'bool'>, <class 'object'>] (16, 16)
+PERSISTENT: <class 'tuple'> ('storage', <function U.find_class.<locals>.f at 0x7f3e4f8a6520>, '3', 'cpu', 16)
+  REBUILD args: [<class 'tuple'>, <class 'int'>, <class 'tuple'>, <class 'tuple'>, <class 'bool'>, <class 'object'>] (16,)
+PERSISTENT: <class 'tuple'> ('storage', <function U.find_class.<locals>.f at 0x7f3e4f8a6520>, '4', 'cpu', 160)
+  REBUILD args: [<class 'tuple'>, <class 'int'>, <class 'tuple'>, <class 'tuple'>, <class 'bool'>, <class 'object'>] (10, 16)
+PERSISTENT: <class 'tuple'> ('storage', <function U.find_class.<locals>.f at 0x7f3e4f8a6520>, '5', 'cpu', 10)
+  REBUILD args: [<class 'tuple'>, <class 'int'>, <class 'tuple'>, <class 'tuple'>, <class 'bool'>, <class 'object'>] (10,)
+Traceback (most recent call last):
+  File "/app/diag.py", line 21, in <module>
+    U(io.BytesIO(pkldata)).load()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+TypeError: 'object' object does not support item assignment
+root@5b4c9697ea7f:/app# cat > /app/convert.py << 'PYEOF'
+> import pickle, io, zipfile, struct, json
+>
+> z = zipfile.ZipFile('/app/model.pth')
+> pkldata = z.read('simple_mnist/data.pkl')
+>
+> class Storage:
+>     _cache = {}
+>     def __init__(self, key):
+>         self.key = key
+>     def data(self):
+>         if self.key not in Storage._cache:
+>             Storage._cache[self.key] = z.read('simple_mnist/data/' + self.key)
+>         return Storage._cache[self.key]
+>
+> class Tensor:
+>     def __init__(self, storage, offset, size, stride):
+>         self.storage = storage
+>         self.offset = offset
+>         self.size = size
+>         self.stride = stride
+>
+> def rebuild(storage, offset, size, stride, requires_grad, hooks):
+>     return Tensor(storage, offset, size, stride)
+>
+> class U(pickle.Unpickler):
+>     def find_class(self, module, name):
+>         if module == 'collections' and name == 'OrderedDict':
+>             def od(pairs):
+>                 return list(pairs)
+>             return od
+>         if name == '_rebuild_tensor_v2':
+>             return rebuild
+>         class D: pass
+>         return D
+>     def persistent_load(self, pid):
+>         return Storage(pid[2])
+>
+> state = U(io.BytesIO(pkldata)).load()
+> weights = {}
+> for key, t in state:
+>     buf = t.storage.data()
+>     n = 1
+>     for s in t.size:
+>         n *= s
+>     vals = struct.unpack_from('<%df' % n, buf, t.offset*4)
+>     weights[key] = list(vals)
+>
+> order = ['input_layer.weight','input_layer.bias','hidden_layer.weight','hidden_layer.bias','output_layer.weight','output_layer.bias']
+> assert all(k in weights for k in order), weights.keys()
+> out = {
+>   'input_dim': 784, 'hidden_dim': 16, 'num_classes': 10,
+>   'W1': weights['input_layer.weight'],
+>   'b1': weights['input_layer.bias'],
+>   'W2': weights['hidden_layer.weight'],
+>   'b2': weights['hidden_layer.bias'],
+>   'W3': weights['output_layer.weight'],
+>   'b3': weights['output_layer.bias'],
+> }
+> with open('/app/weights.json','w') as f:
+>     json.dump(out, f)
+> print('shapes W1', len(out['W1']), 'b1', len(out['b1']), 'W2', len(out['W2']), 'b2', len(out['b2']), 'W3', len(out['W3']), 'b3', len(out['b3']))
+> print('wrote /app/weights.json bytes=', len(json.dumps(out)))
+> PYEOF
+root@5b4c9697ea7f:/app# python3 /app/convert.py
+Traceback (most recent call last):
+  File "/app/convert.py", line 38, in <module>
+    state = U(io.BytesIO(pkldata)).load()
+TypeError: U.find_class.<locals>.od() missing 1 required positional argument: 'pairs'
+root@5b4c9697ea7f:/app# cat > /app/convert.py << 'PYEOF'
+> import pickle, io, zipfile, struct, json
+>
+> z = zipfile.ZipFile('/app/model.pth')
+> pkldata = z.read('simple_mnist/data.pkl')
+>
+> class Storage:
+>     _cache = {}
+>     def __init__(self, key):
+>         self.key = key
+>     def data(self):
+>         if self.key not in Storage._cache:
+>             Storage._cache[self.key] = z.read('simple_mnist/data/' + self.key)
+>         return Storage._cache[self.key]
+>
+> class Tensor:
+>     def __init__(self, storage, offset, size, stride):
+>         self.storage = storage
+>         self.offset = offset
+>         self.size = size
+>         self.stride = stride
+>
+> def rebuild(storage, offset, size, stride, requires_grad, hooks):
+>     return Tensor(storage, offset, size, stride)
+>
+> class StateList:
+>     def __init__(self):
+>         self.items = []
+>     def update(self, pairs):
+>         self.items = list(pairs)
+>
+> class U(pickle.Unpickler):
+>     def find_class(self, module, name):
+>         if module == 'collections' and name == 'OrderedDict':
+>             return lambda: StateList()
+>         if name == '_rebuild_tensor_v2':
+>             return rebuild
+>         class D: pass
+>         return D
+>     def persistent_load(self, pid):
+>         return Storage(pid[2])
+>
+> state_obj = U(io.BytesIO(pkldata)).load()
+> state = state_obj.items
+>
+> weights = {}
+> for key, t in state:
+>     buf = t.storage.data()
+>     n = 1
+>     for s in t.size:
+>         n *= s
+>     vals = struct.unpack_from('<%df' % n, buf, t.offset*4)
+>     weights[key] = list(vals)
+>
+> order = ['input_layer.weight','input_layer.bias','hidden_layer.weight','hidden_layer.bias','output_layer.weight','output_layer.bias']
+> assert all(k in weights for k in order), weights.keys()
+> out = {
+>   'input_dim': 784, 'hidden_dim': 16, 'num_classes': 10,
+>   'W1': weights['input_layer.weight'],
+>   'b1': weights['input_layer.bias'],
+>   'W2': weights['hidden_layer.weight'],
+>   'b2': weights['hidden_layer.bias'],
+>   'W3': weights['output_layer.weight'],
+>   'b3': weights['output_layer.bias'],
+> }
+> with open('/app/weights.json','w') as f:
+>     json.dump(out, f)
+> print('shapes W1', len(out['W1']), 'b1', len(out['b1']), 'W2', len(out['W2']), 'b2', len(out['b2']), 'W3', len(out['W3']), 'b3', len(out['b3']))
+> print('wrote /app/weights.json bytes=', len(json.dumps(out)))
+> PYEOF
+root@5b4c9697ea7f:/app# python3 /app/convert.py
+Traceback (most recent call last):
+  File "/app/convert.py", line 42, in <module>
+    state_obj = U(io.BytesIO(pkldata)).load()
+TypeError: 'StateList' object does not support item assignment
+root@5b4c9697ea7f:/app# cat > /app/convert.py << 'PYEOF'
+> import pickle, io, zipfile, struct, json
+>
+> z = zipfile.ZipFile('/app/model.pth')
+> pkldata = z.read('simple_mnist/data.pkl')
+>
+> class Storage:
+>     _cache = {}
+>     def __init__(self, key):
+>         self.key = key
+>     def data(self):
+>         if self.key not in Storage._cache:
+>             Storage._cache[self.key] = z.read('simple_mnist/data/' + self.key)
+>         return Storage._cache[self.key]
+>
+> class Tensor:
+>     def __init__(self, storage, offset, size, stride):
+>         self.storage = storage
+>         self.offset = offset
+>         self.size = size
+>         self.stride = stride
+>
+> def rebuild(storage, offset, size, stride, requires_grad, hooks):
+>     return Tensor(storage, offset, size, stride)
+>
+> class StateList:
+>     def __init__(self):
+>         self.items = []
+>     def __setitem__(self, k, v):
+>         self.items.append((k, v))
+>
+> class U(pickle.Unpickler):
+>     def find_class(self, module, name):
+>         if module == 'collections' and name == 'OrderedDict':
+>             return lambda: StateList()
+>         if name == '_rebuild_tensor_v2':
+>             return rebuild
+>         class D: pass
+>         return D
+>     def persistent_load(self, pid):
+>         return Storage(pid[2])
+>
+> state_obj = U(io.BytesIO(pkldata)).load()
+> state = state_obj.items
+>
+> weights = {}
+> for key, t in state:
+>     buf = t.storage.data()
+>     n = 1
+>     for s in t.size:
+>         n *= s
+>     vals = struct.unpack_from('<%df' % n, buf, t.offset*4)
+>     weights[key] = list(vals)
+>
+> order = ['input_layer.weight','input_layer.bias','hidden_layer.weight','hidden_layer.bias','output_layer.weight','output_layer.bias']
+> assert all(k in weights for k in order), weights.keys()
+> out = {
+>   'input_dim': 784, 'hidden_dim': 16, 'num_classes': 10,
+>   'W1': weights['input_layer.weight'],
+>   'b1': weights['input_layer.bias'],
+>   'W2': weights['hidden_layer.weight'],
+>   'b2': weights['hidden_layer.bias'],
+>   'W3': weights['output_layer.weight'],
+>   'b3': weights['output_layer.bias'],
+> }
+> with open('/app/weights.json','w') as f:
+>     json.dump(out, f)
+> print('shapes W1', len(out['W1']), 'b1', len(out['b1']), 'W2', len(out['W2']), 'b2', len(out['b2']), 'W3', len(out['W3']), 'b3', len(out['b3']))
+> print('wrote /app/weights.json bytes=', len(json.dumps(out)))
+> PYEOF
+root@5b4c9697ea7f:/app# python3 /app/convert.py
+shapes W1 12544 b1 16 W2 256 b2 16 W3 160 b3 10
+wrote /app/weights.json bytes= 286343
+root@5b4c9697ea7f:/app# cat > /app/analyze.py << 'PYEOF'
+> import zlib, struct, json
+>
+> def read_png(path):
+>     d = open(path,'rb').read()
+>     assert d[:8] == bytes([137,80,78,71,13,10,26,10])
+>     pos = 8
+>     idat = b''
+>     width=height=bitdepth=colortype=None
+>     while pos < len(d):
+>         ln = struct.unpack('>I', d[pos:pos+4])[0]
+>         typ = d[pos+4:pos+8]
+>         data = d[pos+8:pos+8+ln]
+>         pos += 12+ln
+>         if typ == b'IHDR':
+>             width,height,bitdepth,colortype = struct.unpack('>IIBB', data[:10])
+>         elif typ == b'IDAT':
+>             idat += data
+>         elif typ == b'IEND':
+>             break
+>     raw = zlib.decompress(idat)
+>     ch = {0:1,2:3,3:1,4:2,6:4}[colortype]
+>     stride = width*ch
+>     out = bytearray()
+>     bpp = ch
+>     def paeth(a,b,c):
+>         p = a+b-c
+>         pa=abs(p-a); pb=abs(p-b); pc=abs(p-c)
+>         return a if (pa<=pb and pa<=pc) else (b if pb<=pc else c)
+>     rp=0
+>     for y in range(height):
+>         f = raw[rp]; rp+=1
+>         line = raw[rp:rp+stride]; rp+=stride
+>         prev = out[-stride:] if y>0 else bytes(stride)
+>         row = bytearray(stride)
+>         for i in range(stride):
+>             x = line[i]
+>             a = row[i-bpp] if i>=bpp else 0
+>             b = prev[i]
+>             c = prev[i-bpp] if i>=bpp else 0
+>             if f==0: v=x
+>             elif f==1: v=x+a
+>             elif f==2: v=x+b
+>             elif f==3: v=x+(a+b)//2
+>             elif f==4: v=x+paeth(a,b,c)
+>             row[i] = v & 0xff
+>         out += row
+>     # grayscale: take first channel
+>     if ch>1:
+>         px = [out[i] for i in range(0,len(out),ch)]
+>     else:
+>         px = list(out)
+>     return width,height,px
+>
+> W = json.load(open('/app/weights.json'))
+> W1=W['W1']; b1=W['b1']; W2=W['W2']; b2=W['b2']; W3=W['W3']; b3=W['b3']
+> h=W['hidden_dim']; n=W['num_classes']
+>
+> def forward(x):
+>     h1=[0.0]*h
+>     for j in range(h):
+>         s=b1[j]
+>         for i in range(784): s+=W1[j*784+i]*x[i]
+>         h1[j]= max(0.0,s)
+>     h2=[0.0]*h
+>     for j in range(h):
+>         s=b2[j]
+>         for i in range(h): s+=W2[j*h+i]*h1[i]
+>         h2[j]= max(0.0,s)
+>     out=[0.0]*n
+>     for j in range(n):
+>         s=b3[j]
+>         for i in range(h): s+=W3[j*h+i]*h2[i]
+>         out[j]=s
+>     return out
+>
+> w,hgt,px = read_png('/app/image.png')
+> print('image', w, hgt, 'min', min(px), 'max', max(px), 'n', len(px))
+>
+> def show(name, x):
+>     o=forward(x)
+>     am=max(range(n), key=lambda i:o[i])
+>     print(name, 'argmax', am, 'logits', [round(v,1) for v in o])
+>
+> x_raw=[float(v) for v in px]
+> show('raw0-255', x_raw)
+> show('div255', [v/255.0 for v in x_raw])
+> show('div255_inv', [(255.0-v)/255.0 for v in x_raw])
+> m=sum(x_raw)/len(x_raw); var=sum((v-m)**2 for v in x_raw)/len(x_raw); sd=var**0.5
+> print('mean', round(m,2), 'sd', round(sd,2))
+> show('std', [(v-m)/sd for v in x_raw])
+> show('std_inv', [((255.0-v)-m)/sd for v in x_raw])
+> PYEOF
+root@5b4c9697ea7f:/app# python3 /app/analyze.py
+image 28 28 min 0 max 255 n 784
+raw0-255 argmax 2 logits [5.3, -752.2, 453.5, -274.7, 45.1, -198.0, 145.8, -885.1, -198.9, -546.4]
+div255 argmax 2 logits [0.0, -3.1, 1.7, -1.0, 0.2, -1.0, 0.6, -3.2, -0.8, -1.8]
+div255_inv argmax 7 logits [-0.4, -0.3, -0.2, -0.6, -0.4, -1.3, -0.5, 1.4, -2.2, -0.7]
+mean 37.83 sd 80.84
+std argmax 2 logits [-0.9, -13.0, 8.5, -3.8, 0.2, -3.4, 1.8, -16.4, -2.9, -9.0]
+std_inv argmax 7 logits [-1.3, -0.4, -0.3, -1.9, -1.0, -3.0, -1.5, 3.1, -5.8, -2.6]
+root@5b4c9697ea7f:/app# cat > /app/cli_tool.cpp << 'CPPEOF'
+> #include <cstdio>
+> #include <cmath>
+> #include <vector>
+> #include <string>
+> #include "cJSON.h"
+> #include "lodepng.h"
+>
+> static void die(const char* msg){
+>     fprintf(stderr, "Error: %s\n", msg);
+>     exit(1);
+> }
+>
+> static std::vector<double> load_array(cJSON* root, const char* name){
+>     cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, name);
+>     if(!arr || !cJSON_IsArray(arr)) die(("missing array " + std::string(name)).c_str());
+>     int n = cJSON_GetArraySize(arr);
+>     std::vector<double> v(n);
+>     for(int i=0;i<n;i++){
+>         cJSON* e = cJSON_GetArrayItem(arr,i);
+>         v[i] = e->valuedouble;
+>     }
+>     return v;
+> }
+>
+> int main(int argc, char** argv){
+>     if(argc != 3) die("usage: cli_tool weights.json image.png");
+>     const char* wpath = argv[1];
+>     const char* ipath = argv[2];
+>
+>     // load weights json
+>     FILE* f = fopen(wpath, "rb");
+>     if(!f) die("cannot open weights file");
+>     fseek(f,0,SEEK_END); long sz = ftell(f); fseek(f,0,SEEK_SET);
+>     std::string buf(sz,0);
+>     fread(&buf[0],1,sz,f); fclose(f);
+>     cJSON* root = cJSON_Parse(buf.c_str());
+>     if(!root) die("invalid json");
+>
+>     std::vector<double> W1 = load_array(root,"W1");
+>     std::vector<double> b1 = load_array(root,"b1");
+>     std::vector<double> W2 = load_array(root,"W2");
+>     std::vector<double> b2 = load_array(root,"b2");
+>     std::vector<double> W3 = load_array(root,"W3");
+>     std::vector<double> b3 = load_array(root,"b3");
+>     int hidden = cJSON_GetObjectItemCaseSensitive(root,"hidden_dim")->valueint;
+>     int num_classes = cJSON_GetObjectItemCaseSensitive(root,"num_classes")->valueint;
+>     cJSON_Delete(root);
+>
+>     // decode png
+>     std::vector<unsigned char> image;
+>     unsigned w,h;
+>     unsigned err = lodepng::decode(image, w, h, ipath);
+>     if(err) die("png decode failed");
+>     if((int)w!=28 || (int)h!=28) fprintf(stderr,"warning: image is %ux%u, expected 28x28\n", w, h);
+>     // image is RGBA; convert to grayscale (take red channel)
+>     std::vector<double> x(w*h);
+>     for(unsigned i=0;i<w*h;i++){
+>         x[i] = (double)image[i*4+0];
+>     }
+>
+>     // forward pass (raw 0-255 pixel values)
+>     std::vector<double> h1(hidden,0.0);
+>     for(int j=0;j<hidden;j++){
+>         double s = b1[j];
+>         for(int i=0;i<784;i++) s += W1[j*784+i]*x[i];
+>         h1[j] = s>0? s:0.0;
+>     }
+>     std::vector<double> h2(hidden,0.0);
+>     for(int j=0;j<hidden;j++){
+>         double s = b2[j];
+>         for(int i=0;i<hidden;i++) s += W2[j*hidden+i]*h1[i];
+>         h2[j] = s>0? s:0.0;
+>     }
+>     std::vector<double> out(num_classes,0.0);
+>     for(int j=0;j<num_classes;j++){
+>         double s = b3[j];
+>         for(int i=0;i<hidden;i++) s += W3[j*hidden+i]*h2[i];
+>         out[j] = s;
+>     }
+>     int pred=0;
+>     for(int j=1;j<num_classes;j++) if(out[j]>out[pred]) pred=j;
+>     printf("%d\n", pred);
+>     return 0;
+> }
+> CPPEOF
+root@5b4c9697ea7f:/app# ls -la /app/cli_tool.cpp
+-rw-r--r-- 1 root root 2778 Jul  2 15:59 /app/cli_tool.cpp
+root@5b4c9697ea7f:/app# g++ -O2 -std=c++11 cli_tool.cpp cJSON.c lodepng.cpp -o cli_tool 2>&1 | head -30; echo EXIT=$?
+bash: g++: command not found
+EXIT=0
+root@5b4c9697ea7f:/app# which gcc cc clang clang++ g++ 2>&1; echo '---'; ls /usr/bin | grep -iE 'gcc|clang|cc$' 2>&1
+---
+root@5b4c9697ea7f:/app# which apt apt-get apk dnf yum pacman tcc 2>&1; echo '==='; cat /etc/os-release 2>/dev/null | head -3
+/usr/bin/apt
+/usr/bin/apt-get
+===
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+NAME="Debian GNU/Linux"
+VERSION_ID="12"
+root@5b4c9697ea7f:/app# apt-get install -y g++ 2>&1 | tail -20
+usr-is-merged is already the newest version (37~deb12u1).
+usr-is-merged set to manually installed.
+libcap-ng0 is already the newest version (0.8.3-1+b3).
+libcap-ng0 set to manually installed.
+libpam0g is already the newest version (1.5.2-6+deb12u1).
+libpam0g set to manually installed.
+libgdbm6 is already the newest version (1.23-3).
+libhogweed6 is already the newest version (3.8.1-2).
+libhogweed6 set to manually installed.
+libunistring2 is already the newest version (1.0-2).
+libunistring2 set to manually installed.
+libgssapi-krb5-2 is already the newest version (1.20.1-2+deb12u2).
+libgssapi-krb5-2 set to manually installed.
+libsemanage-common is already the newest version (3.4-1).
+libsemanage-common set to manually installed.
+libsemanage2 is already the newest version (3.4-1+b5).
+libsemanage2 set to manually installed.
+login is already the newest version (1:4.13+dfsg1-1+b1).
+login set to manually installed.
+0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+root@5b4c9697ea7f:/app#

@@ -1,0 +1,56 @@
+New Terminal Output:
+]
+root@d7c0eb23a4ed:/app# cat > /tmp/parse.py << 'PYEOF'
+> import struct
+> data = open('/app/trunc.db','rb').read()
+> out=[]
+> ncells = int.from_bytes(data[3:5],'big')
+> out.append('len=%d pagehdr=0x%02x ncells=%d'%(len(data),data[0],ncells))
+> def rv(buf, pos):
+>     r=0
+>     for i in range(9):
+>         b=buf[pos+i]
+>         if i==8:
+>             return (r<<8)|b, i+1
+>         r=(r<<7)|(b&0x7f)
+>         if not (b&0x80):
+>             return r, i+1
+> for i in range(ncells):
+>     off=int.from_bytes(data[8+2*i:10+2*i],'big')
+>     pos=off
+>     plen,n=rv(data,pos); pos+=n
+>     rowid,n=rv(data,pos); pos+=n
+>     hstart=pos
+>     hs,n=rv(data,pos); pos+=n
+>     hpos=pos
+>     types=[]
+>     while pos-hstart < hs:
+>         t,m=rv(data,pos); pos+=m; types.append(t)
+>     body=pos
+>     vals=[]
+>     for t in types:
+>         if t==0: vals.append('NULL')
+>         elif t<8: vals.append(int.from_bytes(data[body:body+t],'big',signed=True)); body+=t
+>         elif t==7: vals.append(struct.unpack('>d', data[body:body+8])[0]); body+=8
+>         elif t==8: vals.append(0);
+>         elif t==9: vals.append(1)
+>         elif t%2==0:
+>             s=(t-12)//2; vals.append(data[body:body+s]); body+=s
+>         else:
+>             s=(t-13)//2; vals.append(data[body:body+s].decode('utf-8','replace')); body+=s
+>     out.append('cell %d off=%d plen=%d rowid=%d hstart=%d hs=%d hdr=%s types=%s vals=%s'%(i,off,plen,rowid,hstart,hs,data[hpos:hpos+hs].hex(),types,vals))
+> open('/tmp/out.txt','w').write('\n'.join(out))
+> PYEOF
+root@d7c0eb23a4ed:/app# python3 /tmp/parse.py
+root@d7c0eb23a4ed:/app# cat /tmp/out.txt
+len=4096 pagehdr=0x0d ncells=10
+cell 0 off=4080 plen=14 rowid=1 hstart=4082 hs=4 hdr=00210974 types=[0, 33, 9] vals=['NULL', 'testword00', 1]
+cell 1 off=4063 plen=15 rowid=2 hstart=4065 hs=4 hdr=00210174 types=[0, 33, 1] vals=['NULL', 'testword01', 2]
+cell 2 off=4046 plen=15 rowid=3 hstart=4048 hs=4 hdr=00210174 types=[0, 33, 1] vals=['NULL', 'testword02', 10]
+cell 3 off=4029 plen=15 rowid=4 hstart=4031 hs=4 hdr=00210174 types=[0, 33, 1] vals=['NULL', 'testword03', 25]
+cell 4 off=4012 plen=15 rowid=5 hstart=4014 hs=4 hdr=00210174 types=[0, 33, 1] vals=['NULL', 'testword04', 42]
+cell 5 off=3995 plen=15 rowid=6 hstart=3997 hs=4 hdr=00210174 types=[0, 33, 1] vals=['NULL', 'testword05', 50]
+cell 6 off=3978 plen=15 rowid=7 hstart=3980 hs=4 hdr=00210174 types=[0, 33, 1] vals=['NULL', 'testword06', 75]
+cell 7 off=3961 plen=15 rowid=8 hstart=3963 hs=4 hdr=00210174 types=[0, 33, 1] vals=['NULL', 'testword07', 99]
+cell 8 off=3937 plen=22 rowid=9 hstart=3939 hs=4 hdr=00210774 types=[0, 33, 7] vals=['NULL', 'testword08', 18112252295574978]
+cell 9 off=3913 plen=22 rowid=10 hstart=3915 hs=4 hdr=00210774 types=[0, 33, 7] vals=['NULL', 'testword09', 17979214137393152]root@d7c0eb23a4ed:/app#

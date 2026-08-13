@@ -1,0 +1,206 @@
+New Terminal Output:
+
+root@517baccc7abc:/app# cat > /app/agent.py << 'EOF'
+> import os
+> import torch
+> import torch.nn as nn
+>
+>
+> class DQN(nn.Module):
+>     def __init__(self, state_dim, action_dim, hidden=128):
+>         super().__init__()
+>         self.net = nn.Sequential(
+>             nn.Linear(state_dim, hidden),
+>             nn.ReLU(),
+>             nn.Linear(hidden, hidden),
+>             nn.ReLU(),
+>             nn.Linear(hidden, action_dim),
+>         )
+>
+>     def forward(self, x):
+>         return self.net(x)
+>
+>
+> class Agent:
+>     def __init__(self):
+>         self.state_dim = 4
+>         self.action_dim = 2
+>         self.policy_net = DQN(self.state_dim, self.action_dim)
+>         self.policy_net.eval()
+>
+>     def select_action(self, current_observation):
+>         obs = torch.as_tensor(current_observation, dtype=torch.float32).unsqueeze(0)
+>         with torch.no_grad():
+>             q_values = self.policy_net(obs)
+>             action = int(q_values.argmax(1).item())
+>         return action
+>
+>     def save(self, directory):
+>         os.makedirs(directory, exist_ok=True)
+>         path = os.path.join(directory, "policy_net.pt")
+>         torch.save(self.policy_net.state_dict(), path)
+>
+>     def load(self, directory):
+>         path = os.path.join(directory, "policy_net.pt")
+>         state = torch.load(path, map_location="cpu")
+>         self.policy_net.load_state_dict(state)
+>         self.policy_net.eval()
+> EOF
+root@517baccc7abc:/app# cat > /app/train.py << 'EOF'
+xs])
+
+
+def evaluate(agent, episodes=20):
+    env = gym.make("CartPole-v1")
+    total = 0.0
+    for _ in range(episodes):
+        o, _ = env.reset()
+        ep = 0.0
+        while True:
+            a = agent.select_action(o)
+            o2, r, term, trunc, _ = env.step(a)
+            ep += r
+            o = o2
+            if term or trunc:
+                break
+        total += ep
+    env.close()
+    return total / episodes
+
+
+def main():
+    env = gym.make("CartPole-v1")
+    agent = Agent()
+    target = Agent()
+    target.policy_net.load_state_dict(agent.policy_net.state_dict())
+    opt = optim.Adam(agent.policy_net.parameters(), lr=1e-3)
+    buf = ReplayBuffer(20000, 4)
+    gamma = 0.99
+    batch = 128
+    eps = 1.0
+    eps_end = 0.05
+    best = -1.0
+    save_dir = "/app/trained_model"
+
+    for ep in range(800):
+        o, _ = env.reset()
+        ep_reward = 0.0
+        while True:
+            if np.random.rand() < eps:
+                a = env.action_space.sample()
+            else:
+                a = agent.> import os
+> import numpy as np
+> import torch
+> import torch.nn as nn
+> import torch.optim as optim
+> import gymnasium as gym
+> from agent import Agent
+>
+>
+> class ReplayBuffer:
+>     def __init__(self, cap, state_dim):
+>         self.cap = cap
+>         self.s = np.zeros((cap, state_dim), dtype=np.float32)
+>         self.a = np.zeros((cap,), dtype=np.int64)
+>         self.r = np.zeros((cap,), dtype=np.float32)
+>         self.s2 = np.zeros((cap, state_dim), dtype=np.float32)
+>         self.d = np.zeros((cap,), dtype=np.float32)
+>         self.idx = 0
+>         self.size = 0
+>
+>     def add(self, s, a, r, s2, d):
+>         self.s[self.idx] = s
+>         self.a[self.idx] = a
+>         self.r[self.idx] = r
+>         self.s2[self.idx] = s2
+>         self.d[self.idx] = d
+>         self.idx = (self.idx + 1) % self.cap
+>         self.size = min(self.size + 1, self.cap)
+>
+>     def sample(self, batch):
+>         idxs = np.random.randint(0, self.size, size=batch)
+>         return (self.s[idxs], self.a[idxs], self.r[idxs], self.s2[idxs], self.d[idxs])
+>
+>
+> def evaluate(agent, episodes=20):
+>     env = gym.make("CartPole-v1")
+>     total = 0.0
+>     for _ in range(episodes):
+>         o, _ = env.reset()
+>         ep = 0.0
+>         while True:
+>             a = agent.select_action(o)
+>             o2, r, term, trunc, _ = env.step(a)
+>             ep += r
+>             o = o2
+>             if term or trunc:
+>                 break
+>         total += ep
+>     env.close()
+>     return total / episodes
+>
+>
+> def main():
+>     env = gym.make("CartPole-v1")
+>     agent = Agent()
+>     target = Agent()
+>     target.policy_net.load_state_dict(agent.policy_net.state_dict())
+>     opt = optim.Adam(agent.policy_net.parameters(), lr=1e-3)
+>     buf = ReplayBuffer(20000, 4)
+>     gamma = 0.99
+>     batch = 128
+>     eps = 1.0
+>     eps_end = 0.05
+>     best = -1.0
+>     save_dir = "/app/trained_model"
+>
+>     for ep in range(800):
+>         o, _ = env.reset()
+>         ep_reward = 0.0
+>         while True:
+>             if np.random.rand() < eps:
+>                 a = env.action_space.sample()
+>             else:
+>                 a = agent.select_action(o)
+>             o2, r, term, trunc, _ = env.step(a)
+>             done = float(term or trunc)
+>             buf.add(o, a, r, o2, done)
+>             o = o2
+>             ep_reward += r
+>             if buf.size > batch:
+>                 s_b, a_b, r_b, s2_b, d_b = buf.sample(batch)
+>                 s_b = torch.as_tensor(s_b)
+>                 a_b = torch.as_tensor(a_b).unsqueeze(1)
+>                 r_b = torch.as_tensor(r_b)
+>                 s2_b = torch.as_tensor(s2_b)
+>                 d_b = torch.as_tensor(d_b)
+>                 q = agent.policy_net(s_b).gather(1, a_b).squeeze(1)
+>                 with torch.no_grad():
+>                     q_next = target.policy_net(s2_b).max(1)[0]
+>                     tgt = r_b + gamma * q_next * (1 - d_b)
+>                 loss = nn.functional.mse_loss(q, tgt)
+>                 opt.zero_grad()
+>                 loss.backward()
+>                 opt.step()
+>             if term or trunc:
+>                 break
+>         eps = max(eps_end, eps * 0.995)
+>         if ep % 10 == 0:
+>             target.policy_net.load_state_dict(agent.policy_net.state_dict())
+>         if ep % 25 == 0:
+>             score = evaluate(agent, 20)
+>             print(f"ep {ep} reward {ep_reward:.0f} eps {eps:.3f} eval {score:.1f}", flush=True)
+>             if score > best:
+>                 best = score
+>                 agent.save(save_dir)
+>                 print(f"  -> saved best {best:.1f}", flush=True)
+>     print("best eval:", best)
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@517baccc7abc:/app# cd /app && python3 -c "import ast; ast.parse(open('agent.py').read()); ast.parse(open('train.py').read()); print('syntax ok')"
+syntax ok
+root@517baccc7abc:/app#

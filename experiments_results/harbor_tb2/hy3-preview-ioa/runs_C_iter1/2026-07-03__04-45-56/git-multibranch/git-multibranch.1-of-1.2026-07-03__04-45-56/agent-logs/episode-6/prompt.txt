@@ -1,0 +1,23 @@
+New Terminal Output:
+
+root@d74a665d2e11:/app# cat > /app/ssh-password.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 120
+> spawn ssh -tt {*}$argv
+> expect {
+>     -re "(?i)password:" { send "password\r"; exp_continue }
+> }
+> interact
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/ssh-password.exp
+root@d74a665d2e11:/app# cat > /app/git-ssh <<'EOF'
+> #!/bin/bash
+> exec expect -f /app/ssh-password.exp "$@"
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/git-ssh
+root@d74a665d2e11:/app# sed -i 's#export GIT_SSH_COMMAND="expect -f /app/ssh-password.exp"#export GIT_SSH_COMMAND="/app/git-ssh"#' /app/test.sh; grep GIT_SSH_CO
+MMAND /app/test.sh
+export GIT_SSH_COMMAND="/app/git-ssh"
+root@d74a665d2e11:/app# /app/test.sh
+fatal: protocol error: bad line length character: spaw
+root@d74a665d2e11:/app#

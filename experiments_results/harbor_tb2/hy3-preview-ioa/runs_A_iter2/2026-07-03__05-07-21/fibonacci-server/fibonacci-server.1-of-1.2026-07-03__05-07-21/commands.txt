@@ -1,0 +1,13 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"cat > /app/server.py << 'PYEOF'\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\nfrom urllib.parse import urlparse, parse_qs\nimport json\n\ndef fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n\nclass Handler(BaseHTTPRequestHandler):\n    def do_GET(self):\n        parsed = urlparse(self.path)\n        if parsed.path != '/fib':\n            self.send_response(404)\n            self.end_headers()\n            return\n        qs = parse_qs(parsed.query)\n        if 'n' not in qs:\n            self.send_error(400)\n            return\n        nvals = qs['n']\n        if len(nvals) != 1:\n            self.send_error(400)\n            return\n        try:\n            n = int(nvals[0])\n        except ValueError:\n            self.send_error(400)\n            return\n        if n < 0:\n            self.send_error(400)\n            return\n        body = json.dumps({'result': fib(n)}).encode()\n        self.send_response(200)\n        self.send_header('Content-Type', 'application/json')\n        self.send_header('Content-Length', str(len(body)))\n        self.end_headers()\n        self.wfile.write(body)\n\n    def log_message(self, *a):\n        pass\n\nif __name__ == '__main__':\n    HTTPServer(('0.0.0.0', 3000), Handler).serve_forever()\nPYEOF\n"
+'nohup python3 /app/server.py > /app/server.log 2>&1 &\n'
+"sleep 1; echo '--- valid n=10 ---'; curl -s 'http://localhost:3000/fib?n=10'; echo; echo '--- missing n ---'; curl -s -o /dev/null -w '%{http_code}\\n' 'http://localhost:3000/fib'; echo '--- non-integer n ---'; curl -s -o /dev/null -w '%{http_code}\\n' 'http://localhost:3000/fib?n=abc'\n"
+'python3 -c "import urllib.request as u; print(u.urlopen(\'http://localhost:3000/fib?n=10\').read().decode())"\n'
+'python3 -c "import urllib.request as u,urllib.error as e;\nfor q in [\'/fib\',\'/fib?n=abc\']:\n  try:\n    u.urlopen(\'http://localhost:3000\'+q); print(q,\'OK\')\n  except e.HTTPError as ex: print(q,\'status\',ex.code)"\n'
+'jobs; cat /app/server.log\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

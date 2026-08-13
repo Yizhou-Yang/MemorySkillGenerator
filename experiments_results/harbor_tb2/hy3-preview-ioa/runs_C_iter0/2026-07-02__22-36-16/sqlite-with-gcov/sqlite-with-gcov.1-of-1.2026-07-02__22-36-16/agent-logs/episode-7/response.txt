@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: df reports the overlay root as 0 available, but I successfully wrote an 80MB file to /tmp — so writes actually work. apt's disk-space check is fooled by fuse-overlayfs reporting 0 free via statvfs, so apt refuses to download/install. The fix: get the package download URIs with `apt-get install --print-uris` (planning only, no space check), fetch the .debs with wget, then extract them with `dpkg -x` (which does NOT do a free-space check). This installs gcc, gcov, make without apt's disk check blocking us.",
+  "plan": "1. Create /tmp/debs. 2. Use `apt-get install --print-uris -y build-essential wget` to print all download URIs (incl. deps) without downloading. 3. Extract URLs with grep and wget them. 4. dpkg -x each .deb into / to install. 5. Verify gcc/gcov/make. Then proceed to download SQLite and compile with gcov.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /tmp/debs && cd /tmp/debs\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get install --print-uris -y build-essential wget > uris.txt 2>uris.err; echo EXIT=$?; tail -3 uris.err; wc -l uris.txt\n",
+      "duration": 5.0
+    }
+  ]
+}

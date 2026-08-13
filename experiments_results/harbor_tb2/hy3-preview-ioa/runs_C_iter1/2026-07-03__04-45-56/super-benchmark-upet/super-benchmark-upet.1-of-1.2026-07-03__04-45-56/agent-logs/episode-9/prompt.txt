@@ -1,0 +1,139 @@
+New Terminal Output:
+
+root@9a429f9c7fca:/app/UPET# echo '=== trainer_base.py ===' && sed -n '1,120p' training/trainer_base.py
+=== trainer_base.py ===
+import logging
+import os
+from typing import Dict, OrderedDict
+
+from transformers import Trainer
+
+logger = logging.getLogger(__name__)
+
+_default_log_level = logging.INFO
+logger.setLevel(_default_log_level)
+
+class BaseTrainer(Trainer):
+    def __init__(self, *args, predict_dataset = None, test_key = "accuracy", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.predict_dataset = predict_dataset
+        self.test_key = test_key
+        self.best_metrics = OrderedDict({
+            "best_epoch": 0,
+            f"best_eval_{self.test_key}": 0,
+        })
+
+    def log_best_metrics(self):
+        self.log_metrics("best", self.best_metrics)
+        self.save_metrics("best", self.best_metrics, combined=False)
+
+
+
+    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+        if self.control.should_log:
+            logs: Dict[str, float] = {}
+
+
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            logs["learning_rate"] = self._get_learning_rate()
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs)
+
+        eval_metrics = None
+        if self.control.should_evaluate:
+            eval_metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
+            self._report_to_hp_search(trial, epoch, eval_metrics)
+            print("eval_metrics=", eval_metrics)
+            if eval_metrics["eval_"+self.test_key] > self.best_metrics["best_eval_"+self.test_key]:
+                self.best_metrics["best_epoch"] = epoch
+                self.best_metrics["best_eval_"+self.test_key] = eval_metrics["eval_"+self.test_key]
+
+                if self.predict_dataset is not None:
+                    if isinstance(self.predict_dataset, dict):
+                        for dataset_name, dataset in self.predict_dataset.items():
+                            _, _, test_metrics = self.predict(dataset, metric_key_prefix="test")
+                            self.best_metrics[f"best_test_{dataset_name}_{self.test_key}"] = test_metrics["test_"+self.test_key]
+                    else:
+                        _, _, test_metrics = self.predict(self.predict_dataset, metric_key_prefix="test")
+                        self.best_metrics["best_test_"+self.test_key] = test_metrics["test_"+self.test_key]
+
+            logger.info(f"***** Epoch {epoch}: Best results *****")
+            for key, value in self.best_metrics.items():
+                logger.info(f"{key} = {value}")
+            self.log(self.best_metrics)
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial, metrics=eval_metrics)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+root@9a429f9c7fca:/app/UPET# echo '=== model/utils.py head ===' && sed -n '1,60p' model/utils.py
+=== model/utils.py head ===
+from enum import Enum
+
+from model.head_for_token_classification import (
+    BertPrefixForTokenClassification,
+    BertAdapterForTokenClassification,
+    RobertaPrefixForTokenClassification,
+    RobertaAdapterForTokenClassification,
+    DebertaPrefixForTokenClassification,
+    DebertaV2PrefixForTokenClassification
+)
+
+from model.head_for_sequence_classification import (
+    BertPrefixForSequenceClassification,
+    BertPtuningForSequenceClassification,
+    BertAdapterForSequenceClassification,
+    RobertaPrefixForSequenceClassification,
+    RobertaPtuningForSequenceClassification,
+    RobertaAdapterForSequenceClassification,
+    DebertaPrefixForSequenceClassification
+)
+
+from model.head_for_question_answering import (
+    BertPrefixForQuestionAnswering,
+    BertAdapterForQuestionAnswering,
+    RobertaPrefixModelForQuestionAnswering,
+    RobertaAdapterForQuestionAnswering,
+    DebertaPrefixModelForQuestionAnswering
+)
+
+from model.prompt_for_sequence_classification import (
+    PromptBertForSequenceClassification,
+    PromptBertPrefixForSequenceClassification,
+    PromptBertPtuningForSequenceClassification,
+    PromptBertAdapterForSequenceClassification,
+    PromptRobertaForSequenceClassification,
+    PromptRobertaPrefixForSequenceClassification,
+    PromptRobertaPtuningForSequenceClassification,
+    PromptRobertaAdapterForSequenceClassification,
+    PromptDebertaForSequenceClassification,
+    PromptDebertaPrefixForSequenceClassification,
+    PromptDebertaPtuningForSequenceClassification,
+    # PromptDebertaAdapterForSequenceClassification,
+    PromptDebertav2ForSequenceClassification,
+    PromptDebertav2PrefixForSequenceClassification,
+    PromptDebertav2PtuningForSequenceClassification,
+    # PromptDebertav2AdapterForSequenceClassification
+)
+
+from model.multiple_choice import (
+    BertPrefixForMultipleChoice,
+    RobertaPrefixForMultipleChoice,
+    DebertaPrefixForMultipleChoice,
+    BertPromptForMultipleChoice,
+    RobertaPromptForMultipleChoice
+)
+
+from transformers import (
+    AutoConfig,
+    AutoModelForTokenClassification,
+    AutoModelForSequenceClassification,
+root@9a429f9c7fca:/app/UPET#

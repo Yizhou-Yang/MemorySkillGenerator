@@ -1,0 +1,49 @@
+New Terminal Output:
+
+root@82d2829cde94:/app# cat > /app/reshard.py <<'PYEOF'
+> import os, json, shutil
+>
+> SRC = '/app/c4_sample'
+> DST = '/app/c4_reshard'
+> MANIFEST = '/app/c4_reshard_manifest.json'
+> MAX_FILES = 30
+> MAX_SIZE = 15 * 1024 * 1024
+>
+> def main():
+>     if not os.path.isdir(SRC):
+>         raise SystemExit('source not found: ' + SRC)
+>     os.makedirs(DST, exist_ok=True)
+>     files = []
+>     for name in os.listdir(SRC):
+>         p = os.path.join(SRC, name)
+>         if os.path.isfile(p):
+>             files.append(name)
+>     files.sort()
+>     for name in files:
+>         s = os.path.getsize(os.path.join(SRC, name))
+>         if s > MAX_SIZE:
+>             raise SystemExit('file exceeds 15MB: ' + name)
+>     manifest = []
+>     batch = 0
+>     idx = 0
+>     n = len(files)
+>     while idx < n:
+>         sub = os.path.join(DST, 'batch_%04d' % batch)
+>         os.makedirs(sub, exist_ok=True)
+>         for name in files[idx:idx+MAX_FILES]:
+>             src_p = os.path.join(SRC, name)
+>             dst_p = os.path.join(sub, name)
+>             shutil.move(src_p, dst_p)
+>             manifest.append({'orig': name, 'dest': os.path.relpath(dst_p, DST)})
+>         idx += MAX_FILES
+>         batch += 1
+>     with open(MANIFEST, 'w') as f:
+>         json.dump({'src': SRC, 'dst': DST, 'entries': manifest}, f, indent=2)
+>     print('resharded %d files into %d folders' % (n, batch))
+>     print('manifest: ' + MANIFEST)
+>
+> if __name__ == '__main__':
+>     main()
+> PYEOF
+root@82d2829cde94:/app# python3 /app/reshard.py
+

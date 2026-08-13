@@ -1,0 +1,114 @@
+New Terminal Output:
+
+root@42ea1ef673ba:/app# cat > /tmp/analyze.py <<'PYEOF'
+> import zipfile, pickle, struct, zlib, sys
+>
+> zf = zipfile.ZipFile('/app/model.pth')
+>
+> class FloatStorage:
+>     def __init__(self, key, device, numel):
+>         raw = zf.read('simple_mnist/data/' + key)
+>         self.data = list(struct.unpack('<%df' % numel, raw[:numel*4]))
+>
+> def rebuild_tensor_v2(storage, offset, size, stride, requires_grad, hooks):
+>     total = 1
+>     for s in size: total *= s
+>     return {'shape': list(size), 'data': storage.data[offset:offset+total]}
+>
+> class U(pickle.Unpickler):
+>     def find_class(self, module, name):
+>         if module=='torch' and name=='FloatStorage': return FloatStorage
+>         if module=='torch._utils' and name=='_rebuild_tensor_v2': return rebuild_tensor_v2
+>         if module=='collections' and name=='OrderedDict': return dict
+>         raise Exception('no class %s.%s' % (module,name))
+>     def persistent_load(self, pid):
+>         kind, cls, key, device, numel = pid
+>         return cls(key, device, numel)
+>
+> obj = U(__import__('io').BytesIO(zf.read('simple_mnist/data.pkl'))).load()
+> params = {k:v for k,v in obj.items() if k!='_metadata'}
+> for k,v in params.items():
+>     print(k, v['shape'])
+>
+> # export weights.json
+> import json
+> out = {}
+> for k,v in params.items():
+>     out[k] = {'shape': v['shape'], 'data': v['data']}
+> open('/app/weights.json','w').write(json.dumps(out))
+> print('wrote weights.json', len(json.dumps(out)), 'bytes')
+>
+> # ---- PNG decode ----
+> def read_png(path):
+>     d=open(path,'rb').read()
+>     pos=8; width=height=bpc=ct=None; idat=b''
+>     while pos<len(d):
+>         ln=struct.unpack('>I',d[pos:pos+4])[0]; ct=d[pos+4:pos+8]; cd=d[pos+8:pos+8+ln]
+>         if ct==b'IHDR': width,height,bpc,ct=struct.unpack('>IIBB',cd[:10])
+>         elif ct==b'IDAT': idat+=cd
+>         elif ct==b'IEND': break
+>         pos+=12+ln
+>     raw=zlib.decompress(idat)
+>     ch={0:1,2:3,3:1,4:2,6:4}[ct]; bpp=ch*(bpc//8); stride=width*bpp
+>     out=bytearray(); prev=bytearray(stride); p=0
+>     for y in range(height):
+>         ft=raw[p]; p+=1; line=bytearray(raw[p:p+stride]); p+=stride
+>         rec=bytearray(stride)
+>         for i in range(stride):
+>             x=line[i]
+>             a=rec[i-bpp] if i>=bpp else 0; b=prev[i]; c=prev[i-bpp] if i>=bpp else 0
+>             if ft==0: v=x
+>             elif ft==1: v=x+a
+>             elif ft==2: v=x+b
+>             elif ft==3: v=x+((a+b)//2)
+>             else:
+>                 pp=a+b-c; pa=abs(pp-a); pb=abs(pp-b); pc=abs(pp-c)
+>                 pr=a if (pa<=pb and pa<=pc) else (b if pb<=pc else c)
+>                 v=x+pr
+>             rec[i]=v&0xff
+>         prev=rec; out+=rec
+>     # to grayscale 2D
+>     img=[]
+>     for y in range(height):
+>         row=[]
+>         for x in range(width):
+>             base=y*stride+x*bpp
+>             if ct in (0,3): g=out[base]
+>             elif ct==2: g=int(0.299*out[base]+0.587*out[base+1]+0.114*out[base+2])
+>             elif ct==4: g=out[base]
+>             else: g=int(0.299*out[base]+0.587*out[base+1]+0.114*out[base+2])
+>             row.append(g)
+>         img.append(row)
+>     return width,height,img
+>
+> w,h,img=read_png('/app/image.png')
+> print('image',w,h)
+> for row in img:
+>     print(''.join('#' if p>128 else ('.' if p>40 else ' ') for p in row))
+>
+> flat=[img[y][x] for y in range(h) for x in range(w)]
+>
+> def matvec(W,x):
+>     return [sum(W[i][j]*x[j] for j in range(len(x))) for i in range(len(W))]
+> def add(a,b): return [a[i]+b[i] for i in range(len(a))]
+> def relu(v): return [x if x>0 else 0.0 for x in v]
+>
+> def forward(x):
+>     x=relu(add(matvec(params['input_layer.weight']['data'],x),params['input_layer.bias']['data']))
+>     x=relu(add(matvec(params['hidden_layer.weight']['data'],x),params['hidden_layer.bias']['data']))
+>     x=add(matvec(params['output_layer.weight']['data'],x),params['output_layer.bias']['data'])
+>     return x
+>
+> def sm(v):
+>     m=max(v); e=[__import__('math').exp(x-m) for x in v]; s=sum(e); return [x/s for x in e]
+>
+> for name,x in [('raw',[f for f in flat]),('/255',[f/255 for f in flat]),('norm',[(f/255-0.1307)/0.3081 for f in flat])]:
+>     logits=forward(x); p=sm(logits)
+>     print(name,'argmax',max(range(10),key=lambda i:p[i]),'conf=%.3f'%max(p))
+> PYEOF
+root@42ea1ef673ba:/app# python3 /tmp/analyze.py
+Traceback (most recent call last):
+  File "/tmp/analyze.py", line 25, in <module>
+    obj = U(__import__('io').BytesIO(zf.read('simple_mnist/data.pkl'))).load()
+AttributeError: 'dict' object has no attribute '__dict__'. Did you mean: '__dir__'?
+root@42ea1ef673ba:/app#

@@ -1,0 +1,23 @@
+New Terminal Output:
+
+root@e093ef276c98:/app/filesystem_spec# cat > /tmp/test_open_async.py << 'PYEOF'
+> import asyncio
+> import fsspec
+> from fsspec.implementations.dirfs import DirFileSystem
+>
+> async def main():
+>     mem = fsspec.filesystem('memory', asynchronous=True)
+>     dirfs = DirFileSystem(path='/foo', fs=mem, asynchronous=True)
+>     f = await dirfs.open_async('hello', 'wb')
+>     await f.write(b'world')
+>     await f.close()
+>     out = await dirfs.open_async('hello', 'rb')
+>     data = await out.read()
+>     await out.close()
+>     assert data == b'world', data
+>     print('open_async OK, data =', data)
+>
+> asyncio.run(main())
+> PYEOF
+root@e093ef276c98:/app/filesystem_spec# python3 /tmp/test_open_async.py
+

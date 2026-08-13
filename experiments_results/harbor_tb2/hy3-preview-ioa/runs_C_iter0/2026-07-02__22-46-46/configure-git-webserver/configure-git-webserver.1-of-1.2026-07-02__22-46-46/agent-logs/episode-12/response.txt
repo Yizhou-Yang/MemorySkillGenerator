@@ -1,0 +1,11 @@
+{
+  "analysis": "The config file still didn't disable the check. apt's free-space check queries statvfs on /var/cache/apt/archives, which on this fuse-overlayfs returns 0 available even though I can write files. The robust fix is to mount a tmpfs over the apt cache directory so statvfs reports real free space. Let me try that.",
+  "plan": "Mount a tmpfs at /var/cache/apt/archives (tmpfs free space comes from RAM). Then retry the install. If mount lacks privileges, I'll fall back to manual `apt-get download` + `dpkg -i` or another method.",
+  "commands": [
+    {
+      "keystrokes": "mount -t tmpfs tmpfs /var/cache/apt/archives 2>&1; echo \"exit=$?\"; df -h /var/cache/apt/archives | tail -1\n",
+      "duration": 1.0
+    }
+  ],
+  "task_complete": false
+}

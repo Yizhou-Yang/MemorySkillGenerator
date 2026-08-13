@@ -1,0 +1,27 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'cat /app/data.hex\n'
+"python3 - <<'EOF'\nwords=[]\nfor line in open('/app/data.hex'):\n    toks=line.split()\n    if not toks: continue\n    for t in toks[1:]:\n        words.append(int(t,8))\nle=b''.join(bytes([w&0xff,(w>>8)&0xff]) for w in words)\nbe=b''.join(bytes([(w>>8)&0xff,w&0xff]) for w in words)\nopen('/app/data_le.bin','wb').write(le)\nopen('/app/data_be.bin','wb').write(be)\nprint('words',len(words),'bytes',len(le))\nprint('first16 LE', le[:16].hex())\nprint('first16 BE', be[:16].hex())\nEOF\n"
+'file /app/data_le.bin /app/data_be.bin\n'
+'strings -n 3 /app/data_le.bin\n'
+"python3 - <<'EOF'\nimport re\ndata=open('/app/data_le.bin','rb').read()\nruns=[]; cur=[]\nfor b in data:\n    if 32<=b<127 or b in (9,10,13):\n        cur.append(chr(b))\n    else:\n        if len(cur)>=4: runs.append(''.join(cur))\n        cur=[]\nif len(cur)>=4: runs.append(''.join(cur))\nfor r in runs: print(repr(r))\nEOF\n"
+"which pdp11 simh nova 2>/dev/null; ls /usr/bin 2>/dev/null | grep -iE 'pdp|sim|nova|dec' ; echo '---done---'\n"
+"which apt apt-get pip pip3 curl wget gcc cc 2>/dev/null; echo '---'\n"
+"find / -iname '*pdp11*' -o -iname '*simh*' 2>/dev/null | head; echo '---find done---'\n"
+"timeout 5 bash -c 'cat < /dev/null > /dev/tcp/pypi.org/443 && echo NET_OK || echo NET_FAIL' 2>/dev/null; echo '---'\n"
+'apt-get update 2>&1 | tail -5\n'
+"apt-cache search simh 2>/dev/null; apt-cache search pdp 2>/dev/null; echo '---'\n"
+'apt-get install -y simh 2>&1 | tail -8\n'
+'ls -la /usr/bin/simh* /usr/lib/simh* 2>/dev/null; dpkg -L simh | grep -i pdp\n'
+"cat > /app/run.scr <<'EOF'\nset cpu 11/70\nset clk enabled\ndep system 0\nload /app/data_le.bin\nrun\nquit\nEOF\ncat /app/run.scr\n"
+'pdp11 /app/run.scr > /app/out.txt 2>&1; echo EXIT=$?\n'
+"echo '==== OUTPUT ===='; cat /app/out.txt\n"
+'python3 -c "b=open(\'/app/data_be.bin\',\'rb\').read(); print(\'len\',len(b)); print(\'first bytes\', b[:4].hex())"\n'
+"cat > /app/run2.scr <<'EOF'\nset cpu 11/70\nset clk enable\nload /app/data_be.bin\nrun\nquit\nEOF\ncat /app/run2.scr\n"
+'pdp11 /app/run2.scr > /app/out2.txt 2>&1; echo EXIT=$?\n'
+"echo '==== OUTPUT ===='; cat /app/out2.txt\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

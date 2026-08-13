@@ -1,0 +1,20 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'cat /app/maze_game.sh\n'
+'cat /app/maze_1.txt\n'
+'ls -la /app/tests && cat /protected/maze_server.py 2>&1 | head -200\n'
+"sed -n '200,320p' /protected/maze_server.py\n"
+'for f in /protected/mazes/maze_*.txt; do echo "=== $f ==="; cat "$f"; echo; done\n'
+"cat > /app/solve.py << 'EOF'\n#!/usr/bin/env python3\nimport sys, os, subprocess\n\nDIRS = [('N',(-1,0)),('E',(0,1)),('S',(1,0)),('W',(0,-1))]\nOPP = {'N':'S','S':'N','E':'W','W':'E'}\n\ndef main():\n    if len(sys.argv) < 2:\n        print('usage: solve.py <maze_id>'); sys.exit(1)\n    maze_id = sys.argv[1]\n    out_dir = '/app/output'\n    os.makedirs(out_dir, exist_ok=True)\n\n    proc = subprocess.Popen(['/app/maze_game.sh', maze_id],\n                            stdin=subprocess.PIPE, stdout=subprocess.PIPE,\n                            text=True, bufsize=1, cwd='/app')\n\n    def read_response():\n        buf = ''\n        while True:\n            ch = proc.stdout.read(1)\n            if not ch:\n                return buf\n            buf += ch\n            if buf.endswith('> '):\n                return buf[:-2]\n\n    # consume welcome banner until first prompt\n    read_response()\n\n    grid = {}\n    known = set()\n    visited = set()\n    start = (0, 0)\n    grid[start] = 'S'\n    known.add(start)\n\n    def move(d):\n        proc.stdin.write('move ' + d + '\\n')\n        proc.stdin.flush()\n        return read_response().strip()\n\n    def explore(pos):\n        visited.add(pos)\n        for d, (dr, dc) in DIRS:\n            target = (pos[0] + dr, pos[1] + dc)\n            if target in known:\n                cell = grid.get(target)\n                if cell == '#' or target in visited:\n                    continue\n                # known open but unvisited (should not normally happen)\n                move(d)\n                explore(target)\n                move(OPP[d])\n            else:\n                resp = move(d)\n                if resp.startswith('hit wall'):\n                    grid[target] = '#'\n                    known.add(target)\n                else:\n                    if resp.startswith('reached exit'):\n                        grid[target] = 'E'\n                    else:\n                        grid[target] = ' '\n                    known.add(target)\n                    explore(target)\n                    move(OPP[d])\n\n    explore(start)\n\n    # try to exit cleanly\n    try:\n        proc.stdin.write('exit\\n'); proc.stdin.flush()\n    except Exception:\n        pass\n    try:\n        proc.wait(timeout=5)\n    except Exception:\n        proc.kill()\n\n    # compute open-cell bounding box\n    open_cells = [p for p in known if grid.get(p) != '#']\n    minr = min(p[0] for p in open_cells)\n    maxr = max(p[0] for p in open_cells)\n    minc = min(p[1] for p in open_cells)\n    maxc = max(p[1] for p in open_cells)\n\n    lines = []\n    for r in range(minr - 1, maxr + 2):\n        row = []\n        for c in range(minc - 1, maxc + 2):\n            ch = grid.get((r, c), '#')\n            row.append(ch)\n        lines.append(''.join(row))\n\n    out_path = os.path.join(out_dir, maze_id + '.txt')\n    with open(out_path, 'w') as f:\n        f.write('\\n'.join(lines))\n    print('\\n'.join(lines))\n\nif __name__ == '__main__':\n    main()\nEOF\n"
+'python3 /app/solve.py 1\n'
+''
+'for i in $(seq 1 10); do echo "=== maze $i ==="; python3 /app/solve.py $i; echo; done\n'
+'for i in $(seq 1 10); do a=$(cat /app/output/$i.txt); b=$(cat /protected/mazes/maze_$i.txt); if [ "$a" = "$b" ]; then echo "maze $i: MATCH"; else echo "maze $i: DIFF"; diff <(cat /app/output/$i.txt) <(cat /protected/mazes/maze_$i.txt); fi; done\n'
+'cat /app/tests/test_outputs.py\n'
+"echo '--- gt ---'; od -c /protected/mazes/maze_1.txt | tail -3; echo '--- mine ---'; od -c /app/output/1.txt | tail -3\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

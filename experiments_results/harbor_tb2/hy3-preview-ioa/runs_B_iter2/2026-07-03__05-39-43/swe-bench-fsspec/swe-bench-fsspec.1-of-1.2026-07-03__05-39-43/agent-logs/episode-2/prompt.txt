@@ -1,0 +1,249 @@
+New Terminal Output:
+
+root@20099aa7046e:/app/filesystem_spec# cat -n ./fsspec/implementations/dirfs.py
+     1  from .. import filesystem
+     2  from ..asyn import AsyncFileSystem
+     3
+     4
+     5  class DirFileSystem(AsyncFileSystem):
+     6      """Directory prefix filesystem
+     7
+     8      The DirFileSystem is a filesystem-wrapper. It assumes every path it is dealing with
+     9      is relative to the `path`. After performing the necessary paths operation it
+    10      delegates everything to the wrapped filesystem.
+    11      """
+    12
+    13      protocol = "dir"
+    14
+    15      def __init__(
+    16          self,
+    17          path=None,
+    18          fs=None,
+    19          fo=None,
+    20          target_protocol=None,
+    21          target_options=None,
+    22          **storage_options,
+    23      ):
+    24          """
+    25          Parameters
+    26          ----------
+    27          path: str
+    28              Path to the directory.
+    29          fs: AbstractFileSystem
+    30              An instantiated filesystem to wrap.
+    31          target_protocol, target_options:
+    32              if fs is none, construct it from these
+    33          fo: str
+    34              Alternate for path; do not provide both
+    35          """
+    36          super().__init__(**storage_options)
+    37          if fs is None:
+    38              fs = filesystem(protocol=target_protocol, **(target_options or {}))
+    39          if (path is not None) ^ (fo is not None) is False:
+    40              raise ValueError("Provide path or fo, not both")
+    41          path = path or fo
+    42
+    43          if self.asynchronous and not fs.async_impl:
+    44              raise ValueError("can't use asynchronous with non-async fs")
+    45
+    46          if fs.async_impl and self.asynchronous != fs.asynchronous:
+    47              raise ValueError("both dirfs and fs should be in the same sync/async mode")
+    48
+    49          self.path = fs._strip_protocol(path)
+    50          self.fs = fs
+    51
+    52      def _join(self, path):
+    53          if isinstance(path, str):
+    54              if not self.path:
+    55                  return path
+    56              if not path:
+    57                  return self.path
+    58              return self.fs.sep.join((self.path, self._strip_protocol(path)))
+    59          if isinstance(path, dict):
+    60              return {self._join(_path): value for _path, value in path.items()}
+    61          return [self._join(_path) for _path in path]
+    62
+    63      def _relpath(self, path):
+    64          if isinstance(path, str):
+    65              if not self.path:
+    66                  return path
+    67              # We need to account for S3FileSystem returning paths that do not
+    68              # start with a '/'
+    69              if path == self.path or (
+    70                  self.path.startswith(self.fs.sep) and path == self.path[1:]
+    71              ):
+    72                  return ""
+    73              prefix = self.path + self.fs.sep
+    74              if self.path.startswith(self.fs.sep) and not path.startswith(self.fs.sep):
+    75                  prefix = prefix[1:]
+    76              assert path.startswith(prefix)
+    77              return path[len(prefix) :]
+    78          return [self._relpath(_path) for _path in path]
+    79
+    80      # Wrappers below
+    81
+    82      @property
+    83      def sep(self):
+    84          return self.fs.sep
+    85
+    86      async def set_session(self, *args, **kwargs):
+    87          return await self.fs.set_session(*args, **kwargs)
+    88
+    89      async def _rm_file(self, path, **kwargs):
+    90          return await self.fs._rm_file(self._join(path), **kwargs)
+    91
+    92      def rm_file(self, path, **kwargs):
+    93          return self.fs.rm_file(self._join(path), **kwargs)
+    94
+    95      async def _rm(self, path, *args, **kwargs):
+    96          return await self.fs._rm(self._join(path), *args, **kwargs)
+    97
+    98      def rm(self, path, *args, **kwargs):
+    99          return self.fs.rm(self._join(path), *args, **kwargs)
+   100
+   101      async def _cp_file(self, path1, path2, **kwargs):
+   102          return await self.fs._cp_file(self._join(path1), self._join(path2), **kwargs)
+   103
+   104      def cp_file(self, path1, path2, **kwargs):
+   105          return self.fs.cp_file(self._join(path1), self._join(path2), **kwargs)
+   106
+   107      async def _copy(
+   108          self,
+   109          path1,
+   110          path2,
+   111          *args,
+   112          **kwargs,
+   113      ):
+   114          return await self.fs._copy(
+   115              self._join(path1),
+   116              self._join(path2),
+   117              *args,
+   118              **kwargs,
+   119          )
+   120
+   121      def copy(self, path1, path2, *args, **kwargs):
+   122          return self.fs.copy(
+   123              self._join(path1),
+   124            
+[... output limited to 10000 bytes; 70 interior bytes omitted ...]
+e, **kwargs):
+   254          ret = self.fs.ls(self._join(path), detail=detail, **kwargs).copy()
+   255          if detail:
+   256              out = []
+   257              for entry in ret:
+   258                  entry = entry.copy()
+   259                  entry["name"] = self._relpath(entry["name"])
+   260                  out.append(entry)
+   261              return out
+   262
+   263          return self._relpath(ret)
+   264
+   265      async def _walk(self, path, *args, **kwargs):
+   266          async for root, dirs, files in self.fs._walk(self._join(path), *args, **kwargs):
+   267              yield self._relpath(root), dirs, files
+   268
+   269      def walk(self, path, *args, **kwargs):
+   270          for root, dirs, files in self.fs.walk(self._join(path), *args, **kwargs):
+   271              yield self._relpath(root), dirs, files
+   272
+   273      async def _glob(self, path, **kwargs):
+   274          detail = kwargs.get("detail", False)
+   275          ret = await self.fs._glob(self._join(path), **kwargs)
+   276          if detail:
+   277              return {self._relpath(path): info for path, info in ret.items()}
+   278          return self._relpath(ret)
+   279
+   280      def glob(self, path, **kwargs):
+   281          detail = kwargs.get("detail", False)
+   282          ret = self.fs.glob(self._join(path), **kwargs)
+   283          if detail:
+   284              return {self._relpath(path): info for path, info in ret.items()}
+   285          return self._relpath(ret)
+   286
+   287      async def _du(self, path, *args, **kwargs):
+   288          total = kwargs.get("total", True)
+   289          ret = await self.fs._du(self._join(path), *args, **kwargs)
+   290          if total:
+   291              return ret
+   292
+   293          return {self._relpath(path): size for path, size in ret.items()}
+   294
+   295      def du(self, path, *args, **kwargs):
+   296          total = kwargs.get("total", True)
+   297          ret = self.fs.du(self._join(path), *args, **kwargs)
+   298          if total:
+   299              return ret
+   300
+   301          return {self._relpath(path): size for path, size in ret.items()}
+   302
+   303      async def _find(self, path, *args, **kwargs):
+   304          detail = kwargs.get("detail", False)
+   305          ret = await self.fs._find(self._join(path), *args, **kwargs)
+   306          if detail:
+   307              return {self._relpath(path): info for path, info in ret.items()}
+   308          return self._relpath(ret)
+   309
+   310      def find(self, path, *args, **kwargs):
+   311          detail = kwargs.get("detail", False)
+   312          ret = self.fs.find(self._join(path), *args, **kwargs)
+   313          if detail:
+   314              return {self._relpath(path): info for path, info in ret.items()}
+   315          return self._relpath(ret)
+   316
+   317      async def _expand_path(self, path, *args, **kwargs):
+   318          return self._relpath(
+   319              await self.fs._expand_path(self._join(path), *args, **kwargs)
+   320          )
+   321
+   322      def expand_path(self, path, *args, **kwargs):
+   323          return self._relpath(self.fs.expand_path(self._join(path), *args, **kwargs))
+   324
+   325      async def _mkdir(self, path, *args, **kwargs):
+   326          return await self.fs._mkdir(self._join(path), *args, **kwargs)
+   327
+   328      def mkdir(self, path, *args, **kwargs):
+   329          return self.fs.mkdir(self._join(path), *args, **kwargs)
+   330
+   331      async def _makedirs(self, path, *args, **kwargs):
+   332          return await self.fs._makedirs(self._join(path), *args, **kwargs)
+   333
+   334      def makedirs(self, path, *args, **kwargs):
+   335          return self.fs.makedirs(self._join(path), *args, **kwargs)
+   336
+   337      def rmdir(self, path):
+   338          return self.fs.rmdir(self._join(path))
+   339
+   340      def mv(self, path1, path2, **kwargs):
+   341          return self.fs.mv(
+   342              self._join(path1),
+   343              self._join(path2),
+   344              **kwargs,
+   345          )
+   346
+   347      def touch(self, path, **kwargs):
+   348          return self.fs.touch(self._join(path), **kwargs)
+   349
+   350      def created(self, path):
+   351          return self.fs.created(self._join(path))
+   352
+   353      def modified(self, path):
+   354          return self.fs.modified(self._join(path))
+   355
+   356      def sign(self, path, *args, **kwargs):
+   357          return self.fs.sign(self._join(path), *args, **kwargs)
+   358
+   359      def __repr__(self):
+   360          return f"{self.__class__.__qualname__}(path='{self.path}', fs={self.fs})"
+   361
+   362      def open(
+   363          self,
+   364          path,
+   365          *args,
+   366          **kwargs,
+   367      ):
+   368          return self.fs.open(
+   369              self._join(path),
+   370              *args,
+   371              **kwargs,
+   372          )
+root@20099aa7046e:/app/filesystem_spec#

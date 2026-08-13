@@ -1,0 +1,10 @@
+{
+  "analysis": "No proxy is set. The new cache at /sys/fs/cgroup/hfhome already holds 210M of the ~331M repo. The download failed mid-way on a subsequent file with a TLS `WRONG_VERSION_NUMBER` error and a segfault — likely a flaky network/CDN hiccup, not a structural problem, since the first big file completed to 100%. Completed blobs persist in the cache, so re-running will resume rather than re-download them. I'll retry inside a shell loop until it succeeds.",
+  "plan": "Run snapshot_download in a retry loop (up to 5 attempts). Each successful file is cached, so partial progress is preserved. Once it prints CACHED_AT, the model+config+tokenizer are fully cached. Then I'll verify offline loading with HF_HUB_OFFLINE=1.",
+  "commands": [
+    {
+      "keystrokes": "for i in 1 2 3 4 5 6; do echo \"=== attempt $i ===\"; python3 -c \"from huggingface_hub import snapshot_download; p = snapshot_download('albert/albert-base-v2'); print('CACHED_AT', p)\" && break; sleep 3; done\n",
+      "duration": 40.0
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+New Terminal Output:
+
+root@1adb917c6aaf:/app/dclm# sed -i 's/AKIA1234567890123456/<your-aws-access-key-id>/g; s/D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF/<your-aws-secret-access-key>/
+g; s/hf_abcdefghijklmnopqrstuvwxyz123456/<your-huggingface-token>/g; s/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/<your-huggingface-token>/g; s/ghp_aBcDeFgHiJkLmNoPq
+RsTuVwXyZ0123456789/<your-github-token>/g' /app/dclm/ray_processing/process.py /app/dclm/ray_processing/ray_cluster.yaml /app/dclm/exp_data/datasets/tokenized/r
+w_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json
+root@1adb917c6aaf:/app/dclm# echo '--- verify secrets gone ---'; grep -rIn -F -e 'AKIA1234567890123456' -e 'D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF' -e 'hf_abc
+defghijklmnopqrstuvwxyz123456' -e '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' -e 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789' /app/dclm --exclude-dir=.git | grep -v -
+E '<your-'; echo 'EXIT_GREP:' $?
+--- verify secrets gone ---
+EXIT_GREP: 1
+root@1adb917c6aaf:/app/dclm# echo '--- placeholders present ---'; grep -rIn -E '<your-(aws-access-key-id|aws-secret-access-key|huggingface-token|github-token)>'
+ /app/dclm --exclude-dir=.git
+--- placeholders present ---
+/app/dclm/ray_processing/process.py:122:    os.environ["AWS_ACCESS_KEY_ID"] = "<your-aws-access-key-id>"
+/app/dclm/ray_processing/process.py:123:    os.environ["AWS_SECRET_ACCESS_KEY"] = "<your-aws-secret-access-key>"
+/app/dclm/ray_processing/ray_cluster.yaml:29:    - echo 'export AWS_ACCESS_KEY_ID=<your-aws-access-key-id>' >> ~/.bashrc
+/app/dclm/ray_processing/ray_cluster.yaml:30:    - echo 'export AWS_SECRET_ACCESS_KEY=<your-aws-secret-access-key>' >> ~/.bashrc
+/app/dclm/ray_processing/ray_cluster.yaml:43:    - git clone -b https://<your-github-token>@github.com/mlfoundations/dcnlp.git
+/app/dclm/ray_processing/ray_cluster.yaml:44:    - huggingface-cli login --token <your-huggingface-token> -y
+/app/dclm/exp_data/datasets/tokenized/rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json:18:    "dcnlp_diff": "diff --git a/eval/eval_openlm_ckpt.py
+b/eval/eval_openlm_ckpt.py\nindex 5a9a662..c095b10 100644\n--- a/eval/eval_openlm_ckpt.py\n+++ b/eval/eval_openlm_ckpt.py\n@@ -334,6 +334,7 @@ def main():\n
+     )\n     else:\n         params = create_params(args)\n+        print(f\"{params=}\")\n         eval_model = OpenLMforCausalLM(OpenLMConfig(create_params(ar
+gs)))\n \n     if \"gpt-neox-20b\" in args.tokenizer:\n@@ -344,7 +345,7 @@ def main():\n         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, trust
+_remote_code=True, cache_dir=args.hf_cache_dir)\n \n     if args.checkpoint is not None:\n-        print(\"Loading checkpoint , required = True from disk\")\n+
+       print(f\"Loading checkpoint {args.checkpoint}\")\n         checkpoint = torch.load(args.checkpoint)\n \n         state_dict = checkpoint[\"state_dict\"]\
+ndiff --git a/exp_data/datasets/raw_sources/sh_2e12_approx_tokens_sample.json b/exp_data/datasets/raw_sources/sh_2e12_approx_tokens_sample.json\nindex 1e88b5e..
+b865e72 100644\n--- a/exp_data/datasets/raw_sources/sh_2e12_approx_tokens_sample.json\n+++ b/exp_data/datasets/raw_sources/sh_2e12_approx_tokens_sample.json\n@@
+ -3,6 +3,11 @@\n     \"name\": \"sh_2e12_approx_tokens_sample\",\n     \"creation_date\": \"2024-01-01 00:47:37\",\n     \"dataset_url\": \"s3://dcnlp-west/dcnl
+p_data_sources/software_heritage/sh_2e12_approx_tokens_sample/\",\n+    \"mirrors\": {\n+        \"tri\": {\n+            \"dataset_url\": \"s3://***REMOVED***-
+uw2/openlm/dcnlp/raw_datasets/software_heritage/sh_2e12_approx_tokens_sample/\"\n+        }\n+    },\n     \"manifest_url\": null,\n     \"sources\": [\n
+  {\n@@ -17,4 +22,4 @@\n     \"dcnlp_commit_hash\": \"b52132d44a59d8bcf7edb2f750d96aaa58dac160\",\n     \"dcnlp_diff\": null,\n     \"data_key\": \"jsonl.zst\"\
+n-}\n\\ No newline at end of file\n+}\ndiff --git a/exp_data/datasets/tokenized/lmdata.json b/exp_data/datasets/tokenized/lmdata.json\nindex 7b52ee0..2bf1568 10
+0644\n--- a/exp_data/datasets/tokenized/lmdata.json\n+++ b/exp_data/datasets/tokenized/lmdata.json\n@@ -2,8 +2,8 @@\n     \"uuid\": \"b8f3eeec-a274-4e38-8c98-5f
+d7c020d1b7\",\n     \"name\": \"lmdata\",\n     \"creation_date\": \"2024_02_22-04_38_36\",\n-    \"dataset_url\": \"s3://dcnlp-west/dcnlp_experiments_tri/openl
+m/dcnlp/datasets/lmdata/\",\n-    \"manifest_url\": \"s3://dcnlp-west/dcnlp_experiments_tri/openlm/dcnlp/datasets/lmdata/manifest.jsonl\",\n+    \"dataset_url\"
+: \"s3://***REMOVED***/openlm/dcnlp/datasets/lmdata/\",\n+    \"manifest_url\": \"s3://***REMOVED***/openlm/dcnlp/datasets/lmdata/manifest.jsonl\",\n     \"mirr
+ors\": {\n         \"tri\": {\n             \"dataset_url\": \"s3://***REMOVED***/openlm/dcnlp/datasets/lmdata\",\ndiff --git a/exp_data/datasets/tokenized/swh_
+rw_mix_1_subfraction012.json b/exp_data/datasets/tokenized/swh_rw_mix_1_subfraction012.json\nindex 7e037b8..702c44d 100644\n--- a/exp_data/datasets/tokenized/sw
+h_rw_mix_1_subfraction012.json\n+++ b/exp_data/datasets/tokenized/sw
+[... output limited to 10000 bytes; 71 interior bytes omitted ...]
+:\n-        data.update_for_mirror(args.mirror)\n \n     _, rank, world_size = world_info_from_env()\n     if rank == 0:\n@@
+-96,7 +94,7 @@ if __name__ == \"__main__\":\n             fs, exp_root = fsspec.core.url_to_fs(os.path.join(args.logs, name))\n \n         stats_glob = os.path.
+join(exp_root, \"checkpoints\", \"stats_*.pt\")\n-        results_jsonl = os.path.join(exp_root, \"checkpoints\", \"results.jsonl\")\n+        # results_jsonl =
+ os.path.join(exp_root, \"checkpoints\", \"results.jsonl\")\n \n         stats = fs.glob(stats_glob)\n         stats = sorted(stats, key=natural_key)\ndiff --gi
+t a/training/train_scripts/docker/Dockerfile.p5 b/training/train_scripts/docker/Dockerfile.p5\nindex eb9d237..e6d060a 100644\n--- a/training/train_scripts/docke
+r/Dockerfile.p5\n+++ b/training/train_scripts/docker/Dockerfile.p5\n@@ -87,6 +87,16 @@ RUN pip install -r /opt/ml/code/requirements.txt\n # RUN rm /opt/ml/code/
+setup.py\n RUN rm /opt/ml/code/requirements.txt\n \n+# Alternative way\n+# COPY . /opt/ml/code/\n+# COPY ./requirements.txt /opt/ml/code/requirements.txt\n+# \n
++# RUN pip install wheel\n+# RUN pip install -r /opt/ml/code/requirements.txt\n+# RUN pip install --upgrade s3fs\n+# \n+# COPY . /opt/ml/code/\n+\n # Defines a
+script entrypoint \n ENV SAGEMAKER_PROGRAM training/train.py\n \ndiff --git a/training/train_scripts/docker/Dockerfile_update b/training/train_scripts/docker/Do
+ckerfile_update\nindex b46252b..18e49d8 100644\n--- a/training/train_scripts/docker/Dockerfile_update\n+++ b/training/train_scripts/docker/Dockerfile_update\n@@
+ -8,7 +8,7 @@ COPY . /opt/ml/code/\n \n # RUN pip install -e /opt/ml/code/\n \n-# # Prevent sagemaker from installing requirements again.\n+# Prevent sagemaker
+from installing requirements again.\n RUN rm /opt/ml/code/requirements.txt\n \n ENV SAGEMAKER_PROGRAM training/train.py\ndiff --git a/training/train_scripts/tra
+in_sagemaker.py b/training/train_scripts/train_sagemaker.py\nindex 1e2fb8c..154fb20 100644\n--- a/training/train_scripts/train_sagemaker.py\n+++ b/training/trai
+n_scripts/train_sagemaker.py\n@@ -50,7 +50,7 @@ def get_image(user, instance_type, docker_dir, build_type=None, profile=\"powerus\n         commands = [\n
+       # Log in to Sagemaker account to get image.\n             f\"{login_cmd} 763104351884.dkr.ecr.{region}.amazonaws.com\",\n-            f\"docker build --p
+rogress=plain -f {dockerfile_base} --build-arg AWS_REGION={region} -t {algorithm_name} .\",\n+            f\"docker build --no-cache --progress=plain -f {docker
+file_base} --build-arg AWS_REGION={region} -t {algorithm_name} .\",\n             f\"docker tag {algorithm_name} {fullname}\",\n             f\"{login_cmd} {ful
+lname}\",\n             (\n@@ -88,6 +88,7 @@ def main():\n     parser.add_argument(\"--chinchilla-multiplier\", required=False, type=float)\n     parser.add_arg
+ument(\"--do-eval\", action=\"store_true\")\n     parser.add_argument(\"--multiple-data-passes\", action=\"store_true\")\n+    parser.add_argument(\"--prefix-re
+place\", default=\"tri\")\n \n     # Docker / AWS args\n     parser.add_argument(\"--docker-dir\", type=Path, default=Path(__file__).parent / \"docker\")\n@@ -1
+61,12 +162,15 @@ def main_after_setup_move(args):\n         return job_name\n \n     job_name = get_job_name(base_job_name)\n+    if args.prefix_replace == \"tr
+i\":\n+        args.prefix_replace = \"s3://dcnlp-west/=s3://***REMOVED***/openlm/dcnlp/dcnlp-west-mirror/\"\n     train_args = {\n         \"scale\": args.scal
+e,\n         \"data-config\": args.data_config,\n         \"remote-sync\": args.remote_sync,\n         \"logs\": f\"{checkpoint_local_path}/{job_name}\",\n
+    \"report-to-wandb\": \"\",\n+        \"prefix-replace\": args.prefix_replace,\n     }\n     if args.chinchilla_multiplier:\n         train_args[\"chinchilla
+-multiplier\"] = args.chinchilla_multiplier\n@@ -185,17 +189,16 @@ def main_after_setup_move(args):\n         instance_count=args.instance_count,\n         inst
+ance_type=\"local_gpu\" if args.local else INSTANCE_MAPPER[args.instance_type],\n         train_use_spot_instances=args.spot_instance,\n-        output_path=f\"
+{args.remote_sync}/sagemaker\",\n         job_name=job_name,\n         checkpoint_local_path=None,\n         code_location=f\"{args.remote_sync}/sagemaker\",\n
+        # Training using SMDataParallel Distributed Training Framework\n         distribution={\"torch_distributed\": {\"enabled\": True}},\n         # Max run
+5 days\n-        max_run=5 * 24 * 60 * 60,\n+        max_run=10 * 24 * 60 * 60,\n         max_wait=5 * 24 * 60 * 60 if args.spot_instance else None,\n         i
+nput_mode=\"FastFile\",\n-        # environment={\"TORCH_DISTRIBUTED_DEBUG\": \"DETAIL\", \"TORCH_CPP_LOG_LEVEL\": \"INFO\"},\n+        # environment={\"NCCL_DE
+BUG\": \"INFO\", \"TORCH_DISTRIBUTED_DEBUG\": \"DETAIL\", \"TORCH_CPP_LOG_LEVEL\": \"INFO\"},\n         keep_alive_period_in_seconds=15 * 60 if not args.spot_in
+stance else None,\n     )\n ",
+root@1adb917c6aaf:/app/dclm#

@@ -1,0 +1,16 @@
+The disk is actually usable in /app (my 150MB test wrote fine) — the `df` 0-avail is a fuse-overlayfs accounting artifact, and apt's real blocker is its own `/var/cache/apt/archives`. I'll point apt's cache at `/app` and install nodejs so yt-dlp has a JS runtime to bypass the bot check.
+
+{
+  "analysis": "Key insight confirmed: /app can hold large files (150MB dd succeeded) even though df shows 0 avail — that's a fuse-overlayfs accounting quirk, not a real limit. apt failed because /var/cache/apt/archives specifically has no space accounted. Network and /app writes both work. YouTube blocks yt-dlp ('Sign in to confirm you're not a bot') and yt-dlp needs a JS runtime (node). I'll redirect apt's cache to /app and install nodejs there.",
+  "plan": "1) Create /app/aptcache and install nodejs with apt's cache pointed there, so I bypass the /var/cache limit. 2) Verify node works. 3) Retry yt-dlp with --js-runtimes node to bypass the bot detection. This unblocks the download pipeline.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /app/aptcache && apt-get -o Dir::Cache=/app/aptcache install -y nodejs 2>&1 | tail -6\n",
+      "duration": 45
+    },
+    {
+      "keystrokes": "node --version 2>&1; which node\n",
+      "duration": 1
+    }
+  ]
+}

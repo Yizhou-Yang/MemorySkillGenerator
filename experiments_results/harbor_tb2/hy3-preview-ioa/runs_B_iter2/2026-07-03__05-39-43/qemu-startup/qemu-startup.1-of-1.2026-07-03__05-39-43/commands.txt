@@ -1,0 +1,29 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'which qemu-system-x86_64; qemu-system-x86_64 --version 2>&1 | head -1\n'
+"ls -l /dev/kvm 2>&1; echo '---'; nproc\n"
+'which python3 7z 7za isoinfo mount 2>&1\n'
+'ls -la /tmp/vmlinuz /tmp/initramfs 2>&1\n'
+'mkdir -p /mnt/iso\n'
+'mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1; echo EXIT=$?\n'
+'ls -la /mnt/iso/boot 2>&1\n'
+"cat > /tmp/extract.py <<'PYEOF'\nimport struct\nISO='/app/alpine.iso'\nf=open(ISO,'rb')\nSEC=2048\ndef rd(lba,count=1):\n    f.seek(lba*SEC); return f.read(count*SEC)\npvd=None; lba=16\nfor _ in range(200):\n    s=rd(lba)\n    if s[1:6]!=b'CD001': break\n    if s[0]==1: pvd=s; break\n    if s[0]==255: break\n    lba+=1\nassert pvd, 'no PVD'\nroot=pvd[156:190]\ndef name_of(off,data):\n    fi=data[off+32]; name=data[off+33:off+33+fi]\n    rec=data[off]; sysuse=data[off+33+fi:off+rec]\n    i=0\n    while i+4<=len(sysuse):\n        sl=sysuse[i]\n        if sl==0: break\n        if sl+i>len(sysuse): break\n        if sysuse[i+1:i+3]==b'NM':\n            rr=sysuse[i+4:sl]\n            if rr.endswith(b'\\x00'): rr=rr[:-1]\n            return rr.decode('utf-8','replace')\n        i+=sl\n    if name in (b'\\x00',b'\\x01'): return '.' if name==b'\\x00' else '..'\n    if b';' in name: name=name.split(b';')[0]\n    return name.decode('latin1')\ndef parse_dir(lba,length):\n    data=rd(lba,(length+SEC-1)//SEC); out=[]; off=0\n    while off<length:\n        rl=data[off]\n        if rl==0:\n            off=(off+SEC)&~(SEC-1); continue\n        e_lba=struct.unpack('<I',data[off+2:off+6])[0]\n        e_size=struct.unpack('<I',data[off+10:off+14])[0]\n        flags=data[off+25]; nm=name_of(off,data)\n        out.append((nm,e_lba,e_size,bool(flags&2))); off+=rl\n    return out\ndef walk(lba,length,path,files):\n    for nm,el,es,isdir in parse_dir(lba,length):\n        if nm in ('.','..'): continue\n        full=(path+'/'+nm) if path else nm\n        if isdir: walk(el,es,full,files)\n        else: files.append((full,el,es))\nfiles=[]\nwalk(struct.unpack('<I',root[2:6])[0],struct.unpack('<I',root[10:14])[0],'',files)\nvl=[x for x in files if 'vmlinuz' in x[0].lower()]\ninr=[x for x in files if 'initramfs' in x[0].lower()]\ndef pick(c):\n    for suf in ('lts','virt'):\n        for x in c:\n            if suf in x[0].lower(): return x\n    return c[0] if c else None\nv=pick(vl); ii=pick(inr)\ndef extract(x,dst):\n    _,lba,size=x; f.seek(lba*SEC); open(dst,'wb').write(f.read(size)); print('wrote',dst,size)\nif v: extract(v,'/tmp/vmlinuz')\nelse: print('NO VMLINUZ')\nif ii: extract(ii,'/tmp/initramfs')\nelse: print('NO INITRAMFS')\nprint('vmlinuz:',v[0] if v else None)\nprint('initramfs:',ii[0] if ii else None)\nPYEOF\n"
+'python3 /tmp/extract.py\n'
+"nohup qemu-system-x86_64 -m 1024 -smp 2 -machine pc,accel=tcg -display none -monitor none -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append 'console=ttyS0,115200' -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 -serial telnet:127.0.0.1:6665,server,nowait > /tmp/qemu.log 2>&1 &\n"
+"sleep 2; echo '--- qemu.log ---'; cat /tmp/qemu.log; echo '--- ps ---'; ps aux | grep qemu | grep -v grep | head\n"
+"ls /proc/239 2>&1 | head -1; echo '---'; ls -l /proc/239/exe 2>&1\n"
+"cat > /tmp/wait_ready.py <<'PYEOF'\nimport socket, time, sys\nport=6665; deadline=time.time()+180; last=''\nwhile time.time()<deadline:\n    try:\n        s=socket.create_connection(('127.0.0.1',port),timeout=5)\n        s.settimeout(2.0)\n        buf=b''; t0=time.time()\n        while time.time()-t0<90:\n            try:\n                d=s.recv(4096)\n                if not d: break\n                buf+=d\n                if b'login:' in buf.lower() or b'welcome' in buf.lower():\n                    print('LOGIN_PROMPT_READY'); sys.stdout.flush(); s.close(); sys.exit(0)\n            except socket.timeout:\n                try: s.sendall(b'\\n')\n                except: break\n        print('LAST:',buf[-200:].decode('latin1','replace'))\n        s.close(); sys.exit(0)\n    except Exception as e:\n        time.sleep(2)\nprint('TIMEOUT_NO_CONNECT')\nsys.exit(1)\nPYEOF\n"
+'python3 /tmp/wait_ready.py\n'
+''
+''
+'python3 /tmp/wait_ready.py\n'
+'ls /proc/239/exe 2>&1; echo \'---\'; python3 -c "import socket; s=socket.create_connection((\'127.0.0.1\',6665),5); s.settimeout(2); s.sendall(b\'\\n\'); print(\'PORT_OPEN\', repr(s.recv(200))); s.close()"\n'
+'python3 -c "import socket,time; s=socket.create_connection((\'127.0.0.1\',6665),5); s.settimeout(3.0); time.sleep(0.5); s.sendall(b\'\\n\'); buf=b\'\';\\nt=time.time()\\nwhile time.time()-t<5:\\n  try: buf+=s.recv(512)\\n  except: break\\nprint(\'REPLY\', repr(buf[-160:]))\\nprint(\'LOGIN_SEEN\', b\'login:\' in buf.lower())\\ns.close()"\n'
+"cat > /tmp/verify.py <<'PYEOF'\nimport socket, time\ns=socket.create_connection(('127.0.0.1',6665),5)\ns.settimeout(3.0)\ntime.sleep(0.5)\ns.sendall(b'\\n')\nbuf=b''; t=time.time()\nwhile time.time()-t<6:\n    try:\n        d=s.recv(512); buf+=d\n    except socket.timeout:\n        break\ns.close()\nprint('REPLY', repr(buf[-160:]))\nprint('LOGIN_SEEN', b'login:' in buf.lower())\nPYEOF\n"
+'python3 /tmp/verify.py\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

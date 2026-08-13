@@ -1,0 +1,38 @@
+New Terminal Output:
+
+04-25-2025 06:00:00,52root@f946e4f35ca8:/app# python3 - <<'EOF'
+> import re
+> from datetime import datetime
+>
+> def parse_date(s):
+>     s = s.strip()
+>     for fmt in ('%Y-%m-%d','%m/%d/%Y %H:%M:%S','%m-%d-%Y %H:%M:%S'):
+>         try:
+>             return datetime.strptime(s, fmt).strftime('%Y-%m-%d')
+>         except ValueError:
+>             pass
+>     return None
+>
+> def load(fn):
+>     d={}
+>     with open(fn) as f:
+>         next(f)
+>         for line in f:
+>             line=line.strip()
+>             if not line: continue
+>             date,temp=line.split(',')
+>             d[parse_date(date)]=float(temp)
+>     return d
+>
+> high=load('daily_temp_sf_high.csv')
+> low=load('daily_temp_sf_low.csv')
+> common=set(high)&set(low)
+> diffs=[high[k]-low[k] for k in common]
+> avg=sum(diffs)/len(diffs)
+> with open('avg_temp.txt','w') as f:
+>     f.write(str(avg))
+> print('days:',len(diffs),'avg:',avg)
+> EOF
+days: 7 avg: 11.428571428571429
+root@f946e4f35ca8:/app# cat avg_temp.txt
+11.428571428571429root@f946e4f35ca8:/app#

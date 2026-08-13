@@ -1,0 +1,43 @@
+New Terminal Output:
+
+root@1e3fed7d83ee:/app# cat > fit.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+>
+> data = np.loadtxt('/tmp/graphene_conv.txt')
+> x = data[:,0]; y = data[:,1]
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+>
+> def lor(x, x0, gamma, amp, offset):
+>     return offset + amp / (1.0 + ((x - x0)/gamma)**2)
+>
+> def fit_peak(xmin, xmax, name):
+>     m = (x >= xmin) & (x <= xmax)
+>     xw, yw = x[m], y[m]
+>     imax = np.argmax(yw)
+>     x0g = xw[imax]
+>     offg = np.percentile(yw, 10)
+>     ampg = yw[imax] - offg
+>     gammag = 80.0
+>     p0 = [x0g, gammag, ampg, offg]
+>     popt, pcov = curve_fit(lor, xw, yw, p0=p0, maxfev=100000)
+>     resid = np.sum((lor(xw, *popt) - yw)**2)
+>     print('%s: x0=%.3f gamma=%.3f amp=%.3f offset=%.3f (resid=%.2e)' % (name, *popt, resid))
+>     return popt
+>
+> pG = fit_peak(17000, 21000, 'G')
+> p2D = fit_peak(31000, 37000, '2D')
+>
+> results = {
+>     'G':  {'x0': float(pG[0]), 'gamma': float(abs(pG[1])), 'amplitude': float(pG[2]), 'offset': float(pG[3])},
+>     '2D': {'x0': float(p2D[0]), 'gamma': float(abs(p2D[1])), 'amplitude': float(p2D[2]), 'offset': float(p2D[3])},
+> }
+> with open('results.json','w') as f:
+>     json.dump(results, f, indent=2)
+> print('--- results.json ---')
+> print(open('results.json').read())
+> EOF
+root@1e3fed7d83ee:/app# python3 fit.py
+

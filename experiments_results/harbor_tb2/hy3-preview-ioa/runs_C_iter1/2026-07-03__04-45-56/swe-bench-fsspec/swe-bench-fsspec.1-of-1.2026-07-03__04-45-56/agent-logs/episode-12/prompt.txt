@@ -1,0 +1,54 @@
+New Terminal Output:
+
+root@f57cd087e35b:/app/filesystem_spec# cat > /tmp/test_dirfs_async2.py <<'EOF'
+> import asyncio
+> import fsspec
+> from fsspec.asyn import AsyncFileSystem
+>
+>
+> class FakeAsync(AsyncFileSystem):
+>     protocol = "fakeasync"
+>     async_impl = True
+>
+>     def __init__(self, *a, **k):
+>         super().__init__(*a, **k)
+>         self.calls = []
+>
+>     async def open_async(self, path, mode="rb", **kwargs):
+>         class F:
+>             async def write(self, d): pass
+>             async def read(self): return b""
+>             async def close(self): pass
+>         self.calls.append((path, mode))
+>         return F()
+>
+>
+> async def main():
+>     fs = FakeAsync()
+>     dirfs = fsspec.filesystem("dir", path="/myroot", fs=fs, asynchronous=True)
+>     f = await dirfs.open_async("hello", "wb")
+>     await f.close()
+>     assert fs.calls == [("/myroot/hello", "wb")], fs.calls
+>     print("OK delegation ->", fs.calls)
+>
+>
+> asyncio.run(main())
+> EOF
+root@f57cd087e35b:/app/filesystem_spec# PYTHONPATH=/app/filesystem_spec python /tmp/test_dirfs_async2.py
+Traceback (most recent call last):
+  File "/tmp/test_dirfs_async2.py", line 32, in <module>
+    asyncio.run(main())
+  File "/usr/local/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/local/lib/python3.9/asyncio/base_events.py", line 647, in run_until_complete
+    return future.result()
+  File "/tmp/test_dirfs_async2.py", line 25, in main
+    dirfs = fsspec.filesystem("dir", path="/myroot", fs=fs, asynchronous=True)
+  File "/app/filesystem_spec/fsspec/registry.py", line 303, in filesystem
+    return cls(**storage_options)
+  File "/app/filesystem_spec/fsspec/spec.py", line 81, in __call__
+    obj = super().__call__(*args, **kwargs)
+  File "/app/filesystem_spec/fsspec/implementations/dirfs.py", line 47, in __init__
+    raise ValueError("both dirfs and fs should be in the same sync/async mode")
+ValueError: both dirfs and fs should be in the same sync/async mode
+root@f57cd087e35b:/app/filesystem_spec#

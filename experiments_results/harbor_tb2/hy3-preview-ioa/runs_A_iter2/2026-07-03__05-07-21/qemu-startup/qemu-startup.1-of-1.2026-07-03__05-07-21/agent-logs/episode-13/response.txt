@@ -1,0 +1,8 @@
+{
+  "analysis": "The boot got through OpenRC up to '* Loading hardware drivers ...' and then the serial log stopped growing (it went 28740 -> 29176 then stopped). A probe to 6665 replayed the history up to that point and a newline produced no response, so no getty prompt is currently present on ttyS0. I need to determine whether Alpine is hung there or just slow, and whether a getty will appear. Let me check the qemu process CPU/state and watch the log grow.",
+  "plan": "1) Inspect qemu process state/CPU to distinguish a hang from idle. 2) Wait a bit and re-measure serial.log size to see if boot progresses. 3) If it's progressing slowly, wait more. If it's truly stuck, I'll need to adjust the boot (e.g., the mdev coldplug may be hanging; a known fix is adding kernel params or it may just need time).",
+  "commands": [
+    {"keystrokes": "ps -o pid,stat,pcpu,etime,cmd -p $(cat /tmp/qemu.pid) 2>/dev/null\n", "duration": 0.3},
+    {"keystrokes": "for i in 1 2 3; do sleep 5; echo \"t+$((i*5))s size=$(wc -c < /tmp/serial.log)\"; done\n", "duration": 17.0}
+  ]
+}

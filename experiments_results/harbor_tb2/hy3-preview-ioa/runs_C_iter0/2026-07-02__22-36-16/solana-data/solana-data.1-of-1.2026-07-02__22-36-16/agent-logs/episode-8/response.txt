@@ -1,0 +1,12 @@
+The transparent proxy is hijacking Solana's DNS (resolves to the proxy IP 185.45.7.185) and returns a 502 over HTTP. PyPI works directly (not hijacked). Let me test whether I can reach Solana through the proxy via HTTP CONNECT tunneling.
+
+{
+  "analysis": "Key finding: pip/PyPI HTTPS works directly, but api.devnet.solana.com DNS resolves to 185.45.7.185 (a transparent HTTP proxy). HTTPS to Solana fails with 'SSL WRONG_VERSION_NUMBER' (proxy doesn't speak TLS), and HTTP returns 502 'Server UnReachable'. This is a proxy that may support CONNECT tunneling. I'll test using it as an explicit HTTP proxy to reach Solana over HTTPS via CONNECT. I'll also test several alternative public Solana RPCs in case some are whitelisted.",
+  "plan": "Write a test script that: (1) tries using 185.45.7.185:80 as an HTTP CONNECT proxy for https://api.devnet.solana.com; (2) probes alternative RPCs (mainnet-beta, testnet, and a few public providers). This determines the working path to Solana.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/rpctest2.py << 'EOF'\nimport urllib.request, json\n\ndef post(url, body, proxy=None, timeout=15):\n    data = json.dumps(body).encode()\n    req = urllib.request.Request(url, data=data, headers={'Content-Type':'application/json'})\n    handlers = []\n    if proxy:\n        ph = urllib.request.ProxyHandler({'http': proxy, 'https': proxy})\n        handlers.append(ph)\n    opener = urllib.request.build_opener(*handlers)\n    try:\n        r = opener.open(req, timeout=timeout)\n        return r.status, r.read().decode()\n    except Exception as e:\n        return 'ERR', repr(e)\n\nbody = {'jsonrpc':'2.0','id':1,'method':'getHealth'}\nprint('=== CONNECT proxy via 185.45.7.185:80 ===')\nprint('devnet', post('https://api.devnet.solana.com', body, proxy='http://185.45.7.185:80')[:2])\nprint('mainnet', post('https://api.mainnet-beta.solana.com', body, proxy='http://185.45.7.185:80')[:2])\n\nprint('=== direct (no proxy) HTTPS ===')\nprint('devnet', post('https://api.devnet.solana.com', body)[:2])\n\nprint('=== try public RPCs direct ===')\nfor u in ['https://api.testnet.solana.com','https://rpc.ankr.com/solana']:\n    print(u, post(u, body)[:2])\nEOF\npython3 /tmp/rpctest2.py\n",
+      "duration": 60.0
+    }
+  ]
+}

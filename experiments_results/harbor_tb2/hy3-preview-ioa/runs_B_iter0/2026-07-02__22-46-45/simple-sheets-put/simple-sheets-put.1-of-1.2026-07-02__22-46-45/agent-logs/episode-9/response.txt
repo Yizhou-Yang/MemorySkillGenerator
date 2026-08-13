@@ -1,0 +1,12 @@
+Batch format is unclear, but single-cell PUT works reliably. I'll just use individual cell PUTs for all 15 cells.
+
+{
+  "analysis": "Single-cell PUT works perfectly (proven on A1). The batch endpoint rejects my requests with 'Cell ID must be in A1 notation' regardless of format (dict keyed by cell_id, or list of {cell_id,value}). Rather than debug batch, I'll use the proven single-cell PUT for each cell. The spreadsheet (id=1) and sheet (id=1) already exist; I'll populate all cells via individual PUTs.",
+  "plan": "Write a script that does 15 individual PUTs to /sheets/1/cells/{cell_id} for the header row plus 3 data rows including the Profit column (D). Print final confirmation. Profit values: January 2000, February 3000, March 5000.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/final.py << 'EOF'\nimport json, urllib.request, urllib.error\nBASE='http://api:8000'\ndef put(cell, value):\n    url=BASE+f'/sheets/1/cells/{cell}'\n    body=json.dumps({'value':value}).encode()\n    r=urllib.request.Request(url,data=body,method='PUT',headers={'Content-Type':'application/json'})\n    try:\n        with urllib.request.urlopen(r) as resp:\n            return 'ok'\n    except urllib.error.HTTPError as e:\n        return f'ERR {e.code}: {e.read().decode()}'\ncells=[\n  ('A1','Month'),('B1','Revenue'),('C1','Expenses'),('D1','Profit'),\n  ('A2','January'),('B2',10000),('C2',8000),('D2',2000),\n  ('A3','February'),('B3',12000),('C3',9000),('D3',3000),\n  ('A4','March'),('B4',15000),('C4',10000),('D4',5000),\n]\nfor c,v in cells:\n    print(c, put(c,v))\n# verify by reading sheet\nurl=BASE+'/sheets/1'\nwith urllib.request.urlopen(url) as resp:\n    s=json.load(resp)\nprint('DATA:', json.dumps(s['data'], indent=2))\nEOF\npython3 /tmp/final.py\n",
+      "duration": 2.0
+    }
+  ]
+}

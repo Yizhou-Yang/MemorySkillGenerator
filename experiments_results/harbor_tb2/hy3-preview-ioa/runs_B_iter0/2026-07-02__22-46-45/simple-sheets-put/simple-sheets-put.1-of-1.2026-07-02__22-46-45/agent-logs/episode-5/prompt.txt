@@ -1,0 +1,48 @@
+New Terminal Output:
+
+root@d614a7f600cd:/app# cat > /tmp/do.py << 'EOF'
+> import json, urllib.request
+>
+> BASE = 'http://api:8000'
+>
+> def req(method, path, body=None):
+>     url = BASE + path
+>     data = json.dumps(body).encode() if body is not None else None
+>     r = urllib.request.Request(url, data=data, method=method, headers={'Content-Type':'application/json'})
+>     with urllib.request.urlopen(r) as resp:
+>         return json.loads(resp.read().decode())
+>
+> # 1. create spreadsheet
+> ss = req('POST', '/spreadsheets/', {'title': 'Financial Report'})
+> print('spreadsheet:', ss)
+> sid = ss['id']
+>
+> # 2. create sheet
+> sheet = req('POST', f'/spreadsheets/{sid}/sheets/', {'title': 'Q1 Data'})
+> print('sheet:', sheet)
+> sheet_id = sheet['id']
+>
+> # 3 + 4. data + profit column
+> updates = {
+>   'A1': {'value': 'Month'},
+>   'B1': {'value': 'Revenue'},
+>   'C1': {'value': 'Expenses'},
+>   'D1': {'value': 'Profit'},
+>   'A2': {'value': 'January'},
+>   'B2': {'value': 10000},
+>   'C2': {'value': 8000},
+>   'D2': {'value': 2000},
+>   'A3': {'value': 'February'},
+>   'B3': {'value': 12000},
+>   'C3': {'value': 9000},
+>   'D3': {'value': 3000},
+>   'A4': {'value': 'March'},
+>   'B4': {'value': 15000},
+>   'C4': {'value': 10000},
+>   'D4': {'value': 5000},
+> }
+> batch = req('PUT', f'/sheets/{sheet_id}/cells/batch', {'updates': updates})
+> print('batch:', batch)
+> EOF
+root@d614a7f600cd:/app# python3 /tmp/do.py
+

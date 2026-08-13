@@ -1,0 +1,10 @@
+{
+  "analysis": "Root cause clear: /root/.cache is a 100M tmpfs, but `snapshot_download` fetches all 12 repo files (~331M including tf/flax/onnx variants) concurrently, exceeding the tmpfs. The `remount size=2G` needs CAP_SYS_ADMIN which we don't have. The fix is to download ONLY the files needed for offline use (config + tokenizer + a single weight file ~45MB), which easily fits in 100M. The cleanest way is to let transformers' `from_pretrained` fetch just the required files into the default cache, rather than the full snapshot.",
+  "plan": "1. Use transformers AutoModel/AutoTokenizer.from_pretrained to download only the needed files (config, tokenizer files, and one set of weights) into the default HF cache — this stays well under 100M. 2. Then verify offline loading works by setting HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE=1 and re-loading. First, run the download.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'EOF'\nfrom transformers import AutoModel, AutoTokenizer\nm = AutoModel.from_pretrained(\"albert/albert-base-v2\")\nt = AutoTokenizer.from_pretrained(\"albert/albert-base-v2\")\nprint(\"DOWNLOAD_OK\", m.config.model_type, len(t))\nEOF\n",
+      "duration": 45.0
+    }
+  ]
+}

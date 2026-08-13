@@ -1,0 +1,22 @@
+{
+  "analysis": "Kernel (11.8MB) and initramfs (20.5MB) extracted successfully to /tmp/vmlinuz and /tmp/initramfs. The ISO uses standard Alpine layout with VMLINUZ_LTS/INITRAMFS_LTS. Now I need to boot qemu with these, redirect the serial console to a telnet server on 127.0.0.1:6665, and block until a login prompt appears. I'll use a chardev socket with server+wait=off+telnet + a logfile so I can monitor readiness via the logfile without consuming the user's telnet connection.",
+  "plan": "1) Check /dev/kvm to decide accelerator. 2) Launch qemu in the background: -kernel/-initrd from /tmp, console=ttyS0,115200, -cdrom ISO, plus a serial chardev socket on port 6665 (telnet, server, wait=off) with logfile=/tmp/serial.log. 3) In following steps, poll /tmp/serial.log for 'login:' with a timeout loop to satisfy 'block until ready'.",
+  "commands": [
+    {
+      "keystrokes": "ls -l /dev/kvm 2>&1; echo '---'; nproc\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "rm -f /tmp/serial.log /tmp/qemu.log; touch /tmp/serial.log\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "nohup qemu-system-x86_64 -m 1024 -smp 2 -machine pc,accel=tcg -display none -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append 'modules=loop,squashfs,sd-mod,usb-storage console=ttyS0,115200' -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2,if=virtio -chardev socket,id=s0,host=127.0.0.1,port=6665,server=on,wait=off,telnet=on,logfile=/tmp/serial.log -serial chardev:s0 > /tmp/qemu.log 2>&1 &\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "echo STARTED PID=$!; sleep 3; echo '--- qemu.log ---'; cat /tmp/qemu.log; echo '--- serial.log head ---'; tail -c 300 /tmp/serial.log\n",
+      "duration": 4.0
+    }
+  ]
+}

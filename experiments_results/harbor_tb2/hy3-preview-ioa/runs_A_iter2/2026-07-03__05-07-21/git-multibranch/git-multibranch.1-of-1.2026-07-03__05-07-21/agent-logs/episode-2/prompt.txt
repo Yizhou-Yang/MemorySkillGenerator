@@ -1,0 +1,57 @@
+New Terminal Output:
+
+root@52e1bb54e013:/app# useradd -m -s /bin/bash git 2>/dev/null || echo 'git exists'
+root@52e1bb54e013:/app# echo 'git:password' | chpasswd
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config; grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'Pas
+swordAuthentication yes' >> /etc/ssh/sshd_config
+root@52e1bb54e013:/app# sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config; grep -q '^PasswordAuthentication yes' /etc/ssh/
+sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+root@52e1bb54e013:/app# ssh-keygen -A
+root@52e1bb54e013:/app# mkdir -p /run/sshd; /usr/sbin/sshd; sleep 1; ss -tlnp | grep ':22' || netstat -tlnp 2>/dev/null | grep ':22'
+bash: ss: command not found
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      200/sshd: /usr/sbin
+tcp6       0      0 :::22                   :::*                    LISTEN      200/sshd: /usr/sbin
+root@52e1bb54e013:/app# mkdir -p /git && git init --bare /git/project
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /git/project/
+root@52e1bb54e013:/app# cat > /git/project/hooks/post-receive << 'EOF'
+> #!/bin/bash
+> unset GIT_DIR
+> while read oldrev newrev refname; do
+>     branch="${refname#refs/heads/}"
+>     case "$branch" in
+>         main) target=/var/www/html ;;
+>         dev)  target=/var/www/html/dev ;;
+>         *) continue ;;
+>     esac
+>     mkdir -p "$target"
+>     git --git-dir=/git/project archive "$branch" | tar -x -C "$target"
+> done
+> EOF
+root@52e1bb54e013:/app# chmod +x /git/project/hooks/post-receive && chown -R git:git /git/project && mkdir -p /var/www/html && chown -R git:git /var/www/html
+root@52e1bb54e013:/app# cat /git/project/hooks/post-receive
+#!/bin/bash
+unset GIT_DIR
+while read oldrev newrev refname; do
+    branch="${refname#refs/heads/}"
+    case "$branch" in
+        main) target=/var/www/html ;;
+        dev)  target=/var/www/html/dev ;;
+        *) continue ;;
+    esac
+    mkdir -p "$target"
+    git --git-dir=/git/project archive "$branch" | tar -x -C "$target"
+done
+root@52e1bb54e013:/app#

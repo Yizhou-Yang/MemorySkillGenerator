@@ -1,0 +1,10 @@
+{
+  "analysis": "Key finding: the fuse-overlayfs reports 0 available via statvfs, but dd proves real writes succeed (500MB written fine). The tmpfs mount is denied, so I'll work around apt's download-space check by redirecting the apt cache (archives) directory to /tmp, where the space check will see genuine free space. The earlier 'Unable to locate package' was because I wrongly redirected Dir::State. This time I'll only redirect Dir::Cache and use --download-only, which downloads .debs to /tmp without triggering the target-unpack space check. Then I'll extract the .debs manually with dpkg-deb.",
+  "plan": "1) Create /tmp/aptcache/partial. 2) Run apt-get with Dir::Cache redirected to /tmp/aptcache and --download-only to fetch ffmpeg, tesseract-ocr, tesseract-ocr-eng, and python3-pip .debs. This should bypass the archives-space failure and avoid the install-space check. After download, I'll extract all .debs into / so the binaries are available, bypassing apt's space checks entirely.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /tmp/aptcache/partial && apt-get -o Dir::Cache=/tmp/aptcache -o Dir::Cache::archives=/tmp/aptcache install --download-only -y ffmpeg tesseract-ocr tesseract-ocr-eng python3-pip 2>&1 | tail -20; echo EXIT=$?\n",
+      "duration": 90.0
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+New Terminal Output:
+
+root@11af9af5740e:/app# cat > /app/scan.py << 'EOF'
+> import struct
+> d = open('/app/data.bin','rb').read()
+> def w(off): return struct.unpack_from('<H', d, off)[0]
+> a_text=w(2); a_data=w(4); a_bss=w(6); a_syms=w(8); a_entry=w(10)
+> print('text',a_text,'data',a_data,'bss',a_bss,'syms',a_syms,'entry',a_entry)
+> text_off=16
+> print('=== sys instructions (opcode 0x49xx) ===')
+> for i in range(0, a_text, 2):
+>     val=w(text_off+i)
+>     if (val & 0xFF00)==0x4900:
+>         n=val & 0x7F
+>         ctx=[hex(w(text_off+i+2*k)) for k in range(1,6)]
+>         print('addr %04x (file %04x) sys %d  nextwords %s'%(i, text_off+i, n, ctx))
+> print('=== symbol table ===')
+> # symbol table follows header+a_text+a_data+a_bss? Actually symtab after text+data, before string table.
+> # V6 a.out: header(16) + text + data + symtab(a_syms) + strtab. Let's find _main.
+> st=text_off+a_text+a_data
+> for i in range(0, a_syms, 6):
+>     val=w(st+i)
+>     typ=w(st+i+2)
+>     name=w(st+i+4)
+>     print('sym off %d value %06o type %06o strx %06o'%(i,val,typ,name))
+> EOF
+root@11af9af5740e:/app# python3 /app/scan.py | head -120
+text 1062 data 30 bss 572 syms 276 entry 0
+=== sys instructions (opcode 0x49xx) ===
+=== symbol table ===
+sym off 0 value 071143 type 030164 strx 067456
+sym off 6 value 000000 type 000037 strx 000000
+sym off 12 value 027141 type 000157 strx 000000
+sym off 18 value 000000 type 000037 strx 000026
+sym off 24 value 071160 type 067151 strx 063164
+sym off 30 value 067456 type 000037 strx 000316
+sym off 36 value 063146 type 072154 strx 071160
+sym off 42 value 067456 type 000037 strx 001212
+sym off 48 value 072560 type 061564 strx 071150
+sym off 54 value 067456 type 000037 strx 001224
+sym off 60 value 071562 type 073141 strx 027145
+sym off 66 value 000157 type 000037 strx 001404
+sym off 72 value 061545 type 072166 strx 067456
+sym off 78 value 000000 type 000037 strx 001444
+sym off 84 value 060563 type 071166 strx 000065
+sym off 90 value 000000 type 000044 strx 002104
+sym off 96 value 066537 type 064541 strx 000156
+sym off 102 value 000000 type 000042 strx 000170
+sym off 108 value 067137 type 000000 strx 000000
+sym off 114 value 000000 type 000042 strx 000026
+sym off 120 value 071562 type 073141 strx 000145
+sym off 126 value 000000 type 000042 strx 001406
+sym off 132 value 071162 type 072145 strx 067162
+sym off 138 value 000000 type 000042 strx 001424
+sym off 144 value 071137 type 000000 strx 000000
+sym off 150 value 000000 type 000042 strx 000124
+sym off 156 value 070137 type 064562 strx 072156
+sym off 162 value 000146 type 000042 strx 000316
+sym off 168 value 067137 type 064544 strx 064547
+sym off 174 value 000164 type 000043 strx 002102
+sym off 180 value 063160 type 067554 strx 072141
+sym off 186 value 000000 type 000042 strx 001212
+sym off 192 value 071560 type 064543 strx 067145
+sym off 198 value 000000 type 000042 strx 001212
+sym off 204 value 070137 type 072165 strx 064143
+sym off 210 value 071141 type 000042 strx 001224
+sym off 216 value 063137 type 072554 strx 064163
+sym off 222 value 000000 type 000042 strx 001302
+sym off 228 value 063137 type 072557 strx 000164
+sym off 234 value 000000 type 000044 strx 002116
+sym off 240 value 071155 type 060563 strx 062566
+sym off 246 value 000000 type 000042 strx 001404
+sym off 252 value 061545 type 072166 strx 000000
+sym off 258 value 000000 type 000042 strx 001452
+sym off 264 value 061546 type 072166 strx 000000
+sym off 270 value 000000 type 000042 strx 001444
+

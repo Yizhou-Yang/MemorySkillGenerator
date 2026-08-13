@@ -1,0 +1,93 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected after JSON object
+
+New Terminal Output:
+
+root@d3ab05b92ba8:/app# cat > /tmp/parse.py << 'EOF'
+> import json, struct
+>
+> with open('/app/trunc.db','rb') as f:
+>     data = f.read()
+>
+> print('file len', len(data))
+> page_type = data[0]
+> cell_count = int.from_bytes(data[3:5], 'big')
+> cell_content_start = int.from_bytes(data[5:7], 'big')
+> print('page_type', hex(page_type), 'cell_count', cell_count, 'content_start', hex(cell_content_start))
+>
+> def read_varint(b, off):
+>     result = 0
+>     for i in range(9):
+>         x = b[off+i]
+>         if i == 8:
+>             result = (result << 8) | x
+>             return result, off+9
+>         result = (result << 7) | (x & 0x7f)
+>         if not (x & 0x80):
+>             return result, off+i+1
+>     return result, off+9
+>
+> ptrs = [int.from_bytes(data[8+i*2:10+i*2],'big') for i in range(cell_count)]
+> print('ptrs', [hex(p) for p in ptrs])
+>
+> rows = []
+> for p in ptrs:
+>     off = p
+>     plen, off = read_varint(data, off)
+>     rowid, off = read_varint(data, off)
+>     payload = data[off:off+plen]
+>     hlen, h = read_varint(payload, 0)
+>     types = []
+>     pos = h
+>     while pos < hlen:
+>         t, pos = read_varint(payload, pos)
+>         types.append(t)
+>     vals = []
+>     pos = hlen
+>     for t in types:
+>         if t == 0:
+>             vals.append(None)
+>         elif t == 1:
+>             vals.append(int.from_bytes(payload[pos:pos+1],'big',signed=True)); pos+=1
+>         elif t == 2:
+>             vals.append(int.from_bytes(payload[pos:pos+2],'big',signed=True)); pos+=2
+>         elif t == 3:
+>             vals.append(int.from_bytes(payload[pos:pos+3],'big',signed=True)); pos+=3
+>         elif t == 4:
+>             vals.append(int.from_bytes(payload[pos:pos+4],'big',signed=True)); pos+=4
+>         elif t == 5:
+>             vals.append(int.from_bytes(payload[pos:pos+6],'big',signed=True)); pos+=6
+>         elif t == 6:
+>             vals.append(int.from_bytes(payload[pos:pos+8],'big',signed=True)); pos+=8
+>         elif t == 7:
+>             vals.append(struct.unpack('>d', payload[pos:pos+8])[0]); pos+=8
+>         elif t == 8:
+>             vals.append(0)
+>         elif t == 9:
+>             vals.append(1)
+>         elif t >= 12 and t % 2 == 0:
+>             n = (t-12)//2; vals.append(payload[pos:pos+n]); pos+=n
+>         elif t >= 13 and t % 2 == 1:
+>             n = (t-13)//2; vals.append(payload[pos:pos+n].decode('utf-8','replace')); pos+=n
+>         else:
+>             vals.append('?t%d'%t)
+>     rows.append((rowid, payload, vals))
+>
+> for rowid, payload, vals in rows:
+>     print(rowid, vals)
+> EOF
+root@d3ab05b92ba8:/app# python3 /tmp/parse.py
+file len 4096
+page_type 0xd cell_count 10 content_start 0xf49
+ptrs ['0xff0', '0xfdf', '0xfce', '0xfbd', '0xfac', '0xf9b', '0xf8a', '0xf79', '0xf61', '0xf49']
+1 [None, 'testword00', 1]
+2 [None, 'testword01', 2]
+3 [None, 'testword02', 10]
+4 [None, 'testword03', 25]
+5 [None, 'testword04', 42]
+6 [None, 'testword05', 50]
+7 [None, 'testword06', 75]
+8 [None, 'testword07', 99]
+9 [None, 'testword08', 99.99]
+10 [None, 'testword09', 0.5]
+root@d3ab05b92ba8:/app#

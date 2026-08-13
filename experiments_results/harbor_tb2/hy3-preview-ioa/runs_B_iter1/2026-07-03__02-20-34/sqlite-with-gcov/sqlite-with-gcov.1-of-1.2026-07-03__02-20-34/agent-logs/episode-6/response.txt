@@ -1,0 +1,18 @@
+{
+  "analysis": "Critical situation: the root filesystem (fuse-overlayfs) reports 100% used with 0 available, yet `du` shows only ~130M of actual files. The 956G 'used' is host/shard-level accounting, and the container's writable space appears exhausted. Yet `apt-get update` successfully wrote 31MB, so some writes work. The gcc install needs 71MB archives + ~221MB installed, which won't fit. I need to understand the actual mount layout and find where real free space is (e.g., the 32G tmpfs at /sys/fs/cgroup or /dev/shm) before deciding how to obtain a compiler.",
+  "plan": "Investigate the real storage: re-check df, look at mount points, find any large files, and check whether the tmpfs filesystems (/sys/fs/cgroup with 32G, /dev/shm 64M) are writable. This tells me whether I can install gcc into a tmpfs or whether I must free space on root. I'll also test writing a file to the tmpfs to confirm it's usable.",
+  "commands": [
+    {
+      "keystrokes": "df -h /; echo '---mounts---'; mount | grep -E 'cgroup|shm|overlay|/dev/vdb| / '\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "find / -xdev -type f -size +20M 2>/dev/null\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "touch /sys/fs/cgroup/testfile 2>&1 && echo 'cgroup writable' && rm -f /sys/fs/cgroup/testfile; touch /dev/shm/testfile 2>&1 && echo 'shm writable' && rm -f /dev/shm/testfile\n",
+      "duration": 0.1
+    }
+  ]
+}

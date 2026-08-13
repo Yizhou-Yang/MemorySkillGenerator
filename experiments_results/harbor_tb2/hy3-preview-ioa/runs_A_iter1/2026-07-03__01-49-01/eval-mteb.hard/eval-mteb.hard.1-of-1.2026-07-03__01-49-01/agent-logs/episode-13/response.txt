@@ -1,0 +1,14 @@
+{
+  "analysis": "The symbol `AutoModelForVision2Seq` is imported at line 13 and used at line 145 inside a method of a wrapper class we won't use (gme-Qwen2-VL vision models). Since we only need sentence-transformers on STS12, I'll make that import conditional so mteb can import successfully. The runtime use at line 145 won't be triggered for our task.",
+  "plan": "Patch gme_v_models.py to wrap the failing import in a try/except, leaving the name as None if unavailable. Then verify mteb imports cleanly with a quick `mteb --help` or a python import. After that, re-run the evaluation.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'EOF'\nimport re\np='/usr/local/lib/python3.10/site-packages/mteb/models/gme_v_models.py'\ns=open(p).read()\nold='from transformers import AutoModelForVision2Seq, AutoProcessor\\n'\nnew=('try:\\n'\n     '    from transformers import AutoModelForVision2Seq\\n'\n     'except ImportError:\\n'\n     '    AutoModelForVision2Seq = None\\n'\n     'from transformers import AutoProcessor\\n')\nassert old in s, 'pattern not found'\ns=s.replace(old,new)\nopen(p,'w').write(s)\nprint('patched')\nEOF\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "python3 -c \"import mteb; print('mteb import OK', mteb.__version__)\"\n",
+      "duration": 8.0
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected after JSON object
+
+New Terminal Output:
+
+root@ec9d7e8ea249:/app# cat > fit2.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+>
+> raw = open('graphene.dat').read().replace(',', '.')
+> from io import StringIO
+> data = np.loadtxt(StringIO(raw))
+> x = data[:,0]; y = data[:,1]
+> order = np.argsort(x); x=x[order]; y=y[order]
+>
+> def lorentzian(x, x0, gamma, amp, offset):
+>     return offset + amp * gamma**2 / ((x - x0)**2 + gamma**2)
+>
+> def do_fit(lo, hi, p0):
+>     m = (x>lo)&(x<hi)
+>     xf, yf = x[m], y[m]
+>     popt, pcov = curve_fit(lorentzian, xf, yf, p0=p0, maxfev=500000)
+>     resid = yf - lorentzian(xf, *popt)
+>     ss_res = np.sum(resid**2); ss_tot = np.sum((yf-yf.mean())**2)
+>     r2 = 1 - ss_res/ss_tot
+>     return popt, r2
+>
+> # G peak
+> gp, gr2 = do_fit(18000, 20500, [19139, 400, 65000, 14000])
+> # 2D peak
+> dp, dr2 = do_fit(31000, 35500, [33245, 800, 2250, 19000])
+>
+> result = {
+>   "G":  {"x0": float(gp[0]), "gamma": float(abs(gp[1])), "amplitude": float(gp[2]), "offset": float(gp[3])},
+>   "2D": {"x0": float(dp[0]), "gamma": float(abs(dp[1])), "amplitude": float(dp[2]), "offset": float(dp[3])},
+> }
+> with open('results.json','w') as f:
+>     json.dump(result, f, indent=2)
+> print('G :', gp, 'R2=%.5f'%gr2)
+> print('2D:', dp, 'R2=%.5f'%dr2)
+> EOF
+root@ec9d7e8ea249:/app# python3 fit2.py
+G : [19194.90140885   464.68252231 79022.24542784  5323.50632223] R2=0.94638
+2D: [33459.48071012  2375.43874719  4384.27201707 16584.06785464] R2=0.88172
+root@ec9d7e8ea249:/app#

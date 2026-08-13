@@ -1,0 +1,25 @@
+The SSH login succeeded end-to-end.
+
+**Verification output** confirmed:
+- Connected to `[localhost]:2222` with password `password123`
+- Dropped into a root shell (`localhost:~#`)
+- Ran `hostname` → `localhost` and `id` → `uid=0(root)...`
+- Clean `exit` closed the connection
+
+**What was set up:**
+- QEMU boots `/app/alpine.iso` (headless, serial console `ttyS0`) in a detached tmux session `alpine`, with host forwarding `tcp::2222 → guest:22` and `e1000` NIC on qemu's user-net.
+- Inside the live VM: root password set to `password123` (`chpasswd`), `openssh-server` installed from the ISO's local apk cache, host keys generated (`ssh-keygen -A`), `/run/sshd` created, `PermitRootLogin yes` + `PasswordAuthentication yes` set, eth0 brought up via `udhcpc` (got `10.0.2.15`), and `sshd` listening on `:22`.
+
+The qemu instance keeps running in the background (`tmux attach -t alpine` to view the console). You can now run:
+
+```
+ssh -p 2222 root@localhost
+```
+Password: `password123` → drops you into a root shell.
+
+{
+  "analysis": "SSH connectivity is fully verified: the host's `ssh -p 2222 root@localhost` reached the guest, accepted password123, and dropped into a root shell (hostname/id output shown). The qemu VM runs in a detached tmux session and sshd is active. Task requirements are met.",
+  "plan": "No further action needed. The environment is ready: qemu is running with port 2222 forwarded to the guest's sshd, root password is password123, and a root shell is delivered on login. The user can connect immediately.",
+  "commands": [],
+  "task_complete": true
+}

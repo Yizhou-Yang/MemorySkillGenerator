@@ -1,0 +1,14 @@
+{
+  "analysis": "I have all the patterns I need. The fix is in place and verified. I'll add a regression test `test_async_open` mirroring `test_open`, appending it to the test file, then run the dirfs test suite to confirm nothing is broken.",
+  "plan": "Append test_async_open to test_dirfs.py using a heredoc, then run pytest on the dirfs tests to confirm the new test passes and existing tests still pass.",
+  "commands": [
+    {
+      "keystrokes": "cat >> fsspec/implementations/tests/test_dirfs.py << 'EOF'\n\n\n@pytest.mark.asyncio\nasync def test_async_open(mocker, adirfs):\n    adirfs.fs.open_async = mocker.AsyncMock()\n    assert (\n        await adirfs.open_async(\"file\", *ARGS, **KWARGS)\n        == adirfs.fs.open_async.return_value\n    )\n    adirfs.fs.open_async.assert_called_once_with(f\"{PATH}/file\", *ARGS, **KWARGS)\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -n 20\n",
+      "duration": 30.0
+    }
+  ]
+}

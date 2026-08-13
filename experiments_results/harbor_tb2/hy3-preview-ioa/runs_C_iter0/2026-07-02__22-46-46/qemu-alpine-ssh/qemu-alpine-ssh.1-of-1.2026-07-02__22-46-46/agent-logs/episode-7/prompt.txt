@@ -1,0 +1,45 @@
+New Terminal Output:
+
+root@f7750922546c:/app# cat > /tmp/extract2.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb'); f.seek(16*SECTOR)
+> pvd=f.read(SECTOR); root_dr=pvd[156:190]
+> def parse_dr(dr):
+>     return (struct.unpack('<I',dr[2:6])[0], struct.unpack('<I',dr[10:14])[0], dr[25], dr[33:33+dr[32]])
+> wanted=['vmlinuz-lts','intel-ucode.img','amd-ucode.img','initramfs-lts']
+> got={}
+> def walk(extent,length,path=''):
+>     f.seek(extent*SECTOR); data=f.read(length); off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0:
+>             off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=parse_dr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'):
+>             off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full)
+>         else:
+>             if nm.lower() in wanted: got[nm]=(e,d)
+>         off+=rl
+> ext,dl,fl,nm=parse_dr(root_dr); walk(ext,dl)
+> for nm in wanted:
+>     if nm in got:
+>         e,d=got[nm]; f.seek(e*SECTOR); data=f.read(d)
+>         open('/tmp/'+nm,'wb').write(data)
+>         print('OK', nm, d, 'bytes')
+>     else:
+>         print('MISSING', nm)
+> EOF
+root@f7750922546c:/app# python3 /tmp/extract2.py
+MISSING vmlinuz-lts
+MISSING intel-ucode.img
+MISSING amd-ucode.img
+MISSING initramfs-lts
+root@f7750922546c:/app# ls -la /tmp/vmlinuz-lts /tmp/intel-ucode.img /tmp/amd-ucode.img /tmp/initramfs-lts
+ls: cannot access '/tmp/vmlinuz-lts': No such file or directory
+ls: cannot access '/tmp/intel-ucode.img': No such file or directory
+ls: cannot access '/tmp/amd-ucode.img': No such file or directory
+ls: cannot access '/tmp/initramfs-lts': No such file or directory
+root@f7750922546c:/app#

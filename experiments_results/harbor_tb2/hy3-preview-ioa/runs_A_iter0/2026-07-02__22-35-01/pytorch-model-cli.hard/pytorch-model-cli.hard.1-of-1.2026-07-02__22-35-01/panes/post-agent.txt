@@ -1,0 +1,97 @@
+root@f1f6f26c9318:/app# ls -la /app
+total 588
+drwxr-xr-x  2 root root   4096 Jul  2 13:59 .
+drwxr-xr-x 19 root root   4096 Jul  2 16:34 ..
+-rw-r--r--  1 root root  79506 Jul  2 13:59 cJSON.c
+-rw-r--r--  1 root root  16393 Jul  2 13:59 cJSON.h
+-rw-r--r--  1 root root    389 Jul  2 13:59 image.png
+-rw-r--r--  1 root root 311873 Jul  2 13:59 lodepng.cpp
+-rw-r--r--  1 root root 107788 Jul  2 13:59 lodepng.h
+-rw-r--r--  1 root root  54714 Jul  2 13:59 model.pth
+-rw-r--r--  1 root root    681 Jul  2 13:59 model.py
+root@f1f6f26c9318:/app# which python3 gcc g++ cc; python3 --version
+/usr/local/bin/python3
+Python 3.13.1
+root@f1f6f26c9318:/app# python3 -c "import numpy, PIL; print('numpy', numpy.__version__, 'PIL', PIL.__version__)" 2>&1
+python3 -c "import torch; print('torch', torch.__version__)" 2>&1; python3 -c "import sklearn; print('sklearn', sklearn.__version__)" 2>&1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy, PIL; print('numpy', numpy.__version__, 'PIL', PIL.__version__)
+    ^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+root@f1f6f26c9318:/app# python3 -c "import torch; print('torch', torch.__version__)" 2>&1; python3 -c "import sklearn; print('sklearn', sklearn.__version__)" 2>
+&1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import torch; print('torch', torch.__version__)
+    ^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'torch'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sklearn; print('sklearn', sklearn.__version__)
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'sklearn'
+root@f1f6f26c9318:/app# curl -sI https://github.com 2>&1 | head -3; echo '---'; python3 -c "import urllib.request; print(urllib.request.urlopen('https://pypi.or
+g', timeout=5).status)" 2>&1
+bash: curl: command not found
+---
+200
+root@f1f6f26c9318:/app# cat /app/model.py
+import torch
+import torch.nn as nn
+
+
+class MnistModel(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        num_classes: int,
+    ) -> torch.nn.Module:
+        super().__init__()
+
+        self.input_layer = nn.Linear(input_dim, hidden_dim)
+        self.hidden_layer = nn.Linear(hidden_dim, hidden_dim)
+        self.output_layer = nn.Linear(hidden_dim, num_classes)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        x = self.input_layer(x)
+        x = self.activation(x)
+
+        x = self.hidden_layer(x)
+        x = self.activation(x)
+
+        x = self.output_layer(x)
+        return x
+root@f1f6f26c9318:/app# python3 -c "import struct; print(open('/app/image.png','rb').read(8))"
+b'\x89PNG\r\n\x1a\n'
+root@f1f6f26c9318:/app# head -c 200 /app/model.pth | xxd | head -20
+bash: xxd: command not found
+head: write error: Broken pipe
+root@f1f6f26c9318:/app# python3 -c "import struct,zlib; d=open('/app/image.png','rb').read(); w,h=struct.unpack('>II', d[16:24]); print('dims', w, h, 'colortype
+', d[25], 'bitdepth', d[24])"
+dims 28 28 colortype 0 bitdepth 8
+root@f1f6f26c9318:/app# pip install torch --quiet 2>&1 | tail -5
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@f1f6f26c9318:/app# python3 -c "import torch; print('torch', torch.__version__)"
+python3 << 'EOF'
+import torch
+from model import MnistModel
+sd = torch.load('model.pth', map_location='cpu')
+print(type(sd))
+if isinstance(sd, dict):
+    print(list(sd.keys()))
+    for k,v in sd.items():
+        print(k, tuple(v.shape))
+EOF
+/usr/local/lib/python3.13/site-packages/torch/_subclasses/functional_tensor.py:362: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered
+internally at /pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+torch 2.12.1+cu130
+

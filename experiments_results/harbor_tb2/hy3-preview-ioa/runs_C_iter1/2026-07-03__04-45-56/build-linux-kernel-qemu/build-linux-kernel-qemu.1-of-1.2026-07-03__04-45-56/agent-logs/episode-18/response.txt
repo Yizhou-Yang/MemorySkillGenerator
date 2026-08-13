@@ -1,0 +1,10 @@
+{
+  "analysis": "The cdn.kernel.org directory listing is 403, and the expected tarball path returned 404. The exact correct URL needs verifying. I'll probe several candidate URLs with HEAD-like requests to find one that returns 200, then download it.",
+  "plan": "Write a python script to test multiple candidate kernel tarball URLs (cdn.kernel.org, www.kernel.org, kernel.org with and without /pub, and .tar.xz vs .tar.gz) and report which returns 200, then download the working one.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe.py << 'EOF'\nimport urllib.request\nbase=['https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.gz']\nhdr={'User-Agent':'Mozilla/5.0'}\nfor u in base:\n    try:\n        req=urllib.request.Request(u,headers=hdr,method='HEAD')\n        r=urllib.request.urlopen(req,timeout=30)\n        print(r.status,u)\n    except Exception as e:\n        print(getattr(e,'code','?'),u)\nEOF\npython3 /tmp/probe.py\n",
+      "duration": 30.0
+    }
+  ]
+}

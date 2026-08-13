@@ -1,0 +1,14 @@
+{
+  "analysis": "The push failed with 'protocol error: bad line length character: Welc'. The literal 'Welc' (='Welcome') is text being sent on the git data channel, corrupting the protocol. This is the classic symptom of a MOTD/welcome banner being printed to stdout by PAM (pam_motd) or a login shell when git-upload-pack runs over SSH. SSHd and nginx are fine; I just need to stop that banner from reaching git's stdin/stdout. Let me confirm the source before fixing.",
+  "plan": "Diagnose: check the git user's shell, /etc/motd, and run a quick expect test executing a plain command over SSH to see if 'Welcome' appears in output. Then fix by disabling pam_motd (and PrintMotd) so the data channel is clean, and retry the push.",
+  "commands": [
+    {
+      "keystrokes": "getent passwd git | cut -d: -f7; echo '---'; ls -la /etc/motd /run/motd.dynamic 2>/dev/null; echo '---'; grep -n motd /etc/pam.d/sshd /etc/ssh/sshd_config 2>/dev/null\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /tmp/t.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 30\nspawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost echo HELLO_MARKER\nexpect {\n  -re {(?i)password} { send \"password\\r\"; exp_continue }\n  eof { }\n}\nEOF\n/tmp/t.exp\n",
+      "duration": 4.0
+    }
+  ]
+}

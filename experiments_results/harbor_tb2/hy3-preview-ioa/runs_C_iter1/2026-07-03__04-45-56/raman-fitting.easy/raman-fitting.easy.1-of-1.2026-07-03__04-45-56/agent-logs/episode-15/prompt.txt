@@ -1,0 +1,30 @@
+New Terminal Output:
+
+root@882cf59b4aca:/app# cat > /app/fit2.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> data = np.loadtxt('/app/graphene_converted.dat')
+> x = data[:,0]; y = data[:,1]
+> order = np.argsort(x); x=x[order]; y=y[order]
+>
+> def lor(x,x0,g,a):
+>     return a*(g*g)/((x-x0)**2+g*g)
+>
+> # Combined: linear baseline + 2 Lorentzians
+> def model(x, x1,g1,a1, x2,g2,a2, off, slope):
+>     return off + slope*(x-x.mean()) + lor(x,x1,g1,a1) + lor(x,x2,g2,a2)
+>
+> p0 = [19140, 400, 70000,  35000, 8000, 6000,  8000, 0.0]
+> popt,_ = curve_fit(model, x, y, p0=p0, maxfev=400000)
+> yp = model(x,*popt)
+> print('Combined R2 =', 1-np.sum((y-yp)**2)/np.sum((y-y.mean())**2))
+> print('G : x0=%.2f gamma=%.2f amp=%.2f'%(popt[0],popt[1],popt[2]))
+> print('2D: x0=%.2f gamma=%.2f amp=%.2f'%(popt[3],popt[4],popt[5]))
+> print('offset=%.2f slope=%.5f'%(popt[6],popt[7]))
+> EOF
+root@882cf59b4aca:/app# python3 /app/fit2.py
+Combined R2 = 0.8359936854721722
+G : x0=19196.02 gamma=372.48 amp=71761.67
+2D: x0=50496.27 gamma=25105.69 amp=-48403.09
+offset=15339.87 slope=1.25602
+root@882cf59b4aca:/app#

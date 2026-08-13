@@ -1,0 +1,31 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app; which gcc cc wget curl; gcc --version | head -1\n'
+"which apt apt-get clang cc make tar python3 2>&1; echo '---'; ls -la /app/sqlite 2>&1\n"
+'apt-get update 2>&1 | tail -5\n'
+'apt-get install -y build-essential wget 2>&1 | tail -8\n'
+"df -h / /var /tmp; echo '---'; du -sh /var/cache/apt/archives 2>/dev/null\n"
+'du -h --max-depth=1 / 2>/dev/null | sort -rh | head -20\n'
+"find / -name 'gcc*' -o -name 'cc' -o -name 'clang*' 2>/dev/null | head; echo '==='; dd if=/dev/zero of=/tmp/testfile bs=1M count=30 2>&1; echo exit=$?\n"
+'apt-get clean; apt-get install -y gcc make 2>&1 | tail -12\n'
+"stat -f /; mount 2>/dev/null | grep -E ' on / |tmpfs|overlay' ; echo '==='\n"
+'rm -f /tmp/testfile /tmp/big; dd if=/dev/zero of=/tmp/big bs=1M count=120 2>&1 | tail -1; echo dd_exit=$?; df -h /\n'
+'mount -t tmpfs tmpfs /mnt 2>&1; echo mount_exit=$?; ls -ld /mnt\n'
+'which dpkg dpkg-deb; apt-get install --print-uris -y gcc make > /tmp/uris.txt 2>&1; echo rc=$?; wc -l /tmp/uris.txt; head -5 /tmp/uris.txt\n'
+''
+'grep -c "^\'" /tmp/uris.txt; grep "^\'" /tmp/uris.txt | head -3\n'
+'mkdir -p /tmp/debs; cat > /tmp/dl.py <<\'PY\'\nimport sys, urllib.request, re\nout=\'/tmp/debs/\'\nurls=[]\nfor line in open(\'/tmp/uris.txt\'):\n    line=line.strip()\n    if line.startswith("\'"):\n        parts=line.split()\n        url=parts[0].strip("\'")\n        fname=parts[1]\n        urls.append((url,fname))\nprint(\'total\',len(urls))\nfor i,(u,f) in enumerate(urls):\n    try:\n        urllib.request.urlretrieve(u, out+f)\n        print(\'ok\',i,f)\n    except Exception as e:\n        print(\'FAIL\',i,f,e)\nPY\npython3 /tmp/dl.py\n'
+'cat > /tmp/dl.py <<\'PY\'\nimport urllib.request\nout=\'/tmp/debs/\'\nurls=[]\nfor line in open(\'/tmp/uris.txt\'):\n    line=line.strip()\n    if line.startswith("\'"):\n        parts=line.split()\n        urls.append((parts[0].strip("\'"), parts[1]))\nhdr={\'User-Agent\':\'Debian APT-HTTP/1.3 (2.7.14)\'}\nfor i,(u,f) in enumerate(urls):\n    try:\n        req=urllib.request.Request(u, headers=hdr)\n        with urllib.request.urlopen(req, timeout=60) as r:\n            data=r.read()\n        open(out+f,\'wb\').write(data)\n        print(\'ok\',i,f,len(data))\n    except Exception as e:\n        print(\'FAIL\',i,f,e)\nPY\npython3 /tmp/dl.py 2>&1 | head -8\n'
+"python3 /tmp/dl.py 2>&1 | grep -c '^ok'; echo '---fails---'; python3 /tmp/dl.py 2>&1 | grep -c FAIL; ls /tmp/debs | wc -l\n"
+'dpkg -i /tmp/debs/*.deb 2>&1 | tail -20; echo rc=${PIPESTATUS[0]}\n'
+''
+'which gcc cc make; gcc --version | head -1; make --version | head -1\n'
+'mkdir -p /app/sqlite; cat > /tmp/get_sqlite.py <<\'PY\'\nimport urllib.request, re, os, sys, tarfile\nhdr={\'User-Agent\':\'Mozilla/5.0\'}\nhtml=urllib.request.urlopen(urllib.request.Request(\'https://www.sqlite.org/download.html\', headers=hdr), timeout=60).read().decode(\'utf-8\',\'ignore\')\nm=re.findall(r\'href="([^"]*sqlite-autoconf-\\d+\\.tar\\.gz)"\', html)\nprint(\'candidates:\', m[:5])\nurl=\'https://www.sqlite.org/\'+m[0]\nprint(\'using\', url)\ndata=urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=120).read()\nopen(\'/app/sqlite/sqlite.tar.gz\',\'wb\').write(data)\nprint(\'downloaded bytes:\', len(data))\nos.chdir(\'/app/sqlite\')\ntarfile.open(\'sqlite.tar.gz\').extractall(\'.\')\nfor d in os.listdir(\'.\'):\n    if os.path.isdir(d): print(\'extracted dir:\', d)\nPY\npython3 /tmp/get_sqlite.py\n'
+'cat > /tmp/get_sqlite.py <<\'PY\'\nimport urllib.request, re, os, tarfile\nhdr={\'User-Agent\':\'Mozilla/5.0\'}\nhtml=urllib.request.urlopen(urllib.request.Request(\'https://www.sqlite.org/download.html\', headers=hdr), timeout=60).read().decode(\'utf-8\',\'ignore\')\nm=re.findall(r\'href="([^"]*sqlite-autoconf-\\d+\\.tar\\.gz)"\', html)\nprint(\'candidates:\')\nfor x in m: print(\' \', x)\nPY\npython3 /tmp/get_sqlite.py\n'
+'python3 -c "import urllib.request,re; h=urllib.request.urlopen(urllib.request.Request(\'https://www.sqlite.org/download.html\',headers={\'User-Agent\':\'Mozilla/5.0\'}),timeout=60).read().decode(\'utf-8\',\'ignore\'); import sys; [print(repr(s)) for s in re.findall(r\'[^\\n]*autoconf[^\\n]*\', h)][:10]"\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+"cat > /tmp/get_sqlite.py <<'PY'\nimport urllib.request, re, os, tarfile\nhdr={'User-Agent':'Mozilla/5.0'}\nhtml=urllib.request.urlopen(urllib.request.Request('https://www.sqlite.org/download.html', headers=hdr), timeout=60).read().decode('utf-8','ignore')\nm=re.findall(r'(\\d{4})/sqlite-autoconf-(\\d+)\\.tar\\.gz', html)\nprint('matches:', m[:5])\nyear, num = m[0]\nurl=f'https://www.sqlite.org/{year}/sqlite-autoconf-{num}.tar.gz'\nprint('url:', url)\ndata=urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=120).read()\nopen('/app/sqlite/sqlite.tar.gz','wb').write(data)\nprint('downloaded bytes:', len(data))\nos.chdir('/app/sqlite')\ntarfile.open('sqlite.tar.gz').extractall('.')\nfor d in sorted(os.listdir('.')):\n    if os.path.isdir(d): print('extracted dir:', d)\nPY\npython3 /tmp/get_sqlite.py\n"
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

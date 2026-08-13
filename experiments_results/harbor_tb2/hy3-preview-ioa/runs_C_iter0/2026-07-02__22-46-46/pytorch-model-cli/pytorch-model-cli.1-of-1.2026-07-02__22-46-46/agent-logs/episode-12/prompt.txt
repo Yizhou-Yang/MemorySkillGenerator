@@ -1,0 +1,94 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected after JSON object
+
+New Terminal Output:
+
+root@5b4c9697ea7f:/app# cat > /app/cli_tool.cpp << 'CPPEOF'
+> #include <cstdio>
+> #include <cmath>
+> #include <vector>
+> #include <string>
+> #include "cJSON.h"
+> #include "lodepng.h"
+>
+> static void die(const char* msg){
+>     fprintf(stderr, "Error: %s\n", msg);
+>     exit(1);
+> }
+>
+> static std::vector<double> load_array(cJSON* root, const char* name){
+>     cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, name);
+>     if(!arr || !cJSON_IsArray(arr)) die(("missing array " + std::string(name)).c_str());
+>     int n = cJSON_GetArraySize(arr);
+>     std::vector<double> v(n);
+>     for(int i=0;i<n;i++){
+>         cJSON* e = cJSON_GetArrayItem(arr,i);
+>         v[i] = e->valuedouble;
+>     }
+>     return v;
+> }
+>
+> int main(int argc, char** argv){
+>     if(argc != 3) die("usage: cli_tool weights.json image.png");
+>     const char* wpath = argv[1];
+>     const char* ipath = argv[2];
+>
+>     // load weights json
+>     FILE* f = fopen(wpath, "rb");
+>     if(!f) die("cannot open weights file");
+>     fseek(f,0,SEEK_END); long sz = ftell(f); fseek(f,0,SEEK_SET);
+>     std::string buf(sz,0);
+>     fread(&buf[0],1,sz,f); fclose(f);
+>     cJSON* root = cJSON_Parse(buf.c_str());
+>     if(!root) die("invalid json");
+>
+>     std::vector<double> W1 = load_array(root,"W1");
+>     std::vector<double> b1 = load_array(root,"b1");
+>     std::vector<double> W2 = load_array(root,"W2");
+>     std::vector<double> b2 = load_array(root,"b2");
+>     std::vector<double> W3 = load_array(root,"W3");
+>     std::vector<double> b3 = load_array(root,"b3");
+>     int hidden = cJSON_GetObjectItemCaseSensitive(root,"hidden_dim")->valueint;
+>     int num_classes = cJSON_GetObjectItemCaseSensitive(root,"num_classes")->valueint;
+>     cJSON_Delete(root);
+>
+>     // decode png
+>     std::vector<unsigned char> image;
+>     unsigned w,h;
+>     unsigned err = lodepng::decode(image, w, h, ipath);
+>     if(err) die("png decode failed");
+>     if((int)w!=28 || (int)h!=28) fprintf(stderr,"warning: image is %ux%u, expected 28x28\n", w, h);
+>     // image is RGBA; convert to grayscale (take red channel)
+>     std::vector<double> x(w*h);
+>     for(unsigned i=0;i<w*h;i++){
+>         x[i] = (double)image[i*4+0];
+>     }
+>
+>     // forward pass (raw 0-255 pixel values)
+>     std::vector<double> h1(hidden,0.0);
+>     for(int j=0;j<hidden;j++){
+>         double s = b1[j];
+>         for(int i=0;i<784;i++) s += W1[j*784+i]*x[i];
+>         h1[j] = s>0? s:0.0;
+>     }
+>     std::vector<double> h2(hidden,0.0);
+>     for(int j=0;j<hidden;j++){
+>         double s = b2[j];
+>         for(int i=0;i<hidden;i++) s += W2[j*hidden+i]*h1[i];
+>         h2[j] = s>0? s:0.0;
+>     }
+>     std::vector<double> out(num_classes,0.0);
+>     for(int j=0;j<num_classes;j++){
+>         double s = b3[j];
+>         for(int i=0;i<hidden;i++) s += W3[j*hidden+i]*h2[i];
+>         out[j] = s;
+>     }
+>     int pred=0;
+>     for(int j=1;j<num_classes;j++) if(out[j]>out[pred]) pred=j;
+>     printf("%d\n", pred);
+>     return 0;
+> }
+> CPPEOF
+root@5b4c9697ea7f:/app# ls -la /app/cli_tool.cpp
+-rw-r--r-- 1 root root 2778 Jul  2 15:59 /app/cli_tool.cpp
+root@5b4c9697ea7f:/app#

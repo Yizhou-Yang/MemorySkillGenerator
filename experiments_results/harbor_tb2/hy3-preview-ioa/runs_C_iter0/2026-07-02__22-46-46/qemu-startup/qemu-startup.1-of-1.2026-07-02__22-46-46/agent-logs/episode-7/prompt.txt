@@ -1,0 +1,78 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@fb781a110bd4:/app# cat << 'PYEOF' > /app/run/walk.py
+> import struct
+> ISO='/app/alpine.iso'
+> def read_sectors(f,lba,c):
+>     f.seek(lba*2048); return f.read(2048*c)
+> def parse_entry(rec):
+>     length=rec[0]
+>     if length==0: return None
+>     ext_lba=struct.unpack_from('<I',rec,2)[0]
+>     data_len=struct.unpack_from('<I',rec,10)[0]
+>     flags=rec[25]
+>     name_len=rec[32]
+>     name=rec[33:33+name_len]
+>     nm=name.split(b';')[0]
+>     return (ext_lba,data_len,bool(flags&2),nm)
+> def list_dir(f,lba,length):
+>     buf=read_sectors(f,lba,(length+2047)//2048)
+>     out=[]; off=0
+>     while off<len(buf):
+>         rl=buf[off]
+>         if rl==0: break
+>         e=parse_entry(buf[off:off+rl])
+>         if e: out.append(e)
+>         off+=rl
+>     return out
+> f=open(ISO,'rb')
+> lba=16; pvd=None
+> while True:
+>     vd=read_sectors(f,lba,1)
+>     if vd[1:6]!=b'CD001': break
+>     if vd[0]==1: pvd=vd; break
+>     if vd[0]==255: break
+>     lba+=1
+> root=parse_entry(pvd[156:156+34])
+> def walk(e,path):
+>     for x in list_dir(f,e[0],e[1]):
+>         nm=x[3].decode('latin1')
+>         if nm in ('\x00','\x01'): continue
+>         full=path+'/'+nm
+>         if x[2]:
+>             walk(x,full)
+>         else:
+>             if nm.lower().endswith('.cfg'):
+>                 f.seek(x[0]*2048); data=f.read(x[1])
+>                 print('======== '+full+' ========')
+>                 print(data.decode('latin1','replace'))
+>                 print('------------------------------------')
+> walk(root,'')
+> PYEOF
+root@fb781a110bd4:/app# python3 /app/run/walk.py
+======== /BOOT/GRUB/GRUB.CFG ========
+set timeout=1
+
+menuentry "Linux lts" {
+linux   /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage quiet
+initrd  /boot/intel-ucode.img /boot/amd-ucode.img /boot/initramfs-lts
+}
+
+------------------------------------
+======== /BOOT/SYSLINUX/SYSLINUX.CFG ========
+TIMEOUT 10
+PROMPT 1
+DEFAULT lts
+
+LABEL lts
+MENU LABEL Linux lts
+KERNEL /boot/vmlinuz-lts
+INITRD /boot/intel-ucode.img,/boot/amd-ucode.img,/boot/initramfs-lts
+FDTDIR /boot/dtbs-lts
+APPEND modules=loop,squashfs,sd-mod,usb-storage quiet
+
+------------------------------------
+root@fb781a110bd4:/app#

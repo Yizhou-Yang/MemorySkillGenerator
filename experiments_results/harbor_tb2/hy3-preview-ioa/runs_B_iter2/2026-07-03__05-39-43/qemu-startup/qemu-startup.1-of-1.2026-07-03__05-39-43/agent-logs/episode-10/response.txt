@@ -1,0 +1,15 @@
+{
+  "analysis": "My inline python failed due to `\\n` line-continuation issues. I'll write a proper verification script file instead. The qemu process is still running and the port is open; I just need to confirm that a fresh telnet client which presses Enter will see a 'login:' prompt.",
+  "plan": "Write /tmp/verify.py that connects to 6665, sends Enter, and checks for 'login:'. Run it. If LOGIN_SEEN is True, the login flow works and I'll mark complete.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/verify.py <<'PYEOF'\nimport socket, time\ns=socket.create_connection(('127.0.0.1',6665),5)\ns.settimeout(3.0)\ntime.sleep(0.5)\ns.sendall(b'\\n')\nbuf=b''; t=time.time()\nwhile time.time()-t<6:\n    try:\n        d=s.recv(512); buf+=d\n    except socket.timeout:\n        break\ns.close()\nprint('REPLY', repr(buf[-160:]))\nprint('LOGIN_SEEN', b'login:' in buf.lower())\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /tmp/verify.py\n",
+      "duration": 9.0
+    }
+  ],
+  "task_complete": false
+}

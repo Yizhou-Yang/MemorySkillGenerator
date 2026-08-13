@@ -1,0 +1,44 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+Current Terminal Screen:
+> # for each inst, find enclosing function (nearest preceding label)
+> consts={}
+> for a,n,r in inst:
+>     fm=re.search(r'\[rip\+0x([0-9a-f]+)\]',r)
+>     if not fm: continue
+>     if 'movsd' not in r and 'movss' not in r: continue
+>     disp=int(fm.group(1),16)
+>     if disp>=0x80000000: disp-=(1<<32)
+>     tgt=a+n+disp
+>     if 0x3000<=tgt<0x32c0:
+>         # find function
+>         fname=None
+>         for fa in sorted(funcmap):
+>             if fa<=a: fname=funcmap[fa]
+>         consts.setdefault(tgt,set()).add(fname)
+> # decode
+> rodata=open('orig','rb').read()[0x3000:0x32c0]
+> for tgt in sorted(consts):
+>     off=tgt-0x3000
+>     d=struct.unpack('<d',rodata[off:off+8])[0]
+>     if abs(d)<1e6 or d!=d:
+>         print('rodata+%d = %.10g  used by %s'%(off,d,sorted(consts[tgt])))
+> EOF
+rodata+579 = 1.368687285e-312  used by [None]
+rodata+591 = 2.716154612e-312  used by [None]
+rodata+607 = 1.241622178e-312  used by [None]
+rodata+623 = 2.716154611e-312  used by [None]
+rodata+639 = -1.205701032e-312  used by [None]
+rodata+643 = 1.347467328e-312  used by [None]
+rodata+647 = 4.667305227e-62  used by [None]
+rodata+651 = -2.000120544  used by [None]
+rodata+667 = 1.332613357e-312  used by [None]
+rodata+679 = 1.432346331e-312  used by [None]
+rodata+683 = -1.49175919e-154  used by [None]
+rodata+687 = 4.087494393e-312  used by [None]
+rodata+691 = -4.053011962e-312  used by [None]
+Traceback (most recent call last):
+  File "<stdin>", line 39, in <module>
+struct.error: unpack requires a buffer of 8 bytes
+root@03270641b450:/app#

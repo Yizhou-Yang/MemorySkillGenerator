@@ -1,0 +1,83 @@
+New Terminal Output:
+
+stat -c '%s' c4_sample/*.jsonl | sort -n | tail -1
+-rw-r--r-- 1 root root  54540 Jul  2 15:33 c4-mini-09895-of-10000.jsonl
+-rw-r--r-- 1 root root  70250 Jul  2 15:33 c4-mini-09896-of-10000.jsonl
+-rw-r--r-- 1 root root  69648 Jul  2 15:33 c4-mini-09897-of-10000.jsonl
+root@3bded9ad04d7:/app# stat -c '%s' c4_sample/*.jsonl | sort -n | tail -1
+307834
+root@3bded9ad04d7:/app# cat > /app/revert.py << 'PYEOF'
+> #!/usr/bin/env python3
+> '''Revert c4_reshard/ back to the original c4_sample/ flat layout.
+>
+> c4_reshard was produced by reorganizing the files of c4_sample into
+> sub-directories (each holding at most 30 files) for upload. This script
+> moves every file found under c4_reshard/ back into c4_sample/ and removes
+> the now-empty shards, restoring the original flat structure.
+> '''
+> import os
+> import shutil
+> import sys
+>
+> BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+> RESHARD = os.path.join(BASE_DIR, 'c4_reshard')
+> SAMPLE = os.path.join(BASE_DIR, 'c4_sample')
+>
+>
+> def main():
+>     if not os.path.isdir(RESHARD):
+>         print('Nothing to revert: ' + RESHARD + ' does not exist.', file=sys.stderr)
+>         return 1
+>
+>     os.makedirs(SAMPLE, exist_ok=True)
+>
+>     moved = 0
+>     for entry in sorted(os.listdir(RESHARD)):
+>         shard = os.path.join(RESHARD, entry)
+>         if not os.path.isdir(shard):
+>             shutil.move(shard, os.path.join(SAMPLE, entry))
+>             moved += 1
+>             continue
+>         for name in sorted(os.listdir(shard)):
+>             src = os.path.join(shard, name)
+>             if os.path.isfile(src):
+>                 shutil.move(src, os.path.join(SAMPLE, name))
+>                 moved += 1
+>         try:
+>             os.rmdir(shard)
+>         except OSError:
+>             pass
+>
+>     try:
+>         os.rmdir(RESHARD)
+>     except OSError:
+>         pass
+>
+>     print('Reverted ' + str(moved) + ' file(s) from c4_reshard/ back into c4_sample/.')
+>     return 0
+>
+>
+> if __name__ == '__main__':
+>     sys.exit(main())
+> PYEOF
+root@3bded9ad04d7:/app# python3 - << 'PREPEOF'
+> import os, shutil
+> src = 'c4_sample'
+> dst = 'c4_reshard'
+> os.makedirs(dst, exist_ok=True)
+> files = sorted(os.listdir(src))
+> per = 30
+> part = 0
+> count = 0
+> cur = None
+> for f in files:
+>     if cur is None or count == per:
+>         cur = os.path.join(dst, 'part_%06d' % part)
+>         os.makedirs(cur, exist_ok=True)
+>         part += 1
+>         count = 0
+>     shutil.move(os.path.join(src, f), os.path.join(cur, f))
+>     count += 1
+> print('moved', len(files), 'files into', part, 'parts')
+> PREPEOF
+

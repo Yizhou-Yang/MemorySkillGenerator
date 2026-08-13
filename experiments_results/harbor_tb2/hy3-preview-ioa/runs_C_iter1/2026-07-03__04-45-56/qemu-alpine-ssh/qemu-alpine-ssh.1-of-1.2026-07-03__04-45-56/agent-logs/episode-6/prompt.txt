@@ -1,0 +1,83 @@
+New Terminal Output:
+
+root@411fe746526f:/app# cat > /app/run_batch.py <<'PY'
+> import telnetlib, time, sys
+>
+> def expect(tn, pat, timeout=40):
+>     end=time.time()+timeout
+>     buf=b''
+>     while time.time()<end:
+>         try:
+>             d=tn.read_very_eager()
+>         except Exception:
+>             d=b''
+>         if d:
+>             buf+=d
+>             if pat in buf:
+>                 return buf
+>         time.sleep(0.05)
+>     return buf
+>
+> tn=telnetlib.Telnet('127.0.0.1',4545,timeout=30)
+> time.sleep(0.5)
+> tn.read_very_eager()
+> tn.write(b'root\n')
+> buf=expect(tn,b'localhost:~#',timeout=25)
+> sys.stdout.buffer.write(b'---LOGIN---\n'+buf)
+> sys.stdout.buffer.flush()
+>
+> for line in sys.stdin:
+>     cmd=line.rstrip('\n').encode()
+>     if not cmd.strip():
+>         continue
+>     tn.write(cmd+b'\n')
+>     time.sleep(0.3)
+>     out=expect(tn,b'localhost:~#',timeout=45)
+>     sys.stdout.buffer.write(b'\n===CMD: '+cmd+b'===\n')
+>     sys.stdout.buffer.write(out)
+>     sys.stdout.buffer.flush()
+>
+> tn.write(b'exit\n')
+> PY
+root@411fe746526f:/app# printf '%s\n' 'hostname' 'cat /etc/apk/repositories' 'which sshd ssh apk' 'ls /usr/sbin/sshd 2>&1' 'ip -o link' 'cat /etc/os-release | h
+ead -3' | python3 /app/run_batch.py
+---LOGIN---
+root
+Welcome to Alpine!
+
+The Alpine Wiki contains a large amount of how-to guides and general
+information about administrating Alpine systems.
+See <https://wiki.alpinelinux.org/>.
+
+You can setup the system with the command: setup-alpine
+
+You may change this message by editing /etc/motd.
+
+localhost:~# ^[[40;14R
+===CMD: hostname===
+hostname
+localhost
+localhost:~# ^[[40;14R
+===CMD: cat /etc/apk/repositories===
+cat /etc/apk/repositories
+/media/cdrom/apks
+localhost:~# ^[[40;14R
+===CMD: which sshd ssh apk===
+which sshd ssh apk
+/sbin/apk
+localhost:~# ^[[40;14R
+===CMD: ls /usr/sbin/sshd 2>&1===
+ls /usr/sbin/sshd 2>&1
+ls: /usr/sbin/sshd: No such file or directory
+localhost:~# ^[[40;14R
+===CMD: ip -o link===
+ip -o link
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN qlen 1000\    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000\    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+localhost:~# ^[[40;14R
+===CMD: cat /etc/os-release | head -3===
+cat /etc/os-release | head -3
+NAME="Alpine Linux"
+ID=alpine
+VERSION_ID=3.19.0
+localhost:~# ^[[40;14Rroot@411fe746526f:/app# ;14R;14R;14R;14R;14R;14R;14R

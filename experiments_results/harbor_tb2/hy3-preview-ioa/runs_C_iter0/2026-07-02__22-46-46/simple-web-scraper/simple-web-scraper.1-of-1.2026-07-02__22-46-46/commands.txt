@@ -1,0 +1,16 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'curl -s http://server:8000 | head -60\n'
+'curl -s -i http://server:8000 | head -40\n'
+'cat > /app/scraper.py << \'EOF\'\nimport re\n\nimport requests\nfrom bs4 import BeautifulSoup\nimport pandas as pd\n\nURL = "http://server:8000"\n\n\ndef parse_book(book):\n    title = book.find("div", class_="book-title").get_text(strip=True)\n    author = book.find("div", class_="book-author").get_text(strip=True)\n    author = re.sub(r"^by\\s+", "", author)\n    year = book.find("span", class_="book-year").get_text(strip=True)\n    year = re.search(r"(\\d{4})", year).group(1)\n    rating = book.find("span", class_="book-rating").get_text(strip=True)\n    rating = re.search(r"([\\d.]+)/?\\s*5", rating).group(1)\n    price = book.find("span", class_="book-price").get_text(strip=True)\n    price = re.search(r"\\$?([\\d.]+)", price).group(1)\n    return {\n        "title": title,\n        "author": author,\n        "year": int(year),\n        "rating": float(rating),\n        "price": float(price),\n    }\n\n\ndef main():\n    resp = requests.get(URL, timeout=10)\n    resp.raise_for_status()\n    soup = BeautifulSoup(resp.text, "html.parser")\n    books = [parse_book(b) for b in soup.find_all("div", class_="book")]\n\n    df = pd.DataFrame(books, columns=["title", "author", "year", "rating", "price"])\n    df.to_csv("books.csv", index=False)\n\n    total = len(df)\n    avg_price = df["price"].mean()\n    highest = df.loc[df["rating"].idxmax()]\n\n    lines = [\n        "Book Store Scraping Summary Report",\n        "=================================",\n        f"Total number of books scraped: {total}",\n        f"Average book price: ${avg_price:.2f}",\n        f"Highest rated book: {highest[\'title\']} (Rating: {highest[\'rating\']}/5)",\n    ]\n    with open("report.txt", "w") as f:\n        f.write("\\n".join(lines) + "\\n")\n\n    print("\\n".join(lines))\n\n\nif __name__ == "__main__":\n    main()\nEOF\n'
+'cd /app && python3 scraper.py\n'
+'ls -la /app/books.csv /app/report.txt\n'
+"echo '--- books.csv ---'; cat /app/books.csv; echo '--- report.txt ---'; cat /app/report.txt\n"
+''
+''
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

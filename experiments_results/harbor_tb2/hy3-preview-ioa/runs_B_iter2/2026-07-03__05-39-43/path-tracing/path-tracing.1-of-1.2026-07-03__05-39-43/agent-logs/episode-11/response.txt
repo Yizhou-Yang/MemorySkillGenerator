@@ -1,0 +1,10 @@
+{
+  "analysis": "The `orig` binary is a raytracer: .text at 0x11e0 (size 0x1bf1), .rodata at file offset 0x3000 (size 0x2c0 = 704 bytes) holds the scene constants. It renders 8800x6600 and ffmpeg-downsamples to 800x600 (image.ppm). To reproduce image.ppm I must recover the scene params from .rodata and reimplement the raytracer in C, then replicate the box-average downsample. Let me dump .rodata as doubles to find constants (camera, sphere center/radius, light dir, sky/ground colors).",
+  "plan": "1. Extract .rodata (file offset 0x3000, 704 bytes) and print as 8-byte little-endian doubles to spot scene constants. 2. Disassemble key functions (sky_color, sphere_intersect, main render) to confirm the math. 3. Reimplement in C with supersampling to approximate the ffmpeg downsample.",
+  "commands": [
+    {
+      "keystrokes": "cd /app && .venv/bin/python - << 'EOF'\nimport struct\ndata=open('orig','rb').read()\noff=0x3000; sz=0x2c0\nseg=data[off:off+sz]\nfor i in range(0,len(seg)-7,8):\n    d=struct.unpack('<d',seg[i:i+8])[0]\n    print('+%3d'%i, '%.6f'%d)\nEOF\n",
+      "duration": 0.5
+    }
+  ]
+}

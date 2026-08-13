@@ -1,0 +1,47 @@
+New Terminal Output:
+
+root@4008c52d3fe4:/app# cat > /tmp/explore.py << 'EOF'
+> import numpy as np
+> d = np.loadtxt('/app/graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',', '.')), 1: lambda s: float(s.decode().replace(',', '
+.'))})
+> x = d[:,0]; y = d[:,1]
+> print('n', len(x))
+> print('x range', x.min(), x.max())
+> print('y range', y.min(), y.max())
+> # sort by x
+> o = np.argsort(x)
+> x = x[o]; y = y[o]
+> # find peaks: local maxima larger than neighborhood
+> from scipy.signal import find_peaks
+> pk, props = find_peaks(y, distance=10, prominence=500)
+> print('num peaks', len(pk))
+> for i in pk:
+>     print(f'x={x[i]:.1f} y={y[i]:.1f}')
+> EOF
+root@4008c52d3fe4:/app# python3 /tmp/explore.py
+Traceback (most recent call last):
+  File "/tmp/explore.py", line 2, in <lambda>
+    d = np.loadtxt('/app/graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',', '.')), 1: lambda s: float(s.decode().replace(',',
+ '.'))})
+                                                                                       ^^^^^^^^
+AttributeError: 'str' object has no attribute 'decode'. Did you mean: 'encode'?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/tmp/explore.py", line 2, in <module>
+    d = np.loadtxt('/app/graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',', '.')), 1: lambda s: float(s.decode().replace(',',
+ '.'))})
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1381, in loadtxt
+    arr = _read(fname, dtype=dtype, comment=comment, delimiter=delimiter,
+                converters=converters, skiplines=skiprows, usecols=usecols,
+                unpack=unpack, ndmin=ndmin, encoding=encoding,
+                max_rows=max_rows, quote=quotechar)
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1035, in _read
+    arr = _load_from_filelike(
+        data, delimiter=delimiter, comment=comment, quote=quote,
+    ...<3 lines>...
+        encoding=encoding, filelike=filelike,
+        byte_converters=byte_converters)
+ValueError: could not convert string '47183,554644' to float64 at row 0, column 1.
+root@4008c52d3fe4:/app#

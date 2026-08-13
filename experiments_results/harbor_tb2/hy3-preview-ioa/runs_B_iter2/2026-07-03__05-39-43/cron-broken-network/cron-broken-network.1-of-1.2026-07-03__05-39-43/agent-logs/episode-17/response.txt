@@ -1,0 +1,18 @@
+{
+  "analysis": "Mystery deepens: dpkg reported 'Setting up curl' successfully and dpkg -L curl confirms the package owns /usr/bin/curl, yet /usr/bin/curl is STILL the 46-byte fake script (timestamp updated to 22:32, exactly the install time). So something is actively restoring the fake /usr/bin/curl immediately after dpkg writes the real binary. This points to a dpkg/apt hook or an inotify-based watcher process re-creating the stub. I need to find and neutralize that mechanism, then install the genuine binary.",
+  "plan": "1) Inspect apt/dpkg hook configuration for anything that rewrites /usr/bin/curl (APT::*Invoke hooks in /etc/apt/apt.conf.d, dpkg cfg, dpkg hooks). 2) Search recursively for references to '/usr/bin/curl' or the fake script in /etc. 3) List running processes for any watcher. 4) Once found, disable it, remove the fake, and install the real binary from the .deb directly. First, investigate.",
+  "commands": [
+    {
+      "keystrokes": "grep -rIl 'curl' /etc/apt /etc/dpkg 2>/dev/null; echo '--- hooks ---'; grep -rIi 'invoke\\|pre-install\\|post-invoke' /etc/apt/apt.conf.d/ 2>/dev/null\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "ls -la /etc/apt/apt.conf.d/ /etc/dpkg/dpkg.cfg.d/ 2>/dev/null\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "ps aux 2>/dev/null | grep -v '\\s\\[' | head -n 40\n",
+      "duration": 0.5
+    }
+  ]
+}

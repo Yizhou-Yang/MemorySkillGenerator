@@ -1,0 +1,15 @@
+{
+  "analysis": "The script printed 'Common Name: None' despite the subject line containing 'CN = dev-internal.company.local'. My string splitting approach is fragile. I'll rewrite the script using a robust regex to extract the CN, and also use regex for the expiration date to be safe. Everything else (key perms, cert, pem, verification.txt) is correct.",
+  "plan": "Rewrite /app/check_cert.py using regex search for CN and the notAfter date, making it robust to spacing. Then run it to confirm it prints the correct Common Name and the success message.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/check_cert.py << 'PYEOF'\n#!/usr/bin/env python3\nimport ssl\nimport subprocess\nimport os\nimport re\nimport sys\nfrom datetime import datetime\n\nCERT_PATH = \"/app/ssl/server.crt\"\n\n\ndef main():\n    if not os.path.exists(CERT_PATH):\n        print(f\"Certificate not found at {CERT_PATH}\")\n        sys.exit(1)\n\n    result = subprocess.run(\n        [\"openssl\", \"x509\", \"-in\", CERT_PATH, \"-noout\", \"-subject\", \"-dates\"],\n        capture_output=True, text=True,\n    )\n    if result.returncode != 0 or not result.stdout.strip():\n        print(\"Failed to load certificate\")\n        sys.exit(1)\n\n    output = result.stdout\n\n    cn_match = re.search(r\"CN\\s*=\\s*([^,]+)\", output)\n    cn = cn_match.group(1).strip() if cn_match else None\n\n    exp_match = re.search(r\"notAfter\\s*=\\s*(.+)\", output)\n    exp_date = None\n    if exp_match:\n        date_str = exp_match.group(1).strip()\n        date_str = re.sub(r\"\\s+(GMT|UTC)$\", \"\", date_str)\n        try:\n            dt = datetime.strptime(date_str, \"%b %d %H:%M:%S %Y\")\n            exp_date = dt.strftime(\"%Y-%m-%d\")\n        except ValueError:\n            exp_date = date_str\n\n    print(f\"Common Name: {cn}\")\n    print(f\"Expiration Date: {exp_date}\")\n    print(\"Certificate verification successful\")\n\n\nif __name__ == \"__main__\":\n    main()\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /app/check_cert.py\n",
+      "duration": 1.0
+    }
+  ],
+  "task_complete": false
+}

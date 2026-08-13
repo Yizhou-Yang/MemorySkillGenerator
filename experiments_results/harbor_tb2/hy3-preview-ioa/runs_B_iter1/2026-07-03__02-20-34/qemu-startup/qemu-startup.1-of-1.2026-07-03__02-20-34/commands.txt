@@ -1,0 +1,34 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+'which qemu-system-x86_64\n'
+'ls -la /tmp/vmlinuz /tmp/initramfs 2>&1\n'
+'ls -la /tmp/*.py 2>&1\n'
+'mkdir -p /mnt/iso && mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1; echo EXIT=$?\n'
+'ls -la /mnt/iso 2>&1\n'
+'ls -la /mnt/iso/boot 2>&1\n'
+'which 7z 7za isoinfo xorriso bsdtar 2>&1; python3 -c \'import pycdlib; print("pycdlib ok")\' 2>&1\n'
+"cat > /tmp/extract.py << 'EOF'\nimport struct\nISO='/app/alpine.iso'\nf=open(ISO,'rb')\nf.seek(16*2048)\npvd=f.read(2048)\nassert pvd[1:6]==b'CD001', 'not iso9660'\ndef parse(data,i):\n    rl=data[i]\n    if rl==0: return None\n    extent=struct.unpack('<I',data[i+2:i+6])[0]\n    dlen=struct.unpack('<I',data[i+10:i+14])[0]\n    flags=data[i+25]\n    nlen=data[i+32]\n    name=data[i+33:i+33+nlen]\n    return name,extent,dlen,(flags&2),rl\ndef readdir(extent,dlen):\n    f.seek(extent*2048)\n    data=f.read(dlen)\n    out=[]; i=0\n    while i < len(data):\n        rec=parse(data,i)\n        if rec is None:\n            i=((i//2048)+1)*2048\n            continue\n        name,extent,dlen,isdir,rl=rec\n        i+=rl\n        nm=name.split(b';')[0]\n        if nm in (b'.',b'\\x00'): continue\n        out.append((nm,extent,dlen,isdir))\n    return out\ndef find(entries,name):\n    for nm,e,dl,d in entries:\n        if nm.upper()==name.upper(): return e,dl,d\n    return None\nroot_ext=struct.unpack('<I',pvd[158:162])[0]\nroot_len=struct.unpack('<I',pvd[166:170])[0]\nroot=readdir(root_ext,root_len)\nboot=find(root,b'BOOT')\nassert boot and boot[2], 'no boot dir'\nbootdir=readdir(boot[0],boot[1])\nk=find(bootdir,b'VMLINUZ')\ni=find(bootdir,b'INITRAMFS')\nassert k, 'no vmlinuz'; assert i,'no initramfs'\nfor nm,e,dl,fn in [('vmlinuz',k[0],k[1],'/tmp/vmlinuz'),('initramfs',i[0],i[1],'/tmp/initramfs')]:\n    f.seek(e*2048)\n    d=f.read(dl)\n    open(fn,'wb').write(d)\n    print('wrote',fn,dl)\nEOF\n"
+'python3 /tmp/extract.py\n'
+"cat > /tmp/list.py << 'EOF'\nimport struct\nISO='/app/alpine.iso'\nf=open(ISO,'rb')\nf.seek(16*2048)\npvd=f.read(2048)\ndef parse(data,i):\n    rl=data[i]\n    if rl==0: return None\n    extent=struct.unpack('<I',data[i+2:i+6])[0]\n    dlen=struct.unpack('<I',data[i+10:i+14])[0]\n    flags=data[i+25]\n    nlen=data[i+32]\n    name=data[i+33:i+33+nlen]\n    return name,extent,dlen,(flags&2),rl\ndef readdir(extent,dlen):\n    f.seek(extent*2048); data=f.read(dlen); out=[]; i=0\n    while i < len(data):\n        rec=parse(data,i)\n        if rec is None:\n            i=((i//2048)+1)*2048; continue\n        name,extent,dlen,isdir,rl=rec; i+=rl\n        nm=name.split(b';')[0]\n        if nm in (b'.',b'\\x00'): continue\n        out.append((nm,extent,dlen,isdir))\n    return out\ndef find(entries,name):\n    for nm,e,dl,d in entries:\n        if nm.upper()==name.upper(): return e,dl,d\n    return None\nroot_ext=struct.unpack('<I',pvd[158:162])[0]\nroot_len=struct.unpack('<I',pvd[166:170])[0]\nroot=readdir(root_ext,root_len)\nprint('ROOT:',[(n.decode(),d) for n,e,dl,d in root])\nboot=find(root,b'BOOT')\nprint('boot',boot)\nif boot:\n    bd=readdir(boot[0],boot[1])\n    print('BOOT:',[(n.decode(),d) for n,e,dl,d in bd])\nEOF\npython3 /tmp/list.py\n"
+"cat > /tmp/extract.py << 'EOF'\nimport struct\nISO='/app/alpine.iso'\nf=open(ISO,'rb')\nf.seek(16*2048)\npvd=f.read(2048)\nassert pvd[1:6]==b'CD001', 'not iso9660'\ndef parse(data,i):\n    rl=data[i]\n    if rl==0: return None\n    extent=struct.unpack('<I',data[i+2:i+6])[0]\n    dlen=struct.unpack('<I',data[i+10:i+14])[0]\n    flags=data[i+25]\n    nlen=data[i+32]\n    name=data[i+33:i+33+nlen]\n    return name,extent,dlen,(flags&2),rl\ndef readdir(extent,dlen):\n    f.seek(extent*2048); data=f.read(dlen); out=[]; i=0\n    while i < len(data):\n        rec=parse(data,i)\n        if rec is None:\n            i=((i//2048)+1)*2048; continue\n        name,extent,dlen,isdir,rl=rec; i+=rl\n        nm=name.split(b';')[0]\n        if nm in (b'.',b'\\x00'): continue\n        out.append((nm,extent,dlen,isdir))\n    return out\ndef find_prefix(entries,pref):\n    pref=pref.upper()\n    for nm,e,dl,d in entries:\n        if nm.upper().startswith(pref): return e,dl,d\n    return None\nroot_ext=struct.unpack('<I',pvd[158:162])[0]\nroot_len=struct.unpack('<I',pvd[166:170])[0]\nroot=readdir(root_ext,root_len)\nboot=None\nfor nm,e,dl,d in root:\n    if nm.upper()==b'BOOT' and d: boot=(e,dl)\nassert boot, 'no boot dir'\nbootdir=readdir(boot[0],boot[1])\nk=find_prefix(bootdir,b'VMLINUZ')\ni=find_prefix(bootdir,b'INITRAMFS')\nassert k, 'no vmlinuz'; assert i,'no initramfs'\nfor fn,e,dl in [('/tmp/vmlinuz',k[0],k[1]),('/tmp/initramfs',i[0],i[1])]:\n    f.seek(e*2048); d=f.read(dl); open(fn,'wb').write(d); print('wrote',fn,dl)\nEOF\npython3 /tmp/extract.py\n"
+'ls -la /tmp/vmlinuz /tmp/initramfs\n'
+"ls -l /dev/kvm 2>&1; echo '---'; nproc\n"
+'rm -f /tmp/serial.log /tmp/qemu.log; touch /tmp/serial.log\n'
+"nohup qemu-system-x86_64 -m 1024 -smp 2 -machine pc,accel=tcg -display none -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append 'modules=loop,squashfs,sd-mod,usb-storage console=ttyS0,115200' -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2,if=virtio -chardev socket,id=s0,host=127.0.0.1,port=6665,server=on,wait=off,telnet=on,logfile=/tmp/serial.log -serial chardev:s0 > /tmp/qemu.log 2>&1 &\n"
+"echo STARTED PID=$!; sleep 3; echo '--- qemu.log ---'; cat /tmp/qemu.log; echo '--- serial.log head ---'; tail -c 300 /tmp/serial.log\n"
+"for n in $(seq 1 120); do if grep -a -m1 'login:' /tmp/serial.log >/dev/null 2>&1; then echo READY after ${n}x2s; break; fi; sleep 2; done; echo '--- tail ---'; tail -c 600 /tmp/serial.log\n"
+''
+''
+''
+''
+'jobs -l; ps -o pid,stat,cmd -p 332 2>&1 | cat\n'
+'(ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep 6665; echo PORTCHECK=$?\n'
+"grep -i ':1A0D' /proc/net/tcp /proc/net/tcp6 2>/dev/null; echo GREP=$?\n"
+'ls -d /proc/332 2>&1\n'
+'timeout 4 python3 -c \'import socket;s=socket.create_connection(("127.0.0.1",6665),timeout=3);print("CONNECTED",s.recv(60));s.close()\' 2>&1\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

@@ -1,0 +1,70 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@68b41fa74434:/app# cat > /tmp/extract2.py <<'PYEOF'
+> import struct
+> ISO="/app/alpine.iso"; OUT="/tmp"
+> def read_sec(f,lba,n=1):
+>     f.seek(lba*2048); return f.read(2048*n)
+> def norm(nm):
+>     nm=nm.split(b";")[0].decode("latin1")
+>     while nm.endswith("."): nm=nm[:-1]
+>     return nm
+> def parse(f,lba,length):
+>     f.seek(lba*2048); data=f.read(((length+2047)//2048)*2048)
+>     off=0;n=len(data);res=[]
+>     while off<n:
+>         rl=data[off]
+>         if rl==0:
+>             off=(off//2048+1)*2048
+>             if off>=n:break
+>             continue
+>         if off+rl>n:break
+>         flags=data[off+25]; loc=struct.unpack_from("<I",data,off+2)[0]; dlen=struct.unpack_from("<I",data,off+10)[0]
+>         nl=data[off+32]; nm=norm(data[off+33:off+33+nl])
+>         res.append((nm,bool(flags&2),loc,dlen)); off+=rl
+>     return res
+> def walk(f,parts):
+>     pvd=read_sec(f,16); loc=struct.unpack_from("<I",pvd,158)[0]; leng=struct.unpack_from("<I",pvd,166)[0]
+>     for i,p in enumerate(parts):
+>         found=None
+>         for nm,isd,l,d in parse(f,loc,leng):
+>             if nm.upper()==p.upper(): found=(nm,isd,l,d);break
+>         if not found: raise SystemExit("MISSING "+p)
+>         nm,isd,l,d=found
+>         if i==len(parts)-1: return l,d
+>         loc,length=l,d
+> with open(ISO,"rb") as f:
+>     for name,path in [("VMLINUZ_LTS","vmlinuz-lts"),("INITRAMFS_LTS","initramfs-lts")]:
+>         l,d=walk(f,["BOOT",name])
+>         f.seek(l*2048); open(OUT+"/"+path,"wb").write(f.read(d))
+>         print("extracted",path,d,"bytes")
+>     l,d=walk(f,["BOOT","SYSLINUX"])
+>     for nm,isd,l2,d2 in parse(f,l,d):
+>         print("SYSLINUX:",nm,"DIR" if isd else "FILE",l2,d2)
+>     # extract cfg files
+>     for nm,isd,l2,d2 in parse(f,l,d):
+>         if not isd and nm.upper().endswith(".CFG"):
+>             f.seek(l2*2048); open(OUT+"/"+nm,"wb").write(f.read(d2))
+>             print("wrote",nm)
+> PYEOF
+root@68b41fa74434:/app# python3 /tmp/extract2.py
+extracted vmlinuz-lts 11879168 bytes
+extracted initramfs-lts 20486092 bytes
+SYSLINUX:  DIR 65 2048
+SYSLINUX:  DIR 62 2048
+SYSLINUX: BOOT.CAT FILE 103 2048
+SYSLINUX: ISOHDPFX.BIN FILE 479461 432
+SYSLINUX: ISOLINUX.BIN FILE 104 43008
+SYSLINUX: LDLINUX.C32 FILE 480215 115468
+SYSLINUX: LIBCOM32.C32 FILE 480272 178532
+SYSLINUX: LIBUTIL.C32 FILE 480360 23636
+SYSLINUX: MBOOT.C32 FILE 480372 11712
+SYSLINUX: SYSLINUX.CFG FILE 480378 235
+wrote SYSLINUX.CFG
+root@68b41fa74434:/app# ls -la /tmp/vmlinuz-lts /tmp/initramfs-lts
+-rw-r--r-- 1 root root 20486092 Jul  2 21:53 /tmp/initramfs-lts
+-rw-r--r-- 1 root root 11879168 Jul  2 21:53 /tmp/vmlinuz-lts
+root@68b41fa74434:/app#

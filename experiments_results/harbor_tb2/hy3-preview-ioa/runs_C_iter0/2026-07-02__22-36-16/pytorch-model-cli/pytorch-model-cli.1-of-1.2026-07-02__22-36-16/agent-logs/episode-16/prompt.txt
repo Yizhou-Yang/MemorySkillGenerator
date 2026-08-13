@@ -1,0 +1,90 @@
+New Terminal Output:
+
+root@0d23ed83aaca:/app# cat > /app/convert.py << 'EOF'
+> import zipfile, pickle, struct, json
+>
+> ZIP_PATH='/app/model.pth'
+>
+> class Mk: pass
+> FLOAT=type('FloatStorage',(Mk,),{})
+> DOUBLE=type('DoubleStorage',(Mk,),{})
+> HALF=type('HalfStorage',(Mk,),{})
+>
+> class Storage:
+>     def __init__(self, marker, data):
+>         self.marker=marker; self.data=data
+>
+> class MyOD:
+>     def __init__(self, items=None):
+>         self.items = list(items) if items is not None else []
+>     def __setstate__(self, state):
+>         pass
+>
+> class Loader:
+>     def __init__(self, zf):
+>         self.zf=zf; self.cache={}
+>     def persistent_load(self, pid):
+>         if isinstance(pid, tuple) and pid and pid[0]=='storage':
+>             marker=pid[1]; key=pid[2]; numel=pid[4]
+>             if key in self.cache: return self.cache[key]
+>             raw=self.zf.read('simple_mnist/data/'+str(key))
+>             if marker is FLOAT: fmt='<%df'%numel; esz=4
+>             elif marker is DOUBLE: fmt='<%dd'%numel; esz=8
+>             elif marker is HALF: fmt='<%de'%numel; esz=2
+>             else: raise Exception('bad marker')
+>             vals=list(struct.unpack(fmt, raw[:numel*esz]))
+>             s=Storage(marker, vals); self.cache[key]=s; return s
+>         return pid
+>     def rebuild(self,*a):
+>         storage=a[0]; offset=a[1]; size=tuple(a[2])
+>         total=1
+>         for s in size: total*=s
+>         data=storage.data[offset:offset+total]
+>         return (data, list(size))
+>
+> class PUnpickler(pickle.Unpickler):
+>     def __init__(self, f, loader):
+>         super().__init__(f); self.loader=loader
+>     def persistent_load(self, pid):
+>         return self.loader.persistent_load(pid)
+>     def find_class(self, module, name):
+>         if module=='torch._utils' and name=='_rebuild_tensor_v2':
+>             return self.loader.rebuild
+>         if module=='collections' and name=='OrderedDict':
+>             return MyOD
+>         if module=='torch' and name=='FloatStorage': return FLOAT
+>         if module=='torch' and name=='DoubleStorage': return DOUBLE
+>         if module=='torch' and name=='HalfStorage': return HALF
+>         if module=='torch' and name in ('float32','float64','float16'): return name
+>         if module=='torch' and name=='strided': return name
+>         raise pickle.UnpicklingError('unsupported %s.%s'%(module,name))
+>
+> zf=zipfile.ZipFile(ZIP_PATH)
+> ld=Loader(zf)
+> data=zf.read('simple_mnist/data.pkl')
+> pk=PUnpickler(__import__('io').BytesIO(data), ld)
+> sdobj=pk.load()
+> sd=dict(sdobj.items)
+>
+> for k,v in sd.items():
+>     print(k, v[1])
+>
+> w0=sd['input_layer.weight'][1]; w1=sd['hidden_layer.weight'][1]; w2=sd['output_layer.weight'][1]
+> input_dim=w0[1]; hidden_dim=w0[0]; num_classes=w2[0]
+> assert w0==[hidden_dim,input_dim] and w1==[hidden_dim,hidden_dim] and w2==[num_classes,hidden_dim]
+> print('input_dim',input_dim,'hidden_dim',hidden_dim,'num_classes',num_classes)
+>
+> j={'input_dim':input_dim,'hidden_dim':hidden_dim,'num_classes':num_classes}
+> for layer in ['input_layer','hidden_layer','output_layer']:
+>     j[layer+'_weight']=sd[layer+'.weight'][0]
+>     j[layer+'_bias']=sd[layer+'.bias'][0]
+> with open('/app/weights.json','w') as f:
+>     json.dump(j,f)
+> print('wrote weights.json, total weights', sum(len(x) for x in j.values() if isinstance(x,list)))
+> EOF
+root@0d23ed83aaca:/app# python3 /app/convert.py
+Traceback (most recent call last):
+  File "/app/convert.py", line 63, in <module>
+    sdobj=pk.load()
+TypeError: 'MyOD' object does not support item assignment
+root@0d23ed83aaca:/app#

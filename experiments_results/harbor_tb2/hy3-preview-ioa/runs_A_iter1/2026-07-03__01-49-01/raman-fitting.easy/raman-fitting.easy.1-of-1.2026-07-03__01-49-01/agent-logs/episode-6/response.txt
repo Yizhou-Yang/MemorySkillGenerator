@@ -1,0 +1,10 @@
+{
+  "analysis": "The data has 3565 points, x from 1648.7 to 47183.6 (monotonic, comma-decimal converted). The spectrum is noisy. The single dominant spike is at x~19239 (y~79400). The hint says G~1580 and 2D~2700, which are real-world wavenumbers; the data x-axis is scaled (the 2D/G position ratio in the data ~1.73 matches the real 2700/1580=1.71, confirming G is the lower-position peak ~19239 and 2D the higher ~33244). I need to robustly locate both peaks from the noisy data before fitting Lorentzians. The two clearest broad features are at ~19239 (G) and ~33244 (2D). Let me confirm with a smoothed peak-finder before fitting.",
+  "plan": "Write an analysis script that smooths the spectrum (moving average) and finds the dominant local maxima, to confirm G and 2D positions. Then I'll set sensible fit windows and run scipy curve_fit with a Lorentzian model y = offset + amplitude/(1+((x-x0)/gamma)^2) for each peak, and write results to results.json. First, just locate peaks.",
+  "commands": [
+    {
+      "keystrokes": "cat > findpeaks.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('/tmp/graphene_conv.txt')\nx = data[:,0]; y = data[:,1]\norder = np.argsort(x)\nx = x[order]; y = y[order]\nw = 15\nker = np.ones(w)/w\nys = np.convolve(y, ker, mode='same')\nmaxs = []\nfor i in range(1, len(x)-1):\n    if ys[i] > ys[i-1] and ys[i] >= ys[i+1]:\n        maxs.append((ys[i], x[i], i))\nmaxs.sort(reverse=True)\nprint('Baseline rough (median y):', np.median(y))\nprint('Top smoothed local maxima:')\nfor v, xx, i in maxs[:20]:\n    print('x=%.2f y=%.1f' % (xx, v))\nEOF\npython3 findpeaks.py\n",
+      "duration": 2.0
+    }
+  ]
+}

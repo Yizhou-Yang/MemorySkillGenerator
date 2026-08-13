@@ -1,0 +1,25 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@064410431fd1:/app/filesystem_spec# python - << 'EOF'
+> import re
+> p = 'fsspec/implementations/dirfs.py'
+> s = open(p).read()
+> old = '''    async def open_async(self, path, mode="rb", **kwargs):
+>         return await self.fs.open_async(self._join(path), mode=mode, **kwargs)'''
+> new = '''    async def open_async(self, path, *args, **kwargs):
+>         return await self.fs.open_async(self._join(path), *args, **kwargs)'''
+> assert old in s, 'old not found'
+> s = s.replace(old, new)
+> open(p, 'w').write(s)
+> print('patched')
+> EOF
+patched
+root@064410431fd1:/app/filesystem_spec# tail -n 4 fsspec/implementations/dirfs.py
+        )
+
+    async def open_async(self, path, *args, **kwargs):
+        return await self.fs.open_async(self._join(path), *args, **kwargs)
+root@064410431fd1:/app/filesystem_spec#

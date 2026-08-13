@@ -1,0 +1,137 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@c093e5eac1f3:/app# cat > /app/recover.py << 'EOF'
+> import json, struct
+>
+> with open('/app/trunc.db','rb') as f:
+>     data = f.read()
+>
+> def read_varint(b, off):
+>     result = 0
+>     for i in range(9):
+>         x = b[off+i]
+>         if i == 8:
+>             return (result << 8) | x, off + 9
+>         result = (result << 7) | (x & 0x7f)
+>         if not (x & 0x80):
+>             return result, off + i + 1
+>     return result, off + 9
+>
+> cell_count = int.from_bytes(data[3:5], 'big')
+> cell_ptrs = [int.from_bytes(data[8+i*2:10+i*2], 'big') for i in range(cell_count)]
+>
+> def serial_value(st, b, off):
+>     if st == 0: return None, off
+>     if st == 1: return int.from_bytes(b[off:off+1],'big',signed=True), off+1
+>     if st == 2: return int.from_bytes(b[off:off+2],'big',signed=True), off+2
+>     if st == 3: return int.from_bytes(b[off:off+3],'big',signed=True), off+3
+>     if st == 4: return int.from_bytes(b[off:off+4],'big',signed=True), off+4
+>     if st == 5: return int.from_bytes(b[off:off+6],'big',signed=True), off+6
+>     if st == 6: return int.from_bytes(b[off:off+8],'big',signed=True), off+8
+>     if st == 7: return struct.unpack('<d', b[off:off+8])[0], off+8
+>     if st == 8: return 0, off
+>     if st == 9: return 1, off
+>     if st >= 12 and st % 2 == 0:
+>         n = (st-12)//2
+>         return b[off:off+n], off+n
+>     if st >= 13 and st % 2 == 1:
+>         n = (st-13)//2
+>         return b[off:off+n].decode('utf-8','replace'), off+n
+>     return None, off
+>
+> rows = []
+> for ptr in cell_ptrs:
+>     try:
+>         off = ptr
+>         payload_len, off = read_varint(data, off)
+>         rowid, off = read_varint(data, off)
+>         rec_start = off
+>         hdr_len, off = read_varint(data, off)
+>         header_end = rec_start + hdr_len
+>         serials = []
+>         while off < header_end:
+>             st, off = read_varint(data, off)
+>             serials.append(st)
+>         body = off
+>         vals = []
+>         for st in serials:
+>             v, body = serial_value(st, data, body)
+>             vals.append(v)
+>         word = None; value = None
+>         for v in vals:
+>             if isinstance(v, str) and word is None:
+>                 word = v
+>             elif isinstance(v, (int, float)) and not isinstance(v, bool) and value is None:
+>                 value = v
+>         if word is None: continue
+>         if value is None: value = 0
+>         rows.append({'word': word, 'value': value})
+>     except Exception as e:
+>         print('failed', hex(ptr), e)
+>         continue
+>
+> # sort by word to keep stable, but preserve original order from cell pointers (desc rowid)
+> rows = sorted(rows, key=lambda r: r['word'])
+> print('recovered', len(rows))
+> for r in rows: print(r)
+> with open('/app/recover.json','w') as f:
+>     json.dump(rows, f, indent=2)
+> EOF
+root@c093e5eac1f3:/app# python3 /app/recover.py
+recovered 10
+{'word': 'testword00', 'value': 1}
+{'word': 'testword01', 'value': 2}
+{'word': 'testword02', 'value': 10}
+{'word': 'testword03', 'value': 25}
+{'word': 'testword04', 'value': 42}
+{'word': 'testword05', 'value': 50}
+{'word': 'testword06', 'value': 75}
+{'word': 'testword07', 'value': 99}
+{'word': 'testword08', 'value': -9.539767623450528e-233}
+{'word': 'testword09', 'value': 2.8363e-319}
+root@c093e5eac1f3:/app# cat /app/recover.json
+[
+  {
+    "word": "testword00",
+    "value": 1
+  },
+  {
+    "word": "testword01",
+    "value": 2
+  },
+  {
+    "word": "testword02",
+    "value": 10
+  },
+  {
+    "word": "testword03",
+    "value": 25
+  },
+  {
+    "word": "testword04",
+    "value": 42
+  },
+  {
+    "word": "testword05",
+    "value": 50
+  },
+  {
+    "word": "testword06",
+    "value": 75
+  },
+  {
+    "word": "testword07",
+    "value": 99
+  },
+  {
+    "word": "testword08",
+    "value": -9.539767623450528e-233
+  },
+  {
+    "word": "testword09",
+    "value": 2.8363e-319
+  }
+]root@c093e5eac1f3:/app#

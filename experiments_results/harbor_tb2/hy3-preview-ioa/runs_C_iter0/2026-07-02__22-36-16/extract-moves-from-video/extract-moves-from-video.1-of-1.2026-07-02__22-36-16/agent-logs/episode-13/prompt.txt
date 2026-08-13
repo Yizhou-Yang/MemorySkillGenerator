@@ -1,0 +1,35 @@
+New Terminal Output:
+
+root@efd9ca4f7707:/app# cat > /tmp/dl.py << 'PYEOF'
+> import re, os, sys, urllib.request
+> os.makedirs('/tmp/debs', exist_ok=True)
+> urls=[]
+> for line in open('/tmp/uris.txt'):
+>     line=line.strip()
+>     m=re.match(r"^'(http[^"]+)'\s+(\S+)\s", line)
+>     if m:
+>         urls.append((m.group(1), m.group(2)))
+> print('total', len(urls), file=sys.stderr)
+> ok=0
+> for i,(u,f) in enumerate(urls):
+>     dest='/tmp/debs/'+f
+>     if os.path.exists(dest) and os.path.getsize(dest)>0:
+>         ok+=1; continue
+>     for attempt in range(4):
+>         try:
+>             req=urllib.request.Request(u, headers={'User-Agent':'Debian APT'})
+>             data=urllib.request.urlopen(req, timeout=60).read()
+>             open(dest,'wb').write(data)
+>             ok+=1
+>             break
+>         except Exception as e:
+>             if attempt==3: print('FAIL', f, e, file=sys.stderr)
+>     if (i+1)%50==0: print('progress', i+1, ok, file=sys.stderr)
+> print('done ok', ok, file=sys.stderr)
+> PYEOF
+root@efd9ca4f7707:/app# python3 /tmp/dl.py 2>&1 | tail -20
+  File "/tmp/dl.py", line 6
+    m=re.match(r"^'(http[^"]+)'\s+(\S+)\s", line)
+                           ^
+SyntaxError: closing parenthesis ']' does not match opening parenthesis '('
+root@efd9ca4f7707:/app#

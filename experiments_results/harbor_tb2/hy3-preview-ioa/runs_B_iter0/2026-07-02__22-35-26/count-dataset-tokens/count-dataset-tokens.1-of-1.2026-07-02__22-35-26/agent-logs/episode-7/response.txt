@@ -1,0 +1,14 @@
+{
+  "analysis": "Disk shows 0 avail but that's misleading overlayfs reporting (the 95MB download succeeded, so space is available). Tokenizer downloaded and first parquet downloaded. Now I need to inspect the parquet schema and a sample science row to confirm the structure of deepseek_reasoning/deepseek_solution and how domain is stored.",
+  "plan": "Inspect the parquet schema and print a sample row where domain is 'science', to confirm field names, types, and whether deepseek_reasoning/solution are separate fields to concatenate. Then build the full processing script.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"import pyarrow.parquet as pq; t=pq.read_table('/tmp/ot/0000.parquet'); print(t.schema); print('---'); d=t.to_pydict(); print('domains sample:', d['domain'][:10]); print('n=',len(d['domain']))\"\n",
+      "duration": 10.0
+    },
+    {
+      "keystrokes": "python3 -c \"import pyarrow.parquet as pq; t=pq.read_table('/tmp/ot/0000.parquet'); d=t.to_pydict(); idx=[i for i,dom in enumerate(d['domain']) if dom=='science']; print('science idx in file0:', idx[:10], 'count', len(idx)); i=idx[0]; print('REASONING len', len(d['deepseek_reasoning'][i]) if d['deepseek_reasoning'][i] else 0); print('SOLUTION len', len(d['deepseek_solution'][i]) if d['deepseek_solution'][i] else 0); print(repr(d['deepseek_reasoning'][i][:300]))\"\n",
+      "duration": 10.0
+    }
+  ]
+}

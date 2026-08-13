@@ -1,0 +1,39 @@
+New Terminal Output:
+
+root@8ae78e2835c8:/app# python3 -c "import PIL; from PIL import Image; print('pillow', PIL.__version__)" 2>&1 | tail -2
+pillow 12.3.0
+root@8ae78e2835c8:/app# cat > /app/probe.py <<'PY'
+> import torch, numpy as np
+> from PIL import Image
+> sd = torch.load('model.pth', weights_only=True)
+> W1=sd['input_layer.weight'].numpy(); b1=sd['input_layer.bias'].numpy()
+> W2=sd['hidden_layer.weight'].numpy(); b2=sd['hidden_layer.bias'].numpy()
+> W3=sd['output_layer.weight'].numpy(); b3=sd['output_layer.bias'].numpy()
+> img = Image.open('image.png')
+> print('mode', img.mode, 'size', img.size)
+> g = img.convert('L'); g=g.resize((28,28)); px=np.asarray(g,dtype=np.float64)
+> print('px range', px.min(), px.max())
+> x01 = px/255.0
+>
+> def relu(a): return np.maximum(a,0)
+> def fwd(x):
+>     h1=relu(W1@x+b1)
+>     h2=relu(W2@h1+b2)
+>     return W3@h2+b3
+> for name,x in [('raw/255',x01), ('norm',(x01-0.1307)/0.3081), ('centered',x01-0.1307)]:
+>     logits=fwd(x)
+>     idx=int(np.argmax(logits))
+>     order=np.argsort(logits)[::-1]
+>     print(f'{name}: pred={idx} top2={order[:2]} logits[top2]={logits[order[0]]:.3f},{logits[order[1]]:.3f}')
+> PY
+root@8ae78e2835c8:/app# python3 /app/probe.py 2>&1 | tail -20
+mode L size (28, 28)
+px range 0.0 255.0
+Traceback (most recent call last):
+  File "/app/probe.py", line 19, in <module>
+    logits=fwd(x)
+  File "/app/probe.py", line 15, in fwd
+    h1=relu(W1@x+b1)
+            ~~^~
+ValueError: matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature (n?,k),(k,m?)->(n?,m?) (size 28 is different from 784)
+root@8ae78e2835c8:/app#

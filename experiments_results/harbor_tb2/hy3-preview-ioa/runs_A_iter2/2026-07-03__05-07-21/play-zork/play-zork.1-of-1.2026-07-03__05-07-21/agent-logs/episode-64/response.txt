@@ -1,0 +1,18 @@
+{
+  "analysis": "transcript.txt is 0 bytes again, even with play6.py (synchronous reads). Yet t.py — which used synchronous reads but only read AFTER writing a command — captured frotz's output perfectly. The difference: play6 did a standalone read BEFORE any write, which appears to block/hang. t.py's working pattern is: write a command, sleep, then read. I'll rewrite the driver to exactly match t.py's proven pattern (write-then-read per command, no initial standalone read, plus a drain at the end).",
+  "plan": "Write /app/play7.py modeled exactly on the working t.py: sleep 1s, then for each command write+read, then send a trailing newline and drain. Run it on the opening command file and check the transcript for the Cellar and inventory.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/play7.py <<'PYEOF'\nimport os, pty, sys, time, pwd\n\ndef main():\n    cmds = [c for c in open(sys.argv[1]).read().split('\\n') if c.strip() != '']\n    uid = pwd.getpwnam('player').pw_uid\n    gid = pwd.getpwnam('player').pw_gid\n    pid, fd = pty.fork()\n    if pid == 0:\n        os.setgid(gid)\n        os.setuid(uid)\n        os.environ['TERM'] = 'dumb'\n        os.environ['LINES'] = '40'\n        os.environ['COLUMNS'] = '80'\n        os.execv('/app/frotz/frotz', ['frotz', '/app/frotz/zork1.z5'])\n    out = open('/app/transcript.txt', 'wb')\n    time.sleep(1.0)\n    def read_one():\n        try:\n            return os.read(fd, 65536)\n        except OSError:\n            return b''\n    for c in cmds:\n        os.write(fd, (c + '\\n').encode())\n        time.sleep(0.4)\n        out.write(read_one())\n    os.write(fd, b'\\n')\n    time.sleep(0.4)\n    out.write(read_one())\n    time.sleep(0.4)\n    out.write(read_one())\n    out.close()\n    try:\n        os.waitpid(pid, 0)\n    except Exception:\n        pass\n\nmain()\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /app/play7.py /app/cmds.txt\n",
+      "duration": 6.0
+    },
+    {
+      "keystrokes": "echo RC=$?; wc -l /app/transcript.txt\n",
+      "duration": 0.3
+    }
+  ]
+}

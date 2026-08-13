@@ -1,0 +1,14 @@
+{
+  "analysis": "The core deployment works: both https://localhost:8443/index.html (MAIN) and /dev/index.html (DEV) serve the correct content, proving the post-receive hook successfully deploys. The repo exists at /git/project, sshd and nginx run with HTTPS + self-signed cert. Two things to confirm: (1) SSH password auth actually works end-to-end (no sshpass available), and (2) a real SSH push triggers the hook. Let me verify password auth using expect if available, and otherwise confirm sshd config is correct.",
+  "plan": "1) Check for expect (to test SSH password login without sshpass). 2) Verify sshd is listening on 22 and PasswordAuthentication is enabled in the effective config. 3) Add safe.directory for the git user to be safe. 4) Do an end-to-end SSH push test using expect (running the hook as git) to confirm deploy triggers on a real over-SSH push. If expect isn't available, I'll install sshpass or rely on config verification.",
+  "commands": [
+    {
+      "keystrokes": "which expect || echo NO_EXPECT; ss -tlnp 2>/dev/null | grep ':22'; sshd -T 2>/dev/null | grep -i passwordauthentication\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "grep -i 'passwordauthentication' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/* 2>/dev/null\n",
+      "duration": 0.2
+    }
+  ]
+}

@@ -1,0 +1,350 @@
+root@d74a665d2e11:/app# cat /etc/os-release; echo '==='; which git sshd nginx openssl ssh; echo '==='; ls -la /usr/sbin/sshd 2>&1; echo '==='; ls -la /etc/nginx
+ 2>&1 | head
+PRETTY_NAME="Ubuntu 26.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+VERSION="26.04 LTS (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=resolute
+LOGO=ubuntu-logo
+===
+/usr/bin/git
+/usr/sbin/sshd
+/usr/sbin/nginx
+/usr/bin/openssl
+/usr/bin/ssh
+===
+-rwxr-xr-x 1 root root 408536 Apr 28 00:15 /usr/sbin/sshd
+===
+total 76
+drwxr-xr-x  8 root root 4096 Jul  2 15:01 .
+drwxr-xr-x 53 root root 4096 Jul  2 21:27 ..
+drwxr-xr-x  2 root root 4096 Jun 19 13:25 conf.d
+-rw-r--r--  1 root root 1125 Mar 27 14:26 fastcgi.conf
+-rw-r--r--  1 root root 1126 Mar 27 14:26 fastcgi_params
+-rw-r--r--  1 root root 2837 Mar 27 14:26 koi-utf
+-rw-r--r--  1 root root 2223 Mar 27 14:26 koi-win
+-rw-r--r--  1 root root 5527 Mar 27 14:26 mime.types
+drwxr-xr-x  2 root root 4096 Jun 19 13:25 modules-available
+root@d74a665d2e11:/app# useradd -m -s /bin/bash git 2>/dev/null; echo 'git:password' | chpasswd; mkdir -p /git /run/sshd /etc/nginx/ssl /var/www/main /var/www/d
+ev; git init --bare /git/project; echo '<h1>main placeholder</h1>' > /var/www/main/index.html; echo '<h1>dev placeholder</h1>' > /var/www/dev/index.html; chown
+-R git:git /git /var/www; ssh-keygen -A
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /git/project/
+root@d74a665d2e11:/app# cat > /git/project/hooks/post-receive <<'EOF'
+> #!/bin/bash
+> umask 022
+> GIT_DIR=/git/project
+> while read oldrev newrev refname; do
+>     branch="${refname#refs/heads/}"
+>     case "$branch" in
+>         main) target=/var/www/main ;;
+>         dev)  target=/var/www/dev ;;
+>         *) continue ;;
+>     esac
+>     mkdir -p "$target"
+>     git --git-dir="$GIT_DIR" archive "$branch" 2>/dev/null | tar -x -C "$target"
+> done
+> EOF
+root@d74a665d2e11:/app# chmod +x /git/project/hooks/post-receive
+root@d74a665d2e11:/app# cat > /etc/ssh/sshd_config <<'EOF'
+> Port 22
+> AddressFamily inet
+> ListenAddress 0.0.0.0
+> HostKey /etc/ssh/ssh_host_rsa_key
+> HostKey /etc/ssh/ssh_host_ecdsa_key
+> HostKey /etc/ssh/ssh_host_ed25519_key
+> UsePAM no
+> PasswordAuthentication yes
+> PubkeyAuthentication yes
+> AuthorizedKeysFile .ssh/authorized_keys
+> PermitRootLogin prohibit-password
+> Subsystem sftp /usr/lib/openssh/sftp-server
+> EOF
+root@d74a665d2e11:/app# printf 'Host localhost\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    LogLevel ERROR\n\n' | cat - /etc/ssh/ssh_con
+fig > /tmp/ssh_config.new && mv /tmp/ssh_config.new /etc/ssh/ssh_config
+root@d74a665d2e11:/app# mkdir -p /etc/ssh/ssh_config.d
+root@d74a665d2e11:/app# cat > /etc/ssh/ssh_config.d/99-localhost.conf <<'EOF'
+> Host localhost
+>     StrictHostKeyChecking no
+>     UserKnownHostsFile /dev/null
+>     LogLevel ERROR
+> EOF
+root@d74a665d2e11:/app# openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.crt -days 365 -subj "/CN=localhost"
+ 2>/dev/null
+root@d74a665d2e11:/app# cat > /etc/nginx/conf.d/ssl.conf <<'EOF'
+> server {
+>     listen 8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/nginx.crt;
+>     ssl_certificate_key /etc/nginx/ssl/nginx.key;
+>     root /var/www/main;
+>     index index.html;
+>     location /dev/ {
+>         alias /var/www/dev/;
+>         index index.html;
+>     }
+> }
+> EOF
+root@d74a665d2e11:/app# pkill sshd 2>/dev/null; sleep 0.3; /usr/sbin/sshd; nginx -t && (nginx -s reload 2>/dev/null || nginx)
+2026/07/02 21:30:01 [warn] 217#217: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+2026/07/02 21:30:01 [warn] 218#218: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+root@d74a665d2e11:/app# sleep 1; ss -tlnp 2>/dev/null | grep -E ':(22|8443)'; echo '---procs---'; ps aux | grep -E 'sshd|nginx' | grep -v grep
+---procs---
+root         216  0.0  0.0  10724  1116 ?        Ss   21:30   0:00 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+root         220  0.0  0.0  15108  2640 ?        Ss   21:30   0:00 nginx: master process nginx
+www-data     221  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     222  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     223  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     224  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     225  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     226  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     227  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     228  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     229  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     230  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     231  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     232  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     233  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     234  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     235  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     236  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     237  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     238  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     239  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     240  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     241  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     242  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     243  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     244  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     245  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     246  0.0  0.0  17128  5180 ?        S    21:30   0:00 nginx: worker process
+www-data     247  0.0  0.0  17128  5232 ?        S    21:30   0:00 nginx: worker process
+www-data     248  0.0  0.0  17128  5184 ?        S    21:30   0:00 nginx: worker process
+www-data     249  0.0  0.0  17128  5184 ?        S    21:30   0:00 nginx: worker process
+www-data     250  0.0  0.0  17128  5184 ?        S    21:30   0:00 nginx: worker process
+www-data     251  0.0  0.0  17128  5184 ?        S    21:30   0:00 nginx: worker process
+www-data     252  0.0  0.0  17128  5184 ?        S    21:30   0:00 nginx: worker process
+root@d74a665d2e11:/app# ps -ef | grep -E 'sshd|nginx' | grep -v grep
+root         216       1  0 21:30 ?        00:00:00 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+root         220       1  0 21:30 ?        00:00:00 nginx: master process nginx
+www-data     221     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     222     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     223     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     224     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     225     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     226     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     227     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     228     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     229     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     230     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     231     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     232     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     233     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     234     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     235     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     236     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     237     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     238     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     239     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     240     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     241     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     242     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     243     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     244     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     245     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     246     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     247     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     248     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     249     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     250     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     251     220  0 21:30 ?        00:00:00 nginx: worker process
+www-data     252     220  0 21:30 ?        00:00:00 nginx: worker process
+root@d74a665d2e11:/app# ss -tlnp 2>/dev/null | grep -E ':(22|8443)'
+root@d74a665d2e11:/app# grep -rn '8443\|server_name' /etc/nginx/nginx.conf /etc/nginx/conf.d/ /etc/nginx/sites-enabled/ 2>/dev/null
+/etc/nginx/nginx.conf:24:	# server_names_hash_bucket_size 64;
+/etc/nginx/nginx.conf:25:	# server_name_in_redirect off;
+/etc/nginx/conf.d/ssl.conf:2:    listen 8443 ssl;
+/etc/nginx/conf.d/ssl.conf:3:    server_name localhost;
+root@d74a665d2e11:/app# ss -tln 2>/dev/null | head -20; echo '---curl---'; curl -sk https://localhost:8443/ ; echo; echo '---tools---'; which expect sshpass
+---curl---
+<h1>main placeholder</h1>
+
+---tools---
+/usr/bin/expect
+root@d74a665d2e11:/app# ls -la /etc/nginx/sites-enabled/ 2>/dev/null; cat /etc/nginx/sites-enabled/* 2>/dev/null | grep -n 'listen\|server_name'
+total 8
+drwxr-xr-x 2 root root 4096 Jul  2 14:56 .
+drwxr-xr-x 9 root root 4096 Jul  2 21:30 ..
+lrwxrwxrwx 1 root root   34 Jul  2 14:56 default -> /etc/nginx/sites-available/default
+2:    listen 8443 ssl;
+3:    server_name localhost;
+root@d74a665d2e11:/app# rm -f /etc/nginx/sites-enabled/default; nginx -s reload
+2026/07/02 21:31:00 [notice] 379#379: signal process started
+root@d74a665d2e11:/app# cat > /app/ssh-password.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 60
+> eval spawn ssh -tt {*}$argv
+> expect {
+>     -re "(?i)password:" { send "password\r"; exp_continue }
+>     eof
+> }
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/ssh-password.exp
+root@d74a665d2e11:/app# cat > /app/test.sh <<'EOF'
+> #!/bin/bash
+> set -e
+> export GIT_SSH_COMMAND="expect -f /app/ssh-password.exp"
+> cd /tmp
+> rm -rf localrepo && mkdir localrepo && cd localrepo
+> git init -b main -q
+> git config user.email t@t.com
+> git config user.name tester
+> echo '<h1>Main Branch Deployed</h1>' > index.html
+> git add -A && git commit -qm 'main commit'
+> git remote add origin ssh://git@localhost/git/project
+> git push -q origin main
+> echo '--- pushed main ---'
+> git checkout -q -b dev
+> git rm -q index.html 2>/dev/null || true
+> echo '<h1>Dev Branch Deployed</h1>' > index.html
+> git add -A && git commit -qm 'dev commit'
+> git push -q origin dev
+> echo '--- pushed dev ---'
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/test.sh
+root@d74a665d2e11:/app# /app/test.sh
+fatal: protocol error: bad line length character: spaw
+root@d74a665d2e11:/app# cat > /app/ssh-password.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 120
+> spawn ssh -tt {*}$argv
+> expect {
+>     -re "(?i)password:" { send "password\r"; exp_continue }
+> }
+> interact
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/ssh-password.exp
+root@d74a665d2e11:/app# cat > /app/git-ssh <<'EOF'
+> #!/bin/bash
+> exec expect -f /app/ssh-password.exp "$@"
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/git-ssh
+root@d74a665d2e11:/app# sed -i 's#export GIT_SSH_COMMAND="expect -f /app/ssh-password.exp"#export GIT_SSH_COMMAND="/app/git-ssh"#' /app/test.sh; grep GIT_SSH_CO
+MMAND /app/test.sh
+export GIT_SSH_COMMAND="/app/git-ssh"
+root@d74a665d2e11:/app# /app/test.sh
+fatal: protocol error: bad line length character: spaw
+root@d74a665d2e11:/app# ls -la /dev/pts 2>&1 | head; echo '---'; mount | grep devpts; echo '---expect test---'; expect -f /app/ssh-password.exp git@localhost 'e
+cho HELLO_FROM_SSH' 2>&1 | head
+total 0
+drwxr-xr-x 2 root root      0 Jul  2 21:27 .
+drwxr-xr-x 5 root root    340 Jul  2 21:27 ..
+crw--w---- 1 root tty  136, 0 Jul  2 21:27 0
+crw--w---- 1 root tty  136, 1 Jul  2 21:32 1
+crw--w---- 1 root tty  136, 4 Jul  2 21:31 4
+crw--w---- 1 git  tty  136, 5 Jul  2 21:31 5
+crw-rw-rw- 1 root root   5, 2 Jul  2 21:32 ptmx
+---
+devpts on /dev/pts type devpts (rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=666)
+---expect test---
+spawn ssh -tt git@localhost echo HELLO_FROM_SSH
+git@localhost's password:
+HELLO_FROM_SSH
+spawn_id: spawn id exp4 not open
+    while executing
+"interact"
+    (file "/app/ssh-password.exp" line 7)
+root@d74a665d2e11:/app# rm -f /tmp/git.sock; cat > /app/exp-master.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 120
+> spawn ssh -tt -M -S /tmp/git.sock -fN git@localhost
+> expect {
+>     -re "(?i)password:" { send "password\r"; exp_continue }
+>     timeout { puts "TIMEOUT"; exit 1 }
+>     eof {}
+> }
+> EOF
+root@d74a665d2e11:/app# chmod +x /app/exp-master.exp
+root@d74a665d2e11:/app# expect -f /app/exp-master.exp
+spawn ssh -tt -M -S /tmp/git.sock -fN git@localhost
+git@localhost's password:
+root@d74a665d2e11:/app# ls -la /tmp/git.sock 2>&1; ssh -S /tmp/git.sock -o ControlMaster=no git@localhost 'echo MASTER_OK; whoami'
+srw------- 1 root root 0 Jul  2 21:33 /tmp/git.sock
+MASTER_OK
+git
+root@d74a665d2e11:/app# sed -i 's#export GIT_SSH_COMMAND="/app/git-ssh"#export GIT_SSH_COMMAND="ssh -S /tmp/git.sock -o ControlMaster=no"#' /app/test.sh; grep G
+IT_SSH_COMMAND /app/test.sh
+export GIT_SSH_COMMAND="ssh -S /tmp/git.sock -o ControlMaster=no"
+root@d74a665d2e11:/app# /app/test.sh
+--- pushed main ---
+--- pushed dev ---
+root@d74a665d2e11:/app# echo '== main =='; curl -sk https://localhost:8443/; echo '== dev =='; curl -sk https://localhost:8443/dev/index.html; echo '== files ==
+'; ls -la /var/www/main /var/www/dev
+== main ==
+<h1>Main Branch Deployed</h1>
+== dev ==
+<h1>Dev Branch Deployed</h1>
+== files ==
+/var/www/dev:
+total 12
+drwxr-xr-x 2 git git 4096 Jul  2 21:33 .
+drwxr-xr-x 5 git git 4096 Jul  2 21:29 ..
+-rw-r--r-- 1 git git   29 Jul  2 21:33 index.html
+
+/var/www/main:
+total 12
+drwxr-xr-x 2 git git 4096 Jul  2 21:33 .
+drwxr-xr-x 5 git git 4096 Jul  2 21:29 ..
+-rw-r--r-- 1 git git   30 Jul  2 21:33 index.html
+root@d74a665d2e11:/app# ls -la /git/project/hooks/post-receive; echo '--- scp-style path test ---'; cd /tmp && rm -rf scptest && mkdir scptest && cd scptest &&
+git init -b main -q && git config user.email t@t.com && git config user.name t && echo '<h1>scp path ok</h1>' > index.html && git add -A && git commit -qm x &&
+git remote add o git@localhost:/git/project && GIT_SSH_COMMAND='ssh -S /tmp/git.sock -o ControlMaster=no' git push -q o HEAD:refs/heads/main && echo PUSH_OK
+-rwxr-xr-x 1 root root 354 Jul  2 21:29 /git/project/hooks/post-receive
+--- scp-style path test ---
+To localhost:/git/project
+ ! [rejected]        HEAD -> main (fetch first)
+error: failed to push some refs to 'localhost:/git/project'
+hint: Updates were rejected because the remote contains work that you do not
+hint: have locally. This is usually caused by another repository pushing to
+hint: the same ref. If you want to integrate the remote changes, use
+hint: 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+root@d74a665d2e11:/tmp/scptest# echo '== main after scp push =='; curl -sk https://localhost:8443/; echo '== hook perms =='; ls -la /git/project/hooks/post-rece
+ive; echo '== auth sanity: sshd_config UsePAM/PassAuth =='; grep -E 'UsePAM|PasswordAuthentication' /etc/ssh/sshd_config
+== main after scp push ==
+<h1>Main Branch Deployed</h1>
+== hook perms ==
+-rwxr-xr-x 1 root root 354 Jul  2 21:29 /git/project/hooks/post-receive
+== auth sanity: sshd_config UsePAM/PassAuth ==
+UsePAM no
+PasswordAuthentication yes
+root@d74a665d2e11:/tmp/scptest# cd /tmp/scptest && git checkout -q -b scpstyle && echo '<h1>scp path works</h1>' > index.html && git add -A && git commit -qm sc
+p && GIT_SSH_COMMAND='ssh -S /tmp/git.sock -o ControlMaster=no' git push -q o HEAD:refs/heads/scpstyle && echo PUSH_OK && ls /var/www/ && curl -sk https://local
+host:8443/ && echo && curl -sk https://localhost:8443/dev/index.html
+PUSH_OK
+dev  html  main
+<h1>Main Branch Deployed</h1>
+
+<h1>Dev Branch Deployed</h1>
+root@d74a665d2e11:/tmp/scptest#

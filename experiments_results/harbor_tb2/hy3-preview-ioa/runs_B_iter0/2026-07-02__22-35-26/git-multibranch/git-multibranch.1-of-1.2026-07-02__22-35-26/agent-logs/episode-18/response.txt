@@ -1,0 +1,15 @@
+{
+  "analysis": "Critical progress: authentication now succeeds (`Authenticated ... using \"password\"`), and the earlier MOTD corruption is gone. The remaining failure is server-side: `git-receive-pack '/git/project'` exits 254, after which the client reports 'Could not read from remote repository'. The repo is empty (local clone confirmed it as an empty repo, and the earlier local 'push' only failed because the default branch is master, not main — a client branch-name issue). I need to find why git-receive-pack exits 254 over SSH. I'll test git-receive-pack directly as the git user and check how it's invoked.",
+  "plan": "1) Check where git-receive-pack lives and whether it's in the git user's PATH. 2) Run `git-receive-pack /git/project` directly as the git user (with /dev/null stdin) to capture any error and its exit code. 3) Based on the result, fix the root cause (likely a PATH or environment issue under non-interactive ssh).",
+  "commands": [
+    {
+      "keystrokes": "ls -l /usr/bin/git-receive-pack 2>&1; su git -c 'which git-receive-pack; echo PATH=$PATH'\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "su git -c 'git-receive-pack /git/project < /dev/null; echo EXIT=$?'\n",
+      "duration": 1.0
+    }
+  ],
+  "task_complete": false
+}

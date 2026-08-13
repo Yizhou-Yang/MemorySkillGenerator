@@ -1,0 +1,18 @@
+{
+  "analysis": "Now the real obstacle is clear: the filesystem is 100% full (0 bytes available) because of the fuse-overlayfs at 957G/984G used. That's why apt can't download the curl package. So I have two problems to solve: (1) /usr/bin/curl is a fake 46-byte script that always fails, and (2) no disk space to install the real curl. I need to free some space before I can restore a working curl.",
+  "plan": "First locate what's consuming disk space so I can safely free a few MB. I'll check apt lists, logs, and scan for large files. Then clean up enough to allow apt to install curl. I'll avoid deleting anything important. After freeing space, retry `apt-get install -y curl` and verify it works.",
+  "commands": [
+    {
+      "keystrokes": "du -sh /var/lib/apt/lists 2>/dev/null; apt-get clean; du -sh /var/cache/apt/archives 2>/dev/null\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "df -h / | tail -n 1\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "find / -xdev -type f -size +50M 2>/dev/null | head -n 30\n",
+      "duration": 5.0
+    }
+  ]
+}

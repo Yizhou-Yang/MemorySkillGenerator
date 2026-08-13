@@ -1,0 +1,37 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'cat /etc/os-release | head -3\n'
+'which git nginx sshd openssl ssh-keygen tar 2>/dev/null\n'
+'ls -l /usr/sbin/sshd 2>/dev/null; nginx -v 2>/dev/null; echo done\n'
+"useradd -m -s /bin/bash git 2>/dev/null; echo 'git:password' | chpasswd\n"
+'ssh-keygen -A\n'
+'mkdir -p /run/sshd\n'
+"printf '\\nPasswordAuthentication yes\\nPubkeyAuthentication yes\\n' >> /etc/ssh/sshd_config\n"
+'/usr/sbin/sshd\n'
+'ps aux | grep -v grep | grep sshd\n'
+'mkdir -p /etc/nginx/ssl /srv/www/dev\n'
+'openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/server.key -out /etc/nginx/ssl/server.crt -days 365 -subj "/CN=localhost"\n'
+'git init --bare /git/project >/dev/null && chown -R git:git /git/project && chmod -R u+rwx /git/project\n'
+'cat > /git/project/hooks/post-receive <<\'EOF\'\n#!/bin/bash\nset -e\nwhile read oldrev newrev refname; do\n  branch="${refname#refs/heads/}"\n  case "$branch" in\n    main) dest=/srv/www ;;\n    dev)  dest=/srv/www/dev ;;\n    *) continue ;;\n  esac\n  mkdir -p "$dest"\n  git archive "$newrev" | tar -x -C "$dest"\n  find "$dest" -type f -exec chmod 644 {} \\;\n  find "$dest" -type d -exec chmod 755 {} \\;\ndone\nEOF\n'
+'chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive\n'
+'chown -R git:git /srv/www\n'
+'rm -f /etc/nginx/sites-enabled/default\n'
+"cat > /etc/nginx/conf.d/gitdeploy.conf <<'EOF'\nserver {\n    listen 8443 ssl;\n    server_name localhost;\n    ssl_certificate     /etc/nginx/ssl/server.crt;\n    ssl_certificate_key /etc/nginx/ssl/server.key;\n    root /srv/www;\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}\nEOF\n"
+'nginx -t\n'
+'nginx\n'
+'ps aux | grep -v grep | grep nginx\n'
+'ps aux | grep nginx | grep -v grep; ss -ltnp 2>/dev/null | grep 8443 || netstat -ltnp 2>/dev/null | grep 8443\n'
+"curl -sk https://localhost:8443/ -o /dev/null -w '%{http_code}\\n'\n"
+''
+'which sshpass || apt-get install -y sshpass >/dev/null 2>&1; which sshpass\n'
+"which expect sshpass; echo '---'; apt-get install -y sshpass 2>&1 | tail -5\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+"mkdir -p /root/.ssh && echo -e 'Host localhost\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null' >> /root/.ssh/config\n"
+'rm -rf /tmp/testrepo && mkdir -p /tmp/testrepo && cd /tmp/testrepo && git init -q && git config user.email t@t.com && git config user.name t\n'
+"echo '<h1>MAIN PAGE</h1>' > index.html && git add . && git commit -qm 'main init' && git branch -M main\n"
+"git checkout -q -b dev && echo '<h1>DEV PAGE</h1>' > index.html && git commit -qam 'dev init' && git checkout -q main\n"
+'cat > /tmp/push.exp <<\'EOF\'\n#!/usr/bin/expect -f\nset timeout 60\nspawn git push git@localhost:/git/project main dev\nexpect {\n  -re "(?i)yes/no" { send "yes\\r"; exp_continue }\n  -re "(?i)password:" { send "password\\r"; exp_continue }\n  eof\n}\nEOF\nexpect /tmp/push.exp\n'
+['C-d']
+['C-d']

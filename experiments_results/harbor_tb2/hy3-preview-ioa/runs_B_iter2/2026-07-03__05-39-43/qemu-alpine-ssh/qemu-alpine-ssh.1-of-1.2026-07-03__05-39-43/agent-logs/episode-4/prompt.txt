@@ -1,0 +1,45 @@
+New Terminal Output:
+
+root@b0ec125a472b:/app# cat > /app/setup.exp <<'EOF'
+> #!/usr/bin/expect -f
+> set timeout 240
+>
+> proc cmd {c} {
+>     send "$c\r"
+>     expect {
+>         "# " {}
+>         timeout { puts "TIMEOUT_CMD: $c"; exit 2 }
+>     }
+> }
+>
+> spawn nc 127.0.0.1 9001
+> sleep 1
+> send "\r"
+> expect {
+>     "login:" {
+>         send "root\r"
+>         expect {
+>             "Password:" { send "\r" }
+>             "# " {}
+>             timeout { puts "TIMEOUT_AFTER_LOGIN"; exit 1 }
+>         }
+>     }
+>     "# " {}
+>     timeout { puts "TIMEOUT_WAITING"; exit 1 }
+> }
+>
+> cmd "ip link set eth0 up"
+> cmd "udhcpc -i eth0"
+> cmd "echo root:password123 | chpasswd"
+> cmd "apk add openssh"
+> cmd "ssh-keygen -A"
+> cmd "sed -i 's/^#\\?PermitRootLogin.*/PermitRootLogin yes/ ; s/^#\\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
+> cmd "/usr/sbin/sshd"
+> cmd "echo SETUP_DONE_OK"
+> expect "SETUP_DONE_OK"
+> send "exit\r"
+> EOF
+root@b0ec125a472b:/app# expect /app/setup.exp
+spawn nc 127.0.0.1 9001
+
+

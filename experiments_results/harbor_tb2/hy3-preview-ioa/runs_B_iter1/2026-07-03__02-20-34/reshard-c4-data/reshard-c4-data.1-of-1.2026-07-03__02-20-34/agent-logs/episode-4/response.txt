@@ -1,0 +1,18 @@
+{
+  "analysis": "c4_sample/ is at /app/c4_sample/ with 9898 flat .jsonl files, no subdirectories. Total ~800MB. File sizes range ~50KB to ~307KB — all well under the 15MB limit, so no file splitting is needed. I only need to distribute the 9898 files into folders of at most 30 files each (9898/30 ≈ 330 folders). I'll build c4_reshard by COPYING from c4_sample so the original stays intact (safest), and write revert.py in /app (the parent of c4_sample) to move the files back and remove the reshard folder. Let me first check disk space, then build.",
+  "plan": "1. Check disk free space. 2. Write a small Python build script that copies each file into c4_reshard/<bucket>/ (30 files per bucket, zero-padded). 3. Run it. 4. Verify: file count, max files-per-folder <=30, max file size <=15MB. 5. Write /app/revert.py that moves all files back into c4_sample and removes the c4_reshard tree. I will NOT run revert.py.",
+  "commands": [
+    {
+      "keystrokes": "df -h /app\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /app/build_reshard.py << 'EOF'\nimport os, shutil\nSRC = \"/app/c4_sample\"\nDST = \"/app/c4_reshard\"\nPER = 30\nfiles = sorted(os.listdir(SRC))\nos.makedirs(DST, exist_ok=True)\nfor i, f in enumerate(files):\n    b = i // PER\n    d = os.path.join(DST, \"%03d\" % b)\n    os.makedirs(d, exist_ok=True)\n    shutil.copy2(os.path.join(SRC, f), os.path.join(d, f))\nprint(\"copied\", len(files), \"files into\", (len(files) + PER - 1)//PER, \"buckets\")\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /app/build_reshard.py\n",
+      "duration": 8.0
+    }
+  ]
+}

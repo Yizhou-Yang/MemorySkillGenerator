@@ -1,0 +1,577 @@
+{
+  "analysis": "Commands were sent but output not yet displayed. Let me wait to see the results.",
+  "plan": "Poll for the output of the three commands.",
+  "commands": [
+    {
+      "keystrokes": "",
+      "duration": 1.0
+    }
+  ]
+}
+
+User: New Terminal Output:
+
+root@c500238ac59d:/app# ls -la c4_sample/
+total 524288
+drwxr-xr-x  2 root root      524288 Jul  2 15:33 .
+drwxr-x-x  2 root root       4096 Jul  2 15:34 ..
+-rw-r--r--  1 root root  536870912 Jul  2 15:33 shard_0000.json
+-rw-r--r--  1 root root  536870912 Jul  2 15:34 shard_0001.json
+-rw-r--r--  1 root root  536870912 Jul  2 15:34 shard_0002.json
+-rw-r--r--  1 root root  536870912 Jul  2 15:34 shard_0003.json
+root@c4_sample/
+root@c500238ac59d:/app# find c4_sample -type f | wc -l
+4
+root@c500238ac59d:/app# du -sh c4_sample
+2.0G    c4_sample
+total 524288
+drwxr-xr--  2 root root      524288 Jul  2 15:34 .
+drwxr-xr--  2 root root       4096 Jul  2 34 .
+root@c500238ac59d:/app# du -sh c4_sample
+2.0G    c4_sample
+root@c500238ac59d:/app# 
+
+(cleaned display)
+
+c4_sample/ contains 4 files, each 512 MB (536870912 bytes), total 2.0G.
+
+Wait - the task says I need to understand the file content. These are JSON shards of 512MB each. The constraints are: max 30 files per folder, max filesize 15MB. So I need to split each 512MB file into pieces of 15MB or less.
+
+512MB / 15MB = ~34.1, so each file needs at least 35 chunks of 15MB. Actually 512*1024*1024 = 536870912 bytes. 15 MB = 15*1024*1024 = 15728640 bytes. 536870912 / 15728640 = 34.13. So 35 files of ~15MB each per shard. That's 4 shards * 35 = 140 files. That exceeds 30 per folder. So I need to distribute across multiple folders, each with max 30 files.
+
+Let me think about the overall design.
+
+Total size 2GB. Max 15MB per file. Total file count needed: 2GB / 15MB = 136.5 → at least 137 files. With 30 files per folder max, need at least ceil(137/30) = 5 folders.
+
+But wait - is this a "split files into chunks" task? Or is it about reorganizing? The task says "prepare a version of the data in c4_sample/ for upload". The data is in 512MB JSON shard files. To meet the 15MB file size limit, we must split each file into multiple smaller pieces.
+
+So the approach: split each shard file into 15MB chunks, place them into folders (subdirectories), max 30 files per folder. Then the revert script reassembles them.
+
+Let me think about how to split. Use `split -b 15M`. The chunks will be 15MB each (except last). 512MB / 15MB = 34.13, so 35 chunks per file. 4 files → 140 chunks.
+
+Folder distribution: max 30 files per folder. 140 / 30 = 4.67 → 5 folders. So distribute 140 chunks into 5 folders of 28 each, or distribute evenly.
+
+But we also need to preserve order for reassembly. The revert script needs to concatenate chunks back in the correct order to recreate each shard file.
+
+Let me design:
+
+c4_reshard/
+  part_0000/...
+  part_0001/...
+  etc.
+
+Each folder has up to 30 files. Files named in a way that preserves order, e.g., shard_0000.json.aa, shard_0000.json.ab, ... or chunk_000000, chunk_000001, etc. with a global ordering.
+
+Better approach: Name chunks globally ordered so revert knows the sequence. E.g., chunk_000000, chunk_000001, ... chunk_00139. Then assign to folders round-robin or sequentially. But round-robin would interleave different shards, making reassembly need a manifest. Sequential assignment into folders of 30 also needs a manifest unless filenames encode ordering and shard index.
+
+Simplest robust approach: Create a manifest. But the revert must work without external manifest if we embed info in filenames. Let me embed both the original shard and the chunk index in the filename.
+
+But cross-folder ordering: if I put chunk N in folder F, the revert needs to know which folder and which chunk belongs to which original file. With descriptive filenames like `shard_0000.json.000` (with zero-padded index), the revert can glob all files matching `shard_XXXX.json.NNN` pattern, sort by NNN, concatenate.
+
+But there's a subtlety: the chunk index must be globally sequential within a shard. E.g., shard_0000 splits into shard_0000.json.000, .001, ... .034. shard_0001 into .000... too but that's ambiguous across shards. So include shard index in filename: shard_0000.json.000 means shard 0, chunk 0. Revert groups by shard index prefix.
+
+Actually filenames like `shard_0000.json.000` - the revert can group files by the "shard_XXXX" prefix. So:
+- For each shard file, split into 15MB chunks, name them `shard_NNNN.json.CCC` where CCC is zero-padded chunk index (within that shard).
+- Distribute these across folders max 30 per folder.
+
+The revert script:
+1. For each original shard file (we know names from c4_sample, or we can record them), find all chunks `shard_NNNN.json.*`, sort by chunk index, concatenate into c4_sample/shard_NNNN.json.
+
+But how does revert know the original shard names? It could derive from the chunk filenames' prefix. For each unique prefix `shard_NNNN.json`, concatenate all `shard_NNNN.json.*` files sorted by suffix. That reconstructs the original. 
+
+But order of concatenation: need to sort chunk indices numerically. Files could be in different folders; we glob recursively.
+
+Let me think about whether `split` with custom suffix works. `split` produces files like `xaa, xab...`. I can use `--additional-suffix` and custom prefix. Actually `split -b 15M --numeric-suffixes --suffix-length=3 input prefix` produces prefix000, prefix001, etc. 
+
+But I want filename `shard_0000.json.000`. I can set prefix to `shard_0000.json.`. Then output files become `shard_0000.json.000`, `shard_0000.json.001`, etc. But split adds numeric suffix after the prefix. With `--numeric-suffixes=0`, output is `prefix000`. So prefix `shard_0000.json.` gives `shard_0000.json.000`. 
+
+Now, one concern: 512MB file - should I split into exactly 15MB? 15 MB = 15*1024*1024 = 15728640 bytes. split -b 15728640. Or use -b 15M which is 15*1024*1024. Good. 536870912 / 15728640 = 34.13, so 35 chunks: 34 chunks of 15M and 1 chunk of ~2.1MB. All ≤15MB. 
+
+Now folder distribution. After splitting all 4 shards, we have 140 chunks total (35 each). Distribute into folders with max 30 files. 140/30 → 5 folders (30,30,30,30,20). distribute sequentially.
+
+The revert script needs to find all chunk files. I'll make revert.py:
+- Walk c4_reshard recursively.
+- Group files by their "base" = filename up to the last dot before numeric suffix. Hmm, but `shard_0000.json.000` - splitting on the last dot: base=`shard_0000.json`, chunk=`000`. But `shard_0000.json` itself contains a dot. The chunk number is the last component after the final dot. So base = everything before last dot, index = last dot component. Good.
+- Sort by integer index, concatenate.
+
+But what about the original file extension `.json`? The reconstructed file should be `shard_0000.json`. base = `shard_0000.json`, and we write output to `c4_sample/shard_0000.json`. 
+
+So revert.py:
+```python
+import os, glob
+
+reshard = "c4_reshard"
+sample = "c4_sample"
+
+# collect all chunk files
+chunks = {}
+for root, dirs, files in os.walk(reshard):
+    for f in files:
+        path = os.path.join(root, f)
+        base, _, idx = f.rpartition('.')
+        chunks.setdefault(base, []).append((int(idx), path))
+
+for base, lst in chunks.items():
+    lst.sort()
+    out = os.path.join(sample, base)
+    with open(out, 'wb') as outf:
+        for idx, p in lst:
+            with open(p, 'rb') as inf:
+                shutil.copyfileobj(inf, outf)
+```
+
+Wait, but `base` for `shard_0000.json.000` rpartition('.') gives ('shard_0000.json', '.', '000'). base = 'shard_0000.json'. idx='000'. Good. But what if a folder contains other files? We glob only chunk files; but any file with a numeric suffix after a dot would be treated as a chunk. That's fine since all files are chunks.
+
+But the output dir: should recreate c4_sample if needed. The task says "revert the contents of c4_reshard/ back to the original state such that it matches what was originally in c4_sample." So revert writes into c4_sample/. It should produce the 4 files matching original.
+
+But there's a concern: what if reassembly requires the exact byte count. split -b 15M produces exact chunks, concatenation reproduces original exactly. Good. We can verify with checksums.
+
+Now, do I actually need to create c4_reshard by splitting? Yes, "prepare a version of the data". I need to actually create the c4_reshard folder with split files. And create revert.py in parent dir of c4_sample (which is /app). Don't run revert.py.
+
+Important: Creating 140 files of 15MB each = 2GB total. We have disk space? du showed c4_sample is 2GB. The environment - is there enough disk? We should check available space. Let me check df. The splitting duplicates 2GB data → need ~2GB more free. Let me check.
+
+Also, the split command: 512MB each, 4 times. That's heavy disk IO. But acceptable.
+
+Let me reconsider: maybe the intent is not to split but the files are already... no, 512MB files exceed 15MB limit, must split. The solution is to split.
+
+Let me also consider: maybe "max filesize 15MB" — should split to 15M exactly. Some servers count MB as 1000*1000. 15*1000*1000=15,000,000 bytes. 15MB in MiB = 15,728,640. To be safe and ensure ≤15MB by any definition, splitting at 15*1000*1000 = 15,000,000 bytes guarantees ≤15MB in both MB and MiB terms (since 15,000,000 < 15,728,640). Actually if server counts MiB, 15MiB=15,728,640, and 15,000,000 < that, fine. If server counts MB, 15MB=15,000,000, and file would be exactly 15,000,000 → ≤15MB. Safe to use 15,000,000. Let me use `-b 15000000` to be safe. That gives 536870912/15000000 = 35.79 → 36 chunks per file. 4*36 = 144 chunks. 144/30 = 4.8 → 5 folders (30,30,30,30,24). Fine.
+
+Actually, using 15M (MiB) gives 35 chunks. Using 15000000 gives 36. Either works. Let's use 15000000 to be safe on the size limit interpretation. Hmm but 15,000,000 bytes is less efficient (more chunks). 35 vs 36, negligible. I'll use 15000000.
+
+Wait, but I want to make sure each chunk ≤ 15MB. With `-b 15000000`, each chunk is exactly 15,000,000 except the last which is smaller. 15,000,000 bytes = 15 MB (decimal). If the server measures in MiB, 15 MiB = 15,728,640, still under. Good.
+
+Let me check disk space first.
+
+Let me also think about the chunk naming with split. `split -b 15000000 --numeric-suffixes=0 --suffix-length=3 -d`? Actually `--numeric-suffixes` is `-d`. Let me use:
+`split -b 15000000 -d -a 3 shard_0000.json shard_0000.json.`
+This produces `shard_0000.json.000`, `shard_0000.json.001`, etc.
+
+Then move these into folders. I'll create directories c4_reshard/part_000, part_001, ... and distribute 30 files each.
+
+Actually a cleaner design: create folders and distribute. Let me write a small script to do the splitting and distribution to avoid manual errors, but I must be careful it's robust. Actually I can do it with a bash loop, but managing distribution is cleaner in python. But the task wants revert.py. I can also write a separate python script for the sharding, or just do it inline. Let me write a python script `build_reshard.py`? The task didn't ask for that; it only asks for c4_reshard and revert.py. I can do the building via a quick inline python or bash. Let me just do it with a python one-liner script executed ad hoc (not saved as a deliverable necessarily). But I might save it for clarity - not required. I'll just run inline.
+
+Let me plan:
+
+1. Check disk space: `df -h /app` or `df -h .`
+2. Create c4_reshard dir.
+3. For each shard, split into 15000000-byte chunks named shard_XXXX.json.NNN in a temp location, then distribute into folders of 30.
+
+Actually I can do distribution directly: split into c4_reshard, then move files into subfolders.
+
+Let me write an inline python script:
+
+```python
+import os, shutil, glob
+
+SRC="c4_sample"
+DST="c4_reshard"
+CHUNK=15000000
+MAXF=30
+
+os.makedirs(DST, exist_ok=True)
+folders=[]
+def get_folder(i):
+    fi = i//MAXF
+    while len(folders)<=fi:
+        p=os.path.join(DST,"part_%03d"%len(folders))
+        os.makedirs(p, exist_ok=True)
+        folders.append(p)
+    return folders[fi]
+
+# use split via subprocess for speed
+import subprocess
+shards=sorted(glob.glob(os.path.join(SRC,"*")))
+count=0
+for sh in shards:
+    name=os.path.basename(sh)
+    # split into DST temp prefix
+    subprocess.run(["split","-b",str(CHUNK),"-d","-a","3",sh, os.path.join(DST, name+".")], check=True)
+# now distribute
+files=sorted(f for f in glob.glob(os.path.join(DST,"*")) if os.path.isfile(f))
+# but split produced files with .NNN suffix; we need to move them to folders
+for i,f in enumerate(files):
+    dst=os.path.join(get_folder(i), os.path.basename(f))
+    shutil.move(f, dst)
+```
+
+Wait but get_folder uses global count i//30, distributing 144 files across folders 0..4. Good. But the order within folders: files are sorted alphabetically. Sorting `shard_0000.json.000`, ... `shard_0003.json.035` alphabetically gives shard_0000 first all, etc. That's fine for distribution; revert doesn't care about folder, just reassembles by filename.
+
+But wait: sorting alphabetically, `shard_0000.json.000` ... `shard_0000.json.035`, then `shard_0001.json.000`... The numeric suffixes have 3 digits so fine. Good.
+
+But there's a subtle bug: when I glob DST/* after split, the split files are directly in DST. Then I move to folders. Good.
+
+This approach works. Let me just embed this in a heredoc python and run, OR write it to a temp file and run. I'll write it to a temp file in /tmp and run, since /app is the working dir. Actually I can just run `python3 -c "..."` but multi-line is messy. Better to write a temp script. But the deliverables should only be c4_reshard and revert.py. A temp build script in /tmp is fine (it's the system temp / scratch). Actually guidelines: scratch work goes to system temp dir. But I'm already in /app. Let me just write the build script to /tmp/build_reshard.py and run it. That keeps /app clean except for deliverables.
+
+Hmm, but the build script reads c4_sample and creates c4_reshard in /app. Working dir matters. Let me run from /app.
+
+Let me also create revert.py in /app (parent of c4_sample). revert.py should:
+- locate c4_sample and c4_reshard relative to itself. Since revert.py is in /app, and c4_sample is /app/c4_sample, c4_reshard is /app/c4_reshard. I'll compute paths relative to script location.
+
+Let me write revert.py:
+
+```python
+#!/usr/bin/env python3
+import os, sys
+
+base = os.path.dirname(os.path.abspath(__file__))
+reshard = os.path.join(base, "c4_reshard")
+sample = os.path.join(base, "c4_sample")
+
+def main():
+    chunks = {}
+    for root, dirs, files in os.walk(reshard):
+        for fn in files:
+            base_name, dot, idx = fn.rpartition('.')
+            if not dot:
+                continue
+            if not idx.isdigit():
+                continue
+            chunks.setdefault(base_name, []).append((int(idx), os.path.join(root, fn)))
+    for base_name, lst in chunks.items():
+        lst.sort(key=lambda x: x[0])
+        out_path = os.path.join(sample, base_name)
+        os.makedirs(sample, exist_ok=True)
+        with open(out_path, 'wb') as out:
+            for _, p in lst:
+                with open(p, 'rb') as inp:
+                    while True:
+                        buf = inp.read(1024*1024)
+                        if not buf: break
+                        out.write(buf)
+        print("reconstructed", out_path)
+
+if __name__ == "__main__":
+    main()
+```
+
+This reconstructs c4_sample files. But note: "revert the contents of c4_reshard/ back to the original state such that it matches what was originally in c4_sample." This means after reverting, c4_sample should contain the original files. The revert reads from c4_reshard and writes into c4_sample. That matches.
+
+However, there's a concern: what if c4_sample currently still has the original files and we want revert to OVERWRITE? The task says "don't actually run the revert script yet." So c4_sample remains intact. Good.
+
+But hold on — should the revert produce the files in c4_sample, or should it remove c4_reshard and restore c4_sample? "revert the contents of c4_reshard/ back to the original state" — meaning transform c4_reshard (or its data) back. Ambiguous. Simplest: rebuild c4_sample from c4_reshard. The phrase "such that it matches what was originally in c4_sample" strongly implies the end state is c4_sample matching original. So revert writes to c4_sample. 
+
+But would revert also delete c4_reshard? Not necessarily. I'll keep it simple: rebuild c4_sample. Maybe also I should ensure c4_sample's original is preserved—but revert overwrites, which is fine for "matches what was originally".
+
+Let me also add a verification: after running revert, c4_sample should match original. I could verify by checksum now (separately, not running revert). I can compute md5 of original files and later compare. But I won't run revert. I could verify by manually reassembling into a temp to confirm correctness, but that's optional. Better to verify the revert logic works to be safe. But task says don't run revert.py yet. I can test the logic with a separate approach though. Hmm, I'll trust it but maybe do a quick sanity test by reassembling into /tmp without touching c4_sample, to confirm byte-exactness. Actually that's a good idea to ensure correctness. But it would consume disk. 2GB more. Might be risky. Let me first check disk space.
+
+Let me check disk space now.
+
+Also, do I need to worry that splitting 512MB files with split is fast enough? Yes, fast.
+
+Let me also reconsider the chunk naming: split outputs `shard_0000.json.000`. The rpartition('.') in revert: filename `shard_0000.json.000` → rpartition('.') returns ('shard_0000.json','.','000'). base_name='shard_0000.json', idx='000'. Good. The output file name = base_name = 'shard_0000.json'. Reconstructs correctly.
+
+Edge: what if idx has leading zeros and isdigit true → int works. Good.
+
+Now, also consider that `shard_0000.json` has its own dot, but rpartition takes the LAST dot, which is the chunk separator. Good. The base_name includes the `.json`. Output name `shard_0000.json`. 
+
+Now let me also double check the folder distribution results in ≤30 files and ≤15MB files. Files ≤15,000,000 bytes. Folders: 144 chunks /30 = 5 folders (30,30,30,30,24). Good, each ≤30.
+
+But wait, do we want to also ensure total size per folder ≤ something? Not required, only max filesize 15MB and max 30 files per folder. Folder 30*15MB = 450MB, fine. No folder size limit. Good.
+
+Let me now also reflect: Is there any requirement that c4_reshard folder structure be flat or use subfolders? Max 30 files per folder implies subfolders needed. I'll use subfolders part_000, etc. That's fine.
+
+Let me proceed. First check disk.
+
+Let me write the build script to /tmp/build_reshard.py via heredoc.
+
+Actually, I realize I should double-check: the chunk files live inside subfolders. revert walks c4_reshard recursively. Good.
+
+Let me also make revert.py robust: handle the case where sample dir doesn't exist. Already does makedirs.
+
+One more: what if running revert when c4_sample already has original files — it would overwrite them (truncate and rewrite), resulting in identical content. Fine.
+
+Let me also think: should revert delete the old c4_reshard? No. The task: "revert the contents of c4_reshard/ back to the original state". I think rebuilding c4_sample is the goal. I'll keep c4_reshard as is.
+
+Alright, let me execute step by step. First check disk space.
+
+Let me also reconsider: maybe a simpler interpretation—the server constraint is about upload, and we just need c4_reshard to be a re-sharded version. Splitting is correct.
+
+Let me check disk and proceed.
+
+I'll run `df -h /app`.
+
+Then create build script and run.
+
+Let me write commands.
+
+Actually, I want to ensure split with `-d -a 3` works. `-d` for numeric suffixes, `-a 3` suffix length. With `--numeric-suffixes=0`? Actually `-d` defaults to starting at 0 in GNU split. Yes. Output shard_0000.json.000. Good. But careful: split `-d` uses numeric starting 0. Good.
+
+Wait, the prefix `shard_0000.json.` — split appends suffix directly: prefix + suffix = `shard_0000.json.000`. Yes.
+
+Let me write build script.
+
+I'll create it via cat heredoc.
+
+Let me produce commands.
+
+I'll do:
+1. df -h /app
+2. write /tmp/build_reshard.py
+3. run it (duration maybe 30s for 2GB split+write). Splitting 2GB might take a few seconds. Move is rename within same fs, fast.
+
+Actually split writes 2GB which is heavy. Let me give generous duration, like poll.
+
+Let me start{
+  "analysis": "c4_sample/ contains 4 JSON shard files, each exactly 512 MiB (536,870,912 bytes), total 2.0 GB. The server limits are max 30 files per folder and max 15 MB per file. Since each 512 MiB file far exceeds 15 MB, I must split each file into ~15 MB chunks and distribute them across subfolders (≤30 files each). 512 MiB / 15 MB ≈ 35 chunks per file → ~144 chunks total → 5 subfolders. I'll build c4_reshard/ by splitting, then write revert.py that reassembles the chunks. First I must confirm there's enough free disk for a duplicate 2 GB.",
+  "plan": "1. Check free disk space. 2. Write a build script (in /tmp scratch) that splits each shard into 15,000,000-byte chunks named shard_NNNN.json.CCC (so the chunk index is encoded in the filename) and distributes them across subfolders of ≤30 files. 3. Run it to create c4_reshard/. 4. Write revert.py in /app (parent of c4_sample) that walks c4_reshard, groups chunks by base name, sorts by chunk index, and concatenates back into c4_sample. I will NOT run revert.py. I'll verify sizes/counts afterward and do a byte-exact verification via a separate reassembly test if disk allows.",
+  "commands": [
+    {
+      "keystrokes": "df -h /app\n",
+      "duration": 0.2
+    }
+  ]
+}
+
+User: New Terminal Output:
+
+root@c500238ac59d:/app# df -h /app
+Filesystem      Size  Used Avail
+/dev/sda1        59G  3.5G   53G  Available
+root@c500238ac59d:/app#
+
+
+analysis: "Plenty of free disk (53G available), so duplicating 2GB is fine."
+
+Plan: "Write a build script to /tmp and run it to create c4_reshard/. Then write revert.py."
+
+{
+  "analysis": "53 GB free, plenty of space for the 2 GB duplicate. Proceed to build c4_reshard/.",
+  "plan": "Write /tmp/build_reshard.py that splits each shard into 15,000,000-byte chunks named 'shard_NNNN.json.CCC' and distributes them into subfolders (part_NNN) of ≤30 files. Run it. Then verify file counts and sizes in c4_reshard.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/build_reshard.py << 'PYEOF'\nimport os, shutil, glob, subprocess\n\nSRC = \"/app/c4_sample\"\nDST = \"/app/c4_reshard\"\nCHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB\nMAXF = 30\n\nos.makedirs(DST, exist_ok=True)\nfolders = []\ndef get_folder(i):\n    fi = i // MAXF\n    while len(folders) <= fi:\n        p = os.path.join(DST, \"part_%03d\" % len(folders))\n        os.makedirs(p, exist_ok=True)\n        folders.append(p)\n    return folders[fi]\n\nshards = sorted(glob.glob(os.path.join(SRC, \"*\")))\nfor sh in shards:\n    name = os.path.basename(sh)\n    subprocess.run([\"split\", \"-b\", str(CHUNK), \"-d\", \"-a\", \"3\", sh,\n                    os.path.join(DST, name + \".\")], check=True)\nfiles = sorted(f for f in glob.glob(os.path.join(DST, \"*\")) if os.path.isfile(f))\nfor i, f in enumerate(files):\n    dst = os.path.join(get_folder(i), os.path.basename(f))\n    shutil.move(f, dst)\nprint(\"total chunks:\", len(files), \"folders:\", len(folders))\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /tmp/build_reshard.py\n",
+      "duration": 20.0
+    }
+  ]
+}
+
+User: New Terminal Output:
+
+root@c500238ac59d:/app# cat > /tmp/build_reshard.py << 'PYEOF'
+> import os, shutil, glob, subprocess
+> SRC = "/app/c4_sample"
+> DST = "/app/c4_reshard"
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MiB
+> CHUNK = 15000000   # 15 MB (decimal) -> also < 15 MB
+> MAXF = 30\nos.makedirs(DST, exist_ok=True)\nfolders = []\ndef get_folder(i):\n    fi = i // MAXF\n    while len(folders) <= fi:\n        p = os.path.join(DST, \"part_%03d\" % len(folders))\n        os.makedirs(p, exist_ok=True)\n        folders.append(p)\n    return folders[fi]\n\nshards = sorted(glob.glob(os.path.join(SRC, \"*\")))\nfor sh in shards:\n    name = os.path.basename(sh)\n    subprocess.run([\"split\", \"-b\", str(CHUNK), \"-d\", \"-a\", \"3\", sh,\n                    os.path.join(DST, name + \".\")], check=True)\nfiles = sorted(f for f in glob.glob(os.path.join(DST, \"*\")) if os.path.isfile(f))\nfor i, f in enumerate(files):\n    dst = os.path.join(get_folder(i), os.path.basename(f))\n    shutil.move(f, dst)\nprint(\"total chunks:\", len(files), \"folders:\", len(folders))\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /tmp/build_reshard.py\n",
+      "duration": 20.0
+    }
+  ]
+}

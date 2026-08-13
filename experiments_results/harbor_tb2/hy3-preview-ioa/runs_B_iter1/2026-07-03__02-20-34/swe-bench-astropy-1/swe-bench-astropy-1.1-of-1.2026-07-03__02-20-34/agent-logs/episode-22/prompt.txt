@@ -1,0 +1,36 @@
+New Terminal Output:
+
+root@0be47ff82c40:/app/astropy# cat >> /app/astropy/astropy/modeling/tests/test_separable.py << 'EOF'
+>
+>
+> def test_cstack_nested_compound():
+>     # Regression test: combining a model with an existing coord_matrix
+>     # (as happens when a CompoundModel is itself an operand to '&') must
+>     # preserve the internal structure of that coord_matrix instead of
+>     # filling the block with ones.
+>     cm = models.Linear1D(10) & models.Linear1D(5)
+>     cm_matrix = separability_matrix(cm)
+>
+>     # _cstack should copy the existing coord_matrix into the right block.
+>     left = models.Pix2Sky_TAN()
+>     result = _cstack(left, cm_matrix)
+>     expected = np.zeros((4, 4), dtype=bool)
+>     expected[:2, :2] = separability_matrix(left)
+>     expected[2:, 2:] = cm_matrix
+>     assert_allclose(result, expected)
+>
+>
+> def test_separability_nested_compound():
+>     # Regression test for nested CompoundModels reported in
+>     # https://github.com/astropy/astropy/issues/... : nesting a compound
+>     # model via '&' produced a fully-connected (non-separable) block
+>     # instead of the expected diagonal.
+>     cm = models.Linear1D(10) & models.Linear1D(5)
+>     nested = models.Pix2Sky_TAN() & cm
+>
+>     expected = np.eye(4, dtype=bool)
+>     assert_allclose(separability_matrix(nested), expected)
+> EOF
+root@0be47ff82c40:/app/astropy# python -c "import ast; ast.parse(open('/app/astropy/astropy/modeling/tests/test_separable.py').read()); print('syntax ok')"
+syntax ok
+root@0be47ff82c40:/app/astropy#

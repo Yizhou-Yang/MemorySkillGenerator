@@ -1,0 +1,155 @@
+root@c48048e4900e:/app# which python python3; python --version 2>&1; python3 --version 2>&1
+/usr/local/bin/python
+/usr/local/bin/python3
+Python 3.13.1
+Python 3.13.1
+root@c48048e4900e:/app# python -c 'import fasttext' 2>&1 | head -n 40
+root@c48048e4900e:/app# python -c 'import fasttext; print(fasttext.__file__); print(fasttext.__version__)' 2>&1 | head -n 20
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; print(fasttext.__file__); print(fasttext.__version__)
+                                                     ^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'fasttext' has no attribute '__version__'
+/usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+root@c48048e4900e:/app# pip show fasttext 2>&1 | head -n 20
+Name: fasttext
+Version: 0.9.3
+Summary: fasttext Python bindings
+Home-page: https://github.com/facebookresearch/fastText
+Author: Onur Celebi
+Author-email: celebio@fb.com
+License: MIT
+Location: /usr/local/lib/python3.13/site-packages
+Requires: numpy, pybind11, setuptools
+Required-by:
+root@c48048e4900e:/app# pip show fasttext-python 2>&1 | head -n 20
+WARNING: Package(s) not found: fasttext-python
+root@c48048e4900e:/app# ls -la /usr/local/lib/python3.13/site-packages/fasttext/
+total 44
+drwxr-xr-x  5 root root  4096 Jul  2 14:51 .
+drwxr-xr-x 14 root root  4096 Jul  2 18:29 ..
+-rw-r--r--  1 root root 19636 Jul  2 14:51 FastText.py
+-rw-r--r--  1 root root   659 Jul  2 14:51 __init__.py
+drwxr-xr-x  2 root root  4096 Jul  2 14:51 __pycache__
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 tests
+drwxr-xr-x  3 root root  4096 Jul  2 14:51 util
+root@c48048e4900e:/app# python -c 'import fasttext; print([x for x in dir(fasttext) if not x.startswith("__")])'
+['BOW', 'EOS', 'EOW', 'FastText', 'absolute_import', 'cbow', 'division', 'load_model', 'print_function', 'skipgram', 'supervised', 'tokenize', 'train_supervised
+', 'train_unsupervised', 'unicode_literals']
+root@c48048e4900e:/app# python -c 'import fasttext; fasttext.train_supervised("/tmp/nonexistent.txt")' 2>&1 | head -n 30
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; fasttext.train_supervised("/tmp/nonexistent.txt")
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 560, in train_supervised
+    fasttext.train(ft.f, a)
+    ~~~~~~~~~~~~~~^^^^^^^^^
+ValueError: /tmp/nonexistent.txt cannot be opened for training!
+root@c48048e4900e:/app# cat /usr/local/lib/python3.13/site-packages/fasttext/__init__.py
+# Copyright (c) 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from .FastText import train_supervised
+from .FastText import train_unsupervised
+from .FastText import load_model
+from .FastText import tokenize
+from .FastText import EOS
+from .FastText import BOW
+from .FastText import EOW
+
+from .FastText import cbow
+from .FastText import skipgram
+from .FastText import supervised
+root@c48048e4900e:/app# grep -n 'import' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py | head -n 20
+7:from __future__ import absolute_import
+8:from __future__ import division
+9:from __future__ import print_function
+10:from __future__ import unicode_literals
+12:import fasttext_pybind as fasttext
+13:import numpy as np
+14:import multiprocessing
+15:from itertools import chain
+root@c48048e4900e:/app# find / -name 'fasttext*.so' 2>/dev/null; find / -name '*.so' 2>/dev/null | grep -i fasttext
+/mnt/cache_dir/site-packages/fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+/usr/local/lib/python3.13/site-packages/fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+echo "PYTHONPATH=$PYTHONPATH"; python -c "import sys; print('\n'.join(sys.path))"
+python -c "import fasttext_pybind; print('fasttext_pybind loaded from:', fasttext_pybind.__file__)" 2>&1 | head -n 20
+ls -la /usr/local/lib/python3.13/site-packages/*.pth 2>/dev/null; cat /usr/local/lib/python3.13/site-packages/*.pth 2>/dev/null
+/mnt/cache_dir/site-packages/fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+/usr/local/lib/python3.13/site-packages/fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+root@c48048e4900e:/app# echo "PYTHONPATH=$PYTHONPATH"; python -c "import sys; print('\n'.join(sys.path))"
+PYTHONPATH=
+
+/usr/local/lib/python313.zip
+/usr/local/lib/python3.13
+/usr/local/lib/python3.13/lib-dynload
+/usr/local/lib/python3.13/site-packages
+root@c48048e4900e:/app# python -c "import fasttext_pybind; print('fasttext_pybind loaded from:', fasttext_pybind.__file__)" 2>&1 | head -n 20
+fasttext_pybind loaded from: /usr/local/lib/python3.13/site-packages/fasttext_pybind.cpython-313-x86_64-linux-gnu.so
+root@c48048e4900e:/app# ls -la /usr/local/lib/python3.13/site-packages/*.pth 2>/dev/null; cat /usr/local/lib/python3.13/site-packages/*.pth 2>/dev/null
+-rw-r--r-- 1 root root 151 Jul  2 14:51 /usr/local/lib/python3.13/site-packages/distutils-precedence.pth
+import os; var = 'SETUPTOOLS_USE_DISTUTILS'; enabled = os.environ.get(var, 'local') == 'local'; enabled and __import__('_distutils_hack').add_shim();
+root@c48048e4900e:/app# printf '__label__pos great movie\n__label__neg bad film\n__label__pos nice show\n__label__neg awful plot\n' > /tmp/ft_train.txt; cat /tm
+p/ft_train.txt
+__label__pos great movie
+__label__neg bad film
+__label__pos nice show
+__label__neg awful plot
+root@c48048e4900e:/app# python -c "import fasttext; m=fasttext.train_supervised('/tmp/ft_train.txt', epoch=5); m.save_model('/tmp/ft_model.bin'); m2=fasttext.lo
+ad_model('/tmp/ft_model.bin'); print(m2.predict('great movie'))" 2>&1 | head -n 40
+Read 0M words
+Number of words:  9
+Number of labels: 2
+Progress: 100.0% words/sec/thread:     155 lr:  0.000000 avg.loss:      -nan ETA:   0h 0m 0s
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fasttext; m=fasttext.train_supervised('/tmp/ft_train.txt', epoch=5); m.save_model('/tmp/ft_model.bin'); m2=fasttext.load_model('/tmp/ft_model.bin');
+print(m2.predict('great movie'))
+
+      ~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/fasttext/FastText.py", line 239, in predict
+    return labels, np.array(probs, copy=False)
+                   ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+ValueError: Unable to avoid copy while creating an array as requested.
+If using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).
+For more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.
+root@c48048e4900e:/app# grep -n 'copy=False' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+239:            return labels, np.array(probs, copy=False)
+root@c48048e4900e:/app# grep -n 'np.array' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.array(y_scores, copy=False), np.array(y_true, copy=False)
+56:        return np.array(precision, copy=False), np.array(recall, copy=False)
+136:        return np.array(b)
+151:        return np.array(b)
+184:        return pair[0], np.array(pair[1])
+193:        return np.array(b)
+239:            return labels, np.array(probs, copy=False)
+248:        return np.array(self.f.getInputMatrix())
+257:        return np.array(self.f.getOutputMatrix())
+268:            return (pair[0], np.array(pair[1]))
+284:                return (pair[0], np.array(pair[1]))
+root@c48048e4900e:/app# sed -i 's/np\.array(\([^,]*\), copy=False)/np.asarray(\1)/g' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+root@c48048e4900e:/app# grep -n 'copy=False\|np.asarray' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py
+41:        return np.asarray(y_scores), np.asarray(y_true)
+56:        return np.asarray(precision), np.asarray(recall)
+239:            return labels, np.asarray(probs)
+root@c48048e4900e:/app# python -c "import fasttext; m=fasttext.train_supervised('/tmp/ft_train.txt', epoch=5); m.save_model('/tmp/ft_model.bin'); m2=fasttext.lo
+ad_model('/tmp/ft_model.bin'); print(m2.predict('great movie')); print(m2.predict('awful plot'))" 2>&1 | tail -n 10
+Read 0M words
+Number of words:  9
+Number of labels: 2
+Progress: 100.0% words/sec/thread:     194 lr:  0.000000 avg.loss:      -nan ETA:   0h 0m 0s
+(('__label__pos',), array([0.50011796]))
+(('__label__neg',), array([0.50012988]))
+root@c48048e4900e:/app# python -c "import fasttext; m=fasttext.load_model('/tmp/ft_model.bin'); print(m.test('/tmp/ft_train.txt'))" 2>&1 | tail -n 5
+(4, 1.0, 1.0)
+root@c48048e4900e:/app#

@@ -1,0 +1,130 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected after JSON object
+
+New Terminal Output:
+
+root@5e3475dd7004:/app# cat > /tmp/solve.py << 'PYEOF'
+> import subprocess, sys, os
+>
+> DIRS = {'N':(-1,0),'S':(1,0),'E':(0,1),'W':(0,-1)}
+> OPP = {'N':'S','S':'N','E':'W','W':'E'}
+>
+> def explore(maze_id):
+>     p = subprocess.Popen(['python3','-u','/protected/maze_server.py', str(maze_id)],
+>                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+>                          text=True, bufsize=1)
+>     # consume welcome (3 lines)
+>     for _ in range(3):
+>         p.stdout.readline()
+>
+>     def send(cmd):
+>         p.stdin.write(cmd + "\n")
+>         p.stdin.flush()
+>         while True:
+>             line = p.stdout.readline()
+>             if not line:
+>                 return "moved"
+>             line = line.rstrip("\n")
+>             if line.startswith("> "):
+>                 line = line[2:]
+>             if line == "hit wall":
+>                 return "wall"
+>             if line == "reached exit":
+>                 return "exit"
+>             if line == "moved":
+>                 return "moved"
+>             # ignore stray lines
+>
+>     known = {}
+>     known[(0,0)] = 'S'
+>     visited = set()
+>     sys.setrecursionlimit(1000000)
+>
+>     def dfs(r, c):
+>         visited.add((r,c))
+>         for d in ('N','E','S','W'):
+>             dr, dc = DIRS[d]
+>             nr, nc = r+dr, c+dc
+>             if (nr,nc) in known:
+>                 continue
+>             res = send("move " + d)
+>             if res == "wall":
+>                 known[(nr,nc)] = '#'
+>             else:
+>                 if res == "exit":
+>                     known[(nr,nc)] = 'E'
+>                 else:
+>                     known[(nr,nc)] = ' '
+>                 dfs(nr, nc)
+>                 send("move " + OPP[d])
+>
+>     dfs(0,0)
+>
+>     try:
+>         p.stdin.write("exit\n")
+>         p.stdin.flush()
+>     except Exception:
+>         pass
+>     try:
+>         p.terminate()
+>     except Exception:
+>         pass
+>
+>     rs = [k[0] for k in known]
+>     cs = [k[1] for k in known]
+>     min_r, max_r = min(rs), max(rs)
+>     min_c, max_c = min(cs), max(cs)
+>     H = max_r - min_r + 1
+>     W = max_c - min_c + 1
+>     grid = []
+>     for ar in range(H):
+>         row = []
+>         for ac in range(W):
+>             rel = (ar + min_r, ac + min_c)
+>             row.append(known.get(rel, '#'))
+>         grid.append(''.join(row))
+>     return grid
+>
+> def main():
+>     out_dir = "/app/output"
+>     os.makedirs(out_dir, exist_ok=True)
+>     for mid in range(1,11):
+>         grid = explore(mid)
+>         with open(os.path.join(out_dir, f"{mid}.txt"), "w") as f:
+>             f.write("\n".join(grid) + "\n")
+>         print(f"maze {mid} done, size {len(grid)}x{len(grid[0])}")
+>
+> if __name__ == "__main__":
+>     main()
+> PYEOF
+root@5e3475dd7004:/app# python3 /tmp/solve.py
+maze 1 done, size 4x4
+maze 2 done, size 8x8
+maze 3 done, size 15x15
+maze 4 done, size 20x20
+maze 5 done, size 4x8
+maze 6 done, size 6x8
+maze 7 done, size 8x12
+maze 8 done, size 20x10
+maze 9 done, size 10x5
+maze 10 done, size 4x20
+Traceback (most recent call last):
+root@5e3475dd7004:/app#   File "/protected/maze_server.py", line 204, in main
+    print(result)
+    ~~~~~^^^^^^^^
+  File "/protected/maze_server.py", line 140, in handle_signal
+    print("\nReceived signal to terminate. Exiting maze server...")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/protected/maze_server.py", line 221, in <module>
+    main()
+    ~~~~^^
+  File "/protected/maze_server.py", line 217, in main
+    print(f"Error: {e}")
+    ~~~~~^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+

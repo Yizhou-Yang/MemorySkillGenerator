@@ -1,0 +1,17 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'python3 --version; which python3 pip\n'
+'python3 -c "import datasets; print(\'datasets\', datasets.__version__)" 2>&1 | head\n'
+'python3 -c "import transformers; print(\'transformers\', transformers.__version__)" 2>&1 | head\n'
+'python3 -c "import huggingface_hub; print(\'hub ok\')" 2>&1 | head\n'
+'pip install -q datasets transformers huggingface_hub 2>&1 | tail -20\n'
+''
+''
+'python3 -c "import datasets, transformers, huggingface_hub; print(\'all ok\')" 2>&1 | tail\n'
+'python3 -c "from huggingface_hub import hf_hub_download; print(\'hub ok\')" 2>&1 | tail\n'
+''
+''
+'python3 -c "from huggingface_hub import hf_hub_download; p=hf_hub_download(repo_id=\'open-thoughts/OpenThoughts-114k\', filename=\'README.md\', repo_type=\'dataset\'); print(p)" 2>&1 | tail\n'
+'cat /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/snapshots/bd093c3994fd54d2390985b66988ddf282a55eb6/README.md\n'
+'cat > /app/explore.py << \'EOF\'\nfrom datasets import load_dataset\nimport itertools\n\n# Try loading with streaming to inspect fields\nstream = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train", streaming=True)\nstream = itertools.islice(stream, 3000)\ndomains = set()\nfirst = None\nfor ex in stream:\n    if first is None:\n        first = ex\n    domains.add(ex.get("domain"))\nprint("DOMAINS:", domains)\nprint("KEYS:", list(first.keys()) if first else None)\nif first:\n    for k,v in first.items():\n        s = v if isinstance(v,str) else str(v)\n        print(f"--- {k} len={len(s)} ---")\n        print(s[:200].replace(chr(10),\' \'))\nEOF\npython3 /app/explore.py 2>&1 | tail -40\n'
+['C-d']

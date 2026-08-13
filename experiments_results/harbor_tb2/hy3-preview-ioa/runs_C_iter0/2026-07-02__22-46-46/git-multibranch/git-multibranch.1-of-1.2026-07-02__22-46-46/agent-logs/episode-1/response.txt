@@ -1,0 +1,46 @@
+{
+  "analysis": "Fresh Ubuntu 26.04 container. git, sshd, nginx, and openssl are installed. No git user yet, no /git, sshd not running, nginx not yet serving 8443, no self-signed cert. I need to: create a 'git' user with password 'password', enable SSH password auth, start sshd, create a bare repo at /git/project owned by git with a post-receive hook that deploys main->/var/www and dev->/var/www/dev, generate a self-signed cert, and configure nginx to serve HTTPS on 8443.",
+  "plan": "Run the full server setup in one batch: (1) create git user + set password; (2) prep sshd (host keys, /run/sshd, force PasswordAuthentication yes via drop-in + sed); (3) start sshd; (4) create bare repo /git/project and chown to git; (5) write the post-receive hook; (6) chown /var/www to git; (7) generate self-signed cert; (8) write nginx 8443 SSL vhost; (9) test and reload nginx. Then I'll verify in a follow-up batch.",
+  "commands": [
+    {
+      "keystrokes": "useradd -m -s /bin/bash git 2>/dev/null; echo 'git:password' | chpasswd\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "mkdir -p /run/sshd && ssh-keygen -A >/dev/null 2>&1\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "rm -f /etc/ssh/sshd_config.d/* 2>/dev/null; printf 'PasswordAuthentication yes\\nPubkeyAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-local.conf; sed -i 's/^#*[[:space:]]*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "/usr/sbin/sshd; sleep 1; ss -tlnp 2>/dev/null | grep ':22 ' || echo 'sshd-not-listening'\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "mkdir -p /git && git init --bare /git/project >/dev/null 2>&1 && chown -R git:git /git\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "cat > /git/project/hooks/post-receive <<'EOF'\n#!/bin/bash\nwhile read oldrev newrev refname; do\n    branch=\"${refname#refs/heads/}\"\n    case \"$branch\" in\n        main) target=/var/www ;;\n        dev) target=/var/www/dev ;;\n        *) continue ;;\n    esac\n    mkdir -p \"$target\"\n    git --git-dir=/git/project archive \"$branch\" | tar -x -C \"$target\"\ndone\nEOF\nchmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "chown -R git:git /var/www\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/server.key -out /etc/nginx/ssl/server.crt -days 3650 -subj '/CN=localhost' >/dev/null 2>&1 && echo cert-ok\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "cat > /etc/nginx/conf.d/git.conf <<'EOF'\nserver {\n    listen 8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/server.crt;\n    ssl_certificate_key /etc/nginx/ssl/server.key;\n    root /var/www;\n    index index.html;\n    location /dev/ {\n        root /var/www;\n    }\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "nginx -t 2>&1 | tail -2 && (nginx -s reload 2>/dev/null || nginx) && sleep 1 && ss -tlnp 2>/dev/null | grep 8443 || echo 'nginx-8443-not-listening'\n",
+      "duration": 2.0
+    }
+  ]
+}

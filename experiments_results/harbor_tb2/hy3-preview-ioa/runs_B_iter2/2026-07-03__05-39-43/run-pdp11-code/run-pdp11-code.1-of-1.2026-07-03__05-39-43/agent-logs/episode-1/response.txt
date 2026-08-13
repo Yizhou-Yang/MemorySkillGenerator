@@ -1,0 +1,26 @@
+{
+  "analysis": "The file /app/data.hex is an octal dump (od-style) of a binary. The first 16-bit word is octal 000407 (= 0o0407 = 0x0107), which is the classic a.out OMAGIC magic (0407). This is a PDP-11 (or VAX) a.out executable. The byte offset column is in octal and each field is a 16-bit little-endian value in octal. I need to reconstruct the binary and run it with a PDP-11 emulator (SIMH).",
+  "plan": "1. Reconstruct the binary from the octal dump (each word -> 2 little-endian bytes) into /tmp/data.bin. 2. Check its type and what emulators are available (look for simh / pdp11). 3. Run it under an emulator to capture output.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/recon.py << 'EOF'\nimport re\nout = bytearray()\nwith open('/app/data.hex') as f:\n    for line in f:\n        toks = line.split()\n        if not toks:\n            continue\n        for w in toks[1:]:\n            v = int(w, 8)\n            out.append(v & 0xFF)\n            out.append((v >> 8) & 0xFF)\nwith open('/tmp/data.bin','wb') as g:\n    g.write(out)\nprint('wrote', len(out), 'bytes')\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /tmp/recon.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "xxd /tmp/data.bin | head\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "file /tmp/data.bin\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "which simh pdp11 simh-pdp11 qemu-system-pdp11 2>/dev/null; ls /usr/bin | grep -i -E 'pdp|simh|vax' \n",
+      "duration": 0.2
+    }
+  ]
+}

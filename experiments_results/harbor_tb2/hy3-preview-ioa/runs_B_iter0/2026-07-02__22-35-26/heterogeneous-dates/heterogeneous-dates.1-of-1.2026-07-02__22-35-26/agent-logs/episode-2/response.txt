@@ -1,0 +1,14 @@
+{
+  "analysis": "Both files have 7 rows covering dates 2025-04-19 through 2025-04-25. The high file uses `YYYY-MM-DD`, the low file uses mixed formats with a time suffix (`04/19/2025 06:00:00` and `04-23-2025 06:00:00`). I need to parse dates robustly, match by date, compute high-low per date, average, and write only the number.",
+  "plan": "Write a Python script that reads both CSVs, normalizes dates (stripping time, handling slash/dash separators) into YYYY-MM-DD keys, computes the difference for matched dates, averages them, and writes the result to avg_temp.txt. Then verify the file contents.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'EOF'\nimport csv, re\nfrom datetime import datetime\n\ndef parse_date(s):\n    s = s.strip()\n    s = re.sub(r'\\s+\\d{2}:\\d{2}:\\d{2}.*$', '', s)\n    for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%m-%d-%Y'):\n        try:\n            return datetime.strptime(s, fmt).strftime('%Y-%m-%d')\n        except ValueError:\n            pass\n    raise ValueError('unparseable date: ' + s)\n\nhigh, low = {}, {}\nwith open('daily_temp_sf_high.csv') as f:\n    for row in csv.reader(f):\n        if row and row[0]!='date':\n            high[parse_date(row[0])] = float(row[1])\nwith open('daily_temp_sf_low.csv') as f:\n    for row in csv.reader(f):\n        if row and row[0]!='date':\n            low[parse_date(row[0])] = float(row[1])\n\ndiffs = [high[d]-low[d] for d in high if d in low]\navg = sum(diffs)/len(diffs)\nprint('matched', len(diffs), 'avg', avg)\nwith open('avg_temp.txt','w') as f:\n    f.write(f'{avg}')\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat avg_temp.txt; echo\n",
+      "duration": 0.1
+    }
+  ]
+}

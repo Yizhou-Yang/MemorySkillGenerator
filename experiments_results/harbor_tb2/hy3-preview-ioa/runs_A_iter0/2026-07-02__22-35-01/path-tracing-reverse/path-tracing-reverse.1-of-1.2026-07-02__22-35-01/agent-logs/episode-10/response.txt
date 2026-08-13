@@ -1,0 +1,18 @@
+{
+  "analysis": "This is a C ray tracer with functions: vector helpers, ray_create/ray_at, sphere_intersect, plane_intersect, is_in_shadow, sky_color, trace, allocate_image, write_image, main. The PPM is ASCII P3 800x600 maxval 255. The output uses \\r progress lines. To get byte-identical output (both text and image.ppm), I must recover the exact source: scene constants, vector ops, and the exact float computation order. I decoded .rodata: key float constants at 0x3004=4.0, 0x3008=0.001, 0x300c=0.0001, 0x3010=0.2, 0x3014=0.9, 0x3018=0.4, 0x301c=-1.5, 0x3020=0.8, 0x3024=8388608.0, 0x3028=255.99, 0x302c=-1.0, 0x3030=100.0, 0x3034=600.0, 0x3038=599.0, 0x303c=799.0, 0x3040=2.6666667, 0x3044=1.3333334, and more at 0x3168+. I'll disassemble each function to map constants to usage and recover the algorithm.",
+  "plan": "Split the disassembly into per-function files for easy reading. Then read main, trace, and the math functions to reconstruct the source. objdump shows rip-relative constant loads with the target address in a comment, so I can map each to my decoded float/double value.",
+  "commands": [
+    {
+      "keystrokes": "awk '/^[0-9a-f]+ <.*>:$/{name=$2; gsub(/[<>:]/,\"\",name); file=\"/tmp/fun_\"name\".txt\"} {print > file}' /tmp/dis.txt\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ls /tmp/fun_*.txt\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "wc -l /tmp/fun_*.txt\n",
+      "duration": 0.1
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+The real bug is identified: `FastText.py` uses `np.array(..., copy=False)`, which is incompatible with NumPy 2.0 (where `copy=False` raises when a copy is needed). The fix is to replace those three `np.array(..., copy=False)` calls with `np.asarray(...)`.
+
+{
+  "analysis": "Confirmed root cause. `import fasttext` works, but `predict()` fails with `ValueError: Unable to avoid copy while creating an array as requested.` This is the NumPy 2.0 incompatibility: `FastText.py` uses `np.array(probs, copy=False)` (also lines 41 and 56). In NumPy 2.0, `copy=False` raises when a copy is actually required. The fix is to replace `np.array(X, copy=False)` with `np.asarray(X)` on the three offending lines (41, 56, 239). Other `np.array(...)` calls without `copy=False` are fine.",
+  "plan": "Use sed to replace `np.array(<arg>, copy=False)` with `np.asarray(<arg>)` on those three lines. The pattern `\\([^,]*\\)` safely captures the argument up to the comma (none of the args contain commas). Then re-run the predict test to confirm the fix.",
+  "commands": [
+    {
+      "keystrokes": "sed -i 's/np\\.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "grep -n 'copy=False\\|np.asarray' /usr/local/lib/python3.13/site-packages/fasttext/FastText.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python -c \"import fasttext; m=fasttext.train_supervised('/tmp/ft_train.txt', epoch=5); m.save_model('/tmp/ft_model.bin'); m2=fasttext.load_model('/tmp/ft_model.bin'); print(m2.predict('great movie')); print(m2.predict('awful plot'))\" 2>&1 | tail -n 10\n",
+      "duration": 3.0
+    }
+  ]
+}

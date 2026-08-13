@@ -1,0 +1,41 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'which gcc gcov make wget curl 2>&1; gcc --version | head -1\n'
+'ls -la /app 2>&1\n'
+'cat /etc/os-release | head -3\n'
+'apt-get --version 2>&1 | head -1\n'
+'apt-get update 2>&1 | tail -5\n'
+'apt-get install -y gcc make wget 2>&1 | tail -8\n'
+'df -h / /var /tmp 2>&1\n'
+'du -sh /var/lib/apt/lists /var/cache/apt/archives 2>/dev/null\n'
+'ls -la /app\n'
+'apt-get clean 2>&1; df -h / 2>&1\n'
+'du -sh /usr /var /opt /root /home 2>/dev/null\n'
+'df -h 2>&1\n'
+'du -h --max-depth=1 / 2>/dev/null | sort -h | tail -20\n'
+'apt-get -o Acquire::Check-Free-Space=false install -y gcc make wget 2>&1 | tail -8\n'
+'df -i / 2>&1\n'
+'lsof 2>/dev/null | grep -i deleted | head -20\n'
+'dd if=/dev/zero of=/tmp/space_test bs=1M count=50 2>&1; echo EXIT=$?; rm -f /tmp/space_test\n'
+'mount -t tmpfs -o size=4g tmpfs /var/cache/apt/archives 2>&1; df -h /var/cache/apt/archives\n'
+'apt-get -o Acquire::Check-Free-Space=false install -y gcc make wget 2>&1 | tail -10\n'
+'unshare -m true 2>&1; echo UNSHARE_EXIT=$?\n'
+"which python3 perl curl 2>&1; echo '---'\n"
+'apt-get -o Acquire::Check-Free-Space=false --print-uris install gcc make wget > /tmp/uris.txt 2>/dev/null; wc -l /tmp/uris.txt; head -5 /tmp/uris.txt\n'
+"cat /tmp/uris.txt | head -20; echo '---LINES---'; wc -l /tmp/uris.txt\n"
+'apt-get -o Acquire::Check-Free-Space=false --print-uris install gcc make wget 2>/dev/null | grep "^\'" > /tmp/urls.txt; wc -l /tmp/urls.txt; head -3 /tmp/urls.txt\n'
+''
+'cat > /tmp/dl.py << \'EOF\'\nimport urllib.request, re, os, sys\nos.makedirs(\'/tmp/debs\', exist_ok=True)\nurls=[]\nfor line in open(\'/tmp/urls.txt\'):\n    line=line.strip()\n    if not line.startswith("\'"): continue\n    m=re.match(r"\'([^\']+)\'\\s+(\\S+)", line)\n    if not m: continue\n    url, fn = m.group(1), m.group(2)\n    urls.append((url, fn))\nprint(\'urls:\', len(urls))\nfor url, fn in urls:\n    dst=\'/tmp/debs/\'+fn\n    try:\n        urllib.request.urlretrieve(url, dst)\n        print(\'OK\', fn)\n    except Exception as e:\n        print(\'FAIL\', fn, e)\nEOF\npython3 /tmp/dl.py 2>&1 | tail -20\n'
+"ls -la /tmp/debs | head; echo '---'; ls /tmp/debs | wc -l\n"
+'cat > /tmp/dl.py << \'EOF\'\nimport urllib.request, re, os\nos.makedirs(\'/tmp/debs\', exist_ok=True)\nurls=[]\nfor line in open(\'/tmp/urls.txt\'):\n    line=line.strip()\n    if not line.startswith("\'"): continue\n    m=re.match(r"\'([^\']+)\'\\s+(\\S+)", line)\n    if not m: continue\n    urls.append((m.group(1), m.group(2)))\nprint(\'urls:\', len(urls))\nopener=urllib.request.build_opener()\nopener.addheaders=[(\'User-Agent\',\'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36\')]\nfor url, fn in urls:\n    dst=\'/tmp/debs/\'+fn\n    try:\n        urllib.request.urlretrieve(url, dst)\n        print(\'OK\', fn, os.path.getsize(dst))\n    except Exception as e:\n        print(\'FAIL\', fn, e)\nEOF\npython3 /tmp/dl.py 2>&1 | tail -25\n'
+'env | grep -i proxy; ls /etc/apt/apt.conf.d/ 2>/dev/null; grep -ri proxy /etc/apt/ 2>/dev/null | head\n'
+'apt-get -o APT::Acquire::Check-Free-Space=false install -y gcc make wget 2>&1 | tail -12\n'
+'apt-config -o APT::Acquire::Check-Free-Space=false dump 2>/dev/null | grep -i freespace\n'
+'apt-config -o APT::Acquire::Check-Free-Space=false -o APT::Acquire::CheckFreeSpace=false dump 2>/dev/null | grep -i free\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+'printf \'APT::Acquire::Check-Free-Space "false";\\n\' > /etc/apt/apt.conf.d/99freespace; cat /etc/apt/apt.conf.d/99freespace\n'
+'apt-get install -y gcc make wget 2>&1 | tail -12\n'
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

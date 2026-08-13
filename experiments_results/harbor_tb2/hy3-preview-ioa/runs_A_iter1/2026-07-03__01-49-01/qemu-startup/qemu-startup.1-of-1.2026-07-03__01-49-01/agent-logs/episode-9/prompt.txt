@@ -1,0 +1,59 @@
+New Terminal Output:
+
+root@e7b935aa5229:/app# cat > /app/run-qemu.sh << 'EOF'
+> #!/bin/bash
+> nohup qemu-system-x86_64 \
+>   -m 2048 \
+>   -kernel /app/extracted/VMLINUZ_LTS \
+>   -initrd /app/extracted/INTEL_UCODE.IMG,/app/extracted/AMD_UCODE.IMG,/app/extracted/INITRAMFS_LTS \
+>   -append "modules=loop,squashfs,sd-mod,usb-storage console=ttyS0 quiet" \
+>   -cdrom /app/alpine.iso \
+>   -display none \
+>   -serial telnet:127.0.0.1:6665,server,nowait \
+>   -monitor none \
+>   > /app/qemu.log 2>&1 &
+> echo "qemu pid $!"
+> EOF
+root@e7b935aa5229:/app# chmod +x /app/run-qemu.sh
+root@e7b935aa5229:/app# cat > /app/wait-ready.py << 'PYEOF'
+> import socket, sys, time
+> HOST, PORT = "127.0.0.1", 6665
+> deadline = time.time() + 30
+> while time.time() < deadline:
+>     try:
+>         s = socket.create_connection((HOST, PORT), timeout=5)
+>         break
+>     except Exception:
+>         time.sleep(1)
+> else:
+>     print("FAILED: cannot connect to telnet port")
+>     sys.exit(1)
+> s.settimeout(3)
+> buf = b""
+> start = time.time()
+> while time.time() - start < 280:
+>     try:
+>         d = s.recv(4096)
+>     except socket.timeout:
+>         continue
+>     if not d:
+>         time.sleep(1)
+>         continue
+>     buf += d
+>     if b"login" in buf.lower():
+>         sys.stdout.write(buf.decode("latin-1", "replace")[-800:])
+>         print("\n\nREADY: login prompt detected on telnet 6665")
+>         s.close()
+>         sys.exit(0)
+> print("TIMEOUT. Last received data:")
+> print(buf.decode("latin-1", "replace")[-800:])
+> sys.exit(2)
+> PYEOF
+root@e7b935aa5229:/app# ls -la /app/run-qemu.sh /app/wait-ready.py
+-rwxr-xr-x 1 root root 421 Jul  2 18:36 /app/run-qemu.sh
+-rw-r--r-- 1 root root 837 Jul  2 18:36 /app/wait-ready.py
+root@e7b935aa5229:/app# /app/run-qemu.sh
+qemu pid 401
+root@e7b935aa5229:/app# sleep 1; (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep 6665; echo '--- log ---'; cat /app/qemu.log
+--- log ---
+root@e7b935aa5229:/app#

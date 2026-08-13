@@ -1,0 +1,16 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'cat /app/data.hex\n'
+"cat > /tmp/recon.py << 'EOF'\nimport sys\nout = bytearray()\nwith open('/app/data.hex') as f:\n    for line in f:\n        parts = line.split()\n        if not parts:\n            continue\n        for tok in parts[1:]:\n            v = int(tok, 8)\n            out.append(v & 0xFF)\n            out.append((v >> 8) & 0xFF)\nwith open('/app/data.bin','wb') as f:\n    f.write(out)\nprint('wrote', len(out), 'bytes')\nEOF\n"
+'python3 /tmp/recon.py\n'
+'file /app/data.bin\n'
+'xxd /app/data.bin | head -4\n'
+"which file python3 qemu-system-vax simh pdp11 vax runvax 2>/dev/null; ls /usr/bin 2>/dev/null | grep -iE 'vax|pdp|simh|qemu' \n"
+"cat > /tmp/analyze.py << 'PYEOF'\nimport sys\ndata=open('/app/data.bin','rb').read()\nprint('len',len(data))\nmagic=int.from_bytes(data[0:2],'little')\nprint('magic',oct(magic))\na_text=int.from_bytes(data[2:4],'little')\na_data=int.from_bytes(data[4:6],'little')\na_bss=int.from_bytes(data[6:8],'little')\na_syms=int.from_bytes(data[8:10],'little')\na_entry=int.from_bytes(data[10:12],'little')\na_tr=int.from_bytes(data[12:14],'little')\na_dr=int.from_bytes(data[14:16],'little')\nprint('text',a_text,'data',a_data,'bss',a_bss,'syms',a_syms,'entry',a_entry,'tr',a_tr,'dr',a_dr)\ndef runs(b):\n    res=[];cur=[];start=-1\n    for i,v in enumerate(b):\n        if 32<=v<127:\n            if not cur: start=i\n            cur.append(chr(v))\n        else:\n            if len(cur)>=4: res.append((start,''.join(cur)))\n            cur=[]\n    if len(cur)>=4: res.append((start,''.join(cur)))\n    return res\nfor off,s in runs(data):\n    print(hex(off),repr(s))\nPYEOF\n"
+'python3 /tmp/analyze.py\n'
+"ls /usr/bin /usr/local/bin 2>/dev/null | grep -iE 'pdp|vax|sim|qemu|emu|retro'; echo '---'; timeout 6 bash -lc 'echo > /dev/tcp/8.8.8.8/53' 2>/dev/null && echo NET_OK || echo NO_NET\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

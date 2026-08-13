@@ -1,0 +1,56 @@
+New Terminal Output:
+
+root@20c7c101c1fc:/app# cat > /tmp/ascii.py << 'EOF'
+> from PIL import Image
+> import numpy as np
+> im = Image.open('/app/chess_puzzle.png').convert('RGB')
+> a = np.array(im).astype(int)
+> files='abcdefgh'
+> # define background detection
+> def ink_counts(sq):
+>     # sq shape (80,80,3)
+>     d = np.sqrt(((sq-np.array([0,0,0]))**2).sum(2))
+>     w = np.sqrt(((sq-np.array([255,255,255]))**2).sum(2))
+>     dark = d < 60
+>     white = w < 60
+>     return dark.sum(), white.sum()
+> occ={}
+> for r in range(8):
+>     for c in range(8):
+>         sq = a[r*80:(r+1)*80, c*80:(c+1)*80]
+>         dd,ww = ink_counts(sq)
+>         if dd>40 or ww>40:
+>             occ[(r,c)]=(dd,ww)
+> for (r,c),(dd,ww) in sorted(occ.items()):
+>     sqname=files[c]+str(8-r)
+>     print(f'{sqname}: dark={dd} white={ww}')
+> print('total occupied', len(occ))
+> EOF
+root@20c7c101c1fc:/app# python3 /tmp/ascii.py
+a8: dark=708 white=0
+c8: dark=462 white=0
+d8: dark=575 white=0
+f8: dark=736 white=0
+b7: dark=768 white=0
+f7: dark=768 white=0
+g7: dark=778 white=0
+a6: dark=768 white=0
+c6: dark=694 white=0
+e6: dark=768 white=0
+d5: dark=694 white=0
+e5: dark=0 white=343
+f5: dark=677 white=0
+g5: dark=471 white=0
+h5: dark=0 white=443
+a3: dark=0 white=343
+c3: dark=0 white=122
+b2: dark=0 white=343
+e2: dark=0 white=515
+f2: dark=0 white=343
+g2: dark=0 white=443
+a1: dark=0 white=297
+c1: dark=0 white=273
+e1: dark=0 white=384
+h1: dark=0 white=464
+total occupied 25
+root@20c7c101c1fc:/app#

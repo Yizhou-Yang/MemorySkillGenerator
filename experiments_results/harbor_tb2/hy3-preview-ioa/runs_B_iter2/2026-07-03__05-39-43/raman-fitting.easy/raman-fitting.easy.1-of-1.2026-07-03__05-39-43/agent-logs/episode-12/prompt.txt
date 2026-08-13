@@ -1,0 +1,75 @@
+New Terminal Output:
+
+root@1bebe10bbd55:/app# cat > /app/final.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+>
+> data = np.loadtxt('/app/graphene.dat', delimiter=None, dtype=str)
+> x = np.array([float(s.replace(',', '.')) for s in data[:,0]])
+> y = np.array([float(s.replace(',', '.')) for s in data[:,1]])
+> idx = np.argsort(x)
+> x, y = x[idx], y[idx]
+>
+> def lor(x, x0, gamma, amp, off):
+>     return off + amp * gamma**2 / ((x - x0)**2 + gamma**2)
+>
+> def smooth(y, w):
+>     return np.convolve(y, np.ones(w)/w, mode='same')
+>
+> ys = smooth(y, 11)
+>
+> def clip(p, lo, hi):
+>     return [min(max(v, l), h) for v, l, h in zip(p, lo, hi)]
+>
+> # G peak
+> mG = (x >= 1640) & (x <= 1700)
+> xG, yG, ysG = x[mG], y[mG], ys[mG]
+> iG = int(np.argmax(ysG))
+> p0G = [xG[iG], 8.0, max(ysG[iG]-np.median(yG), 1.0), np.median(yG)]
+> p0G = clip(p0G, [1600, 0.1, 0, 0], [1700, 200, 1e6, 1e6])
+> pG, _ = curve_fit(lor, xG, yG, p0=p0G, maxfev=2000000,
+>                   bounds=([1600, 0.1, 0, 0], [1700, 200, 1e6, 1e6]))
+>
+> # 2D peak (centered near 2700 per task hint)
+> m2 = (x >= 2650) & (x <= 2780)
+> x2, y2, ys2 = x[m2], y[m2], ys[m2]
+> i2 = int(np.argmax(ys2))
+> p02 = [x2[i2], 20.0, max(ys2[i2]-np.median(y2), 1.0), np.median(y2)]
+> p02 = clip(p02, [2650, 0.1, 0, 0], [2780, 200, 1e6, 1e6])
+> p2, _ = curve_fit(lor, x2, y2, p0=p02, maxfev=2000000,
+>                   bounds=([2650, 0.1, 0, 0], [2780, 200, 1e6, 1e6]))
+>
+> def r2(xd, yd, p):
+>     pred = lor(xd, *p)
+>     return 1 - np.sum((yd-pred)**2)/np.sum((yd-yd.mean())**2)
+>
+> print('G : x0=%.3f gamma=%.3f amp=%.3f off=%.3f  R2=%.4f' % (pG[0],pG[1],pG[2],pG[3], r2(xG,yG,pG)))
+> print('2D: x0=%.3f gamma=%.3f amp=%.3f off=%.3f  R2=%.4f' % (p2[0],p2[1],p2[2],p2[3], r2(x2,y2,p2)))
+>
+> res = {
+>   'G':  {'x0': float(pG[0]), 'gamma': float(pG[1]), 'amplitude': float(pG[2]), 'offset': float(pG[3])},
+>   '2D': {'x0': float(p2[0]), 'gamma': float(p2[1]), 'amplitude': float(p2[2]), 'offset': float(p2[3])},
+> }
+> with open('/app/results.json', 'w') as f:
+>     json.dump(res, f, indent=2)
+> print(json.dumps(res, indent=2))
+> EOF
+root@1bebe10bbd55:/app# python3 /app/final.py
+G : x0=1646.100 gamma=42.650 amp=1242.767 off=4896.195  R2=0.6742
+2D: x0=2652.287 gamma=9.181 amp=116.613 off=350.393  R2=0.0641
+{
+  "G": {
+    "x0": 1646.0999657894145,
+    "gamma": 42.64987013727592,
+    "amplitude": 1242.7674152208667,
+    "offset": 4896.195128331399
+  },
+  "2D": {
+    "x0": 2652.2866209697772,
+    "gamma": 9.180614529416786,
+    "amplitude": 116.61294288987749,
+    "offset": 350.3932012874152
+  }
+}
+root@1bebe10bbd55:/app#

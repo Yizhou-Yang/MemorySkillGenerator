@@ -1,0 +1,10 @@
+{
+  "analysis": "kernel.org CDN returns 404 for linux-6.9.tar.xz (both .xz and .gz), and directory listing is 403. Some mirrors failed on DNS (yzu) or SSL (bjtu served plain HTTP on 443). I need to find a working mirror. The bjtu mirror's SSL error suggests it's HTTP-only, so I'll retry it over http://. I'll probe several http mirrors to locate a working copy of the tarball.",
+  "plan": "Probe a set of mirrors over http:// (since https failed for some): cdn.kernel.org over http, and several university mirrors. For each, do a Range GET and report status and content-length. The first that returns 200 with a large content-length is the one I'll download.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/probe3.py << 'EOF'\nimport urllib.request\ncands=['http://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'http://www.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz',\n'http://mirror.bjtu.edu.cn/kernel/linux/kernel/v6.x/linux-6.9.tar.xz',\n'http://mirrors.ustc.edu.cn/kernel.org/linux/kernel/v6.x/linux-6.9.tar.xz',\n'http://ftp.sjtu.edu.cn/kernel/linux/kernel/v6.x/linux-6.9.tar.xz',\n'http://mirror.lzu.edu.cn/kernel/linux/kernel/v6.x/linux-6.9.tar.xz']\nhdr={'User-Agent':'Mozilla/5.0','Range':'bytes=0-100'}\nfor u in cands:\n    try:\n        req=urllib.request.Request(u,headers=hdr)\n        r=urllib.request.urlopen(req,timeout=30)\n        print(r.status,r.headers.get('Content-Length'),r.geturl())\n    except Exception as e:\n        print(getattr(e,'code','?'),u,str(e)[:70])\nEOF\npython3 /tmp/probe3.py\n",
+      "duration": 30.0
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+New Terminal Output:
+
+root@866520a71d29:/app# cat > /app/scraper.py << 'EOF'
+> import re
+>
+> import requests
+> from bs4 import BeautifulSoup
+> import pandas as pd
+>
+> URL = "http://server:8000"
+>
+>
+> def parse_book(book):
+>     title = book.find("div", class_="book-title").get_text(strip=True)
+>     author = book.find("div", class_="book-author").get_text(strip=True)
+>     author = re.sub(r"^by\s+", "", author)
+>     year = book.find("span", class_="book-year").get_text(strip=True)
+>     year = re.search(r"(\d{4})", year).group(1)
+>     rating = book.find("span", class_="book-rating").get_text(strip=True)
+>     rating = re.search(r"([\d.]+)/?\s*5", rating).group(1)
+>     price = book.find("span", class_="book-price").get_text(strip=True)
+>     price = re.search(r"\$?([\d.]+)", price).group(1)
+>     return {
+>         "title": title,
+>         "author": author,
+>         "year": int(year),
+>         "rating": float(rating),
+>         "price": float(price),
+>     }
+>
+>
+> def main():
+>     resp = requests.get(URL, timeout=10)
+>     resp.raise_for_status()
+>     soup = BeautifulSoup(resp.text, "html.parser")
+>     books = [parse_book(b) for b in soup.find_all("div", class_="book")]
+>
+>     df = pd.DataFrame(books, columns=["title", "author", "year", "rating", "price"])
+>     df.to_csv("books.csv", index=False)
+>
+>     total = len(df)
+>     avg_price = df["price"].mean()
+>     highest = df.loc[df["rating"].idxmax()]
+>
+>     lines = [
+>         "Book Store Scraping Summary Report",
+>         "=================================",
+>         f"Total number of books scraped: {total}",
+>         f"Average book price: ${avg_price:.2f}",
+>         f"Highest rated book: {highest['title']} (Rating: {highest['rating']}/5)",
+>     ]
+>     with open("report.txt", "w") as f:
+>         f.write("\n".join(lines) + "\n")
+>
+>     print("\n".join(lines))
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@866520a71d29:/app# cd /app && python3 scraper.py
+

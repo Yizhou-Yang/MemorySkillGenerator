@@ -1,0 +1,10 @@
+{
+  "analysis": "Important discrepancy: df reports the root filesystem 100% full (950G used), but du across the visible tree only finds ~250M of files. This mismatch means large files have been deleted but are still held open by running processes, so their space isn't reclaimed. To install the real curl I must free space, which means finding and releasing those held-open deleted files (or removing the fake stubs isn't enough since the real binary must come from the package).",
+  "plan": "Use lsof to find deleted files that are still open and consuming large space. If a process holds a huge deleted file, I can truncate or restart it to reclaim space. Then retry the curl install. I'll also double-check there isn't already a real curl binary elsewhere.",
+  "commands": [
+    {
+      "keystrokes": "lsof 2>/dev/null | grep -i deleted | awk '{print $7, $1, $2, $9}' | sort -rn | head -20\n",
+      "duration": 2.0
+    }
+  ]
+}

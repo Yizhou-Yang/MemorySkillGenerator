@@ -1,0 +1,18 @@
+{
+  "analysis": "Strange situation: `df` reports the root filesystem is 100% full (984G total, 960G used, 0 available), but `du` only accounts for ~180M of actual files. This suggests the 960G 'used' is from the host's underlying disk shared via fuse-overlayfs, while the container's visible files are tiny. I need to understand the real constraint before installing. Let me check mount details and test actual writability.",
+  "plan": "Examine /proc/mounts to understand the overlay setup, test whether I can actually write a small file, and check for any deleted-but-open files. This determines whether the space issue is real or just a reporting artifact. If I can write small files, I may be able to work around apt's space check.",
+  "commands": [
+    {
+      "keystrokes": "cat /proc/mounts | grep -E 'overlay|/ ' \n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "touch /test_write && echo 'write OK' && rm /test_write\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "df -h /tmp /var /app\n",
+      "duration": 0.1
+    }
+  ]
+}

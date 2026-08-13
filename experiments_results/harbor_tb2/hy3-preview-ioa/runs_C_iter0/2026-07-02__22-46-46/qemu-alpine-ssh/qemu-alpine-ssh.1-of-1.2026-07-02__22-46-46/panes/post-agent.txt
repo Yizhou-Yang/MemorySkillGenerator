@@ -1,0 +1,528 @@
+asciinema rec --stdin /logs/agent.cast
+root@f7750922546c:/app# asciinema rec --stdin /logs/agent.cast
+asciinema: recording asciicast to /logs/agent.cast
+asciinema: press <ctrl-d> or type "exit" when you're done
+root@f7750922546c:/app# clear
+root@f7750922546c:/app# ls -la /app
+total 980176
+drwxr-xr-x  2 root root       4096 Jul  2 15:14 .
+drwxr-xr-x 23 root root       4096 Jul  2 15:41 ..
+-rw-r--r--  1 root root     197120 Jul  2 15:14 alpine-disk.qcow2
+-rw-r--r--  1 root root 1003487232 Dec  7  2023 alpine.iso
+root@f7750922546c:/app# ls -la
+total 980176
+drwxr-xr-x  2 root root       4096 Jul  2 15:14 .
+drwxr-xr-x 23 root root       4096 Jul  2 15:41 ..
+-rw-r--r--  1 root root     197120 Jul  2 15:14 alpine-disk.qcow2
+-rw-r--r--  1 root root 1003487232 Dec  7  2023 alpine.iso
+root@f7750922546c:/app# which qemu-system-x86_64 qemu-system-i386 expect python3
+/usr/bin/qemu-system-x86_64
+/usr/bin/qemu-system-i386
+/usr/bin/expect
+/usr/bin/python3
+root@f7750922546c:/app# cat /etc/os-release
+PRETTY_NAME="Debian GNU/Linux 11 (bullseye)"
+NAME="Debian GNU/Linux"
+VERSION_ID="11"
+VERSION="11 (bullseye)"
+VERSION_CODENAME=bullseye
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+root@f7750922546c:/app# find / -iname 'alpine*.iso' 2>/dev/null
+/app/alpine.iso
+root@f7750922546c:/app# ls -l /dev/kvm 2>&1; echo ---
+ls: cannot access '/dev/kvm': No such file or directory
+---
+root@f7750922546c:/app# which 7z xorriso isoinfo bsdtar genisoimage 2>&1; echo ---
+---
+root@f7750922546c:/app# mkdir -p /mnt/iso && mount -o loop,ro /app/alpine.iso /mnt/iso 2>&1; echo MOUNT_EXIT=$?
+mount: /mnt/iso: mount failed: Operation not permitted.
+MOUNT_EXIT=1
+root@f7750922546c:/app# ls -la /mnt/iso 2>&1 | head -40
+total 8
+drwxr-xr-x 2 root root 4096 Jul  2 15:43 .
+drwxr-xr-x 3 root root 4096 Jul  2 15:43 ..
+root@f7750922546c:/app# find /mnt/iso -iname '*.cfg' 2>/dev/null; echo ---; find /mnt/iso -iname '*syslinux*' 2>/dev/null | head
+---
+root@f7750922546c:/app# cd /app
+root@f7750922546c:/app# nohup qemu-system-x86_64 -m 512 -smp 2 -cdrom /app/alpine.iso -netdev user,id=n0,hostfwd=tcp::2222-:22 -device e1000,netdev=n0 -display
+none -serial file:/tmp/serial.log -monitor unix:/tmp/qmon.sock,server,nowait >/tmp/qemu.out 2>&1 &
+[1] 215
+root@f7750922546c:/app# sleep 8; echo '--- qemu.out ---'; cat /tmp/qemu.out; echo '--- serial.log ---'; cat /tmp/serial.log
+--- qemu.out ---
+nohup: ignoring input
+--- serial.log ---
+root@f7750922546c:/app# apt-get --version 2>&1 | head -1; echo ---; timeout 8 apt-get install -y xorriso 2>&1 | tail -15
+apt 2.2.4 (amd64)
+---
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  libburn4 libisoburn1 libisofs6 libjte2
+Suggested packages:
+  xorriso-tcltk jigit cdck
+The following NEW packages will be installed:
+  libburn4 libisoburn1 libisofs6 libjte2 xorriso
+0 upgraded, 5 newly installed, 0 to remove and 0 not upgraded.
+Need to get 1102 kB of archives.
+After this operation, 2356 kB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@f7750922546c:/app# which socat telnet nc ncat 2>&1; echo ---
+/usr/bin/telnet
+/bin/nc
+---
+root@f7750922546c:/app# cat > /tmp/iso_extract.py <<'EOF'
+or 'syslinux' in full.lower():
+        print('FILE', full, d)
+print('=== CFG ===')
+for full,e,d in files:
+    if full.lower().endswith('syslinux.cfg'):
+        f.seek(e*SECTOR); cfg=f.read(d).decode('ascii','replace')
+        print(cfg)
+EOF
+> import struct, os
+> ISO='/app/alpine.iso'
+> SECTOR=2048
+> f=open(ISO,'rb')
+> f.seek(16*SECTOR)
+> pvd=f.read(SECTOR)
+> assert pvd[0:1]==b'\x01', 'no PVD'
+> root_dr=pvd[156:190]
+> def parse_dr(dr):
+>     extent=struct.unpack('<I',dr[2:6])[0]
+>     dl=struct.unpack('<I',dr[10:14])[0]
+>     flags=dr[25]
+>     nl=dr[32]
+>     name=dr[33:33+nl]
+>     return extent,dl,flags,name
+> ext,dl,flags,name=parse_dr(root_dr)
+> files=[]
+> def walk(extent,length,path=''):
+>     f.seek(extent*SECTOR)
+>     data=f.read(length)
+>     off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0:
+>             off=(off//SECTOR+1)*SECTOR
+>             continue
+>         e,d,fl,nm=parse_dr(data[off:off+rl])
+>         nm=nm.split(b';')[0].decode('ascii','replace')
+>         if nm in ('.','..'):
+>             off+=rl; continue
+>         full=(path+'/'+nm) if path else nm
+>         if fl&2:
+>             walk(e,d,full)
+>         else:
+>             files.append((full,e,d))
+>         off+=rl
+> walk(ext,dl)
+> for full,e,d in files:
+>     if '/boot/' in full.lower() or 'syslinux' in full.lower():
+>         print('FILE', full, d)
+> print('=== CFG ===')
+> for full,e,d in files:
+>     if full.lower().endswith('syslinux.cfg'):
+>         f.seek(e*SECTOR); cfg=f.read(d).decode('ascii','replace')
+>         print(cfg)
+> EOF
+root@f7750922546c:/app# python3 /tmp/iso_extract.py
+Traceback (most recent call last):
+  File "/tmp/iso_extract.py", line 37, in <module>
+    walk(ext,dl)
+  File "/tmp/iso_extract.py", line 33, in walk
+    walk(e,d,full)
+  File "/tmp/iso_extract.py", line 33, in walk
+    walk(e,d,full)
+  File "/tmp/iso_extract.py", line 33, in walk
+    walk(e,d,full)
+  [Previous line repeated 994 more times]
+  File "/tmp/iso_extract.py", line 19, in walk
+    f.seek(extent*SECTOR)
+RecursionError: maximum recursion depth exceeded while calling a Python object
+root@f7750922546c:/app# cat > /tmp/iso_extract.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb'); f.seek(16*SECTOR)
+> pvd=f.read(SECTOR)
+> assert pvd[0:1]==b'\x01'
+> root_dr=pvd[156:190]
+> def parse_dr(dr):
+>     e=struct.unpack('<I',dr[2:6])[0]; d=struct.unpack('<I',dr[10:14])[0]
+>     fl=dr[25]; nl=dr[32]; nm=dr[33:33+nl]
+>     return e,d,fl,nm
+> def walk(extent,length,path=''):
+>     f.seek(extent*SECTOR); data=f.read(length); off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0:
+>             off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=parse_dr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'):
+>             off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1')
+>         full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full)
+>         else: files.append((full,e,d))
+>         off+=rl
+> files=[]; ext,dl,fl,nm=parse_dr(root_dr); walk(ext,dl)
+> for full,e,d in files:
+>     if '/boot/' in full.lower(): print('BOOT', full, d)
+> print('=== CFG FILES ===')
+> for full,e,d in files:
+>     if full.lower().endswith('syslinux.cfg') or full.lower().endswith('grub.cfg'):
+>         f.seek(e*SECTOR); cfg=f.read(d).decode('latin1','replace')
+>         print('---',full,'---'); print(cfg)
+> EOF
+root@f7750922546c:/app# python3 /tmp/iso_extract.py
+BOOT EFI/BOOT/BOOTX64.EFI 688128
+=== CFG FILES ===
+--- BOOT/GRUB/GRUB.CFG ---
+set timeout=1
+
+menuentry "Linux lts" {
+linux   /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage quiet
+initrd  /boot/intel-ucode.img /boot/amd-ucode.img /boot/initramfs-lts
+}
+
+--- BOOT/SYSLINUX/SYSLINUX.CFG ---
+TIMEOUT 10
+PROMPT 1
+DEFAULT lts
+
+LABEL lts
+MENU LABEL Linux lts
+KERNEL /boot/vmlinuz-lts
+INITRD /boot/intel-ucode.img,/boot/amd-ucode.img,/boot/initramfs-lts
+FDTDIR /boot/dtbs-lts
+APPEND modules=loop,squashfs,sd-mod,usb-storage quiet
+
+root@f7750922546c:/app# cat > /tmp/extract2.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb'); f.seek(16*SECTOR)
+> pvd=f.read(SECTOR); root_dr=pvd[156:190]
+> def parse_dr(dr):
+>     return (struct.unpack('<I',dr[2:6])[0], struct.unpack('<I',dr[10:14])[0], dr[25], dr[33:33+dr[32]])
+> wanted=['vmlinuz-lts','intel-ucode.img','amd-ucode.img','initramfs-lts']
+> got={}
+> def walk(extent,length,path=''):
+>     f.seek(extent*SECTOR); data=f.read(length); off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0:
+>             off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=parse_dr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'):
+>             off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full)
+>         else:
+>             if nm.lower() in wanted: got[nm]=(e,d)
+>         off+=rl
+> ext,dl,fl,nm=parse_dr(root_dr); walk(ext,dl)
+> for nm in wanted:
+>     if nm in got:
+>         e,d=got[nm]; f.seek(e*SECTOR); data=f.read(d)
+>         open('/tmp/'+nm,'wb').write(data)
+>         print('OK', nm, d, 'bytes')
+>     else:
+>         print('MISSING', nm)
+> EOF
+root@f7750922546c:/app# python3 /tmp/extract2.py
+MISSING vmlinuz-lts
+MISSING intel-ucode.img
+MISSING amd-ucode.img
+MISSING initramfs-lts
+root@f7750922546c:/app# ls -la /tmp/vmlinuz-lts /tmp/intel-ucode.img /tmp/amd-ucode.img /tmp/initramfs-lts
+ls: cannot access '/tmp/vmlinuz-lts': No such file or directory
+ls: cannot access '/tmp/intel-ucode.img': No such file or directory
+ls: cannot access '/tmp/amd-ucode.img': No such file or directory
+ls: cannot access '/tmp/initramfs-lts': No such file or directory
+root@f7750922546c:/app# cat > /tmp/dbg.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb')
+> # print volume descriptors
+> type=0
+> for i in range(16,32):
+>     f.seek(i*SECTOR); h=f.read(SECTOR)
+>     t=h[0]
+>     if t==0: break
+>     if t==1: print('PVD at',i)
+>     elif t==2: print('SVD(joliet?) at',i)
+>     elif t==255: print('Terminator at',i)
+>     else: print('type',t,'at',i)
+> f.seek(16*SECTOR); pvd=f.read(SECTOR); root=pvd[156:190]
+> def pr(dr): return (struct.unpack('<I',dr[2:6])[0],struct.unpack('<I',dr[10:14])[0],dr[25],dr[33:33+dr[32]])
+> def walk(ext,length,path,depth=0):
+>     if depth>20: return
+>     f.seek(ext*SECTOR); data=f.read(length); off=0; n=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0: off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=pr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'): off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full,depth+1)
+>         else: print('F',full,d)
+>         off+=rl; n+=1
+>     return n
+> ext,dl,fl,nm=pr(root); print('root ext',ext,'len',dl)
+> print('entries in root:', walk(ext,dl,''))
+> EOF
+root@f7750922546c:/app# python3 /tmp/dbg.py 2>&1 | head -60
+PVD at 16
+root ext 20 len 2048
+F .ALPINE_RELEASE 30
+F APKS/.BOOT_REPOSITORY 0
+F APKS/X86_64/ACCT_6_6_4_R2.APK 59885
+F APKS/X86_64/ACCT_OPENRC_6_6_4_R2.APK 1875
+F APKS/X86_64/AGETTY_2_39_3_R0.APK 21634
+F APKS/X86_64/AGETTY_OPENRC_0_52_1_R0.APK 2540
+F APKS/X86_64/ALPINE_BASELAYOUT_3_4_3_R2.APK 8911
+F APKS/X86_64/ALPINE_BASELAYOUT_DATA_3_4_.APK 11533
+F APKS/X86_64/ALPINE_BASE_3_19_0_R0.APK 1515
+F APKS/X86_64/ALPINE_CONF_3_17_0_R0.APK 60648
+F APKS/X86_64/ALPINE_KEYS_2_4_R1.APK 13353
+F APKS/X86_64/ALPINE_RELEASE_3_19_0_R0.APK 2063
+F APKS/X86_64/APKINDEX_TAR.GZ 52827
+F APKS/X86_64/APK_TOOLS_2_14_0_R5.APK 120789
+F APKS/X86_64/ARGON2_LIBS_20190702_R5.APK 18597
+F APKS/X86_64/ARPON_3_0_R7.APK 20824
+F APKS/X86_64/ARPON_OPENRC_3_0_R7.APK 1942
+F APKS/X86_64/ARPWATCH_3_5_R0.APK 29663
+F APKS/X86_64/ARPWATCH_OPENRC_3_5_R0.APK 2465
+F APKS/X86_64/AWALL_1_12_2_R1.APK 32491
+F APKS/X86_64/BASH_5_2_21_R0.APK 448728
+F APKS/X86_64/BLKID_2_39_3_R0.APK 18451
+F APKS/X86_64/BONDING_2_6_R5.APK 4361
+F APKS/X86_64/BOTAN_LIBS_2_19_3_R5.APK 2784229
+F APKS/X86_64/BRIDGE_1_5_R5.APK 2871
+F APKS/X86_64/BRIDGE_UTILS_1_7_1_R2.APK 12741
+F APKS/X86_64/BROTLI_LIBS_1_1_0_R1.APK 416208
+F APKS/X86_64/BTRFS_PROGS_6_6_2_R0.APK 807191
+F APKS/X86_64/BTRFS_PROGS_OPENRC_6_6_2_R0.APK 1678
+F APKS/X86_64/BUSYBOX_1_36_1_R15.APK 506796
+F APKS/X86_64/BUSYBOX_BINSH_1_36_1_R15.APK 1543
+F APKS/X86_64/BUSYBOX_MDEV_OPENRC_1_36_1_.APK 2047
+F APKS/X86_64/BUSYBOX_OPENRC_1_36_1_R15.APK 4192
+F APKS/X86_64/BUSYBOX_SUID_1_36_1_R15.APK 3959
+F APKS/X86_64/BWM_NG_0_6_3_R3.APK 20894
+F APKS/X86_64/CA_CERTIFICATES_20230506_R0.APK 156460
+F APKS/X86_64/CA_CERTIFICATES_BUNDLE_2023.APK 126293
+F APKS/X86_64/CFDISK_2_39_3_R0.APK 31388
+F APKS/X86_64/CHRONY_4_5_R0.APK 165952
+F APKS/X86_64/CHRONY_OPENRC_4_5_R0.APK 2561
+F APKS/X86_64/CKSFV_1_3_15_R3.APK 10406
+F APKS/X86_64/CONNTRACK_TOOLS_1_4_8_R0.APK 141325
+F APKS/X86_64/CONNTRACK_TOOLS_OPENRC_1_4_.APK 3069
+F APKS/X86_64/COREUTILS_9_4_R1.APK 508433
+F APKS/X86_64/COREUTILS_ENV_9_4_R1.APK 22394
+F APKS/X86_64/COREUTILS_FMT_9_4_R1.APK 20355
+F APKS/X86_64/COREUTILS_SHA512SUM_9_4_R1.APK 20516
+F APKS/X86_64/CRYPTSETUP_2_6_1_R8.APK 98429
+F APKS/X86_64/CRYPTSETUP_LIBS_2_6_1_R8.APK 198161
+F APKS/X86_64/CRYPTSETUP_OPENRC_2_6_1_R8.APK 6731
+F APKS/X86_64/CURL_8_5_0_R0.APK 147127
+F APKS/X86_64/CUTTER_1_04_R5.APK 7983
+F APKS/X86_64/CYRUS_SASL_2_1_28_R5.APK 44797
+F APKS/X86_64/CYRUS_SASL_OPENRC_2_1_28_R5.APK 1771
+F APKS/X86_64/C_ARES_1_22_1_R0.APK 59562
+F APKS/X86_64/DBUS_LIBS_1_14_10_R0.APK 124346
+F APKS/X86_64/DEVICE_MAPPER_EVENT_LIBS_2_.APK 10722
+F APKS/X86_64/DEVICE_MAPPER_LIBS_2_03_23_.APK 136551
+root@f7750922546c:/app# cat > /tmp/find.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb'); f.seek(16*SECTOR)
+> pvd=f.read(SECTOR); root=pvd[156:190]
+> def pr(dr): return (struct.unpack('<I',dr[2:6])[0],struct.unpack('<I',dr[10:14])[0],dr[25],dr[33:33+dr[32]])
+> hits=[]
+> def walk(ext,length,path):
+>     f.seek(ext*SECTOR); data=f.read(length); off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0: off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=pr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'): off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full)
+>         else:
+>             u=nm.upper()
+>             if any(k in u for k in ['VMLINUZ','INITRAMFS','UCODE','BOOT']):
+>                 hits.append((full,d))
+>         off+=rl
+> ext,dl,fl,nm=pr(root); walk(ext,dl,'')
+> for h in hits: print(h)
+> EOF
+root@f7750922546c:/app# python3 /tmp/find.py
+('APKS/.BOOT_REPOSITORY', 0)
+('APKS/X86_64/EFIBOOTMGR_18_R2.APK', 23580)
+('APKS/X86_64/LINUX_FIRMWARE_AMD_UCODE_20.APK', 40106)
+('BOOT/AMD_UCODE.IMG', 61440)
+('BOOT/INITRAMFS_LTS.', 20486092)
+('BOOT/INTEL_UCODE.IMG', 7367952)
+('BOOT/SYSLINUX/BOOT.CAT', 2048)
+('BOOT/SYSLINUX/MBOOT.C32', 11712)
+('BOOT/VMLINUZ_LTS.', 11879168)
+('EFI/BOOT/BOOTX64.EFI', 688128)
+root@f7750922546c:/app# cat > /tmp/extract3.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb'); f.seek(16*SECTOR)
+> pvd=f.read(SECTOR); root=pvd[156:190]
+> def pr(dr): return (struct.unpack('<I',dr[2:6])[0],struct.unpack('<I',dr[10:14])[0],dr[25],dr[33:33+dr[32]])
+> want={'VMLINUZ_LTS.':'vmlinuz-lts','INITRAMFS_LTS.':'initramfs-lts','INTEL_UCODE.IMG':'intel-ucode.img','AMD_UCODE.IMG':'amd-ucode.img'}
+> got={}
+> def walk(ext,length,path):
+>     f.seek(ext*SECTOR); data=f.read(length); off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0: off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=pr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'): off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full)
+>         elif nm in want: got[nm]=(e,d)
+>         off+=rl
+> ext,dl,fl,nm=pr(root); walk(ext,dl,'')
+> for k,v in got.items():
+>     e,d=v; f.seek(e*SECTOR); open('/tmp/'+want[k],'wb').write(f.read(d))
+>     print('OK',k,'->',want[k],d)
+> for k in want:
+>     if k not in got: print('MISSING',k)
+> EOF
+root@f7750922546c:/app# python3 /tmp/extract3.py
+OK AMD_UCODE.IMG -> amd-ucode.img 61440
+OK INITRAMFS_LTS. -> initramfs-lts 20486092
+OK INTEL_UCODE.IMG -> intel-ucode.img 7367952ls -la /tmp/vmlinuz-lts /tmp/initramfs-lts /tmp/intel-ucode.img /tmp/amd-ucode.img
+
+OK VMLINUZ_LTS. -> vmlinuz-lts 11879168
+root@f7750922546c:/app# ls -la /tmp/vmlinuz-lts /tmp/initramfs-lts /tmp/intel-ucode.img /tmp/amd-ucode.img
+-rw-r--r-- 1 root root    61440 Jul  2 15:53 /tmp/amd-ucode.img
+-rw-r--r-- 1 root root 20486092 Jul  2 15:53 /tmp/initramfs-lts
+-rw-r--r-- 1 root root  7367952 Jul  2 15:53 /tmp/intel-ucode.img
+-rw-r--r-- 1 root root 11879168 Jul  2 15:53 /tmp/vmlinuz-lts
+root@f7750922546c:/app# ls -la /tmp/vmlinuz-lts /tmp/initramfs-lts /tmp/intel-ucode.img /tmp/amd-ucode.img
+-rw-r--r-- 1 root root    61440 Jul  2 15:53 /tmp/amd-ucode.img
+-rw-r--r-- 1 root root 20486092 Jul  2 15:53 /tmp/initramfs-lts
+-rw-r--r-- 1 root root  7367952 Jul  2 15:53 /tmp/intel-ucode.img
+-rw-r--r-- 1 root root 11879168 Jul  2 15:53 /tmp/vmlinuz-lts
+root@f7750922546c:/app# cat > /tmp/ssh.py <<'EOF'
+> import struct
+> ISO='/app/alpine.iso'; SECTOR=2048
+> f=open(ISO,'rb'); f.seek(16*SECTOR)
+> pvd=f.read(SECTOR); root=pvd[156:190]
+> def pr(dr): return (struct.unpack('<I',dr[2:6])[0],struct.unpack('<I',dr[10:14])[0],dr[25],dr[33:33+dr[32]])
+> hits=[]
+> def walk(ext,length,path):
+>     f.seek(ext*SECTOR); data=f.read(length); off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0: off=(off//SECTOR+1)*SECTOR; continue
+>         e,d,fl,nm=pr(data[off:off+rl])
+>         if nm in (b'\x00',b'\x01'): off+=rl; continue
+>         nm=nm.split(b';')[0].decode('latin1'); full=(path+'/'+nm) if path else nm
+>         if fl&2: walk(e,d,full)
+>         elif 'SSH' in nm.upper() or 'DROPBEAR' in nm.upper(): hits.append(full)
+>         off+=rl
+> ext,dl,fl,nm=pr(root); walk(ext,dl,'')
+> print('\n'.join(hits) or 'NONE')
+> EOF
+root@f7750922546c:/app# python3 /tmp/ssh.py
+APKS/X86_64/OPENSSH_9_5_P1_R0.APK
+APKS/X86_64/OPENSSH_CLIENT_COMMON_9_5_P.APK
+APKS/X86_64/OPENSSH_CLIENT_DEFAULT_9_5_.APK
+APKS/X86_64/OPENSSH_KEYGEN_9_5_P1_R0.APK
+APKS/X86_64/OPENSSH_SERVER_9_5_P1_R0.APK
+APKS/X86_64/OPENSSH_SERVER_COMMON_9_5_P.APK
+APKS/X86_64/OPENSSH_SERVER_COMMON_OPENR.APK
+APKS/X86_64/OPENSSH_SFTP_SERVER_9_5_P1_.APK
+root@f7750922546c:/app# pkill -9 -f qemu-system; sleep 1; rm -f /tmp/qmon.sock; echo cleaned
+bash: pkill: command not found
+cleaned
+root@f7750922546c:/app# cat > /tmp/setup.py <<'PYEOF'
+> import socket, time, sys
+>
+> HOST, PORT = '127.0.0.1', 4555
+> s = socket.create_connection((HOST, PORT), timeout=15)
+> s.settimeout(1.0)
+> buf = b''
+>
+> def drain(t=3):
+>     global buf
+>     end = time.time() + t
+>     while time.time() < end:
+>         try:
+>             d = s.recv(4096)
+>             if d: buf += d
+>         except socket.timeout:
+>             pass
+>
+> def waitfor(tok, t=90):
+>     global buf
+>     tok = tok.encode() if isinstance(tok, str) else tok
+>     end = time.time() + t
+>     while time.time() < end:
+>         try:
+>             d = s.recv(4096)
+>             if d: buf += d
+>         except socket.timeout:
+>             pass
+>         if tok in buf:
+>             return True
+>     return False
+>
+> def send(x):
+>     s.sendall(x.encode())
+>
+> guest_script = r'''
+> cat > /tmp/setup.sh <<'SETUP'
+> #!/bin/sh
+> set -x
+> udhcpc -i eth0 >/dev/null 2>&1 || true
+> : > /etc/apk/repositories
+> for d in /media/* ; do
+>   if [ -d "$d/apks" ]; then echo "$d/apks" >> /etc/apk/repositories; fi
+> done
+> if [ ! -s /etc/apk/repositories ]; then
+>   echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/main" > /etc/apk/repositories
+>   echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories
+> fi
+> apk add openssh-server
+> ssh-keygen -A
+> sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+> sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+> echo 'root:password123' | chpasswd
+> rc-update add sshd default
+> rc-service sshd start
+> echo SETUP_DONE_OK
+> SETUP
+> sh /tmp/setup.sh
+> '''
+>
+> drain(2)
+> if not waitfor('login:', 120):
+>     print('NO_LOGIN_PROMPT'); print(buf.decode(errors='replace')); sys.exit(1)
+> send('root\r\n'); drain(2); send('\r\n'); drain(2); send('id\r\n')
+> if not waitfor('uid=0', 30):
+>     print('LOGIN_FAILED'); print(buf.decode(errors='replace')[-2000:]); sys.exit(1)
+> print('LOGGED_IN_AS_ROOT')
+> s.sendall(guest_script.encode())
+> ok = waitfor('SETUP_DONE_OK', 180)
+> print('SETUP_OK' if ok else 'SETUP_FAILED')
+> print(buf.decode(errors='replace')[-4000:])
+> PYEOF
+nohup qemu-system-x86_64 -m 1024 -smp 2 -kernel /tmp/vmlinuz-lts -initrd /tmp/initramfs-lts -append "modules=loop,squashfs,sd-mod,usb-storage console=ttyS0" -cd
+rom /app/alpine.iso -netdev user,id=n0,hostfwd=tcp::2222-:22 -device e1000,netdev=n0 -display none -serial tcp:127.0.0.1:4555,server,nowait -monitor unix:/tmp/q
+mon.sock,server,nowait >/tmp/qemu.out 2>&1 &
+root@f7750922546c:/app# nohup qemu-system-x86_64 -m 1024 -smp 2 -kernel /tmp/vmlinuz-lts -initrd /tmp/initramfs-lts -append "modules=loop,squashfs,sd-mod,usb-st
+orage console=ttyS0" -cdrom /app/alpine.iso -netdev user,id=n0,hostfwd=tcp::2222-:22 -device e1000,netdev=n0 -display none -serial tcp:127.0.0.1:4555,server,now
+ait -monitor unix:/tmp/qmon.sock,server,nowait >/tmp/qemu.out 2>&1 &
+[2] 601
+root@f7750922546c:/app# sleep 40; echo '--- qemu.out ---'; cat /tmp/qemu.out
+

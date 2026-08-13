@@ -1,0 +1,10 @@
+{
+  "analysis": "There's a transparent outbound proxy (header 'proxy-agent: gz-aio-igatec1-tkeprod-outforward-14') intercepting port 443. It returned 502 'Server UnReachable' for api.devnet.solana.com, meaning that host isn't reachable through it. No proxy env vars are set. I need to determine whether the environment has ANY internet access and how to reach Solana (or whether a different Solana cluster/approach works).",
+  "plan": "Diagnose connectivity: (1) test a known-good host (example.com) over both plain HTTP and HTTPS to see if the proxy passes general traffic; (2) test the other Solana clusters (mainnet-beta, testnet). This tells me if Solana is reachable at all and whether I should plan for a real-data path vs. graceful error fallback.",
+  "commands": [
+    {
+      "keystrokes": "python3 -c \"import socket;\nfor h in ['example.com','api.mainnet-beta.solana.com','api.testnet.solana.com']:\n  try:\n    s=socket.create_connection((h,443),timeout=15); s.sendall(b'HEAD / HTTP/1.0\\r\\n\\r\\n'); print(h, repr(s.recv(120)))\n  except Exception as e: print(h,'ERR',e)\"\n",
+      "duration": 50.0
+    }
+  ]
+}

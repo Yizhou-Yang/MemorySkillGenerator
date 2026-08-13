@@ -1,0 +1,278 @@
+New Terminal Output:
+
+root@0513a95268f3:/app# cat > /app/server.py << 'EOF'
+> #!/usr/bin/env python3
+> import json
+> import os
+> import sys
+> import urllib.request
+> import urllib.error
+> import urllib.parse
+> from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+>
+> NETWORK = os.environ.get("SOLANA_NETWORK", "devnet")
+> RPC_URL = os.environ.get("SOLANA_RPC") or {
+>     "devnet": "https://api.devnet.solana.com",
+>     "testnet": "https://api.testnet.solana.com",
+>     "mainnet-beta": "https://api.mainnet-beta.solana.com",
+> }.get(NETWORK, "https://api.devnet.solana.com")
+>
+> NETWORK_NAME = NETWORK
+>
+>
+> class RpcError(Exception):
+>     pass
+>
+>
+> class NotFound(RpcError):
+>     pass
+>
+>
+> def rpc(method, params=None, timeout=30):
+>     payload = {"jsonrpc": "2.0", "id": 1, "method": method}
+>     if params is not None:
+>         payload["params"] = params
+>     data = json.dumps(payload).encode()
+>     req = urllib.request.Request(RPC_URL, data=data,
+>                                  headers={"Content-Type": "application/json"})
+>     try:
+>         with urllib.request.urlopen(req, timeout=timeout) as resp:
+>             text = resp.read().decode()
+>     except urllib.error.HTTPError as e:
+>         raise RpcError("HTTP %s: %s" % (e.code, e.reason))
+>     except urllib.error.URLError as e:
+>         raise RpcError("Network error: %s" % e.reason)
+>     except Exception as e:
+>         raise RpcError("Request error: %s" % e)
+>     try:
+>         j = json.loads(text)
+>     except Exception as e:
+>         raise RpcError("Invalid JSON response: %s" % e)
+>     if "error" in j and j["error"] is not None:
+>         msg = j["error"]
+>         if isinstance(msg, dict):
+>             msg = msg.get("message", str(msg))
+>         raise RpcError(str(msg))
+>     return j.get("result")
+>
+>
+> def get_status():
+>     try:
+>         health = rpc("getHealth")
+>         online = (health == "ok")
+>     except Exception as e:
+>         return {
+>             "status": "offline",
+>             "network": NETWORK_NAME,
+>             "current_slot": 0,
+>             "node_count": 0,
+>             "version": "unknown",
+>             "error": str(e),
+>         }
+>     try:
+>         slot = rpc("getSlot")
+>     except Exception:
+>         slot = 0
+>     try:
+>         nodes = rpc("getClusterNodes")
+>         node_count = len(nodes) if isinstance(nodes, list) else 0
+>     except Exception:
+>         node_count = 0
+>     try:
+>         ver = rpc("getVersion")
+>         version = ver.get("solana-core", "unknown") if isinstance(ver, dict) else "unknown"
+>     except Exception:
+>         version = "unknown"
+>     return {
+>         "status": "online" if online else "offline",
+>         "network": NETWORK_NAME,
+>         "current_slot": slot,
+>         "node_count": node_count,
+>         "version": version,
+>     }
+>
+>
+> def get_block(slot):
+>     try:
+>         slot_i = int(slot)
+>     except Exception:
+>         raise RpcError("Invalid slot number: %s" % slot)
+>     params = [slot_i, {"encoding": "json", "transactionDetails": "none", "rewards": False}]
+>     try:
+>         result = rpc("getBlock", params)
+>     except Exception as e:
+>         raise NotFound("Block at slot %s not found: %s" % (slot_i, e))
+>     if result is None:
+>         raise NotFound("Block at slot %s not found" % slot_i)
+>     return {
+>         "blockhash": result.get("blockhash"),
+>         "parent_slot": result.get("parentSlot"),
+>         "previous_blockhash": result.get("previousBlockhash"),
+>         "block_height": result.get("blockHeight"),
+>         "block_time": result.get("blockTime"),
+>     }
+>
+>
+> def get_transaction(signature):
+>     params = [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
+>     try:
+>         result = rpc("getTransaction", params)
+>     except Exception as e:
+>         raise NotFound("Transaction %s not found: %s" % (signature, e))
+>     if result is None:
+>         raise NotFound("Transaction %s not found" % signature)
+>     meta = result.get("meta") or {}
+>     err = meta.get("err")
+>     success = err is None
+>     fee = meta.get("fee")
+>     transfers = []
+>     pre = {b.get("accountIndex"): b for b in (meta.get("preTokenBalances") or [])}
+>     post = {b.get("accountIndex"): b for b in (meta.get("postTokenBalances") or [])}
+>     acc_keys = []
+>     msg = result.get("transaction", {}).get("message", {})
+>     for a in msg.get("accountKeys", []):
+>         acc_keys.append(a.get("pubkey") if isinstance(a, dict) else a)
+>     for idx, pb in pre.items():
+>         ob = post.get(idx)
+>         if not ob:
+>             continue
+>         try:
+>             pre_amt = int(pb.get("uiTokenAmount", {}).get("amount", "0") or "0")
+>             post_amt = int(ob.get("uiTokenAmount", {}).get("amount", "0") or "0")
+>         except Exception:
+>             continue
+>         delta = post_amt - pre_amt
+>         if delta < 0:
+>             owner = pb.get("owner") or (acc_keys[idx] if idx < len(acc_keys) else None)
+>             transfers.append({
+>                 "account": owner,
+>                 "mint": pb.get("mint"),
+>                 "amount": abs(delta),
+>             })
+>     txn = result.get("transaction", {})
+>     sig = signature
+>     if isinstance(txn, dict):
+>         sigs = txn.get("signatures") or [signature]
+>         sig = sigs[0]
+>     return {
+>         "signature": sig,
+>         "slot": result.get("slot"),
+>         "block_time": result.get("blockTime"),
+>         "success": success,
+>         "fee": fee,
+>         "token_transfers": transfers,
+>     }
+>
+>
+> def get_account(address):
+>     params = [address, {"encoding": "jsonParsed"}]
+>     try:
+>         result = rpc("getAccountInfo", params)
+>     except Exception as e:
+>         raise NotFound("Account %s not found: %s" % (address, e))
+>     if result is None or result.get("value") is None:
+>         raise NotFound("Account %s not found" % address)
+>     val = result["value"]
+>     return {
+>         "address": address,
+>         "executable": val.get("executable"),
+>         "lamports": val.get("lamports"),
+>         "owner": val.get("owner"),
+>         "rent_epoch": val.get("rentEpoch"),
+>     }
+>
+>
+> def get_program_accounts(pid, offset, limit):
+>     params = [pid, {"encoding": "jsonParsed",
+>                    "dataSlice": {"offset": 0, "length": 0},
+>                    "limit": offset + limit}]
+>     result = rpc("getProgramAccounts", params)
+>     if result is None:
+>         result = []
+>     total = len(result)
+>     window = result[offset:offset + limit]
+>     accounts = []
+>     for item in window:
+>         a = item.get("account") or {}
+>         accounts.append({
+>             "pubkey": item.get("pubkey"),
+>             "account": {
+>                 "executable": a.get("executable"),
+>                 "lamports": a.get("lamports"),
+>                 "owner": a.get("owner"),
+>                 "rent_epoch": a.get("rentEpoch"),
+>             },
+>         })
+>     return {
+>         "program_id": pid,
+>         "total_accounts": total,
+>         "limit": limit,
+>         "offset": offset,
+>         "accounts": accounts,
+>     }
+>
+>
+> class Handler(BaseHTTPRequestHandler):
+>     def _send(self, obj, status=200):
+>         body = json.dumps(obj).encode()
+>         self.send_response(status)
+>         self.send_header("Content-Type", "application/json")
+>         self.send_header("Content-Length", str(len(body)))
+>         self.end_headers()
+>         self.wfile.write(body)
+>
+>     def log_message(self, *args):
+>         pass
+>
+>     def do_GET(self):
+>         parsed = urllib.parse.urlparse(self.path)
+>         parts = [p for p in parsed.path.split("/") if p != ""]
+>         try:
+>             if parsed.path.rstrip("/") == "/status":
+>                 self._send(get_status())
+>             elif len(parts) == 2 and parts[0] == "block":
+>                 self._send(get_block(parts[1]))
+>             elif len(parts) == 2 and parts[0] == "transaction":
+>                 self._send(get_transaction(parts[1]))
+>             elif len(parts) == 2 and parts[0] == "account":
+>                 self._send(get_account(parts[1]))
+>             elif len(parts) == 3 and parts[0] == "program" and parts[2] == "accounts":
+>                 q = urllib.parse.parse_qs(parsed.query)
+>
+>                 def getint(name, default):
+>                     v = q.get(name, [None])[0]
+>                     if v is None:
+>                         return default
+>                     try:
+>                         return int(v)
+>                     except Exception:
+>                         return default
+>                 offset = getint("offset", 0)
+>                 limit = getint("limit", 10)
+>                 if limit < 0:
+>                     limit = 10
+>                 if offset < 0:
+>                     offset = 0
+>                 self._send(get_program_accounts(parts[1], offset, limit))
+>             else:
+>                 self._send({"error": "Unknown endpoint: %s" % parsed.path}, status=404)
+>         except NotFound as e:
+>             self._send({"error": str(e)}, status=404)
+>         except RpcError as e:
+>             self._send({"error": str(e)}, status=500)
+>         except Exception as e:
+>             self._send({"error": str(e)}, status=500)
+>
+>
+> def main():
+>     port = int(os.environ.get("PORT", "5000"))
+>     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+>     print("Serving on port %d, network=%s" % (port, NETWORK_NAME), file=sys.stderr)
+>     server.serve_forever()
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@0513a95268f3:/app# python3 -c "import ast; ast.parse(open('/app/server.py').read()); print('syntax ok')"
+

@@ -1,0 +1,12 @@
+```json
+{
+  "analysis": "Cross-check combined fit agrees well on peak positions: xg=10426.9 (vs 10431.3) and x2d=19203.7 (vs 19221.8). The x0 values are robust. However, the G peak gamma differs between fits (local 347 vs combined 184) — likely because the G region has neighboring bumps and the Lorentzian wing behavior. I should verify the G fit is stable to window choice before finalizing, since the gamma value is the main uncertainty.",
+  "plan": "Run a window-sensitivity test for the G peak (try several window widths) to confirm gamma is stable. If it varies, pick the tightest window around the peak for a cleaner fit. Then confirm results.json is final.",
+  "commands": [
+    {
+      "keystrokes": "cat > sens.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\nd = np.loadtxt('graphene.dat', delimiter=None,\n   converters={0: lambda s: float(str(s).replace(',','.')), 1: lambda s: float(str(s).replace(',','.'))})\nx=d[:,0]; y=d[:,1]; o=np.argsort(x); x=x[o]; y=y[o]\ndef lor(x,off,x0,g,a): return off + a*g**2/((x-x0)**2+g**2)\nfor w in [(9600,11500),(9800,11100),(10000,10900),(10100,10800)]:\n    m=(x>=w[0])&(x<=w[1])\n    p,_=curve_fit(lor,x[m],y[m],p0=[9000,10400,350,10000],maxfev=200000)\n    print('win%8d-%8d  off=%.1f x0=%.1f gamma=%.1f amp=%.1f'%(w[0],w[1],p[0],p[1],p[2],p[3]))\nEOF\npython3 sens.py\n",
+      "duration": 3.0
+    }
+  ]
+}
+```

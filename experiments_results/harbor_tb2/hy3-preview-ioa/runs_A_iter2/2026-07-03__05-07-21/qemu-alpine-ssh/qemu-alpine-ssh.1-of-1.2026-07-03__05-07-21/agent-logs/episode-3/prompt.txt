@@ -1,0 +1,42 @@
+New Terminal Output:
+
+root@4690d664d417:/app# which telnet nc socat expect python3; echo DONE
+/usr/bin/telnet
+/bin/nc
+/usr/bin/expect
+/usr/bin/python3
+DONE
+root@4690d664d417:/app# nohup qemu-system-x86_64 -m 1024 -smp 2 -boot d -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2 -netdev user,id=n
+0,hostfwd=tcp::2222-:22 -device e1000,netdev=n0 -display none -serial telnet:127.0.0.1:4444,server,nowait -monitor telnet:127.0.0.1:4445,server,nowait >/tmp/qem
+u.log 2>&1 &
+[1] 182
+root@4690d664d417:/app# sleep 1; pgrep -a qemu-system; echo '---'; tail -5 /tmp/qemu.log
+bash: pgrep: command not found
+---
+nohup: ignoring input
+root@4690d664d417:/app# cat > /app/probe.exp <<'EOF'
+> #!/usr/bin/expect -f
+> log_file -a /tmp/probe.log
+> set timeout 200
+> spawn telnet 127.0.0.1 4444
+> expect "login:"
+> send "root\r"
+> expect {
+>   "Password:" { send "\r" }
+>   ":~#" { }
+> }
+> send "cat /etc/apk/repositories; echo MARK1; ls /media; echo MARK2; which sshd; which udhcpc; which apk; echo MARK3; ip -br a\r"
+> expect "MARK3"
+> expect ":~#"
+> send "exit\r"
+> expect eof
+> EOF
+root@4690d664d417:/app# sleep 30
+expect /app/probe.exp
+root@4690d664d417:/app# expect /app/probe.exp
+spawn telnet 127.0.0.1 4444
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+echo '=====PROBE LOG====='; cat /tmp/probe.log
+

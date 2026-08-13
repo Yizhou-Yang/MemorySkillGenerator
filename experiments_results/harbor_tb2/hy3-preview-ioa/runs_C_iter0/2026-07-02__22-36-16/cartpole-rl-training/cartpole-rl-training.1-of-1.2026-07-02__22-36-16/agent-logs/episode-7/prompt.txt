@@ -1,0 +1,61 @@
+New Terminal Output:
+
+root@bb9a504cc244:/app# ls -la /app
+total 16
+drwxr-xr-x  2 root root 4096 Jul  2 13:59 .
+drwxr-xr-x 19 root root 4096 Jul  2 16:50 ..
+-rw-r--r--  1 root root  651 Jul  2 13:59 run.py
+-rw-r--r--  1 root root  843 Jul  2 13:59 test.py
+root@bb9a504cc244:/app# cat > /app/agent.py << 'PYEOF'
+> import os
+> import numpy as np
+> import torch
+> import torch.nn as nn
+>
+>
+> class QNetwork(nn.Module):
+>     def __init__(self, state_dim=4, action_dim=2, hidden=64):
+>         super().__init__()
+>         self.net = nn.Sequential(
+>             nn.Linear(state_dim, hidden),
+>             nn.ReLU(),
+>             nn.Linear(hidden, hidden),
+>             nn.ReLU(),
+>             nn.Linear(hidden, action_dim),
+>         )
+>
+>     def forward(self, x):
+>         return self.net(x)
+>
+>
+> class Agent:
+>     def __init__(self, state_dim=4, action_dim=2, hidden=64):
+>         self.state_dim = state_dim
+>         self.action_dim = action_dim
+>         self.hidden = hidden
+>         self.policy_net = QNetwork(state_dim, action_dim, hidden)
+>
+>     def select_action(self, current_observation):
+>         obs = np.asarray(current_observation, dtype=np.float32)
+>         self.policy_net.eval()
+>         with torch.no_grad():
+>             t = torch.from_numpy(obs).unsqueeze(0)
+>             q = self.policy_net(t)
+>             a = int(q.argmax(dim=1).item())
+>         self.policy_net.train()
+>         return a
+>
+>     def save(self, directory):
+>         os.makedirs(directory, exist_ok=True)
+>         path = os.path.join(directory, "qnet.pt")
+>         torch.save(self.policy_net.state_dict(), path)
+>
+>     def load(self, directory):
+>         path = os.path.join(directory, "qnet.pt")
+>         state = torch.load(path, map_location="cpu")
+>         self.policy_net.load_state_dict(state)
+>         self.policy_net.eval()
+> PYEOF
+root@bb9a504cc244:/app# python3 -c "import ast; ast.parse(open('/app/agent.py').read()); print('agent.py OK')"
+agent.py OK
+root@bb9a504cc244:/app#

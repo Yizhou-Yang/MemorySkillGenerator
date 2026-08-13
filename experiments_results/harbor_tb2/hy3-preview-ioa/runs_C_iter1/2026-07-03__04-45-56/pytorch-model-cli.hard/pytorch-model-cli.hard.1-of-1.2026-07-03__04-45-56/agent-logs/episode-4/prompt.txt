@@ -1,0 +1,82 @@
+New Terminal Output:
+
+root@51ada88f97d6:/app# cat > /app/extract_weights.py << 'PYEOF'
+> import sys, json, struct, pickle, zipfile
+>
+> class StorageType:
+>     def __init__(self, name):
+>         n = name.lower()
+>         if 'double' in n:
+>             self.fmt='d'; self.itemsize=8
+>         elif 'long' in n or 'int64' in n:
+>             self.fmt='q'; self.itemsize=8
+>         elif 'int' in n:
+>             self.fmt='i'; self.itemsize=4
+>         else:
+>             self.fmt='f'; self.itemsize=4
+>
+> class Tensor:
+>     def __init__(self, data, shape):
+>         self.data=list(data); self.shape=list(shape)
+>
+> def rebuild_tensor_v2(storage, offset, size, stride, requires_grad, backward_hooks):
+>     numel=1
+>     for s in size:
+>         numel*=s
+>     return Tensor(storage[offset:offset+numel], list(size))
+>
+> class U(pickle.Unpickler):
+>     def __init__(self, file, zf):
+>         super().__init__(file); self.zf=zf
+>     def find_class(self, module, name):
+>         if module=='torch._utils' and name=='_rebuild_tensor_v2':
+>             return rebuild_tensor_v2
+>         if 'Storage' in name:
+>             return StorageType(name)
+>         return super().find_class(module, name)
+>     def persistent_load(self, pid):
+>         if isinstance(pid, tuple) and pid[0]=='storage':
+>             st=pid[1]; key=pid[2]; loc=pid[3]; numel=pid[4]
+>             if isinstance(key, bytes):
+>                 key=key.decode()
+>             data=self.zf.read('archive/data/'+key)
+>             n=len(data)//st.itemsize
+>             return list(struct.unpack('<'+str(n)+st.fmt, data))
+>         raise pickle.UnpicklingError('persist '+repr(pid))
+>
+> with zipfile.ZipFile('/app/model.pth') as zf:
+>     pkls=[n for n in zf.namelist() if n.endswith('data.pkl')]
+>     with zf.open(pkls[0]) as f:
+>         obj=U(f, zf).load()
+>
+> state=obj
+> if isinstance(obj, dict):
+>     for cand in ('state_dict','model','net'):
+>         if cand in obj and isinstance(obj[cand], dict):
+>             state=obj[cand]; break
+>
+> out={}
+> for k,v in state.items():
+>     out[k]={'shape':v.shape,'data':v.data}
+> with open('/app/weights.json','w') as f:
+>     json.dump(out, f)
+> print('loaded params:')
+> for k,v in out.items():
+>     print(' ', k, v['shape'])
+> PYEOF
+root@51ada88f97d6:/app# python3 /app/extract_weights.py
+Traceback (most recent call last):
+  File "/app/extract_weights.py", line 47, in <module>
+    obj=U(f, zf).load()
+  File "/app/extract_weights.py", line 39, in persistent_load
+    data=self.zf.read('archive/data/'+key)
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1598, in read
+    with self.open(name, "r", pwd) as fp:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1635, in open
+    zinfo = self.getinfo(name)
+  File "/usr/local/lib/python3.13/zipfile/__init__.py", line 1563, in getinfo
+    raise KeyError(
+        'There is no item named %r in the archive' % name)
+KeyError: "There is no item named 'archive/data/0' in the archive"
+root@51ada88f97d6:/app#

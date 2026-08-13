@@ -1,0 +1,44 @@
+New Terminal Output:
+
+root@a1c701ec22aa:/app# cat > /tmp/cache_model.py << 'EOF'
+> import os
+> from huggingface_hub import snapshot_download
+> from transformers import AutoTokenizer, AutoModel
+>
+> REPO = "albert/albert-base-v2"
+>
+> # 1) Pull ALL repo files so the cache is fully offline-capable
+> dl = snapshot_download(repo_id=REPO, local_dir=None)
+> print("snapshot_download ->", dl)
+>
+> # 2) Materialize tokenizer and model into the cache explicitly
+> AutoTokenizer.from_pretrained(REPO)
+> print("tokenizer cached")
+> AutoModel.from_pretrained(REPO)
+> print("model cached")
+> print("DONE")
+> EOF
+root@a1c701ec22aa:/app# HF_HOME=/sys/fs/cgroup/hfcache python3 /tmp/cache_model.py
+Downloading (incomplete total...): 0.00B [00:00, ?B/s]                                                                                                         W
+arning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.| 0/12 [00:00<?, ?it/s]
+Fetching 12 files: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████| 12/12 [00:04<00:00,  2.47it/s]
+Download complete: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████| 268M/268M [00:04<00:00, 62.0MB/s]s
+napshot_download -> /sys/fs/cgroup/hfcache/hub/models--albert--albert-base-v2/snapshots/8e2f239c5f8a2c0f253781ca60135db913e5c80c
+Download complete: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████| 268M/268M [00:07<00:00, 34.8MB/s]
+tokenizer cached
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████| 25/25 [00:00<00:00, 12733.16it/s]
+[transformers] AlbertModel LOAD REPORT from: albert/albert-base-v2
+Key                          | Status     |  |
+-----------------------------+------------+--+-
+predictions.dense.weight     | UNEXPECTED |  |
+predictions.LayerNorm.weight | UNEXPECTED |  |
+predictions.bias             | UNEXPECTED |  |
+predictions.LayerNorm.bias   | UNEXPECTED |  |
+predictions.decoder.bias     | UNEXPECTED |  |
+predictions.dense.bias       | UNEXPECTED |  |
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+model cached
+DONE
+

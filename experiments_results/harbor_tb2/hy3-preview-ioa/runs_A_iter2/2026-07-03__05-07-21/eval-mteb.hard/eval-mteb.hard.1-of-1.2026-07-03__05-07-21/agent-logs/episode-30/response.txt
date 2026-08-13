@@ -1,0 +1,14 @@
+{
+  "analysis": "Found `has_sufficient_disk_space` in datasets/utils/py_utils.py:559. I'll monkeypatch it to return True so the download proceeds (writes clearly work since the model downloaded). Then re-run the evaluation.",
+  "plan": "Rewrite run_eval.py to monkeypatch `datasets.utils.py_utils.has_sufficient_disk_space` to always return True. Re-run. The dataset (~a few MB for STS12) will download and evaluation will run. Then verify the output JSON exists at the correct path with cosine_spearman > 0.7.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/run_eval.py <<'PY'\nimport datasets.utils.py_utils as _pu\n_pu.has_sufficient_disk_space = lambda needed_bytes, directory=\".\": True\n\nimport mteb\n\nmodel_name = \"sentence-transformers/all-mpnet-base-v2\"\nmodel = mteb.get_model(model_name)\ntask = mteb.get_task(\"STS12\")\nevaluation = mteb.MTEB(tasks=[task])\nresults = evaluation.run(model, eval_splits=[\"test\"], output_folder=\"results\")\nprint(\"DONE\")\nprint(results)\nPY\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cd /app && python3 run_eval.py 2>&1 | tail -40\n",
+      "duration": 60.0
+    }
+  ]
+}

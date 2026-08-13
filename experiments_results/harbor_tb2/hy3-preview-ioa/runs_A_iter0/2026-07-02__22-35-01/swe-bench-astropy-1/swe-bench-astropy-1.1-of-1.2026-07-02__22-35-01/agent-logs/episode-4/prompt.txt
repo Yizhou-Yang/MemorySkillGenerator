@@ -1,0 +1,85 @@
+New Terminal Output:
+
+root@64f840f9395e:/app/astropy# sed -n '800,880p' /app/astropy/astropy/modeling/core.py
+            except TypeError:
+                try:
+                    return len(self.outputs)
+                except AttributeError:
+                    return 0
+
+        return self.__class__.n_outputs
+
+    def _calculate_separability_matrix(self):
+        """
+        This is a hook which customises the behavior of modeling.separable.
+
+        This allows complex subclasses to customise the separability matrix.
+        If it returns `NotImplemented` the default behavior is used.
+        """
+        return NotImplemented
+
+    def _initialize_unit_support(self):
+        """
+        Convert self._input_units_strict and
+        self.input_units_allow_dimensionless to dictionaries
+        mapping input name to a boolean value.
+        """
+        if isinstance(self._input_units_strict, bool):
+            self._input_units_strict = {key: self._input_units_strict for
+                                        key in self.inputs}
+
+        if isinstance(self._input_units_allow_dimensionless, bool):
+            self._input_units_allow_dimensionless = {key: self._input_units_allow_dimensionless
+                                                     for key in self.inputs}
+
+    @property
+    def input_units_strict(self):
+        """
+        Enforce strict units on inputs to evaluate. If this is set to True,
+        input values to evaluate will be in the exact units specified by
+        input_units. If the input quantities are convertible to input_units,
+        they are converted. If this is a dictionary then it should map input
+        name to a bool to set strict input units for that parameter.
+        """
+        val = self._input_units_strict
+        if isinstance(val, bool):
+            return {key: val for key in self.inputs}
+        return dict(zip(self.inputs, val.values()))
+
+    @property
+    def input_units_allow_dimensionless(self):
+        """
+        Allow dimensionless input (and corresponding output). If this is True,
+        input values to evaluate will gain the units specified in input_units. If
+        this is a dictionary then it should map input name to a bool to allow
+        dimensionless numbers for that input.
+        Only has an effect if input_units is defined.
+        """
+
+        val = self._input_units_allow_dimensionless
+        if isinstance(val, bool):
+            return {key: val for key in self.inputs}
+        return dict(zip(self.inputs, val.values()))
+
+    @property
+    def uses_quantity(self):
+        """
+        True if this model has been created with `~astropy.units.Quantity`
+        objects or if there are no parameters.
+
+        This can be used to determine if this model should be evaluated with
+        `~astropy.units.Quantity` or regular floats.
+        """
+        pisq = [isinstance(p, Quantity) for p in self._param_sets(units=True)]
+        return (len(pisq) == 0) or any(pisq)
+
+    def __repr__(self):
+        return self._format_repr()
+
+    def __str__(self):
+        return self._format_str()
+
+    def __len__(self):
+        return self._n_models
+
+root@64f840f9395e:/app/astropy#

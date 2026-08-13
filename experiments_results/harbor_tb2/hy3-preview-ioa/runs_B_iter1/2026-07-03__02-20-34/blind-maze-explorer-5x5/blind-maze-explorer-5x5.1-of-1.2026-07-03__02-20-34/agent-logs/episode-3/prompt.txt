@@ -1,0 +1,74 @@
+New Terminal Output:
+
+root@61f3b1e91975:/app# cat > /app/explore.py << 'PYEOF'
+> import os, pty, subprocess, select, sys
+> sys.setrecursionlimit(1000000)
+> master, slave = pty.openpty()
+> proc = subprocess.Popen(['python3','/protected/maze_server.py'], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+> os.close(slave)
+> buf = ''
+> def read_line(timeout=10):
+>     global buf
+>     while '\n' not in buf:
+>         r,_,_ = select.select([master],[],[],timeout)
+>         if not r:
+>             raise TimeoutError('no data')
+>         data = os.read(master, 65536)
+>         if not data:
+>             raise EOFError('closed')
+>         buf += data.decode(errors='replace')
+>     line, buf = buf.split('\n',1)
+>     return line
+> for _ in range(4):
+>     read_line()
+> def send_move(d):
+>     os.write(master, ('move %s\n' % d).encode())
+>     line = read_line()
+>     return line.split('>')[-1].strip()
+> delta = {'N':(-1,0),'S':(1,0),'E':(0,1),'W':(0,-1)}
+> opp = {'N':'S','S':'N','E':'W','W':'E'}
+> order = ['N','S','E','W']
+> visited = set()
+> start = (0,0)
+> visited.add(start)
+> E_pos = [None]
+> def dfs(r,c):
+>     for d in order:
+>         dr,dc = delta[d]
+>         nr,nc = r+dr, c+dc
+>         if (nr,nc) in visited:
+>             continue
+>         res = send_move(d)
+>         if res == 'hit wall':
+>             continue
+>         if res == 'reached exit':
+>             E_pos[0] = (nr,nc)
+>         visited.add((nr,nc))
+>         dfs(nr,nc)
+>         send_move(opp[d])
+> dfs(0,0)
+> os.write(master, b'exit\n')
+> positions = list(visited)
+> minr = min(p[0] for p in positions)
+> maxr = max(p[0] for p in positions)
+> minc = min(p[1] for p in positions)
+> maxc = max(p[1] for p in positions)
+> H = maxr - minr + 3
+> W = maxc - minc + 3
+> grid = [['#']*W for _ in range(H)]
+> for (r,c) in visited:
+>     grid[r-minr+1][c-minc+1] = ' '
+> sr,sc = start
+> grid[sr-minr+1][sc-minc+1] = 'S'
+> if E_pos[0] is not None:
+>     er,ec = E_pos[0]
+>     grid[er-minr+1][ec-minc+1] = 'E'
+> lines = [''.join(row) for row in grid]
+> maze_str = '\n'.join(lines)
+> with open('/app/maze_map.txt','w') as f:
+>     f.write(maze_str + '\n')
+> print('DONE')
+> print(maze_str)
+> PYEOF
+root@61f3b1e91975:/app# python3 /app/explore.py
+

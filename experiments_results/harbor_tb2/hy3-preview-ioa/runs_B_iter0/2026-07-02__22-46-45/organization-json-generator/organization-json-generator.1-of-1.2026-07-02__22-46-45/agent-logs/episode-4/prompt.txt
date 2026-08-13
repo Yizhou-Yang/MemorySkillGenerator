@@ -1,0 +1,96 @@
+New Terminal Output:
+
+United,On Hold,D005-E001;D005-E002,2025-11-30,D005root@c528b462137e:/app# cat > process.py << 'EOF'
+> import csv, json, datetime
+> from collections import defaultdict
+>
+> with open('data/departments.csv') as f:
+>     departments = list(csv.DictReader(f))
+> with open('data/employees.csv') as f:
+>     employees = list(csv.DictReader(f))
+> with open('data/projects.csv') as f:
+>     projects = list(csv.DictReader(f))
+>
+> emp_by_dept = defaultdict(list)
+> for e in employees:
+>     emp_by_dept[e['department_id']].append(e)
+>
+> proj_by_dept = defaultdict(list)
+> for p in projects:
+>     proj_by_dept[p['department_id']].append(p)
+>
+> dept_list = []
+> for d in departments:
+>     did = d['id']
+>     emps = []
+>     for e in emp_by_dept.get(did, []):
+>         emps.append({
+>             'id': e['id'],
+>             'name': e['name'],
+>             'position': e['position'],
+>             'skills': [s.strip() for s in e['skills'].split(';') if s.strip()],
+>             'years_of_service': int(e['years_of_service'])
+>         })
+>     projs = []
+>     for p in proj_by_dept.get(did, []):
+>         projs.append({
+>             'name': p['name'],
+>             'status': p['status'],
+>             'members': [m.strip() for m in p['member_ids'].split(';') if m.strip()],
+>             'deadline': p['deadline']
+>         })
+>     dept_list.append({
+>         'id': did,
+>         'name': d['name'],
+>         'budget': float(d['budget']),
+>         'employees': emps,
+>         'projects': projs
+>     })
+>
+> budgets = [d['budget'] for d in dept_list]
+> avg_budget = sum(budgets) / len(budgets) if budgets else 0
+> total_emps = len(employees)
+>
+> skill_dist = defaultdict(int)
+> years = []
+> for e in employees:
+>     years.append(int(e['years_of_service']))
+>     for s in e['skills'].split(';'):
+>         s = s.strip()
+>         if s:
+>             skill_dist[s] += 1
+> avg_years = sum(years) / len(years) if years else 0
+>
+> dept_sizes = {d['name']: len(d['employees']) for d in dept_list}
+>
+> status_dist = defaultdict(int)
+> for p in projects:
+>     status_dist[p['status']] += 1
+>
+> out = {
+>     'metadata': {
+>         'version': '1.0',
+>         'timestamp': datetime.datetime.now().isoformat(),
+>         'generator': 'CSV-to-JSON Processor'
+>     },
+>     'organization': {
+>         'name': 'Global Tech Organization',
+>         'founded': '2020-01-01',
+>         'departments': dept_list
+>     },
+>     'statistics': {
+>         'averageDepartmentBudget': round(avg_budget, 2),
+>         'totalEmployees': total_emps,
+>         'skillDistribution': dict(skill_dist),
+>         'departmentSizes': dept_sizes,
+>         'projectStatusDistribution': dict(status_dist),
+>         'averageYearsOfService': round(avg_years, 2)
+>     }
+> }
+>
+> with open('organization.json', 'w') as f:
+>     json.dump(out, f, indent=2)
+> print('Wrote organization.json')
+> EOF
+root@c528b462137e:/app# python3 process.py
+

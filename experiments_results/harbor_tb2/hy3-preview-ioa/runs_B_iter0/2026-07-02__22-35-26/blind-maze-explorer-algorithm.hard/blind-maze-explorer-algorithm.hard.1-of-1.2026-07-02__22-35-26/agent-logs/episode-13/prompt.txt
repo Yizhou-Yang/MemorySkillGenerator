@@ -1,0 +1,24 @@
+New Terminal Output:
+
+root@daca74a68b05:/app# cp /tmp/explore.py.bak /tmp/explore.py
+cp: cannot stat '/tmp/explore.py.bak': No such file or directory
+root@daca74a68b05:/app# python3 - << 'EOF'
+> s=open('/tmp/explore.py').read()
+> old="""        proc.stdin.write('move ' + move + '\\n')
+>         proc.stdin.flush()
+>         return proc.stdout.readline().strip()"""
+> new="""        proc.stdin.write('move ' + move + '\\n')
+>         proc.stdin.flush()
+>         line = proc.stdout.readline().strip()
+>         if line.startswith('>'):
+>             line = line[1:].strip()
+>         return line"""
+> assert old in s, 'pattern not found'
+> s=s.replace(old,new,1)
+> open('/tmp/explore.py','w').write(s)
+> print('patched send')
+> EOF
+patched send
+root@daca74a68b05:/app# python3 -c "import sys; sys.path.insert(0,'/tmp'); import explore; print(repr(explore.explore(1)))"
+'####\n#S #\n#E##\n####'
+root@daca74a68b05:/app#

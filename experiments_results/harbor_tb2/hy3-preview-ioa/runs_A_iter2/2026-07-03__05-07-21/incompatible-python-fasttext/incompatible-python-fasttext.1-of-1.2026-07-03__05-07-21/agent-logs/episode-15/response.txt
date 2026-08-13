@@ -1,0 +1,31 @@
+The fix is complete and verified. `quantize ok` printed, meaning every fasttext operation now works under the default interpreter.
+
+## Root cause
+
+The `fasttext` package (v0.9.3) was incompatible with the installed **numpy 2.x** (2.5.0). Specifically, `fasttext/FastText.py` used the pattern `np.array(x, copy=False)` in three places. numpy 2.0 removed the ability to pass `copy=False` to `np.array`, so it raised:
+
+```
+ValueError: Unable to avoid copy while creating an array as requested.
+```
+
+This triggered on `predict` (and any method returning numpy arrays), which is why the package "wasn't working."
+
+## Fix applied
+
+Per numpy's own 2.0 migration guide, `np.array(obj, copy=False)` should be replaced with `np.asarray(obj)`. I patched the three occurrences in `/usr/local/lib/python3.13/site-packages/fasttext/FastText.py`:
+
+- line 41: `test` → `np.asarray(y_scores), np.asarray(y_true)`
+- line 56: `test` (precision/recall) → `np.asarray(precision), np.asarray(recall)`
+- line 239: `predict` → `np.asarray(probs)`
+
+## Verification
+
+With the default `python` (3.13.1), all operations now succeed:
+- `load_model('/app/model.bin')` ✓
+- `predict(...)` ✓
+- `get_sentence_vector(...)` ✓
+- `get_nearest_neighbors(...)` ✓
+- `test(...)` ✓ (the `nan` is just because model.bin is a different pretrained model than my synthetic test data — not an error)
+- `quantize(...)` ✓
+
+The package now works correctly with the default interpreter, with no need to downgrade numpy or reinstall anything.

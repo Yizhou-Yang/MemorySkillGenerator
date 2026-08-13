@@ -1,0 +1,28 @@
+<br>
+
+{
+  "analysis": "Interesting finding: getent resolves example.com fine (returns IPv6 addresses), so NSS/DNS is actually working. But curl reports 'DNS resolution error'. This suggests curl specifically isn't using the system resolver the same way — possibly a curl built with its own resolver (c-ares), a curlrc config, an alias, or curl preferring a query type that fails. Need to dig into curl itself.",
+  "plan": "1) Check curl type/version and whether it's an alias. 2) Check for curlrc config files. 3) Check /etc/nsswitch.conf. 4) Test curl with -4 vs -6 to isolate IPv4 vs IPv6. 5) Test curl against the DNS server directly. This will pinpoint why curl specifically fails while getent works.",
+  "commands": [
+    {
+      "keystrokes": "type curl; curl --version\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "cat ~/.curlrc 2>/dev/null; cat /etc/curlrc 2>/dev/null; echo done\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "grep hosts /etc/nsswitch.conf\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "curl -4 example.com -o /dev/null -w \"%{http_code}\\n\" --max-time 5; echo \"v4 exit=$?\"\n",
+      "duration": 6.0
+    },
+    {
+      "keystrokes": "curl -6 example.com -o /dev/null -w \"%{http_code}\\n\" --max-time 5; echo \"v6 exit=$?\"\n",
+      "duration": 6.0
+    }
+  ]
+}

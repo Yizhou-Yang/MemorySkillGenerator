@@ -1,0 +1,45 @@
+New Terminal Output:
+
+root@60a81b02434b:/app# cat > /app/sitecustomize.py << 'PYEOF'
+> import ctypes as _ctypes
+> import os as _os
+>
+> _orig_CDLL = _ctypes.CDLL
+>
+> _CUDA_PREFIXES = (
+>     "libcublaslt", "libcublas", "libcudnn", "libnvrtc", "libnvrtc-builtins",
+>     "libcudart", "libcupti", "libcufft", "libcurand", "libnvjitlink",
+>     "libcusparse", "libcusparselt", "libcusolver", "libnccl", "libnvshmem",
+>     "libcufile", "libnvtoolsext", "libnvidia-ml",
+> )
+>
+> def _is_cuda_lib(path):
+>     if not path:
+>         return False
+>     p = str(path).lower()
+>     if "nvidia" in p:
+>         return True
+>     base = _os.path.basename(p)
+>     for pre in _CUDA_PREFIXES:
+>         if base.startswith(pre):
+>             return True
+>     return False
+>
+> class _NoopCDLL:
+>     def __init__(self, *a, **k):
+>         pass
+>     def __getattr__(self, n):
+>         raise AttributeError(n)
+>
+> def _patched_CDLL(*args, **kwargs):
+>     path = args[0] if args else kwargs.get("name")
+>     if _is_cuda_lib(path):
+>         return _NoopCDLL()
+>     return _orig_CDLL(*args, **kwargs)
+>
+> _ctypes.CDLL = _patched_CDLL
+> PYEOF
+root@60a81b02434b:/app# export PYTHONPATH=/app
+root@60a81b02434b:/app# timeout 30 python3 -c "import torch; print('torch', torch.__version__); print('cuda avail', torch.cuda.is_available())" 2>&1 | tail -10
+Terminated
+root@60a81b02434b:/app#

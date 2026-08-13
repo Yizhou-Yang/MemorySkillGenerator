@@ -1,0 +1,275 @@
+root@e369e47bbb57:/app# which gcc gcov make wget curl 2>&1; gcc --version | head -1
+bash: gcc: command not found
+root@e369e47bbb57:/app# ls -la /app 2>&1
+total 8
+drwxr-xr-x  2 root root 4096 May 28  2025 .
+drwxr-xr-x 19 root root 4096 Jul  2 22:51 ..
+root@e369e47bbb57:/app# cat /etc/os-release | head -3
+PRETTY_NAME="Ubuntu 24.04.2 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+root@e369e47bbb57:/app# apt-get --version 2>&1 | head -1
+apt 2.7.14 (amd64)
+root@e369e47bbb57:/app# apt-get update 2>&1 | tail -5
+Get:17 http://archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Packages [671 B]
+Get:18 http://archive.ubuntu.com/ubuntu noble-backports/main amd64 Packages [48.9 kB]
+Get:19 http://archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [35.9 kB]
+Fetched 31.2 MB in 3s (10.3 MB/s)
+Reading package lists...
+root@e369e47bbb57:/app# apt-get install -y gcc make wget 2>&1 | tail -8
+  libxpm4 linux-libc-dev make manpages manpages-dev publicsuffix rpcsvc-proto
+  wget
+The following packages will be upgraded:
+  gcc-14-base libc-bin libc6 libgcc-s1 libstdc++6
+5 upgraded, 71 newly installed, 0 to remove and 46 not upgraded.
+Need to get 70.2 MB of archives.
+After this operation, 217 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@e369e47bbb57:/app# df -h / /var /tmp 2>&1
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  960G     0 100% /
+fuse-overlayfs  984G  960G     0 100% /
+fuse-overlayfs  984G  960G     0 100% /
+root@e369e47bbb57:/app# du -sh /var/lib/apt/lists /var/cache/apt/archives 2>/dev/null
+49M     /var/lib/apt/lists
+8.0K    /var/cache/apt/archives
+root@e369e47bbb57:/app# ls -la /app
+total 8
+drwxr-xr-x  2 root root 4096 May 28  2025 .
+drwxr-xr-x 19 root root 4096 Jul  2 22:51 ..
+root@e369e47bbb57:/app# apt-get clean 2>&1; df -h / 2>&1
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  960G     0 100% /
+root@e369e47bbb57:/app# du -sh /usr /var /opt /root /home 2>/dev/null
+123M    /usr
+56M     /var
+4.0K    /opt
+32K     /root
+20K     /home
+root@e369e47bbb57:/app# df -h 2>&1
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  959G     0 100% /
+tmpfs            64M     0   64M   0% /dev
+tmpfs            32G     0   32G   0% /sys/fs/cgroup
+shm              64M   24K   64M   1% /dev/shm
+/dev/vdb        984G  959G     0 100% /logs
+overlay         984G  959G     0 100% /etc/hosts
+tmpfs            32G     0   32G   0% /proc/acpi
+tmpfs            32G     0   32G   0% /proc/scsi
+tmpfs            32G     0   32G   0% /sys/firmware
+root@e369e47bbb57:/app# du -h --max-depth=1 / 2>/dev/null | sort -h | tail -20
+0       /dev
+0       /proc
+0       /sys
+4.0K    /app
+4.0K    /boot
+4.0K    /media
+4.0K    /mnt
+4.0K    /opt
+4.0K    /srv
+12K     /tmp
+16K     /logs
+16K     /run
+20K     /home
+32K     /root
+1.5M    /etc
+56M     /var
+123M    /usr
+179M    /
+root@e369e47bbb57:/app# apt-get -o Acquire::Check-Free-Space=false install -y gcc make wget 2>&1 | tail -8
+  libxpm4 linux-libc-dev make manpages manpages-dev publicsuffix rpcsvc-proto
+  wget
+The following packages will be upgraded:
+  gcc-14-base libc-bin libc6 libgcc-s1 libstdc++6
+5 upgraded, 71 newly installed, 0 to remove and 46 not upgraded.
+Need to get 70.2 MB of archives.
+After this operation, 217 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@e369e47bbb57:/app# df -i / 2>&1
+Filesystem       Inodes    IUsed    IFree IUse% Mounted on
+fuse-overlayfs 65536000 13178507 52357493   21% /
+root@e369e47bbb57:/app# lsof 2>/dev/null | grep -i deleted | head -20
+root@e369e47bbb57:/app# dd if=/dev/zero of=/tmp/space_test bs=1M count=50 2>&1; echo EXIT=$?; rm -f /tmp/space_test
+50+0 records in
+50+0 records out
+52428800 bytes (52 MB, 50 MiB) copied, 0.0677563 s, 774 MB/s
+EXIT=0
+root@e369e47bbb57:/app# mount -t tmpfs -o size=4g tmpfs /var/cache/apt/archives 2>&1; df -h /var/cache/apt/archives
+mount: /var/cache/apt/archives: permission denied.
+       dmesg(1) may have more information after failed mount system call.
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  957G     0 100% /
+root@e369e47bbb57:/app# apt-get -o Acquire::Check-Free-Space=false install -y gcc make wget 2>&1 | tail -10
+  libpng16-16t64 libpsl5t64 libquadmath0 libsframe1 libsharpyuv0 libtiff6
+  libtsan2 libubsan1 libwebp7 libx11-6 libx11-data libxau6 libxcb1 libxdmcp6
+  libxpm4 linux-libc-dev make manpages manpages-dev publicsuffix rpcsvc-proto
+  wget
+The following packages will be upgraded:
+  gcc-14-base libc-bin libc6 libgcc-s1 libstdc++6
+5 upgraded, 71 newly installed, 0 to remove and 46 not upgraded.
+Need to get 70.2 MB of archives.
+After this operation, 217 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@e369e47bbb57:/app# unshare -m true 2>&1; echo UNSHARE_EXIT=$?
+unshare: unshare failed: Operation not permitted
+UNSHARE_EXIT=1
+root@e369e47bbb57:/app# which python3 perl curl 2>&1; echo '---'
+/usr/bin/python3
+/usr/bin/perl
+---
+root@e369e47bbb57:/app# apt-get -o Acquire::Check-Free-Space=false --print-uris install gcc make wget > /tmp/uris.txt 2>/dev/null; wc -l /tmp/uris.txt; head -5
+/tmp/uris.txt
+120 /tmp/uris.txt
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  binutils binutils-common binutils-x86-64-linux-gnu cpp cpp-13
+root@e369e47bbb57:/app# cat /tmp/uris.txt | head -20; echo '---LINES---'; wc -l /tmp/uris.txt
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  binutils binutils-common binutils-x86-64-linux-gnu cpp cpp-13
+  cpp-13-x86-64-linux-gnu cpp-x86-64-linux-gnu fontconfig-config
+  fonts-dejavu-core fonts-dejavu-mono gcc-13 gcc-13-base
+  gcc-13-x86-64-linux-gnu gcc-14-base gcc-x86-64-linux-gnu libaom3 libasan8
+  libatomic1 libbinutils libbrotli1 libbsd0 libc-bin libc-dev-bin
+  libc-devtools libc6 libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0 libctf0
+  libdeflate0 libfontconfig1 libfreetype6 libgcc-13-dev libgcc-s1 libgd3
+  libgomp1 libgprofng0 libheif-plugin-aomdec libheif-plugin-aomenc libheif1
+  libhwasan0 libisl23 libitm1 libjansson4 libjbig0 libjpeg-turbo8 libjpeg8
+  liblerc4 liblsan0 libmpc3 libmpfr6 libpng16-16t64 libpsl5t64 libquadmath0
+  libsframe1 libsharpyuv0 libstdc++6 libtiff6 libtsan2 libubsan1 libwebp7
+  libx11-6 libx11-data libxau6 libxcb1 libxdmcp6 libxpm4 linux-libc-dev
+  manpages manpages-dev publicsuffix rpcsvc-proto
+Suggested packages:
+  binutils-doc gprofng-gui cpp-doc gcc-13-locales cpp-13-doc gcc-multilib
+  autoconf automake libtool flex bison gdb gcc-doc gcc-13-multilib gcc-13-doc
+---LINES---
+120 /tmp/uris.txt
+root@e369e47bbb57:/app# apt-get -o Acquire::Check-Free-Space=false --print-uris install gcc make wget 2>/dev/null | grep "^'" > /tmp/urls.txt; wc -l /tmp/urls.t
+xt; head -3 /tmp/urls.txt
+76 /tmp/urls.txt
+'http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-14/gcc-14-base_14.2.0-4ubuntu2%7e24.04.1_amd64.deb' gcc-14-base_14.2.0-4ubuntu2~24.04.1_amd64.deb 51014 MD5Sum
+:f6c586006a8a1ddd2b219d2631c2406e
+'http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-14/libgcc-s1_14.2.0-4ubuntu2%7e24.04.1_amd64.deb' libgcc-s1_14.2.0-4ubuntu2~24.04.1_amd64.deb 78392 MD5Sum:411
+f8e32d3e5f2bafbc96efd150a9aaa
+'http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-14/libstdc%2b%2b6_14.2.0-4ubuntu2%7e24.04.1_amd64.deb' libstdc++6_14.2.0-4ubuntu2~24.04.1_amd64.deb 792064 MD5
+Sum:e75dd005d377d610d20a2c9066ba062f
+root@e369e47bbb57:/app# cat > /tmp/dl.py << 'EOF'
+> import urllib.request, re, os, sys
+> os.makedirs('/tmp/debs', exist_ok=True)
+> urls=[]
+> for line in open('/tmp/urls.txt'):
+>     line=line.strip()
+>     if not line.startswith("'"): continue
+>     m=re.match(r"'([^']+)'\s+(\S+)", line)
+>     if not m: continue
+>     url, fn = m.group(1), m.group(2)
+>     urls.append((url, fn))
+> print('urls:', len(urls))
+> for url, fn in urls:
+>     dst='/tmp/debs/'+fn
+>     try:
+>         urllib.request.urlretrieve(url, dst)
+>         print('OK', fn)
+>     except Exception as e:
+>         print('FAIL', fn, e)
+> EOF
+root@e369e47bbb57:/app# python3 /tmp/dl.py 2>&1 | tail -20
+FAIL libsharpyuv0_1.3.2-0.4build3_amd64.deb HTTP Error 403: Forbidden
+FAIL libheif-plugin-aomdec_1.17.6-1ubuntu4.4_amd64.deb HTTP Error 403: Forbidden
+FAIL libheif1_1.17.6-1ubuntu4.4_amd64.deb HTTP Error 403: Forbidden
+FAIL libjpeg-turbo8_2.1.5-2ubuntu2_amd64.deb HTTP Error 403: Forbidden
+FAIL libjpeg8_8c-2ubuntu11_amd64.deb HTTP Error 403: Forbidden
+FAIL libdeflate0_1.19-1build1.1_amd64.deb HTTP Error 403: Forbidden
+FAIL libjbig0_2.1-6.1ubuntu2_amd64.deb HTTP Error 403: Forbidden
+FAIL liblerc4_4.0.0+ds-4ubuntu2_amd64.deb HTTP Error 403: Forbidden
+FAIL libwebp7_1.3.2-0.4build3_amd64.deb HTTP Error 403: Forbidden
+FAIL libtiff6_4.5.1+git230720-4ubuntu2.5_amd64.deb HTTP Error 403: Forbidden
+FAIL libxpm4_1%3a3.5.17-1build2_amd64.deb HTTP Error 403: Forbidden
+FAIL libgd3_2.3.3-9ubuntu5_amd64.deb HTTP Error 403: Forbidden
+FAIL libc-devtools_2.39-0ubuntu8.7_amd64.deb HTTP Error 403: Forbidden
+FAIL linux-libc-dev_6.8.0-134.134_amd64.deb HTTP Error 403: Forbidden
+FAIL libcrypt-dev_1%3a4.4.36-4build1_amd64.deb HTTP Error 403: Forbidden
+FAIL rpcsvc-proto_1.4.2-0ubuntu7_amd64.deb HTTP Error 403: Forbidden
+FAIL libc6-dev_2.39-0ubuntu8.7_amd64.deb HTTP Error 403: Forbidden
+FAIL libheif-plugin-aomenc_1.17.6-1ubuntu4.4_amd64.deb HTTP Error 403: Forbidden
+FAIL make_4.3-4.1build2_amd64.deb HTTP Error 403: Forbidden
+FAIL manpages-dev_6.7-2_all.deb HTTP Error 403: Forbidden
+root@e369e47bbb57:/app# ls -la /tmp/debs | head; echo '---'; ls /tmp/debs | wc -l
+total 8
+drwxr-xr-x 2 root root 4096 Jul  2 22:59 .
+drwxrwxrwt 4 root root 4096 Jul  2 22:59 ..
+---
+0
+root@e369e47bbb57:/app# cat > /tmp/dl.py << 'EOF'
+> import urllib.request, re, os
+> os.makedirs('/tmp/debs', exist_ok=True)
+> urls=[]
+> for line in open('/tmp/urls.txt'):
+>     line=line.strip()
+>     if not line.startswith("'"): continue
+>     m=re.match(r"'([^']+)'\s+(\S+)", line)
+>     if not m: continue
+>     urls.append((m.group(1), m.group(2)))
+> print('urls:', len(urls))
+> opener=urllib.request.build_opener()
+> opener.addheaders=[('User-Agent','Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36')]
+> for url, fn in urls:
+>     dst='/tmp/debs/'+fn
+>     try:
+>         urllib.request.urlretrieve(url, dst)
+>         print('OK', fn, os.path.getsize(dst))
+>     except Exception as e:
+>         print('FAIL', fn, e)
+> EOF
+root@e369e47bbb57:/app# python3 /tmp/dl.py 2>&1 | tail -25
+FAIL libaom3_3.8.2-2ubuntu0.1_amd64.deb HTTP Error 403: Forbidden
+FAIL libbrotli1_1.1.0-2build2_amd64.deb HTTP Error 403: Forbidden
+FAIL libc-dev-bin_2.39-0ubuntu8.7_amd64.deb HTTP Error 403: Forbidden
+FAIL libfreetype6_2.13.2+dfsg-1ubuntu0.1_amd64.deb HTTP Error 403: Forbidden
+FAIL libfontconfig1_2.15.0-1.1ubuntu2_amd64.deb HTTP Error 403: Forbidden
+FAIL libsharpyuv0_1.3.2-0.4build3_amd64.deb HTTP Error 403: Forbidden
+FAIL libheif-plugin-aomdec_1.17.6-1ubuntu4.4_amd64.deb HTTP Error 403: Forbidden
+FAIL libheif1_1.17.6-1ubuntu4.4_amd64.deb HTTP Error 403: Forbidden
+FAIL libjpeg-turbo8_2.1.5-2ubuntu2_amd64.deb HTTP Error 403: Forbidden
+FAIL libjpeg8_8c-2ubuntu11_amd64.deb HTTP Error 403: Forbidden
+FAIL libdeflate0_1.19-1build1.1_amd64.deb HTTP Error 403: Forbidden
+FAIL libjbig0_2.1-6.1ubuntu2_amd64.deb HTTP Error 403: Forbidden
+FAIL liblerc4_4.0.0+ds-4ubuntu2_amd64.deb HTTP Error 403: Forbidden
+FAIL libwebp7_1.3.2-0.4build3_amd64.deb HTTP Error 403: Forbidden
+FAIL libtiff6_4.5.1+git230720-4ubuntu2.5_amd64.deb HTTP Error 403: Forbidden
+FAIL libxpm4_1%3a3.5.17-1build2_amd64.deb HTTP Error 403: Forbidden
+FAIL libgd3_2.3.3-9ubuntu5_amd64.deb HTTP Error 403: Forbidden
+FAIL libc-devtools_2.39-0ubuntu8.7_amd64.deb HTTP Error 403: Forbidden
+FAIL linux-libc-dev_6.8.0-134.134_amd64.deb HTTP Error 403: Forbidden
+FAIL libcrypt-dev_1%3a4.4.36-4build1_amd64.deb HTTP Error 403: Forbidden
+FAIL rpcsvc-proto_1.4.2-0ubuntu7_amd64.deb HTTP Error 403: Forbidden
+FAIL libc6-dev_2.39-0ubuntu8.7_amd64.deb HTTP Error 403: Forbidden
+FAIL libheif-plugin-aomenc_1.17.6-1ubuntu4.4_amd64.deb HTTP Error 403: Forbidden
+FAIL make_4.3-4.1build2_amd64.deb HTTP Error 403: Forbidden
+FAIL manpages-dev_6.7-2_all.deb HTTP Error 403: Forbidden
+root@e369e47bbb57:/app# env | grep -i proxy; ls /etc/apt/apt.conf.d/ 2>/dev/null; grep -ri proxy /etc/apt/ 2>/dev/null | head
+01-vendor-ubuntu  01autoremove  70debconf  docker-autoremove-suggests  docker-clean  docker-disable-periodic-update  docker-gzip-indexes  docker-no-languages
+root@e369e47bbb57:/app# apt-get -o APT::Acquire::Check-Free-Space=false install -y gcc make wget 2>&1 | tail -12
+  libheif-plugin-aomenc libheif1 libhwasan0 libisl23 libitm1 libjansson4
+  libjbig0 libjpeg-turbo8 libjpeg8 liblerc4 liblsan0 libmpc3 libmpfr6
+  libpng16-16t64 libpsl5t64 libquadmath0 libsframe1 libsharpyuv0 libtiff6
+  libtsan2 libubsan1 libwebp7 libx11-6 libx11-data libxau6 libxcb1 libxdmcp6
+  libxpm4 linux-libc-dev make manpages manpages-dev publicsuffix rpcsvc-proto
+  wget
+The following packages will be upgraded:
+  gcc-14-base libc-bin libc6 libgcc-s1 libstdc++6
+5 upgraded, 71 newly installed, 0 to remove and 46 not upgraded.
+Need to get 70.2 MB of archives.
+After this operation, 217 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@e369e47bbb57:/app# apt-config -o APT::Acquire::Check-Free-Space=false dump 2>/dev/null | grep -i freespace
+root@e369e47bbb57:/app# apt-config -o APT::Acquire::Check-Free-Space=false -o APT::Acquire::CheckFreeSpace=false dump 2>/dev/null | grep -i free
+APT::VersionedKernelPackages:: "kfreebsd-.*";
+APT::Acquire::Check-Free-Space "false";
+APT::Acquire::CheckFreeSpace "false";
+CommandLine::AsString "apt-config -o APT::Acquire::Check-Free-Space=false -o APT::Acquire::CheckFreeSpace=false dump";
+root@e369e47bbb57:/app#

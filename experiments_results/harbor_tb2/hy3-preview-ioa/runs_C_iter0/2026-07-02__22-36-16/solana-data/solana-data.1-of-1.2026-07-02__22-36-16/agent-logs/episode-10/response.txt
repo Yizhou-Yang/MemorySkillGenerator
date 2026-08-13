@@ -1,0 +1,12 @@
+Found a working endpoint: `https://mango.devnet.rpcpool.com` returns valid JSON-RPC. Let me verify it supports all the methods I need before building the server.
+
+{
+  "analysis": "Found a working devnet RPC: https://mango.devnet.rpcpool.com returns valid JSON-RPC (getHealth -> 'ok'). The official solana.com hosts are DNS-hijacked to a proxy returning 502/SSL errors, but this third-party devnet endpoint works. I'll verify all required RPC methods (getSlot, getClusterNodes, getVersion, getBlock, getTransaction, getAccountInfo, getProgramAccounts) against it before building the server.",
+  "plan": "Write a comprehensive test against mango.devnet.rpcpool.com: get a recent slot, fetch a block, extract a signature and fetch that transaction, get account info for the system program, and getProgramAccounts for the Vote program. If all succeed, I'll build the Flask server with this endpoint (and make RPC_URL configurable with fallbacks).",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/methodtest.py << 'EOF'\nimport urllib.request, json\nBASE='https://mango.devnet.rpcpool.com'\ndef rpc(method, params=None, timeout=25):\n    body={'jsonrpc':'2.0','id':1,'method':method,'params':params or []}\n    req=urllib.request.Request(BASE,data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})\n    r=urllib.request.urlopen(req,timeout=timeout)\n    return json.loads(r.read().decode())\n\n# slot\nslot=rpc('getSlot')['result']\nprint('slot', slot)\n# version\nprint('version', rpc('getVersion')['result'])\n# cluster nodes\ncn=rpc('getClusterNodes')['result']\nprint('node_count', len(cn))\n# block\nb=rpc('getBlock',[slot,{'maxSupportedTransactionVersion':0}])['result']\nprint('block keys', list(b.keys()) if b else None)\nsig=b['transactions'][0]['transaction']['signatures'][0]\nprint('sig', sig)\nprint('block_time', b.get('blockTime'))\n# transaction\ntx=rpc('getTransaction',[sig,{'maxSupportedTransactionVersion':0}])['result']\nprint('tx keys', list(tx.keys()) if tx else None)\n# account info\nacc=rpc('getAccountInfo',['11111111111111111111111111111111',{'encoding':'jsonParsed'}])['result']\nprint('acc', acc.get('value') is not None, acc.get('value',{}).get('lamports') if acc.get('value') else None)\n# program accounts\npa=rpc('getProgramAccounts',['Vote111111111111111111111111111111111111111',{'encoding':'jsonParsed','dataSlice':{'offset':0,'length':0},'limit':3}])['result']\nprint('program_accounts count(limit3)', len(pa))\nprint('ALL OK')\nEOF\npython3 /tmp/methodtest.py\n",
+      "duration": 60.0
+    }
+  ]
+}

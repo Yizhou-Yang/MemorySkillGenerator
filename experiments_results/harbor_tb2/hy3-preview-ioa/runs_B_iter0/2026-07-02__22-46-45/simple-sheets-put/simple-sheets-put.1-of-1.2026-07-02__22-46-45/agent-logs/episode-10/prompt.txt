@@ -1,0 +1,115 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@d614a7f600cd:/app# cat > /tmp/final.py << 'EOF'
+> import json, urllib.request, urllib.error
+> BASE='http://api:8000'
+> def put(cell, value):
+>     url=BASE+f'/sheets/1/cells/{cell}'
+>     body=json.dumps({'value':value}).encode()
+>     r=urllib.request.Request(url,data=body,method='PUT',headers={'Content-Type':'application/json'})
+>     try:
+>         with urllib.request.urlopen(r) as resp:
+>             return 'ok'
+>     except urllib.error.HTTPError as e:
+>         return f'ERR {e.code}: {e.read().decode()}'
+> cells=[
+>   ('A1','Month'),('B1','Revenue'),('C1','Expenses'),('D1','Profit'),
+>   ('A2','January'),('B2',10000),('C2',8000),('D2',2000),
+>   ('A3','February'),('B3',12000),('C3',9000),('D3',3000),
+>   ('A4','March'),('B4',15000),('C4',10000),('D4',5000),
+> ]
+> for c,v in cells:
+>     print(c, put(c,v))
+> # verify by reading sheet
+> url=BASE+'/sheets/1'
+> with urllib.request.urlopen(url) as resp:
+>     s=json.load(resp)
+> print('DATA:', json.dumps(s['data'], indent=2))
+> EOF
+root@d614a7f600cd:/app# python3 /tmp/final.py
+A1 ok
+B1 ok
+C1 ok
+D1 ok
+A2 ok
+B2 ok
+C2 ok
+D2 ok
+A3 ok
+B3 ok
+C3 ok
+D3 ok
+A4 ok
+B4 ok
+C4 ok
+D4 ok
+DATA: {
+  "A1": {
+    "value": "Month",
+    "format": {}
+  },
+  "B1": {
+    "value": "Revenue",
+    "format": {}
+  },
+  "C1": {
+    "value": "Expenses",
+    "format": {}
+  },
+  "D1": {
+    "value": "Profit",
+    "format": {}
+  },
+  "A2": {
+    "value": "January",
+    "format": {}
+  },
+  "B2": {
+    "value": 10000,
+    "format": {}
+  },
+  "C2": {
+    "value": 8000,
+    "format": {}
+  },
+  "D2": {
+    "value": 2000,
+    "format": {}
+  },
+  "A3": {
+    "value": "February",
+    "format": {}
+  },
+  "B3": {
+    "value": 12000,
+    "format": {}
+  },
+  "C3": {
+    "value": 9000,
+    "format": {}
+  },
+  "D3": {
+    "value": 3000,
+    "format": {}
+  },
+  "A4": {
+    "value": "March",
+    "format": {}
+  },
+  "B4": {
+    "value": 15000,
+    "format": {}
+  },
+  "C4": {
+    "value": 10000,
+    "format": {}
+  },
+  "D4": {
+    "value": 5000,
+    "format": {}
+  }
+}
+root@d614a7f600cd:/app#

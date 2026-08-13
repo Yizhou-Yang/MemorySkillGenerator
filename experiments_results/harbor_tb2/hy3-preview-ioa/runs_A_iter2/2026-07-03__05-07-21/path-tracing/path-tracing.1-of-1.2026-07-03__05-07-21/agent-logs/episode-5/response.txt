@@ -1,0 +1,14 @@
+{
+  "analysis": "Big revelation: the symbol table in 'orig' includes plane_intersect, sphere_intersect, vector_multiply, sky_color, allocate_image. This is a RAY TRACER (like the classic SSloy tinyraytracer): a sphere on a plane/floor with a sky gradient. The pipeline renders high-res to high_res.ppm, then ffmpeg downsamples to 800x600 producing image.ppm. I need to reproduce the scene in C. I can self-test: compile image.c, run it, and compare reconstructed.ppm to image.ppm with Python (allowed, since image.c won't read image.ppm itself). First I'll extract the high_res dimensions and analyze image.ppm to recover scene parameters.",
+  "plan": "1) Read high_res.ppm header to learn the high-res render dimensions (informs the downsample). 2) Run a thorough Python analysis: ASCII art of the scene, detect the sphere (red region bounding box/center/radius), measure the sky gradient vs y, and locate the floor/horizon. This gives me parameters to write image.c, which I'll then iteratively tune against image.ppm until similarity >= 0.8.",
+  "commands": [
+    {
+      "keystrokes": "head -c 40 high_res.ppm | od -c | head\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "cat > /tmp/an3.py << 'EOF'\nimport numpy as np, re\na=np.fromfile('image.ppm',dtype=np.uint8)\nm=re.match(rb'P6\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s', a[:30])\nw,h=int(m.group(1)),int(m.group(2)); off=len(m.group(0))\npx=a[off:].reshape(h,w,3).astype(np.float64)\n# high_res header\nb=np.fromfile('high_res.ppm',dtype=np.uint8)\nmm=re.match(rb'P6\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s', b[:30])\nprint('high_res', mm.groups())\n# ASCII art 100x50\ncw,ch=100,50\nchars=' .:-=+*#%@'\nfor cy in range(ch):\n    row=''\n    for cx in range(cw):\n        y0=cy*h//ch; y1=(cy+1)*h//ch; x0=cx*w//cw; x1=(cx+1)*w//cw\n        blk=px[y0:y1,x0:x1,:].mean(0).mean(0)\n        L=0.299*blk[0]+0.587*blk[1]+0.114*blk[2]\n        row+=chars[min(9,int(L/256*10))]\n    print(row)\nprint('--- sphere detection ---')\nsphere = (px[:,:,0]>120)&(px[:,:,0]-px[:,:,2]>40)&(px[:,:,0]-px[:,:,1]>40)\nys,xs=np.where(sphere)\nif len(xs):\n    print('count',len(xs),'bbox x',xs.min(),xs.max(),'y',ys.min(),ys.max())\n    print('cx,cy',xs.mean(),ys.mean())\n# sky gradient along x=400 top region\nprint('--- sky gradient (x=400) ---')\ncol=px[:,400,:]\nfor y in range(0,320,20):\n    print(y, col[y].astype(int))\nEOF\n.venv/bin/python /tmp/an3.py\n",
+      "duration": 1.5
+    }
+  ]
+}

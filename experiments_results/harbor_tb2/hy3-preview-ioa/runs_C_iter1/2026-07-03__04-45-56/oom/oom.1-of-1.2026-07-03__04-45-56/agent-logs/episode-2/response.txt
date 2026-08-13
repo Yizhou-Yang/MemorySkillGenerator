@@ -1,0 +1,22 @@
+{
+  "analysis": "Findings: /root/.cache is a 100M tmpfs with 75M already consumed by the earlier partial download (the exact trap). `free` and `curl` aren't available, but python3 with huggingface_hub 1.21.0 and transformers 5.12.1 is. The root filesystem and /logs are 100% full (0 avail), so they're useless; the tmpfs is RAM-backed, so I have headroom if RAM allows. I need to check RAM via /proc/meminfo, clean the partial download, enlarge the cache tmpfs to safely hold 2-3x the model (albert-base-v2 is ~90MB, so 3x is ~270MB).",
+  "plan": "1. Read /proc/meminfo for available RAM. 2. Remove the 75M partial download to free space in the tmpfs. 3. Remount /root/.cache tmpfs with size=2G to give safe headroom. 4. Confirm the new df -h shows the larger size. Then I'll run the download.",
+  "commands": [
+    {
+      "keystrokes": "grep -E 'MemTotal|MemAvailable|MemFree' /proc/meminfo\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "rm -rf /root/.cache/huggingface/hub\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "mount -o remount,size=2G /root/.cache 2>&1; echo exit=$?\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "df -h /root/.cache\n",
+      "duration": 0.1
+    }
+  ]
+}

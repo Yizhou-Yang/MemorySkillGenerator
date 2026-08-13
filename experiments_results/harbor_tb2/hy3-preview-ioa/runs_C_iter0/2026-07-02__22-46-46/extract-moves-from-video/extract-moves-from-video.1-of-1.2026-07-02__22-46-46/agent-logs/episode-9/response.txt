@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: stat -f shows the overlay's Free blocks = 8,034,995 (~32GB real free) but Available=0. That's why apt refuses ('no free space') — it uses the b_avail field which fuse-overlayfs reports as 0. But our dd test proved we CAN actually write 100MB to /app. So real space exists; only apt's statvfs-based precheck blocks us. We have no wget/curl, no ensurepip. I need a strategy that doesn't depend on apt's space check: get package download URIs via 'apt-get --print-uris', fetch the .debs with python (which ignores b_avail), then install with dpkg. First, verify --print-uris bypasses the check and find a tmpfs with real available space.",
+  "plan": "1. Check statfs on the tmpfs mounts to find one with b_avail>0 (a place I can stage the .debs). 2. Run 'apt-get install --print-uris' for the three packages to confirm it emits URIs without the space error. If it works, I'll download the .debs via python and install with dpkg, then test whether dpkg's own space check is also a problem.",
+  "commands": [
+    {
+      "keystrokes": "stat -f /sys/fs/cgroup; echo '==='; stat -f /dev/shm\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "apt-get install -y --print-uris tesseract-ocr ffmpeg python3-pip 2>&1 | head -20\n",
+      "duration": 5.0
+    }
+  ]
+}

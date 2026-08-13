@@ -1,0 +1,22 @@
+{
+  "analysis": "Motd is now disabled, so the git stream is no longer corrupted by 'Welcome'. Authentication succeeds, but `git push` still fails with 'Could not read from remote repository', which means the remote `git-receive-pack` is producing no valid git protocol output. My manual `git-receive-pack` via expect also showed no output at all. I need to see the raw bytes/stderr from the remote command. I'll temporarily add root's SSH key to the git user for diagnostics (password auth stays enabled), then inspect the raw response, and remove the key afterward. I'll also check sshd for any ForceCommand.",
+  "plan": "1. Check sshd config for ForceCommand. 2. Add root's pubkey to /home/git/.ssh/authorized_keys so I can run ssh commands manually and see output. 3. Run `git-receive-pack /git/project` over ssh and dump raw bytes with `od -c` plus capture stderr, to learn why it produces nothing. 4. Based on findings, fix the root cause (likely a path or error), then remove the diagnostic key. Then re-test the actual push.",
+  "commands": [
+    {
+      "keystrokes": "grep -in 'forcecommand' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; echo DONE\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa -q; mkdir -p /home/git/.ssh && cat /root/.ssh/id_rsa.pub >> /home/git/.ssh/authorized_keys && chown -R git:git /home/git/.ssh && chmod 700 /home/git/.ssh && chmod 600 /home/git/.ssh/authorized_keys\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "ssh -o StrictHostKeyChecking=no git@localhost 'echo PATH=$PATH; command -v git-receive-pack; ls -la /git/project | head'\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "echo '=== raw receive-pack ==='; ssh -o StrictHostKeyChecking=no git@localhost 'git-receive-pack /git/project' 2>&1 | od -c | head -20\n",
+      "duration": 3.0
+    }
+  ]
+}

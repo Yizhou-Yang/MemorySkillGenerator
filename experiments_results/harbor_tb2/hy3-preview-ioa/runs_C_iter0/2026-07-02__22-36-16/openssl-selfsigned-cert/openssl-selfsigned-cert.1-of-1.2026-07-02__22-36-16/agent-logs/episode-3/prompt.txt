@@ -1,0 +1,63 @@
+New Terminal Output:
+
+root@d6dc4ef50972:/app# cat > /app/check_cert.py << 'EOF'
+> #!/usr/bin/env python3
+> import ssl
+> import subprocess
+> import os
+> import sys
+>
+> CERT_PATH = "/app/ssl/server.crt"
+>
+>
+> def main():
+>     # Verify the certificate exists
+>     if not os.path.isfile(CERT_PATH):
+>         print(f"Certificate not found at {CERT_PATH}")
+>         sys.exit(1)
+>
+>     # Verify the certificate can be loaded
+>     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+>     context.load_verify_locations(CERT_PATH)
+>
+>     # Extract details using openssl via subprocess
+>     subject = subprocess.check_output(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout", "-subject"],
+>         text=True,
+>     ).strip()
+>
+>     end_date = subprocess.check_output(
+>         ["openssl", "x509", "-in", CERT_PATH, "-noout", "-enddate"],
+>         text=True,
+>     ).strip()
+>
+>     # Parse Common Name from subject
+>     cn = ""
+>     for part in subject.replace("subject=", "").split(","):
+>         part = part.strip()
+>         if part.startswith("CN ="):
+>             cn = part.split("=", 1)[1].strip()
+>
+>     # Parse expiration date and format as YYYY-MM-DD
+>     expiry_raw = end_date.replace("notAfter=", "").strip()
+>     expiry = subprocess.check_output(
+>         ["date", "-d", expiry_raw, "+%Y-%m-%d"],
+>         text=True,
+>     ).strip()
+>
+>     print("Certificate Subject:", subject)
+>     print("Common Name:", cn)
+>     print("Expiration Date:", expiry)
+>
+>     print("Certificate verification successful")
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@d6dc4ef50972:/app# python3 /app/check_cert.py
+Certificate Subject: subject=O = DevOps Team, CN = dev-internal.company.local
+Common Name: dev-internal.company.local
+Expiration Date: 2027-07-02
+Certificate verification successful
+root@d6dc4ef50972:/app#

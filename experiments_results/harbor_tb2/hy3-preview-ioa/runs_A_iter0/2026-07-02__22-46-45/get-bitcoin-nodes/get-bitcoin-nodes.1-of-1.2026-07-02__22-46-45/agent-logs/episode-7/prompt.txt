@@ -1,0 +1,296 @@
+New Terminal Output:
+
+root@29ab2e77851c:/app# cat > /app/bitcoin_service.py << 'PYEOF'
+> #!/usr/bin/env python3
+> import os
+> import sys
+> import time
+> import json
+> import socket
+> import logging
+> import threading
+>
+> import requests
+> from flask import Flask, jsonify
+> import bitcoinlib
+>
+> logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+> log = logging.getLogger('bitcoin_service')
+>
+)> HTTP_TIMEOUT = 20
+>
+> RPC_HOST = os.environ.get('BTC_RPC_HOST', '127.0.0.1')
+> RPC_PORT = int(os.environ.get('BTC_RPC_PORT', '8332'))
+> RPC_USER = os.environ.get('BTC_RPC_USER', '')
+> RPC_PASS = os.environ.get('BTC_RPC_PASS', '')
+> P2P_PORT = int(os.environ.get('BTC_P2P_PORT', '8333'))
+> PUBLIC_BLOCK_API = os.environ.get('BTC_PUBLIC_API', 'https://blockstream.info/api').rstrip('/')
+> LISTEN_PORT = int(os.environ.get('PORT', '5000'))
+e>
+>
+> class NotConnected(Exception):
+>     pass
+>
+s>
+> class NotFound(Exception):
+>     pass
+>
+>
+> class BitcoinCoreRPC:
+>     def __init__(self, host, port, user, pwd):
+>         self.url = 'http://%s:%s/' % (host, port)
+>         self.auth = (user, pwd) if user else None
+>         self._id = 0
+>
+r>     def call(self, method, params=None, timeout=HTTP_TIMEOUT):
+>         self._id += 1
+>         payload = {'jsonrpc': '1.0', 'id': self._id, 'method': method, 'params': params or []}
+>         try:
+>             r = requests.post(self.url, json=payload, auth=self.auth, timeout=timeout)
+>         except requests.RequestException as e:
+>             raise ConnectionError('RPC request failed: %s' % e) from e
+>         if r.status_code != 200:
+>             raise ConnectionError('RPC HTTP %s' % r.status_code)
+>         data = r.json()
+>         if data.get('error'):
+>             raise ValueError(data['error'])
+>         return data.get('result')
+>
+ >     def reachable(self):
+>         try:
+>             self.call('getblockchaininfo', timeout=8)
+>             return True
+>         except Exception:
+>             return False
+>
+>
+> class BitcoinP2P:
+>     SEEDS = ['seed.bitcoin.sipa.be', 'dnsseed.bluematt.me', 'seed.bitcoindns.net']
+>
+>     def __init__(self, port=P2P_PORT, timeout=8):
+>         self.port = port
+>         self.timeout = timeout
+>         self.connected = False
+>         self.peer = None
+>
+ >     def connect(self):
+>         host = None
+>         for seed in self.SEEDS:
+e>             try:
+>                 infos = socket.getaddrinfo(seed, self.port, proto=socket.IPPROTO_TCP)
+>                 if infos:
+>                     host = infos[0][4][0]
+>                     break
+>             except socket.gaierror:
+>                 continue
+>         if not host:
+>             log.warning('Unable to resolve any Bitcoin DNS seed')
+>             return False
+>         try:
+>             sock = socket.create_connection((host, self.port), timeout=self.timeout)
+>             sock.close()
+>             self.peer = host
+>             self.connected = True
+>             log.info('P2P connection established to %s:%s' % (host, self.port))
+>             return True
+>         except OSError as e:
+>             log.warning('P2P connection to %s:%s failed: %s' % (host, self.port, e))
+>             return False
+>
+(>
+'> class BitcoinClient:
+>     def __init__(self):
+>         self.rpc = BitcoinCoreRPC(RPC_HOST, RPC_PORT, RPC_USER, RPC_PASS)
+>         self.p2p = BitcoinP2P()
+>         self._p2p_done = threading.Event()
+>         threading.Thread(target=self._init_p2p, daemon=True).start()
+>         self._network = None
+>         self._last_check = 0
+>         self._check_interval = 15
+>
+,>     def _init_p2p(self):
+>         try:
+>             self.p2p.connect()
+>         finally:
+>             self._p2p_done.set()
+>
+ >     def _public_reachable(self):
+>         try:
+>             r = requests.get(PUBLIC_BLOCK_API + '/blocks/tip/hash', timeout=8)
+>             return r.status_code == 200
+>         except requests.RequestException:
+>             return False
+>
+}>     def _probe(self):
+>         now = time.time()
+>         if self._network and now - self._last_check < self._check_interval:
+>             return self._network
+>         if RPC_USER or os.environ.get('BTC_RPC_HOST'):
+>             if self.rpc.reachable():
+id):>                 self._network = 'rpc'
+>                 self._last_check = now
+>                 return self._network
+>         if self._public_reachable():
+>             self._network = 'public'
+>             self._last_check = now
+>             return self._network
+>         self._network = None
+>         self._last_check = now
+>         return None
+>
+_>     def is_connected(self):
+>         return self._probe() is not None
+>
+ >     def _block_via_rpc(self, block_hash):
+>         b = self.rpc.call('getblock', [block_hash, 1])
+>         return {
+>             'hash': b['hash'],
+>             'height': b['height'],
+>             'merkleroot': b['merkleroot'],
+>             'time': b['time'],
+>             'nonce': b['nonce'],
+>             'tx': b
+[... output limited to 10000 bytes; 69 interior bytes omitted ...]
+json()
+>         return {
+>             'hash': b['id'],
+>             'height': b['height'],
+>             'merkleroot': b['merkle_root'],
+>             'time': b['timestamp'],
+>             'nonce': b['nonce'],
+o>             'tx': txids,
+>         }
+>
+e>     def get_block(self, block_hash):
+>         net = self._probe()
+>         if net is None:
+>             raise NotConnected('Not connected to the Bitcoin network')
+>         if net == 'rpc':
+>             try:
+>                 return self._block_via_rpc(block_hash)
+>             except ValueError:
+>                 raise NotFound('Block not found')
+>         try:
+>             return self._block_via_public(block_hash)
+>         except NotFound:
+>             raise
+>         except requests.RequestException as e:
+>             if getattr(e, 'response', None) and e.response.status_code == 404:
+>                 raise NotFound('Block not found')
+>             raise
+>
+>     def _tx_via_rpc(self, txid):
+>         t = self.rpc.call('getrawtransaction', [txid, 1, None])
+>         vin = []
+>         for inp in t.get('vin', []):
+>             vin.append({'coinbase': inp.get('coinbase', ''), 'sequence': inp.get('sequence', 0)})
+>         vout = []
+>         for i, out in enumerate(t.get('vout', [])):
+>             spk = out.get('scriptPubKey', {})
+>             vout.append({
+>                 'value': out.get('value', 0),
+>                 'n': out.get('n', i),
+>                 'scriptPubKey': {
+>                     'asm': spk.get('asm', ''),
+>                     'hex': spk.get('hex', ''),
+>                     'type': spk.get('type', ''),
+>                 },
+>             })
+>         return {
+>             'txid': t['txid'],
+>             'blockhash': t.get('blockhash', ''),
+>             'vin': vin,
+>             'vout': vout,
+>         }
+>
+>     def _tx_via_public(self, txid):
+>         r = requests.get(PUBLIC_BLOCK_API + '/tx/' + txid, timeout=HTTP_TIMEOUT)
+>         if r.status_code == 404:
+>             raise NotFound('Transaction not found')
+>         r.raise_for_status()
+>         t = r.json()
+>         vin = []
+>         for inp in t.get('vin', []):
+>             coinbase = inp.get('scriptsig', '') if inp.get('is_coinbase') else ''
+>             vin.append({'coinbase': coinbase, 'sequence': inp.get('sequence', 0)})
+>         vout = []
+>         for i, out in enumerate(t.get('vout', [])):
+>             vout.append({
+>                 'value': out.get('value', 0) / 1e8,
+>                 'n': i,
+>                 'scriptPubKey': {
+>                     'asm': out.get('scriptpubkey_asm', ''),
+>                     'hex': out.get('scriptpubkey', ''),
+>                     'type': out.get('scriptpubkey_type', ''),
+>                 },
+>             })
+>         blockhash = (t.get('status') or {}).get('block_hash', '')
+>         return {
+>             'txid': t['txid'],
+>             'blockhash': blockhash,
+>             'vin': vin,
+>             'vout': vout,
+>         }
+>
+>     def get_transaction(self, txid):
+>         net = self._probe()
+>         if net is None:
+>             raise NotConnected('Not connected to the Bitcoin network')
+>         if net == 'rpc':
+>             try:
+>                 return self._tx_via_rpc(txid)
+>             except ValueError:
+>                 raise NotFound('Transaction not found')
+>         try:
+>             return self._tx_via_public(txid)
+>         except NotFound:
+>             raise
+>         except requests.RequestException as e:
+>             if getattr(e, 'response', None) and e.response.status_code == 404:
+>                 raise NotFound('Transaction not found')
+>             raise
+>
+>
+> app = Flask(__name__)
+> client = BitcoinClient()
+>
+>
+> @app.route('/status')
+> def status():
+>     if client.is_connected():
+>         return jsonify({'status': 'online'})
+>     return jsonify({'error': 'Not connected to the Bitcoin network'}), 503
+>
+>
+> @app.route('/block/<block_hash>')
+> def block(block_hash):
+>     try:
+>         data = client.get_block(block_hash)
+>         return jsonify(data)
+>     except NotConnected:
+>         return jsonify({'error': 'Not connected to the Bitcoin network'}), 503
+>     except NotFound:
+>         return jsonify({'error': 'Block not found: %s' % block_hash}), 404
+>     except Exception as e:
+>         return jsonify({'error': str(e)}), 500
+>
+>
+> @app.route('/transaction/<txid>')
+> def transaction(txid):
+>     try:
+>         data = client.get_transaction(txid)
+>         return jsonify(data)
+>     except NotConnected:
+>         return jsonify({'error': 'Not connected to the Bitcoin network'}), 503
+>     except NotFound:
+>         return jsonify({'error': 'Transaction not found: %s' % txid}), 404
+>     except Exception as e:
+>         return jsonify({'error': str(e)}), 500
+>
+>
+> if __name__ == '__main__':
+>     app.run(host='127.0.0.1', port=LISTEN_PORT)
+> PYEOF
+root@29ab2e77851c:/app# python3 -m py_compile /app/bitcoin_service.py && echo COMPILE_OK
+COMPILE_OK
+root@29ab2e77851c:/app#

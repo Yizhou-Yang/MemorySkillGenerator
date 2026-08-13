@@ -1,0 +1,485 @@
+root@36ff4f9164b5:/app# head -5 /app/data.csv; echo '---'; wc -l /app/data.csv
+name,age,city
+John,25,New York
+Alice,30,San Francisco
+Bob,35,Chicago
+Emma,28,Boston
+---
+5 /app/data.csv
+root@36ff4f9164b5:/app# python3 -c 'import pandas, pyarrow; print(pandas.__version__, pyarrow.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'pandas'
+root@36ff4f9164b5:/app# python3 -c 'import pyarrow; print(pyarrow.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'pyarrow'
+root@36ff4f9164b5:/app# pip install pandas pyarrow 2>&1 | tail -5
+bash: pip: command not found
+root@36ff4f9164b5:/app# which pip3 python3 apt apt-get; python3 -m pip --version 2>&1 | head -2
+/usr/bin/python3
+/usr/bin/apt
+/usr/bin/apt-get
+/usr/bin/python3: No module named pip
+root@36ff4f9164b5:/app# apt-get update 2>&1 | tail -3
+Get:8 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [2111 kB]
+Fetched 6209 kB in 17s (374 kB/s)
+Reading package lists...
+root@36ff4f9164b5:/app# apt-get install -y python3-pyarrow 2>&1 | tail -5
+Reading package lists...
+Building dependency tree...
+Reading state information...
+E: Unable to locate package python3-pyarrow
+root@36ff4f9164b5:/app# apt-get install -y python3-pip 2>&1 | tail -5
+  python3.12-minimal
+18 upgraded, 118 newly installed, 0 to remove and 33 not upgraded.
+Need to get 118 MB of archives.
+After this operation, 385 MB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@36ff4f9164b5:/app# apt-get clean; df -h /
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  954G     0 100% /
+root@36ff4f9164b5:/app# which duckdb parquet-tools; ls -la /app
+total 12
+drwxr-xr-x  2 root root 4096 Jul  2 15:23 .
+drwxr-xr-x 19 root root 4096 Jul  2 17:06 ..
+-rw-r--r--  1 root root  101 Jul  2 13:59 data.csv
+root@36ff4f9164b5:/app# du -x -h --max-depth=1 / 2>/dev/null | sort -h | tail -20
+4.0K    /boot
+4.0K    /media
+4.0K    /mnt
+4.0K    /opt
+4.0K    /srv
+8.0K    /app
+12K     /tmp
+16K     /run
+20K     /home
+32K     /root
+1.5M    /etc
+56M     /var
+129M    /usr
+186M    /
+root@36ff4f9164b5:/app# apt-get clean
+root@36ff4f9164b5:/app# apt-get install -y --no-install-recommends python3-pip 2>&1 | tail -8
+The following NEW packages will be installed:
+  python3-pip python3-setuptools python3-wheel
+The following packages will be upgraded:
+  python3-pkg-resources
+1 upgraded, 3 newly installed, 0 to remove and 50 not upgraded.
+Need to get 1938 kB of archives.
+After this operation, 9556 kB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@36ff4f9164b5:/app# echo ok > /app/__writetest && cat /app/__writetest && rm -f /app/__writetest
+ok
+root@36ff4f9164b5:/app# cat > /app/make_parquet.py << 'PYEOF'
+> import struct, csv, sys
+>
+i> BOOL_TRUE=1; BOOL_FALSE=2; BYTE=3; I16=4; I32=5; I64=6; DOUBLE=7; BINARY=8; LIST=9; SET=10; MAP=11; STRUCT=12
+>
+d> def write_varint(buf, n):
+n>     n &= 0xFFFFFFFFFFFFFFFF
+>     while True:
+>         b = n & 0x7f
+>         n >>= 7
+>         if n:
+>             buf.append(b | 0x80)
+>         else:
+>             buf.append(b)
+>             break
+>
+> def zigzag(n):
+>     return (n << 1) if n >= 0 else ((-n) << 1) - 1
+>
+> def write_struct(buf, fields):
+>     fields = sorted(fields, key=lambda f: f[0])
+f)
+>     prev = 0
+>     for fid, ttype, val in fields:
+ >         delta = fid - prev
+>         if delta < 15:
+>             buf.append((delta << 4) | ttype)
+>         else:
+al>             buf.append(0xf0 | ttype)
+>             write_varint(buf, delta - 15)
+>         val(buf)
+>         prev = fid
+>     buf.append(0)
+>
+ > def render_i32(x):
+>     def r(b): write_varint(b, zigzag(x))
+>     return r
+>
+> def render_i64(x):
+>     def r(b): write_varint(b, zigzag(x))
+>     return r
+>
+e> def render_double(x):
+>     def r(b): b.extend(struct.pack('<d', x))
+>     return r
+>
+ > def render_binary(x):
+>     def r(b):
+>         write_varint(b, len(x))
+>         b.extend(x)
+>     return r
+>
+> def render_bool(x):
+>     def r(b): b.append(BOOL_TRUE if x else BOOL_FALSE)
+>     return r
+m>
+> def render_raw(data):
+>     def r(b): b.extend(data)
+>     return r
+>
+> def render_struct(fields):
+>     def r(b): write_struct(b, fields)
+>     return r
+>
+> def render_list(etype, items, item_render):
+>     def r(b):
+>         n = len(items)
+>         if n < 15:
+>             b.append((n << 4) | etype)
+>         else:
+>             b.append(0xf0 | etype)
+>             write_varint(b, n)
+>         for it in items:
+>             item_render(it)(b)
+>     return r
+>
+> def page_header(num_values, data_size):
+>     dph = [
+>         (1, I32, render_i32(num_values)),
+>         (2, I32, render_i32(0)),
+ >         (3, I32, render_i32(3)),
+>         (4, I32, render_i32(3)),
+>     ]
+>     fields = [
+>         (1, I32, render_i32(0)),
+>         (2, I32, render_i32(data_size)),
+>         (3, I32, render_i32(data_size)),
+>         (5, STRUCT, render_struct(dph)),
+>     ]
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)
+>
+A> def stats_fields(min_b, max_b, null_count=0):
+>     return [
+>         (1, BINARY, render_binary(max_b)),
+>         (2, BINARY, render_binary(min_b)),
+>         (3, I64, render_i64(null_count)),
+>         (5, BINARY, render_binary(max_b)),
+>         (6, BINARY, render_binary(min_b)),
+>     ]
+l>
+e> def column_meta(col_type, path, num_values, uncompressed, compressed, data_page_offset, stats):
+>     fields = [
+>         (1, I32, render_i32(col_type)),
+>         (2, LIST, render_list(I32, [0, 3], render_i32)),
+>         (3, LIST, render_list(BINARY, [p.encode() for p in path], render_binary)),
+>         (4, I32, render_i32(0)),
+>         (5, I64, render_i64(num_values)),
+>         (6, I64, render_i64(uncompressed)),
+>         (7, I64, render_i64(compressed)),
+>         (9, I64, render_i64(data_page_offset)),
+>         (12, STRUCT, render_struct(stats)),
+>     ]
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)
+>
+> def column_chunk(file_offset, meta_bytes):
+ >     fields = [
+>         (1, I64, render_i64(file_offset)),
+>         (2, STRUCT, render_raw(meta_bytes)),
+>     ]
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)
+>
+> def row_group(col_chunks, total_uncompressed, num_rows, total_compressed):
+>     fields = [
+>         (1, LIST, render_list(STRUCT, col_chunks, render_raw)),
+>         (2, I64, render_i64(total_uncompressed)),
+>         (3, I64, render_i64(num_rows)),
+>         (6, I64, render_i64(total_compressed)),
+>     ]
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)
+>
+> def schema_element(name, type_code=None, num_children=None, converted_type=None, repetition=1):
+>     fields = []
+>     if type_code is not None:
+>         fields.append((1, I32, render_i32(type_code)))
+>     if num_children is not None:
+>         fields.append((5, I32, render_i32(num_children)))
+>     fields.append((3, I32, render_i32(repetition)))
+>     fields.append((4, BINARY, render_binary(name.encode())))
+>     if converted_type is not None:
+>         fields.append((6, I32, render_i32(converted_type)))
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)
+>
+> def file_meta(row_group_bytes, schema_bytes, num_rows):
+>     fields = [
+>         (1, I32, render_i32(1)),
+>         (2, LIST, render_list(STRUCT, schema_bytes, render_raw)),
+>         (3, I64, render_i64(num_rows)),
+>         (4, LIST, render_list(STRUCT, row_group_bytes, render_raw)),
+>         (6, BINARY, render_binary(b"codebuddy-parquet-writer")),
+>     ]
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)
+>
+> def is_int(s):
+>     try:
+>         int(s); return True
+>     except: return False
+>
+> def is_float(s):
+>     try:
+>         float(s); return True
+>     except: return False
+>
+> def main():
+>     in_path = '/app/data.csv'
+>     out_path = '/app/data.parquet'
+>     with open(in_path, 'r', newline='') as f:
+>         reader = csv.reader(f)
+>         rows = [r for r in reader if r]
+>     header = rows[0]
+>     data_rows = rows[1:]
+>     ncols = len(header)
+>     nrows = len(data_rows)
+>     cols = []
+>     for j in range(ncols):
+>         vals = [r[j] for r in data_rows]
+>         if vals and all(is_int(v) for v in vals):
+>             ivals = [int(v) for v in vals]
+>             page = b''.join(struct.pack('<q', x) for x in ivals)
+>             mn = min(ivals).to_bytes(8, 'little', signed=True)
+>             mx = max(ivals).to_bytes(8, 'little', signed=True)
+>             col_type = 2
+>             converted = None
+>         elif vals and all(is_float(v) for v in vals):
+>             fvals = [float(v) for v in vals]
+>             page = b''.join(struct.pack('<d', x) for x in fvals)
+>             mn = struct.pack('<d', min(fvals))
+>             mx = struct.pack('<d', max(fvals))
+>             col_type = 5
+>             converted = None
+>         else:
+>             bvals = [v.encode('utf-8') for v in vals]
+>             page = b''.join(struct.pack('<i', len(b)) + b for b in bvals)
+>             mn = min(bvals)
+>             mx = max(bvals)
+>             col_type = 6
+>             converted = 1
+>         cols.append({'name': header[j], 'col_type': col_type, 'converted': converted, 'page': page, 'mn': mn, 'mx': mx})
+>     out = bytearray()
+>     out.extend(b'PAR1')
+>     pos = 4
+>     col_chunks = []
+>     total_uncompressed = 0
+>     total_compressed = 0
+>     for c in cols:
+>         ph = page_header(nrows, len(c['page']))
+>         data_page_offset = pos
+>         out.extend(ph)
+>         pos += len(ph)
+>         out.extend(c['page'])
+>         pos += len(c['page'])
+>         st = stats_fields(c['mn'], c['mx'])
+>         meta = column_meta(c['col_type'], [c['name']], nrows, len(ph) + len(c['page']), len(ph) + len(c['page']), data_page_offset, st)
+>         cc = column_chunk(pos, meta)
+>         col_chunks.append(cc)
+>         total_uncompressed += len(ph) + len(c['page'])
+>         total_compressed += len(ph) + len(c['page'])
+>     schema = [schema_element('schema', num_children=ncols)]
+>     for c in cols:
+>         schema.append(schema_element(c['name'], type_code=c['col_type'], converted_type=c['converted']))
+>     rg = row_group(col_chunks, total_uncompressed, nrows, total_compressed)
+>     fm = file_meta(rg, schema, nrows)
+>     out.extend(fm)
+>     out.extend(struct.pack('<I', len(fm)))
+>     out.extend(b'PAR1')
+>     with open(out_path, 'wb') as f:
+>         f.write(out)
+>     print('Wrote', out_path, 'size', len(out), 'rows', nrows, 'cols', ncols)
+>
+> main()
+> PYEOF
+root@36ff4f9164b5:/app# python3 /app/make_parquet.py
+Traceback (most recent call last):
+  File "/app/make_parquet.py", line 239, in <module>
+    main()
+  File "/app/make_parquet.py", line 231, in main
+    fm = file_meta(rg, schema, nrows)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/make_parquet.py", line 160, in file_meta
+    write_struct(buf, fields)
+  File "/app/make_parquet.py", line 29, in write_struct
+    val(buf)
+  File "/app/make_parquet.py", line 72, in r
+    item_render(it)(b)
+  File "/app/make_parquet.py", line 56, in r
+    def r(b): b.extend(data)
+              ^^^^^^^^^^^^^^
+TypeError: can't extend bytearray with int
+root@36ff4f9164b5:/app# cat > /app/verify_parquet.py << 'PYEOF'
+> import struct, csv
+>
+> d = open('/app/data.parquet','rb').read()
+> assert d[:4]==b'PAR1' and d[-4:]==b'PAR1', 'magic mismatch'
+> footer_len = struct.unpack('<I', d[-8:-4])[0]
+> footer = d[-8-footer_len:-8]
+>
+> class Dec:
+>     def __init__(self, data):
+>         self.d = data; self.i = 0
+>     def u8(self):
+>         v = self.d[self.i]; self.i += 1; return v
+>     def varint(self):
+>         shift = 0; r = 0
+>         while True:
+>             b = self.u8(); r |= (b & 0x7f) << shift
+>             if not (b & 0x80): break
+>             shift += 7
+>         return r
+>     def zz(self, n):
+>         return (n >> 1) ^ -(n & 1)
+>     def field(self):
+>         b = self.u8()
+>         if b == 0: return None
+>         delta = (b >> 4) & 0xf; t = b & 0xf
+>         if delta == 15: delta = self.varint()
+>         return (delta, t)
+>     def val(self, t):
+>         if t == 1: return True
+>         if t == 2: return False
+>         if t == 3: self.i += 1; return None
+>         if t == 4: return self.zz(self.varint())
+>         if t == 5: return self.zz(self.varint())
+>         if t == 6: return self.zz(self.varint())
+>         if t == 7: v = struct.unpack('<d', self.d[self.i:self.i+8])[0]; self.i += 8; return v
+>         if t == 8:
+>             ln = self.varint(); v = self.d[self.i:self.i+ln]; self.i += ln; return v
+>         if t in (9, 10):
+>             b = self.u8(); size = (b >> 4) & 0xf; et = b & 0xf
+>             if size == 15: size = self.varint()
+>             return [self.val(et) for _ in range(size)]
+>         if t == 11:
+>             size = self.varint()
+>             if size == 0: return {}
+>             b = self.u8(); kt = (b >> 4) & 0xf; vt = b & 0xf
+>             m = {}
+>             for _ in range(size):
+>                 k = self.val(kt); v = self.val(vt); m[k] = v
+>             return m
+>         if t == 12: return self.struct()
+>         raise Exception('bad type %d' % t)
+>     def struct(self):
+>         out = {}; fid = 0
+>         while True:
+>             f = self.field()
+>             if f is None: return out
+>             delta, t = f
+>             fid += delta
+>             out[fid] = self.val(t)
+>
+> meta = Dec(footer).struct()
+> columns = meta[4][0][1]
+> with open('/app/data.csv','r',newline='') as f:
+>     rows = [r for r in csv.reader(f) if r]
+> header = rows[0]; data_rows = rows[1:]
+> for col in columns:
+>     cm = col[2]
+>     typ = cm[1]
+>     path = [p.decode() for p in cm[3]]
+>     dpo = cm[9]
+>     dec = Dec(d); dec.i = dpo
+>     ph = dec.struct()
+>     ups = ph[2]
+>     data = d[dec.i:dec.i+ups]
+>     cidx = header.index(path[0])
+>     vals = []
+>     if typ == 2:
+>         for k in range(0, len(data), 8):
+>             vals.append(str(struct.unpack('<q', data[k:k+8])[0]))
+>     elif typ == 5:
+>         for k in range(0, len(data), 8):
+>             vals.append(str(struct.unpack('<d', data[k:k+8])[0]))
+>     elif typ == 6:
+>         off = 0
+>         while off < len(data):
+>             ln = struct.unpack('<i', data[off:off+4])[0]; off += 4
+>             s = data[off:off+ln].decode(); off += ln
+>             vals.append(s)
+>     else:
+>         raise Exception('unknown type ' + str(typ))
+>     expected = [r[cidx] for r in data_rows]
+>     assert vals == expected, 'mismatch in column ' + str(path)
+> print('VERIFY OK: rows=%d cols=%d' % (len(data_rows), len(header)))
+> print('schema:', [p.decode() for p in columns[0][2][3]])
+> PYEOF
+root@36ff4f9164b5:/app# python3 /app/verify_parquet.py
+Traceback (most recent call last):
+  File "/app/verify_parquet.py", line 3, in <module>
+    d = open('/app/data.parquet','rb').read()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/app/data.parquet'
+root@36ff4f9164b5:/app# sed -i 's/^    fm = file_meta(rg, schema, nrows)/    fm = file_meta([rg], schema, nrows)/' /app/make_parquet.py
+root@36ff4f9164b5:/app# python3 /app/make_parquet.py
+Wrote /app/data.parquet size 503 rows 5 cols 3
+root@36ff4f9164b5:/app# python3 /app/verify_parquet.py
+VERIFY OK: rows=5 cols=3
+schema: ['name']
+root@36ff4f9164b5:/app# python3 - << 'EOF'
+> content = open('/app/make_parquet.py').read()
+> old = '''def schema_element(name, type_code=None, num_children=None, converted_type=None, repetition=1):
+>     fields = []
+>     if type_code is not None:
+>         fields.append((1, I32, render_i32(type_code)))
+>     if num_children is not None:
+>         fields.append((5, I32, render_i32(num_children)))
+>     fields.append((3, I32, render_i32(repetition)))
+>     fields.append((4, BINARY, render_binary(name.encode())))
+>     if converted_type is not None:
+>         fields.append((6, I32, render_i32(converted_type)))
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)'''
+> new = '''def schema_element(name, type_code=None, num_children=None, converted_type=None, repetition=1):
+>     fields = []
+>     if type_code is not None:
+>         fields.append((1, I32, render_i32(type_code)))
+>         fields.append((2, I32, render_i32(repetition)))
+>     if num_children is not None:
+>         fields.append((5, I32, render_i32(num_children)))
+>     fields.append((3, BINARY, render_binary(name.encode())))
+>     if converted_type is not None:
+>         fields.append((6, I32, render_i32(converted_type)))
+>     buf = bytearray()
+>     write_struct(buf, fields)
+>     return bytes(buf)'''
+> assert old in content, 'pattern not found'
+> open('/app/make_parquet.py','w').write(content.replace(old, new))
+> print('patched')
+> EOF
+patched
+root@36ff4f9164b5:/app# python3 /app/make_parquet.py && python3 /app/verify_parquet.py
+Wrote /app/data.parquet size 501 rows 5 cols 3
+VERIFY OK: rows=5 cols=3
+schema: ['name']
+root@36ff4f9164b5:/app# ls -la /app/data.parquet; xxd /app/data.parquet | tail -4
+-rw-r--r-- 1 root root 501 Jul  2 17:16 /app/data.parquet
+bash: xxd: command not found
+root@36ff4f9164b5:/app# python3 -c "import struct; d=open('/app/data.parquet','rb').read(); assert d[:4]==b'PAR1' and d[-4:]==b'PAR1'; fl=struct.unpack('<I',d[-
+8:-4])[0]; print('footer_len',fl,'magic OK'); print('data.parquet ready:', len(d),'bytes')"
+footer_len 295 magic OK
+data.parquet ready: 501 bytes
+root@36ff4f9164b5:/app#

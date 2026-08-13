@@ -1,0 +1,53 @@
+New Terminal Output:
+
+root@de9de7589676:/app# cat > /app/count.py << 'EOF'
+> import os, sys
+> from huggingface_hub import hf_hub_download, HfApi
+> import pyarrow.parquet as pq
+> from tokenizers import Tokenizer
+> from collections import Counter
+>
+> REPO='open-thoughts/OpenThoughts-114k'
+> TOK='/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json'
+> tok=Tokenizer.from_file(TOK)
+> print('tokenizer vocab', tok.get_vocab_size(), flush=True)
+>
+> api=HfApi()
+> files=[f.path for f in api.list_repo_tree(REPO, repo_type='dataset', path_in_repo='metadata')]
+> files=sorted(files)
+> print('shards:', files, flush=True)
+>
+> shard_dir='/app/shards'
+> os.makedirs(shard_dir, exist_ok=True)
+>
+> total=0
+> col_tot={'deepseek_reasoning':0,'deepseek_solution':0}
+> for fn in files:
+>     path=hf_hub_download(REPO, fn, repo_type='dataset', local_dir=shard_dir)
+>     t=pq.read_table(path, columns=['domain','deepseek_reasoning','deepseek_solution'])
+>     domains=t.column('domain').to_pylist()
+>     cnt=Counter(domains)
+>     print(f'{os.path.basename(fn)} rows={t.num_rows} domains={dict(cnt)}', flush=True)
+>     # build science mask
+>     dr=t.column('deepseek_reasoning').to_pylist()
+>     ds=t.column('deepseek_solution').to_pylist()
+>     for i,d in enumerate(domains):
+>         if d=='science':
+>             a=dr[i] or ''
+>             b=ds[i] or ''
+>             for colname, text in (('deepseek_reasoning',a),('deepseek_solution',b)):
+>                 n=len(tok.encode(text).ids)
+>                 col_tot[colname]+=n
+>     total=col_tot['deepseek_reasoning']+col_tot['deepseek_solution']
+>     print(f'  running deepseek token total={total} (reasoning={col_tot["deepseek_reasoning"]} solution={col_tot["deepseek_solution"]})', flush=True)
+>     del t
+>     os.remove(path)
+>
+> print('FINAL deepseek tokens (science):', total, flush=True)
+> print('reasoning=',col_tot['deepseek_reasoning'],'solution=',col_tot['deepseek_solution'], flush=True)
+> with open('/app/answer.txt','w') as f:
+>     f.write(str(total))
+> EOF
+root@de9de7589676:/app# echo written
+written
+root@de9de7589676:/app#

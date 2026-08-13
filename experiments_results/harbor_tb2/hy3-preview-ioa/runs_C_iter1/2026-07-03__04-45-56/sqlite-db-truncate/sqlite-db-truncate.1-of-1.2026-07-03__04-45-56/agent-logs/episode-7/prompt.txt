@@ -1,0 +1,41 @@
+Current Terminal Screen:
+>         if not (b&0x80):
+>             return r, i+1
+> ncells = int.from_bytes(data[3:5],'big')
+> rows=[]
+> for i in range(ncells):
+>     off=int.from_bytes(data[8+2*i:10+2*i],'big')
+>     pos=off
+>     plen,n=rv(data,pos); pos+=n
+>     rowid,n=rv(data,pos); pos+=n
+>     hstart=pos
+>     hs,n=rv(data,pos); pos+=n
+>     types=[]
+>     while pos-hstart < hs:
+>         t,m=rv(data,pos); pos+=m; types.append(t)
+>     body=pos
+>     vals=[]
+>     for t in types:
+>         if t==0: vals.append(None)
+>         elif t<8: vals.append(int.from_bytes(data[body:body+t],'big',signed=True)); body+=t
+>         elif t==7: vals.append(struct.unpack('>d', data[body:body+8])[0]); body+=8
+>         elif t==8: vals.append(0)
+>         elif t==9: vals.append(1)
+>         elif t%2==0:
+>             s=(t-12)//2; vals.append(data[body:body+s]); body+=s
+>         else:
+>             s=(t-13)//2; vals.append(data[body:body+s].decode('utf-8','replace')); body+=s
+>     rows.append((rowid, vals))
+> rows.sort(key=lambda x:x[0])
+> out=[{"word": v[1], "value": v[2]} for _,v in rows]
+> with open('/app/recover.json','w') as f:
+>     json.dump(out, f)
+> print('exists:', os.path.exists('/app/recover.json'))
+> print(json.dumps(out))
+> PYEOF
+root@d7c0eb23a4ed:/app# python3 /tmp/recover.py
+exists: True
+[{"word": "testword00", "value": 1}, {"word": "testword01", "value": 2}, {"word": "testword02", "value": 10}, {"word": "testword03", "value": 25}, {"word": "tes
+tword04", "value": 42}, {"word": "testword05", "value": 50}, {"word": "testword06", "value": 75}, {"word": "testword07", "value": 99}, {"word": "testword08", "v
+alue": 18112252295574978}, {"word": "testword09", "value": 17979214137393152}]
+root@d7c0eb23a4ed:/app#

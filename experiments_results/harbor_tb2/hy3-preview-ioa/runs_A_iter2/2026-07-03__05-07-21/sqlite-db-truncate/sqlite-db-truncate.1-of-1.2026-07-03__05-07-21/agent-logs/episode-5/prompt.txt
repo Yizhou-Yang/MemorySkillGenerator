@@ -1,0 +1,75 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+]root@c093e5eac1f3:/app# cat > /app/debug.py << 'EOF'
+> import struct
+> data = open('/app/trunc.db','rb').read()
+>
+> def rv(b,off):
+>     r=0
+>     for i in range(9):
+>         x=b[off+i]
+>         if i==8: return (r<<8)|x, off+9
+>         r=(r<<7)|(x&0x7f)
+>         if not (x&0x80): return r, off+i+1
+>     return r, off+9
+>
+> cc = int.from_bytes(data[3:5],'big')
+> ptrs = [int.from_bytes(data[8+i*2:10+i*2],'big') for i in range(cc)]
+> for ptr in ptrs:
+>     off=ptr
+>     pl,off = rv(data,off)
+>     rid,off = rv(data,off)
+>     rs = off
+>     hl,off = rv(data,off)
+>     he = rs+hl
+>     serials=[]
+>     while off<he:
+>         st,off=rv(data,off)
+>         serials.append(st)
+>     body=off
+>     print('--- ptr',hex(ptr),'pl',pl,'rid',rid,'hl',hl,'serials',[hex(s) for s in serials])
+>     # dump body bytes
+>     print('  body@',hex(body),'bytes:', data[body:body+20].hex())
+>     for st in serials:
+>         if st==0x21:
+>             print('  text:', data[body:body+10].decode(), 'textbytes', data[body:body+10].hex())
+>         if st==7:
+>             print('  FLOAT bytes:', data[body:body+8].hex(), '= ', struct.unpack('<d', data[body:body+8])[0])
+> EOF
+root@c093e5eac1f3:/app# python3 /app/debug.py
+--- ptr 0xff0 pl 14 rid 1 hl 4 serials ['0x0', '0x21', '0x9']
+  body@ 0xff6 bytes: 74657374776f72643030
+  text: testword00 textbytes 74657374776f72643030
+--- ptr 0xfdf pl 15 rid 2 hl 4 serials ['0x0', '0x21', '0x1']
+  body@ 0xfe5 bytes: 74657374776f72643031020e0104002109746573
+  text: testword01 textbytes 74657374776f72643031
+--- ptr 0xfce pl 15 rid 3 hl 4 serials ['0x0', '0x21', '0x1']
+  body@ 0xfd4 bytes: 74657374776f726430320a0f0204002101746573
+  text: testword02 textbytes 74657374776f72643032
+--- ptr 0xfbd pl 15 rid 4 hl 4 serials ['0x0', '0x21', '0x1']
+  body@ 0xfc3 bytes: 74657374776f72643033190f0304002101746573
+  text: testword03 textbytes 74657374776f72643033
+--- ptr 0xfac pl 15 rid 5 hl 4 serials ['0x0', '0x21', '0x1']
+  body@ 0xfb2 bytes: 74657374776f726430342a0f0404002101746573
+  text: testword04 textbytes 74657374776f72643034
+--- ptr 0xf9b pl 15 rid 6 hl 4 serials ['0x0', '0x21', '0x1']
+  body@ 0xfa1 bytes: 74657374776f72643035320f0504002101746573
+  text: testword05 textbytes 74657374776f72643035
+--- ptr 0xf8a pl 15 rid 7 hl 4 serials ['0x0', '0x21', '0x1']
+  body@ 0xf90 bytes: 74657374776f726430364b0f0604002101746573
+  text: testword06 textbytes 74657374776f72643036
+--- ptr 0xf79 pl 15 rid 8 hl 4 serials ['0x0', '0x21', '0x1']
+  body@ 0xf7f bytes: 74657374776f72643037630f0704002101746573
+  text: testword07 textbytes 74657374776f72643037
+--- ptr 0xf61 pl 22 rid 9 hl 4 serials ['0x0', '0x21', '0x7']
+  body@ 0xf67 bytes: 74657374776f726430384058ff5c28f5c28f0f08
+  text: testword08 textbytes 74657374776f72643038
+  FLOAT bytes: 74657374776f7264 =  7.295422337648177e+175
+--- ptr 0xf49 pl 22 rid 10 hl 4 serials ['0x0', '0x21', '0x7']
+  body@ 0xf4f bytes: 74657374776f726430393fe00000000000001609
+  text: testword09 textbytes 74657374776f72643039
+  FLOAT bytes: 74657374776f7264 =  7.295422337648177e+175
+root@c093e5eac1f3:/app#

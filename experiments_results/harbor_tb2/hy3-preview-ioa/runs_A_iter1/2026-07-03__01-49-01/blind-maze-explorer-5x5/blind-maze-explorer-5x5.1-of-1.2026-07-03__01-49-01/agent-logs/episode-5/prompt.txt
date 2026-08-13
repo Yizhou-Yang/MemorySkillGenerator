@@ -1,0 +1,96 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+##### root@0d034a40ce2e:/app# cat > /app/explore.py << 'PYEOF'
+> #!/usr/bin/env python3
+> import subprocess, sys
+>
+> DIRS = [('N',(-1,0)),('S',(1,0)),('E',(0,1)),('W',(0,-1))]
+> OPP = {'N':'S','S':'N','E':'W','W':'E'}
+>
+> def main():
+>     proc = subprocess.Popen(
+>         ["python3","-u","/protected/maze_server.py"],
+>         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+>         text=True, bufsize=1
+>     )
+>
+>     def read_response():
+>         buf = ""
+>         while True:
+>             ch = proc.stdout.read(1)
+>             if ch == "":
+>                 break
+>             buf += ch
+>             if buf.endswith("> "):
+>                 break
+>         if buf.endswith("> "):
+>             buf = buf[:-2]
+>         return buf.strip()
+>
+>     def send(cmd):
+>         proc.stdin.write(cmd+"\n")
+>         proc.stdin.flush()
+>
+>     read_response()  # consume welcome + first prompt
+>
+>     grid = {}
+>     visited = set()
+>     probed = set()
+>
+>     start = (0,0)
+>     grid[start] = 'S'
+>     visited.add(start)
+>
+>     def dfs(r,c):
+>         for d,(dr,dc) in DIRS:
+>             if (r,c,d) in probed:
+>                 continue
+>             probed.add((r,c,d))
+>             nr, nc = r+dr, c+dc
+>             send("move "+d)
+>             resp = read_response()
+>             if resp == "hit wall":
+>                 grid[(nr,nc)] = '#'
+>             elif resp in ("moved","reached exit"):
+>                 grid[(nr,nc)] = 'E' if resp == "reached exit" else grid.get((nr,nc),' ')
+>                 open_here = (nr,nc)
+>                 if open_here not in visited:
+>                     visited.add(open_here)
+>                     dfs(nr,nc)
+>                 send("move "+OPP[d])
+>                 read_response()
+>             else:
+>                 pass
+>
+>     dfs(start[0], start[1])
+>
+>     send("exit")
+>     try:
+>         proc.stdin.close()
+>     except Exception:
+>         pass
+>     proc.wait()
+>
+>     rs = [k[0] for k in grid]
+>     cs = [k[1] for k in grid]
+>     rmin, rmax = min(rs), max(rs)
+>     cmin, cmax = min(cs), max(cs)
+>     lines = []
+>     for r in range(rmin, rmax+1):
+>         row = "".join(grid.get((r,c), '#') for c in range(cmin, cmax+1))
+>         lines.append(row)
+>     out = "\n".join(lines)
+>     with open("/app/maze_map.txt","w") as f:
+>         f.write(out+"\n")
+>     print("=== MAP ===")
+>     print(out)
+>     print("=== END ===")
+>
+> if __name__ == "__main__":
+>     main()
+> PYEOF
+root@0d034a40ce2e:/app# python3 /app/explore.py
+

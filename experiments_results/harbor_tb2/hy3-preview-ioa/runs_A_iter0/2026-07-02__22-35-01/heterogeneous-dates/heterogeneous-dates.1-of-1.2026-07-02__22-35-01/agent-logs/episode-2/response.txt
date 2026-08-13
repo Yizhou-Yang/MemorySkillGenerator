@@ -1,0 +1,14 @@
+{
+  "analysis": "7 days of data in each file. High file uses YYYY-MM-DD; low file uses mixed formats (MM/DD/YYYY and MM-DD-YYYY). I need to normalize dates, join, compute high-low per day, then average. The expected differences: 16,11,22,18,5,3,5 sum=80, avg=11.4285... Let me write a Python script to do this robustly.",
+  "plan": "Write a Python script that parses both CSVs, normalizes dates to YYYY-MM-DD, joins by date, computes the difference per day, averages them, and writes the number to avg_temp.txt. Then verify the output.",
+  "commands": [
+    {
+      "keystrokes": "python3 - <<'EOF'\nimport csv, re\nfrom datetime import datetime\n\ndef norm(date_str):\n    s=date_str.strip()\n    for fmt in ('%Y-%m-%d','%m/%d/%Y %H:%M:%S','%m-%d-%Y %H:%M:%S'):\n        try:\n            return datetime.strptime(s,fmt).strftime('%Y-%m-%d')\n        except ValueError:\n            pass\n    raise ValueError('unparsed date: '+s)\n\nhigh={}\nwith open('daily_temp_sf_high.csv') as f:\n    r=csv.reader(f); next(r)\n    for row in r:\n        if not row: continue\n        high[norm(row[0])]=int(row[1])\n\nlow={}\nwith open('daily_temp_sf_low.csv') as f:\n    r=csv.reader(f); next(r)\n    for row in r:\n        if not row: continue\n        low[norm(row[0])]=int(row[1])\n\ndiffs=[high[d]-low[d] for d in high if d in low]\navg=sum(diffs)/len(diffs)\nwith open('avg_temp.txt','w') as f:\n    f.write(str(avg))\nprint('diffs',diffs,'avg',avg)\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat avg_temp.txt\n",
+      "duration": 0.1
+    }
+  ]
+}

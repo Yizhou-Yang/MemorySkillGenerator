@@ -1,0 +1,37 @@
+New Terminal Output:
+
+root@0b6040a8cf2f:/app# cat > /tmp/btest6.py << 'EOF'
+> from bitcoinlib.services.services import Service
+> s = Service(network='bitcoin')
+> b = s.getblock('000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f')
+> tx = b.transactions[0]
+> print('tx.block_hash', getattr(tx,'block_hash',None))
+> i = tx.inputs[0]
+> print('INPUT ATTRS', [a for a in dir(i) if not a.startswith('_')])
+> print('coinbase', getattr(i,'coinbase',None), 'sequence', getattr(i,'sequence',None))
+> o = tx.outputs[0]
+> print('OUTPUT ATTRS', [a for a in dir(o) if not a.startswith('_')])
+> print('value', o.value, 'n', o.n)
+> spk = o.script_pubkey
+> print('SPK hex', getattr(spk,'hex',None)[:40], 'type', getattr(spk,'script_type',None))
+> print('SPK asm', getattr(spk,'asm',None)[:60] if hasattr(spk,'asm') else 'noasm')
+> # now test gettransaction by txid
+> tx2 = s.gettransaction(tx.txid)
+> print('gettransaction ok txid', tx2.txid, 'block_hash', getattr(tx2,'block_hash',None))
+> print('errors', s.errors)
+> EOF
+root@0b6040a8cf2f:/app# python3 /tmp/btest6.py
+tx.block_hash None
+INPUT ATTRS ['address', 'address_obj', 'as_dict', 'compressed', 'double_spend', 'encoding', 'hash_type', 'index_n', 'key_path', 'keys', 'locking_script', 'lockt
+ime_cltv', 'locktime_csv', 'network', 'output_n', 'output_n_int', 'parse', 'prev_txid', 'public_hash', 'redeemscript', 'script', 'script_type', 'sequence', 'sig
+natures', 'sigs_required', 'sort', 'strict', 'unlocking_script', 'update_scripts', 'valid', 'value', 'verify', 'witness_type', 'witnesses']
+coinbase None sequence 4294967295
+OUTPUT ATTRS ['address', 'address_obj', 'as_dict', 'change', 'compressed', 'encoding', 'lock_script', 'network', 'output_n', 'parse', 'public_hash', 'public_key
+', 'script', 'script_type', 'set_locktime_relative', 'set_locktime_relative_blocks', 'set_locktime_relative_time', 'spending_index_n', 'spending_txid', 'spent',
+ 'value', 'versionbyte', 'witness_type', 'witver']
+Traceback (most recent call last):
+  File "/tmp/btest6.py", line 11, in <module>
+    print('value', o.value, 'n', o.n)
+                                 ^^^
+AttributeError: 'Output' object has no attribute 'n'
+root@0b6040a8cf2f:/app#

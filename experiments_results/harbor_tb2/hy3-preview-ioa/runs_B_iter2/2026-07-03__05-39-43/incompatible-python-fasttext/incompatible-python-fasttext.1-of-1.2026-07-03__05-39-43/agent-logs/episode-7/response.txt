@@ -1,0 +1,19 @@
+{
+  "analysis": "All code paths now work under NumPy 2.0. Multiline `predict()` returns correct labels/probs, and `test()` returns (2, 1.0, 1.0) — no errors. The fasttext package is fully functional again with the default python interpreter.",
+  "plan": "The task is complete. No further commands needed; provide the summary of the diagnosis and fix.",
+  "commands": [],
+  "task_complete": true
+}
+
+**Root cause:** The `fasttext` package imported fine — the real failure was in `predict()`/`test()`/`test_label()`, which threw:
+```
+ValueError: Unable to avoid copy while creating an array as requested.
+```
+This is a NumPy 2.0 incompatibility. `FastText.py` used `np.array(x, copy=False)` in three places, and NumPy 2.0 rejects `copy=False` (it now requires `np.asarray()`).
+
+**Fix:** In `/usr/local/lib/python3.13/site-packages/fasttext/FastText.py`, replaced the 3 occurrences:
+- line 41: `np.array(y_scores, copy=False), np.array(y_true, copy=False)` → `np.asarray(y_scores), np.asarray(y_true)`
+- line 56: `np.array(precision, copy=False), np.array(recall, copy=False)` → `np.asarray(precision), np.asarray(recall)`
+- line 239: `np.array(probs, copy=False)` → `np.asarray(probs)`
+
+After patching, end-to-end usage (train → save → load → predict → test, single- and multi-line) works correctly with the default `python` (3.13.1).

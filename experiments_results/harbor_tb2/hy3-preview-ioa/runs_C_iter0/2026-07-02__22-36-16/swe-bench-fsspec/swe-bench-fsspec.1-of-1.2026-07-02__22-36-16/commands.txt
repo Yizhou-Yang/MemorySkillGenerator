@@ -1,0 +1,32 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'find /app/filesystem_spec -name dirfs.py\n'
+"grep -n 'async def\\|def open_async\\|_async' /app/filesystem_spec/fsspec/implementations/dirfs.py\n"
+"grep -n 'def open\\|    fs\\|self.fs' /app/filesystem_spec/fsspec/implementations/dirfs.py | head -50\n"
+"grep -n 'def open' /app/filesystem_spec/fsspec/implementations/dirfs.py\n"
+"grep -n 'def open_async' /app/filesystem_spec/fsspec/asyn.py\n"
+"sed -n '362,390p' /app/filesystem_spec/fsspec/implementations/dirfs.py\n"
+"sed -n '900,915p' /app/filesystem_spec/fsspec/asyn.py\n"
+"sed -n '340,400p' /app/filesystem_spec/fsspec/implementations/dirfs.py\n"
+"sed -n '390,420p' /app/filesystem_spec/fsspec/implementations/dirfs.py\n"
+'wc -l /app/filesystem_spec/fsspec/implementations/dirfs.py\n'
+'cat >> /app/filesystem_spec/fsspec/implementations/dirfs.py << \'EOF\'\n\n    async def open_async(self, path, mode="rb", **kwargs):\n        return await self.fs.open_async(self._join(path), mode=mode, **kwargs)\nEOF\n'
+'tail -15 /app/filesystem_spec/fsspec/implementations/dirfs.py\n'
+"cd /app/filesystem_spec && cat > /tmp/test_dirfs_async.py << 'EOF'\nimport asyncio\nimport fsspec\n\nasync def async_test():\n    dirfs = fsspec.filesystem('dir', path='/tmp', asynchronous=True)\n    file = await dirfs.open_async('hello', 'wb')\n    await file.close()\n    print('SUCCESS: open_async worked')\n\nasyncio.run(async_test())\nEOF\npython3 /tmp/test_dirfs_async.py\n"
+'PYTHONPATH=/app/filesystem_spec python3 /tmp/test_dirfs_async.py\n'
+'pip install -e . 2>&1 | tail -5\n'
+''
+'python3 /tmp/test_dirfs_async.py\n'
+"sed -n '1,85p' /app/filesystem_spec/fsspec/implementations/dirfs.py\n"
+'python3 -c "import fsspec; m=fsspec.filesystem(\'memory\'); print(\'async_impl\', m.async_impl, type(m))"\n'
+''
+'python3 /tmp/test_dirfs_async.py\n'
+'cat > /tmp/test_dirfs_async.py << \'PYEOF\'\nimport asyncio\nfrom fsspec.asyn import AsyncFileSystem\nfrom fsspec.implementations.dirfs import DirFileSystem\n\n\nclass MyAsyncFS(AsyncFileSystem):\n    protocol = "myasync"\n\n    async def open_async(self, path, mode="rb", **kwargs):\n        self.last_path = path\n        self.last_mode = mode\n        return True\n\n\nasync def async_test():\n    inner = MyAsyncFS()\n    dirfs = DirFileSystem(path="/somedir", fs=inner)\n    assert dirfs.async_impl is True\n    result = await dirfs.open_async("hello", "wb")\n    assert result is True\n    assert inner.last_path == "/somedir/hello", inner.last_path\n    assert inner.last_mode == "wb", inner.last_mode\n    print("SUCCESS: open_async delegated, joined path =", inner.last_path)\n\n\nasyncio.run(async_test())\nPYEOF\n'
+'python3 /tmp/test_dirfs_async.py\n'
+'tail -4 /app/filesystem_spec/fsspec/implementations/dirfs.py\n'
+'rm -f /tmp/test_dirfs_async.py\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

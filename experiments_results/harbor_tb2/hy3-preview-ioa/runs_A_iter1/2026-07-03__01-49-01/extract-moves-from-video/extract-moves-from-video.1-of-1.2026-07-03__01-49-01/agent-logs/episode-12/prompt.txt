@@ -1,0 +1,31 @@
+New Terminal Output:
+
+root@8ebb5ad2e9be:/app# mkdir -p /tmp/debs; cat > /tmp/dl.py << 'EOF'
+> import urllib.request, sys, os
+> urls=[l.strip() for l in open('/tmp/urls.txt') if l.strip()]
+> fail=[]
+> for i,u in enumerate(urls):
+>     fn=os.path.join('/tmp/debs', os.path.basename(u.split('?')[0]))
+>     if os.path.exists(fn) and os.path.getsize(fn)>0:
+>         continue
+>     ok=False
+>     for attempt in range(3):
+>         try:
+>             urllib.request.urlretrieve(u, fn)
+>             ok=True
+>             break
+>         except Exception as e:
+>             print('retry', u, e)
+>     if not ok:
+>         fail.append(u)
+>     if i%20==0:
+>         print(i, len(urls))
+> print('FAILED', len(fail))
+> for f in fail: print(f)
+> EOF
+root@8ebb5ad2e9be:/app# echo written
+written
+root@8ebb5ad2e9be:/app# python3 -m pip install --quiet yt-dlp 2>&1 | tail -5; echo pip_done=$?
+/usr/bin/python3: No module named pip
+pip_done=0
+root@8ebb5ad2e9be:/app#

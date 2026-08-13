@@ -1,0 +1,34 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"python3 --version; pip list 2>/dev/null | grep -iE 'datasets|transformers|huggingface|tokenizers'\n"
+'ls -la /app; cat /app/answer.txt 2>/dev/null\n'
+'ls -la /app\n'
+"pip list 2>/dev/null | grep -iE 'datasets|transformers|huggingface|tokenizers' ; echo DONE\n"
+'pip install --quiet huggingface_hub 2>&1 | tail -5; echo EXIT=$?\n'
+''
+'pip install --quiet datasets transformers tokenizers 2>&1 | tail -5; echo EXIT=$?\n'
+''
+''
+'python3 -c "from huggingface_hub import hf_hub_download; p=hf_hub_download(repo_id=\'open-thoughts/OpenThoughts-114k\', filename=\'README.md\', repo_type=\'dataset\'); print(p)"\n'
+'cat /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/snapshots/bd093c3994fd54d2390985b66988ddf282a55eb6/README.md\n'
+'cat > /app/explore.py << \'EOF\'\nfrom datasets import load_dataset\n\nds = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train", streaming=True)\nfrom collections import Counter\ndomains = Counter()\nsample = None\nn = 0\nfor ex in ds:\n    domains[ex[\'domain\']] += 1\n    if sample is None:\n        sample = ex\n    n += 1\n    if n >= 2000:\n        break\nprint("domains (first 2000):", domains)\nif sample:\n    print("keys:", list(sample.keys()))\n    print("deepseek_reasoning[:200]:", repr(sample[\'deepseek_reasoning\'][:200]))\n    print("deepseek_solution[:200]:", repr(sample[\'deepseek_solution\'][:200]))\nEOF\npython3 /app/explore.py\n'
+''
+''
+'cat > /app/count.py << \'EOF\'\nimport sys, os\nfrom collections import Counter\nfrom datasets import load_dataset\nfrom transformers import AutoTokenizer\n\ntok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B-Instruct")\n\nds = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train", streaming=True)\n\ndomains = Counter()\nbatch = []\ntotal = 0\nscience = 0\nn = 0\nfor ex in ds:\n    d = ex.get(\'domain\')\n    domains[d] += 1\n    if d == \'science\':\n        science += 1\n        r = ex.get(\'deepseek_reasoning\') or \'\'\n        s = ex.get(\'deepseek_solution\') or \'\'\n        if r: batch.append(r)\n        if s: batch.append(s)\n        if len(batch) >= 2000:\n            enc = tok(batch, add_special_tokens=False)[\'input_ids\']\n            for ids in enc:\n                total += len(ids)\n            batch = []\n    n += 1\n    if n % 20000 == 0:\n        print("progress", n, "domains", dict(domains), flush=True)\n\nif batch:\n    enc = tok(batch, add_special_tokens=False)[\'input_ids\']\n    for ids in enc:\n        total += len(ids)\n\nwith open(\'/app/result.txt\',\'w\') as f:\n    f.write(str(total))\nprint("domains:", dict(domains))\nprint("science_examples:", science)\nprint("TOTAL_DEEPSEEK_TOKENS_SCIENCE:", total)\nsys.stdout.flush()\nos._exit(0)\nEOF\necho written\n'
+'python3 /app/count.py\n'
+''
+''
+''
+''
+''
+''
+''
+''
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+''
+['bash ', '/tests/run-tests.sh', 'Enter']
+''
+['C-d']
+['C-d']

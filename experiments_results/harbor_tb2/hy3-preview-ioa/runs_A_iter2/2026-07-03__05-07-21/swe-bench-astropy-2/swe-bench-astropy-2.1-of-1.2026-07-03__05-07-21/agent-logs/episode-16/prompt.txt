@@ -1,0 +1,24 @@
+New Terminal Output:
+
+root@3ea5ff14c777:/app/astropy# which gcc cc; which apt-get apt 2>/dev/null
+/usr/bin/apt-get
+/usr/bin/apt
+root@3ea5ff14c777:/app/astropy# python -c "
+> import re
+> _decimal_re = r'[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?'
+> _command_re = r'READ [TS]ERR(\\s+[0-9]+)+'
+> sep = r'\\s+'
+> _new_re = rf'NO({sep}NO)+'
+> _data_re = rf'({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)'
+> _type_re = rf'^\\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\\s*(\\!(?P<comment>.*))?\\s*$'
+> r = re.compile(_type_re, re.IGNORECASE)
+> for l in ['read serr 1 2','READ SERR 1 2','Read TERR 1','1 0.5 1 0.5','NO NO NO']:
+>     m=r.match(l.strip())
+>     print(repr(l), m.groupdict() if m else 'NONE')
+> "
+'read serr 1 2' {'command': 'read serr 1 2', 'new': None, 'data': None, 'comment': None}
+'READ SERR 1 2' {'command': 'READ SERR 1 2', 'new': None, 'data': None, 'comment': None}
+'Read TERR 1' {'command': 'Read TERR 1', 'new': None, 'data': None, 'comment': None}
+'1 0.5 1 0.5' {'command': None, 'new': None, 'data': '1 0.5 1 0.5', 'comment': None}
+'NO NO NO' {'command': None, 'new': 'NO NO NO', 'data': None, 'comment': None}
+root@3ea5ff14c777:/app/astropy#

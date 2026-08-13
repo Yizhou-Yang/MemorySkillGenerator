@@ -1,0 +1,455 @@
+root@4c85a0987440:/app# python3 --version; pip show datasets transformers huggingface_hub 2>/dev/null | grep -E 'Name|Version'; free -h; df -h /tmp /app; nproc
+Python 3.13.1
+bash: free: command not found
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  961G     0 100% /
+fuse-overlayfs  984G  961G     0 100% /
+32
+root@4c85a0987440:/app# python3 -c "import datasets, transformers, huggingface_hub; print(datasets.__version__, transformers.__version__, huggingface_hub.__vers
+ion__)" 2>&1 | head
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import datasets, transformers, huggingface_hub; print(datasets.__version__, transformers.__version__, huggingface_hub.__version__)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'datasets'
+root@4c85a0987440:/app# echo '---disk---'; df -h /app; echo '---test net---'; curl -sI https://huggingface.co 2>&1 | head -3
+---disk---
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  961G     0 100% /
+---test net---
+bash: curl: command not found
+root@4c85a0987440:/app# which pip pip3 wget python3; python3 -c "import urllib.request; print('urllib ok')"
+/usr/local/bin/pip
+/usr/local/bin/pip3
+/usr/local/bin/python3
+urllib ok
+root@4c85a0987440:/app# python3 -c "import urllib.request; r=urllib.request.urlopen('https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/main/RE
+ADME.md'); print(r.status); print(r.read()[:500])" 2>&1 | head -40
+200
+b'---\ndataset_info:\n- config_name: default\n  features:\n  - name: system\n    dtype: string\n  - name: conversations\n    list:\n    - name: from\n      dtyp
+e: string\n    - name: value\n      dtype: string\n  splits:\n  - name: train\n    num_bytes: 2635015668\n    num_examples: 113957\n  download_size: 1078777193\
+n  dataset_size: 2635015668\n- config_name: metadata\n  features:\n  - name: problem\n    dtype: string\n  - name: deepseek_reasoning\n    dtype: string\n  - na
+me: deepseek_solution\n    dtype: string\n  - na'
+root@4c85a0987440:/app# python3 -c "import urllib.request; print(urllib.request.urlopen('https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/mai
+n/README.md').read().decode())" 2>&1 | head -120
+---
+dataset_info:
+- config_name: default
+  features:
+  - name: system
+    dtype: string
+  - name: conversations
+    list:
+    - name: from
+      dtype: string
+    - name: value
+      dtype: string
+  splits:
+  - name: train
+    num_bytes: 2635015668
+    num_examples: 113957
+  download_size: 1078777193
+  dataset_size: 2635015668
+- config_name: metadata
+  features:
+  - name: problem
+    dtype: string
+  - name: deepseek_reasoning
+    dtype: string
+  - name: deepseek_solution
+    dtype: string
+  - name: ground_truth_solution
+    dtype: string
+  - name: domain
+    dtype: string
+  - name: source
+    dtype: string
+  - name: test_cases
+    dtype: string
+  - name: starter_code
+    dtype: string
+  splits:
+  - name: train
+    num_bytes: 5525214077.699433
+    num_examples: 113957
+  download_size: 2469729724
+  dataset_size: 5525214077.699433
+configs:
+- config_name: default
+  data_files:
+  - split: train
+    path: data/train-*
+- config_name: metadata
+  data_files:
+  - split: train
+    path: metadata/train-*
+tags:
+- curator
+- synthetic
+license: apache-2.0
+---
+
+<p align="center">
+    <img src="open_thoughts.png" width="50%">
+</p>
+
+> [!NOTE]
+> We have released a paper for OpenThoughts! See our paper [here](https://arxiv.org/abs/2506.04178).
+
+<a href="https://github.com/bespokelabsai/curator/">
+ <img src="https://huggingface.co/datasets/bespokelabs/Bespoke-Stratos-17k/resolve/main/made_with_curator.png" alt="Made with Curator" width=200px>
+</a>
+
+# Open-Thoughts-114k
+
+## Dataset Description
+
+- **Homepage:** https://www.open-thoughts.ai/
+- **Repository:** https://github.com/open-thoughts/open-thoughts
+- **Point of Contact:** [Open Thoughts Team](contact@open-thoughts.ai)
+
+Open synthetic reasoning dataset with 114k high-quality examples covering math, science, code, and puzzles!
+
+Inspect the content with rich formatting with [Curator Viewer](https://curator.bespokelabs.ai/datasets/1389c194254c4ead96daaf145505c3d1).
+
+### Available Subsets
+
+**default** subset containing ready-to-train data used to finetune the [OpenThinker-7B](https://huggingface.co/open-thoughts/OpenThinker-7B) and [OpenThinker-32
+B](https://huggingface.co/open-thoughts/OpenThinker-32B) models:
+```
+ds = load_dataset("open-thoughts/OpenThoughts-114k", split="train")
+```
+**metadata** subset containing extra columns used in dataset construction:
+- `problem`
+- `ground_truth_solution`
+- `deepseek_reasoning`
+- `deepseek_solution`
+- `domain`
+- `source`
+- `test_cases` (code only)
+- `starter_code`(code only)
+
+```
+ds = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train")
+```
+
+# OpenThinker Models
+
+The numbers reported in the tables below are evaluated with our open-source tool [Evalchemy](https://github.com/mlfoundations/Evalchemy).
+
+|                             | AIME24   | MATH500 | GPQA-Diamond | LCBv2 Easy  | LCBv2 Medium  | LCBv2 Hard  | LCBv2 All  |
+| --------------------------- | -------- | ------- | ------------ | ----------- | ------------- | ----------- | ---------- |
+| [OpenThinker-32B](https://huggingface.co/open-thoughts/OpenThinker-32B)             | 66       | 90.6    | 61.6         | 95.1        | 70.9          | 26.8
+      | 68.9       |
+| [OpenThinker-7B](https://huggingface.co/open-thoughts/OpenThinker-7B)              | 31.3     | 83.0    | 42.4         | 75.3        | 28.6          | 6.5
+     | 39.9       |
+| Bespoke-Stratos-7B          | 22.7     | 79.6    | 38.9         | 71.4        | 25.2          | 0.8         | 35.8       |
+| DeepSeek-R1-Distill-Qwen-7B | 60       | 88.2    | 46.9         | 79.7        | 45.1          | 14.6        | 50.1       |
+| gpt-4o-0513                 | 8.7      | 75.8    | 46.5         | 87.4        | 42.7          | 8.9         | 50.5       |
+| o1-mini                     | 64       | 85.6    | 60           | 92.8        | 74.7          | 39.8        | 72.8       |
+
+We are fully open-source. Our [model weights](https://huggingface.co/open-thoughts), [datasets](https://huggingface.co/open-thoughts), [data generation code](ht
+tps://github.com/open-thoughts/open-thoughts), [evaluation code](https://github.com/mlfoundations/Evalchemy), and [training code](https://github.com/hiyouga/LLa
+MA-Factory) are all publicly available.
+
+|  | Open Weights | Open Data | Open Code |
+|--|--------------|-----------| --------- |
+|OpenThinker-32B|✅|[✅](https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k)|[✅](https://github.com/open-thoughts/open-thoughts) |
+|OpenThinker-7B|✅|[✅](https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k)|[✅](https://github.com/open-thoughts/open-thoughts) |
+|Bespoke-Stratos-7B|✅|[✅](https://huggingface.co/datasets/bespokelabs/Bespoke-Stratos-17k)|[✅](https://github.com/bespokelabsai/curator/tree/main/examples/be
+spoke-stratos-data-generation)|
+root@4c85a0987440:/app# stat -f /app | grep -iE 'blocks|avail|free'; echo '---mem---'; head -3 /proc/meminfo
+Blocks: Total: 257946856  Free: 6089721    Available: 0
+Inodes: Total: 65536000   Free: 52223245
+---mem---
+MemTotal:       65579940 kB
+MemFree:         5656008 kB
+MemAvailable:   46285132 kB
+root@4c85a0987440:/app# pip install --no-input huggingface_hub pyarrow tokenizers 2>&1 | tail -20
+Downloading tqdm-4.68.3-py3-none-any.whl (78 kB)
+Downloading typer-0.25.1-py3-none-any.whl (58 kB)
+Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Downloading anyio-4.14.1-py3-none-any.whl (124 kB)
+Downloading idna-3.18-py3-none-any.whl (65 kB)
+Downloading certifi-2026.6.17-py3-none-any.whl (133 kB)
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 27.1 MB/s eta 0:00:00
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Installing collected packages: typing-extensions, tqdm, shellingham, pyyaml, pygments, pyarrow, packaging, mdurl, idna, hf-xet, h11, fsspec, filelock, click, ce
+rtifi, annotated-doc, markdown-it-py, httpcore, anyio, rich, httpx, typer, huggingface_hub, tokenizers
+Successfully installed annotated-doc-0.0.4 anyio-4.14.1 certifi-2026.6.17 click-8.4.2 filelock-3.29.4 fsspec-2026.6.0 h11-0.16.0 hf-xet-1.5.1 httpcore-1.0.9 htt
+px-0.28.1 huggingface_hub-1.21.0 idna-3.18 markdown-it-py-4.2.0 mdurl-0.1.2 packaging-26.2 pyarrow-24.0.0 pygments-2.20.0 pyyaml-6.0.3 rich-15.0.0 shellingham-1
+.5.4 tokenizers-0.23.1 tqdm-4.68.3 typer-0.25.1 typing-extensions-4.16.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@4c85a0987440:/app# python3 -c "from huggingface_hub import HfApi; api=HfApi(); fs=api.list_repo_files('open-thoughts/OpenThoughts-114k', repo_type='dataset
+'); m=[f for f in fs if 'metadata' in f and f.endswith('.parquet')]; print('num_metadata_shards', len(m)); [print(f) for f in m]"
+num_metadata_shards 12
+metadata/train-00000-of-00012.parquet
+metadata/train-00001-of-00012.parquet
+metadata/train-00002-of-00012.parquet
+metadata/train-00003-of-00012.parquet
+metadata/train-00004-of-00012.parquet
+metadata/train-00005-of-00012.parquet
+metadata/train-00006-of-00012.parquet
+metadata/train-00007-of-00012.parquet
+metadata/train-00008-of-00012.parquet
+metadata/train-00009-of-00012.parquet
+metadata/train-00010-of-00012.parquet
+metadata/train-00011-of-00012.parquet
+root@4c85a0987440:/app# python3 -c "from huggingface_hub import hf_hub_download; p=hf_hub_download('Qwen/Qwen2.5-1.5B-Instruct','tokenizer.json'); print('TOKENI
+ZER', p)"
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 7.03 MB. The target location /root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+tokenizer.json: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7.03M/7.03M [00:02<00:00, 3.50MB/s]
+TOKENIZER /root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json
+root@4c85a0987440:/app# TOK=$(python3 -c "from huggingface_hub import hf_hub_download; print(hf_hub_download('Qwen/Qwen2.5-1.5B-Instruct','tokenizer.json'))");
+echo "TOK=$TOK"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+TOK=/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json
+root@4c85a0987440:/app# cat > /app/count.py << 'EOF'
+> import os, sys
+> from huggingface_hub import hf_hub_download
+> from tokenizers import Tokenizer
+> from pyarrow import parquet as pq
+>
+> TOK = "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json"
+> tok = Tokenizer.from_file(TOK)
+>
+> total = 0
+> shards = [f"metadata/train-{i:05d}-of-00012.parquet" for i in range(12)]
+> for i, fname in enumerate(shards):
+>     path = hf_hub_download("open-thoughts/OpenThoughts-114k", fname, repo_type="dataset")
+>     pf = pq.ParquetFile(path)
+>     for batch in pf.iter_batches(batch_size=200):
+>         cols = batch.to_pydict()
+>         domain = cols["domain"]
+>         reason = cols.get("deepseek_reasoning", [None]*len(domain))
+>         sol = cols.get("deepseek_solution", [None]*len(domain))
+>         texts = []
+>         for j in range(len(domain)):
+>             if domain[j] == "science":
+>                 r = reason[j] or ""
+>                 s = sol[j] or ""
+>                 texts.append(r + s)
+>         if texts:
+>             enc = tok.encode_batch(texts, add_special_tokens=False)
+>             total += sum(len(e.ids) for e in enc)
+>     del pf
+>     os.remove(path)
+>     print(f"shard {i+1}/12 done, total={total}", flush=True)
+>
+> with open("/app/answer.txt", "w") as f:
+>     f.write(str(total))
+> print("FINAL", total, flush=True)
+> EOF
+root@4c85a0987440:/app# echo written
+written
+root@4c85a0987440:/app# python3 /app/count.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 95.77 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00000-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 95.8M/95.8M [00:04<00:00, 22.5MB/s]
+shard 1/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 95.14 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00001-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 95.1M/95.1M [00:03<00:00, 26.5MB/s]
+shard 2/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 96.96 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00002-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 97.0M/97.0M [00:03<00:00, 26.4MB/s]
+shard 3/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 96.20 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00003-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 96.2M/96.2M [00:03<00:00, 25.5MB/s]
+shard 4/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 96.52 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00004-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 96.5M/96.5M [00:03<00:00, 25.4MB/s]
+shard 5/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 96.93 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00005-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 96.9M/96.9M [00:03<00:00, 30.0MB/s]
+shard 6/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 97.28 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00006-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 97.3M/97.3M [00:03<00:00, 28.4MB/s]
+shard 7/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 70.73 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00007-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 70.7M/70.7M [00:03<00:00, 20.9MB/s]
+shard 8/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 90.93 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00008-of-00012.parquet: 100%|██████████████████████████████████████████████████████████████████████████████| 90.9M/90.9M [00:03<00:00, 24.4MB/s]
+shard 9/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 370.49 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00009-of-00012.parquet: 100%|████████████████████████████████████████████████████████████████████████████████| 370M/370M [00:04<00:00, 77.8MB/s]
+shard 10/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 975.74 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00010-of-00012.parquet: 100%|█████████████████████████████████████████████████████████████████████████████████| 976M/976M [00:06<00:00, 162MB/s]
+shard 11/12 done, total=0
+/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py:747: UserWarning: Not enough free disk space to download the file. The expected file si
+ze is: 287.05 MB. The target location /root/.cache/huggingface/hub/datasets--open-thoughts--OpenThoughts-114k/blobs only has 0.00 MB free disk space.
+  warnings.warn(
+metadata/train-00011-of-00012.parquet: 100%|████████████████████████████████████████████████████████████████████████████████| 287M/287M [00:05<00:00, 49.2MB/s]
+shard 12/12 done, total=0
+FINAL 0
+root@4c85a0987440:/app# cat > /app/inspect.py << 'EOF'
+> from huggingface_hub import hf_hub_download
+> from pyarrow import parquet as pq
+> from collections import Counter
+> path = hf_hub_download("open-thoughts/OpenThoughts-114k", "metadata/train-00000-of-00012.parquet", repo_type="dataset")
+> pf = pq.ParquetFile(path)
+> print("schema:", pf.schema_arrow.names)
+> c = Counter()
+> sample = None
+> for batch in pf.iter_batches(batch_size=500):
+>     d = batch.to_pydict()["domain"]
+>     for v in d:
+>         c[v] += 1
+>     if sample is None:
+>         sample = batch.to_pydict()
+> print("domain counts:", dict(c))
+> if sample:
+>     print("keys:", list(sample.keys()))
+>     print("reason len:", len(sample.get("deepseek_reasoning",[""])[0] or ""))
+>     print("sol len:", len(sample.get("deepseek_solution",[""])[0] or ""))
+> EOF
+root@4c85a0987440:/app# python3 /app/inspect.py
+Error importing huggingface_hub.file_download: cannot import name 'hf_hub_download' from 'huggingface_hub' (/usr/local/lib/python3.13/site-packages/huggingface_
+hub/__init__.py)
+Traceback (most recent call last):
+  File "/app/inspect.py", line 1, in <module>
+    from huggingface_hub import hf_hub_download
+  File "/usr/local/lib/python3.13/site-packages/huggingface_hub/__init__.py", line 1184, in __getattr__
+    submod = importlib.import_module(submod_path)
+  File "/usr/local/lib/python3.13/importlib/__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/site-packages/huggingface_hub/file_download.py", line 10, in <module>
+    from dataclasses import dataclass
+  File "/usr/local/lib/python3.13/dataclasses.py", line 5, in <module>
+    import inspect
+  File "/app/inspect.py", line 1, in <module>
+    from huggingface_hub import hf_hub_download
+ImportError: cannot import name 'hf_hub_download' from 'huggingface_hub' (/usr/local/lib/python3.13/site-packages/huggingface_hub/__init__.py)
+root@4c85a0987440:/app# mv /app/inspect.py /app/check_domain.py; python3 /app/check_domain.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+schema: ['problem', 'deepseek_reasoning', 'deepseek_solution', 'ground_truth_solution', 'domain', 'source', 'test_cases', 'starter_code']
+domain counts: {'math': 9497}
+keys: ['problem', 'deepseek_reasoning', 'deepseek_solution', 'ground_truth_solution', 'domain', 'source', 'test_cases', 'starter_code']
+reason len: 41079
+sol len: 1575
+root@4c85a0987440:/app# cat > /app/scan.py << 'EOF'
+> from huggingface_hub import hf_hub_download
+> from pyarrow import parquet as pq
+> from collections import Counter
+> import os
+> c = Counter()
+> shards = [f"metadata/train-{i:05d}-of-00012.parquet" for i in range(12)]
+> for i, fname in enumerate(shards):
+>     path = hf_hub_download("open-thoughts/OpenThoughts-114k", fname, repo_type="dataset")
+>     pf = pq.ParquetFile(path)
+>     for batch in pf.iter_batches(batch_size=1000):
+>         d = batch.to_pydict()["domain"]
+>         for v in d:
+>             c[v] += 1
+>     del pf
+>     os.remove(path)
+>     print(f"shard {i+1} done", flush=True)
+> print("ALL DOMAIN COUNTS:", dict(c), flush=True)
+> EOF
+root@4c85a0987440:/app# python3 /app/scan.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+shard 1 done
+shard 2 done
+shard 3 done
+shard 4 done
+shard 5 done
+shard 6 done
+shard 7 done
+shard 8 done
+shard 9 done
+shard 10 done
+shard 11 done
+shard 12 done
+ALL DOMAIN COUNTS: {'math': 89120, 'code': 19904, 'biology': 1246, 'physics': 1246, 'chemistry': 1222, 'puzzle': 1219}
+root@4c85a0987440:/app# cat > /app/count.py << 'EOF'
+> import os
+> from huggingface_hub import hf_hub_download
+> from tokenizers import Tokenizer
+> from pyarrow import parquet as pq
+>
+> TOK = "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json"
+> tok = Tokenizer.from_file(TOK)
+> SCIENCE = {"biology", "physics", "chemistry"}
+> total = 0
+> matched = 0
+> shards = [f"metadata/train-{i:05d}-of-00012.parquet" for i in range(12)]
+> for i, fname in enumerate(shards):
+>     path = hf_hub_download("open-thoughts/OpenThoughts-114k", fname, repo_type="dataset")
+>     pf = pq.ParquetFile(path)
+>     for batch in pf.iter_batches(batch_size=200):
+>         cols = batch.to_pydict()
+>         domain = cols["domain"]
+>         reason = cols["deepseek_reasoning"]
+>         sol = cols["deepseek_solution"]
+>         texts = []
+>         for j in range(len(domain)):
+>             if domain[j] in SCIENCE:
+>                 texts.append((reason[j] or "") + (sol[j] or ""))
+>         if texts:
+>             enc = tok.encode_batch(texts, add_special_tokens=False)
+>             total += sum(len(e.ids) for e in enc)
+>             matched += len(texts)
+>     del pf
+>     os.remove(path)
+>     print(f"shard {i+1}/12 done, matched={matched} total={total}", flush=True)
+>
+> with open("/app/answer.txt", "w") as f:
+>     f.write(str(total))
+> print("FINAL total=", total, "matched=", matched, flush=True)
+> EOF
+root@4c85a0987440:/app# python3 /app/count.py
+shard 1/12 done, matched=0 total=0
+shard 2/12 done, matched=0 total=0
+shard 3/12 done, matched=0 total=0
+shard 4/12 done, matched=0 total=0
+shard 5/12 done, matched=0 total=0
+shard 6/12 done, matched=0 total=0
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+shard 7/12 done, matched=0 total=0
+shard 8/12 done, matched=0 total=0
+shard 9/12 done, matched=0 total=0
+shard 10/12 done, matched=0 total=0
+shard 11/12 done, matched=0 total=0
+shard 12/12 done, matched=3714 total=10991480
+FINAL total= 10991480 matched= 3714
+root@4c85a0987440:/app# cat /app/answer.txt; echo; wc -c /app/answer.txt
+10991480
+8 /app/answer.txt
+root@4c85a0987440:/app#

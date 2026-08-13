@@ -1,0 +1,45 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@2739e611cf42:/app# cat > /tmp/grid.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> data=[]
+> for line in open('/app/graphene.dat'):
+>     line=line.strip()
+>     if not line: continue
+>     p=line.split()
+>     if len(p)<2: continue
+>     data.append((float(p[0].replace(',','.')), float(p[1].replace(',','.'))))
+> data=np.array(data)
+> x=data[:,0]; y=data[:,1]
+> def lor(x,x0,g,a,o): return o+a/(1+((x-x0)/g)**2)
+>
+> for name,c,hw in [('G',19139.0,900.0),('2D',33245.0,2500.0)]:
+>     m=(x>c-hw)&(x<c+hw)
+>     xw,yw=x[m],y[m]
+>     best=None
+>     if name=='G':
+>         x0s=[19139.0]; gs=[80,150,250,400,600]; amps=[40000,60000,80000]; offs=[15000,19000,22000]
+>     else:
+>         x0s=[33245.0]; gs=[800,1500,2500]; amps=[2000,4000,6000]; offs=[15000,19000,21000]
+>     for x0 in x0s:
+>       for g in gs:
+>         for a in amps:
+>           for o in offs:
+>             try:
+>                 popt,_=curve_fit(lor,xw,yw,p0=[x0,g,a,o],maxfev=200000)
+>                 rms=np.sqrt(np.mean((yw-lor(xw,*popt))**2))
+>                 if best is None or rms<best[0]:
+>                     best=(rms,popt)
+>             except Exception:
+>                 pass
+>     rms,popt=best
+>     print('%s: x0=%.2f gamma=%.2f amp=%.2f off=%.2f rms=%.2f'%(name,popt[0],abs(popt[1]),popt[2],popt[3],rms))
+> EOF
+root@2739e611cf42:/app# python3 /tmp/grid.py
+G: x0=19198.34 gamma=504.00 amp=84367.78 off=-496.43 rms=5337.27
+2D: x0=33447.77 gamma=2146.18 amp=3942.22 off=17049.73 rms=255.91
+root@2739e611cf42:/app#

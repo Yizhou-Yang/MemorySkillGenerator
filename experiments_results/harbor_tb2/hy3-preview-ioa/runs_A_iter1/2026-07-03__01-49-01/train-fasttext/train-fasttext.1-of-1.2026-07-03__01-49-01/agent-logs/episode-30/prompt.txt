@@ -1,0 +1,80 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@482d64706df7:/tmp#
+exit
+asciinema: recording finished
+asciinema: asciicast saved to /logs/agent.cast
+root@482d64706df7:/app# cat > /app/train.py << 'PYEOF'
+> import pandas as pd
+> import fasttext
+> import os
+>
+> df = pd.read_parquet('data/train-00000-of-00001.parquet')
+> print('train shape', df.shape)
+> print(df['label'].value_counts().sort_index())
+>
+> df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+> n = len(df)
+> n_val = int(n*0.05)
+> val = df.iloc[:n_val]
+> tr = df.iloc[n_val:]
+>
+> def write(d, path):
+>     with open(path,'w') as f:
+>         for lbl, txt in zip(d['label'].values, d['text'].values):
+>             t = str(txt).replace(chr(10),' ').strip()
+>             f.write('__label__' + str(int(lbl)) + ' ' + t + chr(10))
+>
+> write(tr, '/tmp/ft_train.txt')
+> write(val, '/tmp/ft_val.txt')
+> print('wrote files, train', n-n_val, 'val', n_val)
+>
+> model = fasttext.train_supervised(
+>     input='/tmp/ft_train.txt',
+>     lr=0.5, epoch=30, wordNgrams=2, dim=100,
+>     minCount=5, bucket=2000000, loss='softmax', thread=4)
+> model.save_model('/tmp/model_full.bin')
+> sz = os.path.getsize('/tmp/model_full.bin')
+> print('full size MB', sz/1e6)
+>
+> def evaluate(model, path):
+>     cnt, p, r = model.test(path, k=1)
+>     return p
+>
+> acc = evaluate(model, '/tmp/ft_val.txt')
+> print('val accuracy', acc)
+>
+> if sz > 150*1e6 or acc < 0.635:
+>     print('quantizing')
+>     model.quantize(input='/tmp/ft_val.txt', retrain=True, qnorm=True, cutoff=50000)
+>     model.save_model('model.bin')
+> else:
+>     model.save_model('model.bin')
+> print('final size MB', os.path.getsize('model.bin')/1e6)
+> print('final val acc', evaluate(model, '/tmp/ft_val.txt'))
+> PYEOF
+root@482d64706df7:/app# head -20 /app/train.py
+import pandas as pd
+import fasttext
+import os
+
+df = pd.read_parquet('data/train-00000-of-00001.parquet')
+print('train shape', df.shape)
+print(df['label'].value_counts().sort_index())
+
+df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+n = len(df)
+n_val = int(n*0.05)
+val = df.iloc[:n_val]
+tr = df.iloc[n_val:]
+
+def write(d, path):
+    with open(path,'w') as f:
+        for lbl, txt in zip(d['label'].values, d['text'].values):
+            t = str(txt).replace(chr(10),' ').strip()
+            f.write('__label__' + str(int(lbl)) + ' ' + t + chr(10))
+
+root@482d64706df7:/app#

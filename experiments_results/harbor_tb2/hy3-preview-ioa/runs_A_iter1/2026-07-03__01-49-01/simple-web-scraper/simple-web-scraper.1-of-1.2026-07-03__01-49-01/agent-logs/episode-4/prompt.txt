@@ -1,0 +1,74 @@
+New Terminal Output:
+
+root@5a1643855ec1:/app# cat > /app/scraper.py << 'EOF'
+> import re
+> import requests
+> from bs4 import BeautifulSoup
+> import pandas as pd
+>
+> URL = "http://server:8000"
+>
+>
+> def main():
+>     resp = requests.get(URL, timeout=15)
+>     resp.raise_for_status()
+>     soup = BeautifulSoup(resp.text, "html.parser")
+>
+>     books = []
+>     for book in soup.find_all("div", class_="book"):
+>         title_tag = book.find("div", class_="book-title")
+>         author_tag = book.find("div", class_="book-author")
+>         year_tag = book.find("span", class_="book-year")
+>         rating_tag = book.find("span", class_="book-rating")
+>         price_tag = book.find("span", class_="book-price")
+>
+>         title = title_tag.get_text(strip=True) if title_tag else ""
+>         author = ""
+>         if author_tag:
+>             author = re.sub(r"^by\s+", "", author_tag.get_text(strip=True))
+>         year = int(re.search(r"\d{4}", year_tag.get_text())) if year_tag and re.search(r"\d{4}", year_tag.get_text()) else None
+>         rating = float(re.search(r"[\d.]+\s*/\s*5", rating_tag.get_text()).group().split("/")[0].strip()) if rating_tag and re.search(r"[\d.]+\s*/\s*5", ratin
+g_tag.get_text()) else None
+>         price = float(re.sub(r"[^\d.]", "", price_tag.get_text())) if price_tag else None
+>
+>         books.append({
+>             "title": title,
+>             "author": author,
+>             "year": year,
+>             "rating": rating,
+>             "price": price,
+>         })
+>
+>     df = pd.DataFrame(books, columns=["title", "author", "year", "rating", "price"])
+>     df.to_csv("/app/books.csv", index=False)
+>
+>     total = len(df)
+>     avg_price = df["price"].mean()
+>     highest = df.loc[df["rating"].idxmax()]
+>
+>     lines = []
+>     lines.append("Book Store Scraping Summary Report")
+>     lines.append("=" * 40)
+>     lines.append(f"Total number of books scraped: {total}")
+>     lines.append(f"Average book price: ${avg_price:.2f}")
+>     lines.append(f"Highest rated book: {highest['title']} by {highest['author']} (Rating: {highest['rating']}/5)")
+>
+>     with open("/app/report.txt", "w") as f:
+>         f.write("\n".join(lines) + "\n")
+>
+>     print("\n".join(lines))
+>
+>
+> if __name__ == "__main__":
+>     main()
+> EOF
+root@5a1643855ec1:/app# python3 /app/scraper.py
+Traceback (most recent call last):
+  File "/app/scraper.py", line 59, in <module>
+    main()
+    ~~~~^^
+  File "/app/scraper.py", line 26, in main
+    year = int(re.search(r"\d{4}", year_tag.get_text())) if year_tag and re.search(r"\d{4}", year_tag.get_text()) else None
+           ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 're.Match'
+root@5a1643855ec1:/app#

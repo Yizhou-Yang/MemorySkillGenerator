@@ -1,0 +1,43 @@
+New Terminal Output:
+
+root@08346bd18573:/app# useradd -m -s /bin/bash git 2>/dev/null || echo git_exists
+echo 'git:password' | chpasswd
+mkdir -p /git/project && git init --bare -q /git/project && chown -R git:git /git/project
+root@08346bd18573:/app# echo 'git:password' | chpasswd
+cat > /git/project/hooks/post-receive <<'EOF'
+#!/bin/bash
+while read oldrev newrev refname
+do
+    branch=$(echo "$refname" | sed 's|refs/heads/||')
+    case "$branch" in
+        main)
+            mkdir -p /var/www/html
+            git --git-dir=/git/project archive main | tar -x -C /var/www/html
+            ;;
+        dev)
+            mkdir -p /var/www/html/dev
+            git --git-dir=/git/project archive dev | tar -x -C /var/www/html/dev
+            ;;
+    esac
+done
+EOF
+chmod +x /git/project/hooks/post-receive && chown git:git /git/project/hooks/post-receive
+root@08346bd18573:/app# mkdir -p /git/project && git init --bare -q /git/project && chown -R git:git /git/project
+mkdir -p /var/www/html/dev && chown -R git:git /var/www/html
+mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -days 365 -subj "/CN=localhost"
+ 2>/dev/null && echo CERT_OK
+cat > /etc/nginx/conf.d/gitdeploy.conf <<'EOF'
+server {
+    listen 8443 ssl;
+    server_name localhost;
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+    root /var/www/html;
+    index index.html;
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+EOF
+printf 'PasswordAuthentication yes\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/99-git.conf
+

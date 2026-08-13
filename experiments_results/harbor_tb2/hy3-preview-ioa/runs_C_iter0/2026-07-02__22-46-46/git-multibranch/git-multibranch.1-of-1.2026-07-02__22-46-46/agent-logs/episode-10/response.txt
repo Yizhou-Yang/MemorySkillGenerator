@@ -1,0 +1,22 @@
+{
+  "analysis": "Confirmed root cause: pam_motd is printing /run/motd.dynamic to the SSH session, which corrupts git's protocol ('Welc' from 'Welcome'). Also /tmp is noexec so my test script failed to execute. Fix: disable pam_motd in /etc/pam.d/sshd (and set PrintMotd no), then re-test the push using a script in an exec-capable directory like /app.",
+  "plan": "1) Comment out the pam_motd.so lines in /etc/pam.d/sshd and ensure PrintMotd is off. 2) Rewrite the push test script into /app (exec-capable) and run it. 3) Verify the deploy produced /var/www/index.html and /var/www/dev/index.html, then curl both HTTPS endpoints for 200.",
+  "commands": [
+    {
+      "keystrokes": "sed -i 's/^session.*pam_motd.so/#&/' /etc/pam.d/sshd; grep -c pam_motd /etc/pam.d/sshd\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "echo 'PrintMotd no' >> /etc/ssh/sshd_config; /usr/sbin/sshd -t && echo sshd-ok\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /app/push.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 60\nspawn git -c {core.sshCommand=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null} push git@localhost:/git/project main dev\nexpect {\n  -re {(?i)password} { send \"password\\r\"; exp_continue }\n  eof { }\n}\nEOF\nchmod +x /app/push.exp && echo exp-ready\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "time /app/push.exp\n",
+      "duration": 6.0
+    }
+  ]
+}

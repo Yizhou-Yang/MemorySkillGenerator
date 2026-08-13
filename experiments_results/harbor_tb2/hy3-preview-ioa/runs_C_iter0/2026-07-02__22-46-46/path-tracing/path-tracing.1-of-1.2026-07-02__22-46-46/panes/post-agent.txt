@@ -1,0 +1,717 @@
+root@e4e667a7dedd:/app# ls -la /app/image.ppm 2>/dev/null; ls -la image.ppm 2>/dev/null; find / -name image.ppm 2>/dev/null
+-rw-r--r-- 1 root root 1440015 Jul  2 15:40 /app/image.ppm
+-rw-r--r-- 1 root root 1440015 Jul  2 15:40 image.ppm
+head -c 20 image.ppm | xxd | head
+which python3 gcc
+/app/image.ppm
+root@e4e667a7dedd:/app# head -c 20 image.ppm | xxd | head
+bash: xxd: command not found
+root@e4e667a7dedd:/app# which python3 gcc
+/usr/bin/python3
+/usr/bin/gcc
+root@e4e667a7dedd:/app# head -c 20 image.ppm | od -c
+0000000   P   6  \n   8   0   0       6   0   0  \n   2   5   5  \n 237
+0000020 305 377 237 305
+0000024
+root@e4e667a7dedd:/app# command -v python3; command -v gcc
+/usr/bin/python3
+/usr/bin/gcc
+root@e4e667a7dedd:/app# cat > /tmp/analyze.py << 'EOF'
+> import sys
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> assert data[:2]==b'P6'
+> hdr_end=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[hdr_end:]
+> print('header end',hdr_end,'pxlen',len(px),'expected',w*h*3)
+> def get(x,y):
+>     i=(y*w+x)*3
+>     return px[i],px[i+1],px[i+2]
+> # print first row some samples
+> print('row0 x=0,10,100,400,799:')
+> for x in [0,10,100,400,799]:
+>     print(x, get(x,0))
+> print('col0 y=0,10,100,300,599:')
+> for y in [0,10,100,300,599]:
+>     print(y, get(0,y))
+> # check if pure diagonal gradient
+> print('diag x=y:')
+> for v in [0,100,200,400,799]:
+>     print(v,get(v,v))
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/analyze.py
+header end 15 pxlen 1440000 expected 1440000
+row0 x=0,10,100,400,799:
+0 (159, 197, 255)
+10 (158, 197, 255)
+100 (155, 195, 255)
+400 (146, 190, 255)
+799 (159, 197, 255)
+col0 y=0,10,100,300,599:
+0 (159, 197, 255)
+10 (159, 198, 255)
+100 (168, 203, 255)
+300 (121, 125, 130)
+599 (102, 102, 102)
+diag x=y:
+0 (159, 197, 255)
+100 (164, 201, 255)
+200 (174, 207, 255)
+400 (22, 22, 22)
+Traceback (most recent call last):
+  File "/tmp/analyze.py", line 22, in <module>
+    print(v,get(v,v))
+            ^^^^^^^^
+  File "/tmp/analyze.py", line 11, in get
+    return px[i],px[i+1],px[i+2]
+           ~~^^^
+IndexError: index out of range
+root@e4e667a7dedd:/app# cat > /tmp/an2.py << 'EOF'
+> import math
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> hdr_end=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[hdr_end:]
+> # build channel arrays
+> R=[0]*(w*h);G=[0]*(w*h);B=[0]*(w*h)
+> for i in range(w*h):
+>     R[i]=px[i*3];G[i]=px[i*3+1];B[i]=px[i*3+2]
+> def idx(x,y):return y*w+x
+> # noise estimate: std of second difference along x within a row (smooth region top)
+> res=[]
+> for y in range(0,50):
+>     for x in range(2,w-2):
+>         for ch in (R,G,B):
+>             res.append(ch[idx(x,y)]-2*ch[idx(x-1,y)]+ch[idx(x-2,y)])
+> import statistics
+> print('2nd-diff std (top rows):', statistics.pstdev(res))
+> # try gradient correlation: correlation of R with x and y
+> xs=[i%w for i in range(w*h)]; ys=[i//w for i in range(w*h)]
+> def corr(a,b):
+>     n=len(a); ma=sum(a)/n; mb=sum(b)/n
+>     num=sum((a[i]-ma)*(b[i]-mb) for i in range(n))
+>     da=math.sqrt(sum((v-ma)**2 for v in a)); db=math.sqrt(sum((v-mb)**2 for v in b))
+>     return num/(da*db)
+> print('R vs x',corr(R,xs),'R vs y',corr(R,ys))
+> print('G vs x',corr(G,xs),'G vs y',corr(G,ys))
+> print('B vs x',corr(B,xs),'B vs y',corr(B,ys))
+> # distance from center squared
+> cx,cy=400,300
+> for name,ch in [('R',R),('G',G),('B',B)]:
+>     d2=[((i%w)-cx)**2+((i//w)-cy)**2 for i in range(w*h)]
+>     print(name,'vs dist2',corr(ch,d2))
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an2.py
+2nd-diff std (top rows): 0.18202287159315708
+R vs x -0.0015474626222410795 R vs y -0.5333057791907595
+G vs x -0.0015305758601430722 G vs y -0.6660755601481061
+B vs x -0.0011171242532374951 B vs y -0.7731960332789248
+R vs dist2 0.06180268504107593
+G vs dist2 0.08818251655551755
+B vs dist2 0.07947473692553644
+root@e4e667a7dedd:/app# cat > /tmp/an3.py << 'EOF'
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> hdr_end=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[hdr_end:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> # vertical profile at x=400 every 50
+> print('VERT x=400, y step 50:')
+> for y in range(0,600,50):
+>     print(y, get(400,y))
+> print('VERT x=0, y step 50:')
+> for y in range(0,600,50):
+>     print(y, get(0,y))
+> print('HORIZ y=0, x step 100:')
+> for x in range(0,800,100):
+>     print(x, get(x,0))
+> print('HORIZ y=300, x step 100:')
+> for x in range(0,800,100):
+>     print(x, get(x,300))
+> print('points at y=400 across x:')
+> for x in [0,200,400,600,799]:
+>     print(x, get(x,400))
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an3.py
+VERT x=400, y step 50:
+0 (146, 190, 255)
+50 (151, 193, 255)
+100 (156, 196, 255)
+150 (163, 200, 255)
+200 (171, 205, 255)
+250 (181, 211, 255)
+300 (51, 10, 10)
+350 (51, 10, 10)
+400 (22, 22, 22)
+450 (79, 79, 79)
+500 (74, 74, 74)
+550 (145, 145, 145)
+VERT x=0, y step 50:
+0 (159, 197, 255)
+50 (163, 200, 255)
+100 (168, 203, 255)
+150 (173, 206, 255)
+200 (179, 210, 255)
+250 (185, 213, 255)
+300 (121, 125, 130)
+350 (70, 70, 70)
+400 (69, 69, 69)
+450 (74, 74, 74)
+500 (153, 153, 153)
+550 (67, 67, 67)
+HORIZ y=0, x step 100:
+0 (159, 197, 255)
+100 (155, 195, 255)
+200 (151, 193, 255)
+300 (147, 191, 255)
+400 (146, 190, 255)
+500 (147, 191, 255)
+600 (151, 193, 255)
+700 (155, 195, 255)
+HORIZ y=300, x step 100:
+0 (121, 125, 130)
+100 (115, 117, 120)
+200 (117, 119, 122)
+300 (117, 119, 122)
+400 (51, 10, 10)
+500 (117, 119, 122)
+600 (118, 120, 123)
+700 (117, 119, 122)
+points at y=400 across x:
+0 (69, 69, 69)
+200 (154, 154, 154)
+400 (22, 22, 22)
+600 (89, 89, 89)
+799 (150, 150, 150)
+root@e4e667a7dedd:/app# cat > /tmp/ascii.py << 'EOF'
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> hdr_end=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[hdr_end:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> ramp=' .:-=+*#%@'
+> cols=100; rows=50
+> for ry in range(rows):
+>     line=''
+>     for rx in range(cols):
+>         x=rx*w//cols; y=ry*h//rows
+>         r,g,b=get(x,y)
+>         lum=(r+g+b)/3.0
+>         line+=ramp[min(9,int(lum/256*10))]
+>     print(line)
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/ascii.py
+####################################################################################################
+####################################################################################################
+%###################################################################################################
+%%%%#############################################################################################%%%
+%%%%%%%%#####################################################################################%%%%%%%
+%%%%%%%%%%%##############################################################################%%%%%%%%%%%
+%%%%%%%%%%%%%%%#######################################################################%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%##############################################################%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%#####################################################%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%###########################################%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%###############################%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%###########%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%.....::%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%      ...::%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+============================================         ...:===========================================
++-+-+-+-=-======-=-+-+-+-+-======-=-=-=====            ..:=-=-====-=-======-=-+-+-+-+-=-====-=-+-+-+
++=:-+=--+=--++--++--++-:++-:++-:++-:++-:++-             ..=:-++:-++:-++:-++:-++:-++--++--++--=+--=+-
+*=::-+*+::-+*+::-+*+:::+*+:::***:::***:::**              .:-**+::-**+:::**+:::+*+:::+*+:::+*+-::+*+-
+:-+*++::::++++::::+++*::::++++::::*+++::::*              .-++++:::-++++:::-++++:::-*+*+::::++*+::::+
+++++*:::::++++*:::::+++++:::::+++++:::::*+++             :::-+++++::::-+++++::::-+++++::::-*++++::::
++*::::::+++++*::::::++++++::::::*+++++::::::*           =+++++=:::::-++++++:::::-++++++:::::-*+++++:
+*:::::::+++++++:::::::+++++++:::::::*++++++::.        *++-::::::-+++++++::::::-+++++++::::::-+++++++
++*::::::::++++++++::::::::*+++++++::.     ........    ::::=+++++++=:::::::-++++++++:::::::-++++++++:
+:::::+++++++++:::::::::*++++++*.         .........   ::::::=++++++++=::::::::-+++++++++::::::::-++++
+::::::::::++++++++++:::::::   ..........          .+++++++++-:::::::::-++++++++++:::::::::-+++++++++
+::::::+++++++++++:::::::    ...........         ::+++++++++++-::::::::::-+++++++++++::::::::::-+++++
+::++++++++++++::::::::    ............      .:::::++++++++++++-:::::::::::-++++++++++++:::::::::::-+
+:::::::::::*++++++++....             ..:++++++++++:::::::::::::=++++++++++++=::::::::::::-++++++++++
+::::::::*++++++++++++.           :::*+++++++++++++::::::::::::::=+++++++++++++=:::::::::::::-+++++++
+:::::*++++++++++++++:::::::::::::::*++++++++++++++:::::::::::::::=++++++++++++++=::::::::::::::-++++
+::*+++++++++++++++::::::::::::::::*+++++++++++++++::::::::::::::::=+++++++++++++++=:::::::::::::::-+
+++++++++++++++++:::::::::::::::::*++++++++++++++++:::::::::::::::::=++++++++++++++++=:::::::::::::::
+++++++++++++++::::::::::::::::::*+++++++++++++++++::::::::::::::::::=+++++++++++++++++=:::::::::::::
+::::::::::::*++++++++++++++++++:::::::::::::::::::+++++++++++++++++++-::::::::::::::::::-+++++++++++
+::::::::::*+++++++++++++++++++::::::::::::::::::::++++++++++++++++++++-:::::::::::::::::::-+++++++++
+::::::::*++++++++++++++++++++:::::::::::::::::::::+++++++++++++++++++++-::::::::::::::::::::-+++++++
+::::::*+++++++++++++++++++++::::::::::::::::::::::++++++++++++++++++++++-:::::::::::::::::::::-+++++
+::::*++++++++++++++++++++++:::::::::::::::::::::::+++++++++++++++++++++++-::::::::::::::::::::::-+++
+::*+++++++++++++++++++++++::::::::::::::::::::::::++++++++++++++++++++++++-:::::::::::::::::::::::-+
+root@e4e667a7dedd:/app# cat > /tmp/an4.py << 'EOF'
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> hdr_end=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[hdr_end:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> # Top region parabola fit per row
+> print('TOP parabola R(x,y)=a+b*(x-400)^2  (a at x=400, b from x=0)')
+> for y in range(0,260,20):
+>     a=get(400,y)[0]
+>     b=(get(0,y)[0]-a)/(400.0*400.0)
+>     print('y=%3d a=%3d b=%+.6f  G_a=%d' % (y,a,b,get(400,y)[1]))
+> # gradient direction histogram in bottom region
+> gx=[0]*(w*h); gy=[0]*(w*h)
+> for y in range(1,h-1):
+>     for x in range(1,w-1):
+>         r,xp=get(x+1,y)[0],get(x-1,y)[0]
+>         dyp=get(x,y+1)[0]-get(x,y-1)[0]
+>         gx[y*w+x]=r-xp; gy[y*w+x]=dyp
+> from collections import Counter
+> c=Counter()
+> for y in range(350,599):
+>     for x in range(1,w-1):
+>         gxx=gx[y*w+x]; gyy=gy[y*w+x]
+>         if abs(gxx)+abs(gyy)<3: continue
+>         ang=(round((3.14159265+math.atan2(gyy,gxx))/(math.pi/9))%18)*10
+>         c[ang]+=1
+> print('gradient angle histogram (bottom):')
+> for k in sorted(c): print(' %3d deg: %d' % (k,c[k]))
+> import math
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an4.py
+TOP parabola R(x,y)=a+b*(x-400)^2  (a at x=400, b from x=0)
+y=  0 a=146 b=+0.000081  G_a=190
+y= 20 a=148 b=+0.000075  G_a=191
+y= 40 a=150 b=+0.000075  G_a=192
+y= 60 a=152 b=+0.000075  G_a=193
+y= 80 a=154 b=+0.000075  G_a=194
+y=100 a=156 b=+0.000075  G_a=196
+y=120 a=159 b=+0.000069  G_a=197
+y=140 a=161 b=+0.000069  G_a=199
+y=160 a=165 b=+0.000056  G_a=201
+y=180 a=168 b=+0.000056  G_a=203
+y=200 a=171 b=+0.000050  G_a=205
+y=220 a=175 b=+0.000037  G_a=207
+y=240 a=179 b=+0.000031  G_a=210
+Traceback (most recent call last):
+  File "/tmp/an4.py", line 27, in <module>
+    ang=(round((3.14159265+math.atan2(gyy,gxx))/(math.pi/9))%18)*10
+                           ^^^^
+NameError: name 'math' is not defined. Did you forget to import 'math'?
+root@e4e667a7dedd:/app# python3 -c 'import numpy; print(numpy.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'numpy'
+root@e4e667a7dedd:/app# cat > /tmp/an5.py << 'EOF'
+> import math
+> from collections import Counter
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> he=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[he:]
+> def get(x,y):
+>     i=(y*w+x)*3
+>     return px[i],px[i+1],px[i+2]
+> print('== gray transition (avg |R-G|+|G-B| per row sampled) ==')
+> for y in range(0,600,5):
+>     s=0.0; n=0
+>     for x in range(0,w,4):
+>         r,g,b=get(x,y)
+>         s+=abs(r-g)+abs(g-b); n+=1
+>     print(y, round(s/n,2))
+> print('== red blob ==')
+> xs=[];ys=[]
+> for y in range(h):
+>     for x in range(w):
+>         r,g,b=get(x,y)
+>         if r-g>40 and g<90:
+>             xs.append(x);ys.append(y)
+> if xs:
+>     print('x[%d,%d] y[%d,%d] count=%d'%(min(xs),max(xs),min(ys),max(ys),len(xs)))
+> else:
+>     print('none')
+> print('== gradient angle histogram (full image) ==')
+> c=Counter()
+> for y in range(1,h-1):
+>     for x in range(1,w-1):
+>         gxx=get(x+1,y)[0]-get(x-1,y)[0]
+>         gyy=get(x,y+1)[0]-get(x,y-1)[0]
+>         if abs(gxx)+abs(gyy)<4: continue
+>         ang=(round(math.degrees(math.atan2(gyy,gxx))/5)*5)%180
+>         c[ang]+=1
+> for k in sorted(c):
+>     print('%3d: %d'%(k,c[k]))
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an5.py
+== gray transition (avg |R-G|+|G-B| per row sampled) ==
+0 103.83
+5 103.38
+10 103.01
+15 102.56
+20 102.14
+25 101.72
+30 101.25
+35 100.83
+40 100.31
+45 99.9
+50 99.36
+55 98.92
+60 98.38
+65 97.92
+70 97.35
+75 96.87
+80 96.3
+85 95.79
+90 95.21
+95 94.64
+100 94.08
+105 93.44
+110 92.89
+115 92.28
+120 91.61
+125 91.04
+130 90.39
+135 89.71
+140 89.06
+145 88.42
+150 87.72
+155 87.01
+160 86.25
+165 85.61
+170 84.91
+175 84.16
+180 83.42
+185 82.64
+190 81.86
+195 81.13
+200 80.34
+205 79.58
+210 78.78
+215 77.97
+220 77.17
+225 76.33
+230 75.51
+235 74.69
+240 73.83
+245 73.01
+250 72.14
+255 71.28
+260 70.46
+265 69.56
+270 69.25
+275 68.91
+280 66.94
+285 65.56
+290 64.22
+295 62.89
+300 12.01
+305 6.83
+310 7.16
+315 6.84
+320 6.92
+325 7.04
+330 6.92
+335 6.78
+340 6.52
+345 6.16
+350 6.03
+355 5.83
+360 5.54
+365 5.13
+370 4.76
+375 4.32
+380 3.83
+385 3.02
+390 1.75
+395 0.0
+400 0.0
+405 0.0
+410 0.0
+415 0.0
+420 0.0
+425 0.0
+430 0.0
+435 0.0
+440 0.0
+445 0.0
+450 0.0
+455 0.0
+460 0.0
+465 0.0
+470 0.0
+475 0.0
+480 0.0
+485 0.0
+490 0.0
+495 0.0
+500 0.0
+505 0.0
+510 0.0
+515 0.0
+520 0.0
+525 0.0
+530 0.0
+535 0.0
+540 0.0
+545 0.0
+550 0.0
+555 0.0
+560 0.0
+565 0.0
+570 0.0
+575 0.0
+580 0.0
+585 0.0
+590 0.0
+595 0.0
+== red blob ==
+x[339,460] y[270,391] count=11697
+== gradient angle histogram (full image) ==
+  0: 1277
+  5: 498
+ 10: 550
+ 15: 723
+ 20: 749
+ 25: 698
+ 30: 692
+ 35: 1007
+ 40: 694
+ 45: 1149
+ 50: 1009
+ 55: 1667
+ 60: 1277
+ 65: 1742
+ 70: 2314
+ 75: 2066
+ 80: 2018
+ 85: 2753
+ 90: 27395
+ 95: 2787
+100: 1972
+105: 2074
+110: 2308
+115: 1804
+120: 1348
+125: 1996
+130: 1087
+135: 1286
+140: 838
+145: 1209
+150: 850
+155: 805
+160: 745
+165: 791
+170: 583
+175: 509
+root@e4e667a7dedd:/app# cat > /tmp/an6.py << 'EOF'
+> import math
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> he=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[he:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> print('B top region [y, B at x=0,400,799]:')
+> for y in range(0,300,30):
+>     print(y, get(0,y)[2], get(400,y)[2], get(799,y)[2])
+>
+> def feats(u,v):
+>     return [1,v,v*v,v*v*v,u,u*u,u*u*u,u*v,u*v*v,u*u*v]
+>
+> def fit(plane, y0, y1):
+>     M=[[0.0]*10 for _ in range(10)]
+>     bb=[0.0]*10
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             u=x-400; v=y
+>             f=feats(u,v)
+>             val=plane(x,y)
+>             for i in range(10):
+>                 bb[i]+=f[i]*val
+>                 Mi=M[i]
+>                 for j in range(10):
+>                     Mi[j]+=f[i]*f[j]
+>     A=[row[:] for row in M]; b=bb[:]
+>     for p in range(10):
+>         m=p
+>         for r in range(p+1,10):
+>             if abs(A[r][p])>abs(A[m][p]): m=r
+>         A[p],A[m]=A[m],A[p]; b[p],b[m]=b[m],b[p]
+>         pv=A[p][p]
+>         for c in range(p,10): A[p][c]/=pv
+>         b[p]/=pv
+>         for r in range(10):
+>             if r!=p:
+>                 f=A[r][p]
+>                 for c in range(p,10): A[r][c]-=f*A[p][c]
+>                 b[r]-=f*b[p]
+>     return b
+>
+> def rms(coef, plane, y0, y1):
+>     e=0.0; n=0
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             u=x-400; v=y
+>             f=feats(u,v)
+>             pred=sum(coef[i]*f[i] for i in range(10))
+>             d=pred-plane(x,y); e+=d*d; n+=1
+>     return math.sqrt(e/n)
+>
+> cR=fit(lambda x,y:get(x,y)[0],0,295)
+> cG=fit(lambda x,y:get(x,y)[1],0,295)
+> print('R cubic coef:',[round(c,5) for c in cR])
+> print('R cubic RMS (train):',round(rms(cR,lambda x,y:get(x,y)[0],0,295),3))
+> print('G cubic coef:',[round(c,5) for c in cG])
+> print('G cubic RMS (train):',round(rms(cG,lambda x,y:get(x,y)[1],0,295),3))
+>
+> print('bottom R at x=0..400 step50:')
+> for y in [450,500,550,580]:
+>     print(' y',y,[get(x,y)[0] for x in range(0,401,50)])
+> print('stripe along x+y=const (should be ~const if stripes are x+y const):')
+> for s in [0,10,20,30,40,50]:
+>     print(' x',s,'y',500-s,get(s,500-s)[0])
+> print('stripe along x-y=const:')
+> for s in [0,40,80,120]:
+>     print(' x',100+s,'y',500-s,get(100+s,500-s)[0])
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an6.py
+B top region [y, B at x=0,400,799]:
+0 255 255 255
+30 255 255 255
+60 255 255 255
+90 255 255 255
+120 255 255 255
+150 255 255 255
+180 255 255 255
+210 255 255 255
+240 255 255 255
+270 255 20 255
+R cubic coef: [149.64521, -0.02765, 0.00127, -0.0, 0.00072, 6e-05, -0.0, -1e-05, 0.0, 0.0]
+R cubic RMS (train): 9.158
+G cubic coef: [196.29784, -0.15437, 0.00199, -1e-05, 0.00013, -0.0, -0.0, -0.0, 0.0, 0.0]
+G cubic RMS (train): 16.153
+bottom R at x=0..400 step50:
+ y 450 [74, 74, 146, 145, 22, 22, 44, 145, 79]
+ y 500 [153, 152, 152, 67, 67, 67, 152, 152, 74]
+ y 550 [67, 67, 152, 152, 152, 67, 67, 67, 145]
+ y 580 [67, 152, 152, 152, 152, 67, 67, 67, 145]
+stripe along x+y=const (should be ~const if stripes are x+y const):
+ x 0 y 500 153
+ x 10 y 490 67
+ x 20 y 480 67
+ x 30 y 470 67
+ x 40 y 460 67
+ x 50 y 450 74
+stripe along x-y=const:
+ x 100 y 500 152
+ x 140 y 460 152
+ x 180 y 420 67
+ x 220 y 380 152
+root@e4e667a7dedd:/app# cat > /tmp/an7.py << 'EOF'
+> import math
+> with open('image.ppm','rb') as f:
+>     data=f.read()
+> he=data.index(b'\n255\n')+len(b'\n255\n')
+> w,h=800,600
+> px=data[he:]
+> def get(x,y):
+>     i=(y*w+x)*3; return px[i],px[i+1],px[i+2]
+> def feats(u,v):
+>     return [1.0,v,v*v,v*v*v,u,u*u,u*u*u,u*v,u*v*v,u*u*v]
+> def fit(plane,y0,y1):
+>     M=[[0.0]*10 for _ in range(10)]; bb=[0.0]*10
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             f=feats(x-400,y); val=plane(x,y)
+>             for i in range(10):
+>                 bb[i]+=f[i]*val
+>                 for j in range(10): M[i][j]+=f[i]*f[j]
+>     A=[r[:] for r in M]; b=bb[:]
+>     for p in range(10):
+>         m=p
+>         for r in range(p+1,10):
+>             if abs(A[r][p])>abs(A[m][p]): m=r
+>         A[p],A[m]=A[m],A[p]; b[p],b[m]=b[m],b[p]
+>         pv=A[p][p]
+>         for c in range(p,10): A[p][c]/=pv
+>         b[p]/=pv
+>         for r in range(10):
+>             if r!=p:
+>                 f=A[r][p]
+>                 for c in range(p,10): A[r][c]-=f*A[p][c]
+>                 b[r]-=f*b[p]
+>     return b
+> def rms(c,plane,y0,y1):
+>     e=0.0;n=0
+>     for y in range(y0,y1):
+>         for x in range(0,w):
+>             f=feats(x-400,y); p=sum(c[i]*f[i] for i in range(10)); d=p-plane(x,y); e+=d*d;n+=1
+>     return math.sqrt(e/n)
+> cR=fit(lambda x,y:get(x,y)[0],0,265); cG=fit(lambda x,y:get(x,y)[1],0,265)
+> print('clean R coef',[round(v,5) for v in cR],'RMS',round(rms(cR,lambda x,y:get(x,y)[0],0,265),3))
+> print('clean G coef',[round(v,5) for v in cG],'RMS',round(rms(cG,lambda x,y:get(x,y)[1],0,265),3))
+> print('sphere y=330 profile:')
+> for x in range(335,466,5):
+>     print(x, get(x,330))
+> print('floor boundary x (R>100 -> light) per y:')
+> for y in range(420,590,20):
+>     vals=[1 if get(x,y)[0]>100 else 0 for x in range(w)]
+>     edges=[x for x in range(1,w) if vals[x]!=vals[x-1]]
+>     print('y',y,'n_edges',len(edges),'first25',edges[:25])
+> EOF
+root@e4e667a7dedd:/app# python3 /tmp/an7.py
+clean R coef [146.23291, 0.0879, 0.00022, -0.0, 9e-05, 9e-05, -0.0, -0.0, 0.0, -0.0] RMS 0.652
+clean G coef [189.92599, 0.05298, 0.00013, -0.0, 6e-05, 6e-05, -0.0, -0.0, 0.0, -0.0] RMS 0.455
+sphere y=330 profile:
+335 (73, 73, 73)
+340 (51, 10, 10)
+345 (51, 10, 10)
+350 (51, 10, 10)
+355 (51, 10, 10)
+360 (51, 10, 10)
+365 (51, 10, 10)
+370 (51, 10, 10)
+375 (51, 10, 10)
+380 (51, 10, 10)
+385 (51, 10, 10)
+390 (51, 10, 10)
+395 (51, 10, 10)
+400 (51, 10, 10)
+405 (51, 10, 10)
+410 (51, 10, 10)
+415 (51, 10, 10)
+420 (51, 10, 10)
+425 (51, 10, 10)
+430 (51, 10, 10)
+435 (51, 10, 10)
+440 (51, 10, 10)
+445 (51, 10, 10)
+450 (63, 12, 12)
+455 (86, 17, 17)
+460 (125, 23, 23)
+465 (146, 146, 146)
+floor boundary x (R>100 -> light) per y:
+y 420 n_edges 7 first25 [78, 159, 406, 480, 561, 641, 721]
+y 440 n_edges 7 first25 [25, 119, 400, 494, 587, 681, 774]
+y 460 n_edges 7 first25 [79, 159, 299, 400, 507, 614, 721]
+y 480 n_edges 7 first25 [39, 159, 280, 400, 520, 641, 761]
+y 500 n_edges 5 first25 [133, 266, 400, 534, 667]
+y 520 n_edges 5 first25 [106, 253, 400, 547, 694]
+y 540 n_edges 5 first25 [79, 240, 400, 560, 721]
+y 560 n_edges 5 first25 [53, 226, 400, 574, 747]
+y 580 n_edges 5 first25 [26, 213, 400, 587, 774]
+root@e4e667a7dedd:/app#

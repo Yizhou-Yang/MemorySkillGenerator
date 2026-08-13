@@ -1,0 +1,369 @@
+root@1e3fed7d83ee:/app# ls -la
+total 96
+drwxr-xr-x  2 root root  4096 Jul  2 15:09 .
+drwxr-xr-x 19 root root  4096 Jul  2 18:46 ..
+-rw-r--r--  1 root root 88805 Jul  2 13:59 graphene.dat
+root@1e3fed7d83ee:/app# find / -name 'graphene.dat' 2>/dev/null
+/app/graphene.dat
+root@1e3fed7d83ee:/app# head -50 graphene.dat
+47183,554644    19261,547207
+46588,360019    19266,089699
+46008,191298    19077,996963
+45442,488736    19173,287322
+44890,718036    19501,518253
+44352,368927    19506,586203
+43826,959593    19752,431144
+43314,029137    19812,863021
+42813,138290    19678,348151
+42323,866373    19764,871128
+41845,813826    19360,099292
+41378,600916    19413,554878
+40921,863181    19626,191780
+40475,250679    19704,066336
+40038,430487    19495,727898
+39611,084116    19672,573559
+39192,908278    19538,763458
+38783,609488    19344,943112
+38382,908122    19510,307527
+37990,536178    19552,152695
+37606,236678    19568,884582
+37229,764497    19605,714542
+36860,880256    19652,302102
+36499,358232    19518,303269
+36144,980263    19684,212843
+35797,536721    19599,237174
+35456,826102    19666,264313
+35122,653398    19895,771042
+34794,833482    19781,231391
+34473,186962    19931,483503
+34157,541138    20285,381465
+33847,728547    20523,239756
+33543,589022    21041,170567
+33244,969313    21252,731073
+32951,720556    21063,536782
+32663,698124    20547,110114
+32380,763586    20339,907615
+32102,783353    19883,117751
+31829,629489    19630,215111
+31561,176433    19007,346911
+31297,303919    18787,398139
+31037,895750    18572,941601
+30782,840573    18641,459921
+30532,027914    18252,903219
+30285,354669    18084,091054
+30042,717440    17987,028918
+29804,018905    17844,333233
+29569,163975    17541,066496
+29338,060595    17468,865956
+29110,619627    17434,460788
+root@1e3fed7d83ee:/app# echo '----- TAIL -----'
+----- TAIL -----
+root@1e3fed7d83ee:/app# tail -20 graphene.dat
+1653,704408     5869,936650
+1653,440936     5773,130495
+1653,177619     5895,449413
+1652,914454     6214,277617
+1652,651439     6034,852890
+1652,388578     6285,424832
+1652,125866     6004,103504
+1651,863309     6150,102627
+1651,600904     6161,653672
+1651,338647     6193,454093
+1651,076544     6302,950951
+1650,814593     6154,492341
+1650,552790     6150,191176
+1650,291141     6157,269473
+1650,029641     6090,511415
+1649,768294     6062,725860
+1649,507095     6005,066261
+1649,246046     6009,427936
+1648,985151     5911,446799
+1648,724404     5950,923261
+root@1e3fed7d83ee:/app# python3 --version; python3 -m pip --version
+Python 3.13.1
+python3 -m pip install numpy scipy 2>&1 | tail -5
+pip 24.3.1 from /usr/local/lib/python3.13/site-packages/pip (python 3.13)
+root@1e3fed7d83ee:/app# python3 -m pip install numpy scipy 2>&1 | tail -5
+Successfully installed numpy-2.5.0 scipy-1.18.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+root@1e3fed7d83ee:/app# cat > explore.py << 'EOF'
+> import numpy as np
+> data = np.loadtxt('graphene.dat', delimiter=' ', converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.'))}
+)
+> x = data[:,0]; y = data[:,1]
+> print('n =', len(x))
+> print('x range:', x.min(), x.max())
+> print('y range:', y.min(), y.max())
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+> # top 10 intensity points
+> idx = np.argsort(y)[::-1][:10]
+> for i in idx:
+>     print('x=%.3f y=%.3f' % (x[i], y[i]))
+> EOF
+root@1e3fed7d83ee:/app# python3 explore.py
+Traceback (most recent call last):
+  File "/app/explore.py", line 2, in <module>
+    data = np.loadtxt('graphene.dat', delimiter=' ', converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.')
+)})
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1381, in loadtxt
+    arr = _read(fname, dtype=dtype, comment=comment, delimiter=delimiter,
+                converters=converters, skiplines=skiprows, usecols=usecols,
+                unpack=unpack, ndmin=ndmin, encoding=encoding,
+                max_rows=max_rows, quote=quotechar)
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1035, in _read
+    arr = _load_from_filelike(
+        data, delimiter=delimiter, comment=comment, quote=quote,
+    ...<3 lines>...
+        encoding=encoding, filelike=filelike,
+        byte_converters=byte_converters)
+ValueError: converter specified for column 1, which is invalid for the number of fields 1.
+root@1e3fed7d83ee:/app# cat > explore.py << 'EOF'
+> import numpy as np
+> with open('graphene.dat') as f:
+>     txt = f.read().replace(',', '.')
+> with open('/tmp/graphene_conv.txt','w') as f:
+>     f.write(txt)
+> data = np.loadtxt('/tmp/graphene_conv.txt')
+> x = data[:,0]; y = data[:,1]
+> print('n =', len(x))
+> print('x range:', x.min(), x.max())
+> print('y range:', y.min(), y.max())
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+> idx = np.argsort(y)[::-1][:10]
+> for i in idx:
+>     print('x=%.3f y=%.3f' % (x[i], y[i]))
+> EOF
+root@1e3fed7d83ee:/app# python3 explore.py
+n = 3565
+x range: 1648.724404 47183.554644
+y range: 40.090842 79400.095085
+x=19139.544 y=79400.095
+x=19332.107 y=79083.274
+x=19429.899 y=78849.113
+x=19044.742 y=78843.437
+x=19235.327 y=78815.242
+x=19528.720 y=67902.853
+x=18950.906 y=65451.692
+x=18858.022 y=54280.854
+x=19628.585 y=46667.598
+x=18766.076 y=46110.702
+root@1e3fed7d83ee:/app# cat > scan.py << 'EOF'
+> import numpy as np
+> data = np.loadtxt('/tmp/graphene_conv.txt')
+> x = data[:,0]; y = data[:,1]
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+> # local maxima
+> maxs = []
+> for i in range(1, len(x)-1):
+>     if y[i] > y[i-1] and y[i] >= y[i+1]:
+>         maxs.append((y[i], x[i], i))
+> maxs.sort(reverse=True)
+> print('Top local maxima by intensity:')
+> for yy, xx, i in maxs[:15]:
+>     print('x=%.3f y=%.3f' % (xx, yy))
+> print('--- peaks with y>10000 ---')
+> for yy, xx, i in maxs:
+>     if yy > 10000:
+>         print('x=%.3f y=%.3f' % (xx, yy))
+> EOF
+root@1e3fed7d83ee:/app# python3 scan.py
+Top local maxima by intensity:
+x=19139.544 y=79400.095
+x=19332.107 y=79083.274
+x=33244.969 y=21252.731
+x=35122.653 y=19895.771
+x=43314.029 y=19812.863
+x=42323.866 y=19764.871
+x=40475.251 y=19704.066
+x=36144.980 y=19684.213
+x=39611.084 y=19672.574
+x=36860.880 y=19652.302
+x=46588.360 y=19266.090
+x=10289.940 y=18805.235
+x=10342.096 y=18758.665
+x=10611.564 y=18754.713
+x=10502.001 y=18717.434
+--- peaks with y>10000 ---
+x=19139.544 y=79400.095
+x=19332.107 y=79083.274
+x=33244.969 y=21252.731
+x=35122.653 y=19895.771
+x=43314.029 y=19812.863
+x=42323.866 y=19764.871
+x=40475.251 y=19704.066
+x=36144.980 y=19684.213
+x=39611.084 y=19672.574
+x=36860.880 y=19652.302
+x=46588.360 y=19266.090
+x=10289.940 y=18805.235
+x=10342.096 y=18758.665
+x=10611.564 y=18754.713
+x=10502.001 y=18717.434
+x=10238.342 y=18649.563
+x=30782.841 y=18641.460
+x=10394.818 y=18633.110
+x=10556.480 y=18602.118
+x=16245.584 y=18159.870
+x=16954.541 y=17175.139
+x=15721.279 y=16443.830
+x=27019.885 y=16360.988
+x=26638.043 y=16289.396
+x=25906.582 y=15792.470
+x=25556.068 y=15587.086
+x=15231.049 y=15515.039
+x=15055.328 y=15405.048
+x=24402.290 y=15091.123
+x=14827.512 y=15014.570
+x=23939.880 y=14876.857
+x=23641.473 y=14777.798
+x=23350.612 y=14669.950
+x=14340.341 y=13935.490
+x=6329.372 y=13777.737
+x=14033.726 y=13687.486
+x=14185.299 y=13661.895
+x=13885.507 y=13356.655
+x=13740.532 y=13139.655
+x=13414.286 y=13107.384
+x=13598.694 y=13080.600
+x=3745.053 y=12920.881
+x=13324.036 y=12850.047
+x=13191.026 y=12832.919
+x=12808.218 y=12794.776
+x=13103.891 y=12780.653
+x=13017.958 y=12762.235
+x=12685.751 y=12716.614
+x=12409.359 y=12660.200
+x=12565.724 y=12650.129
+x=12182.350 y=12619.273
+x=12891.256 y=12573.593
+x=12257.041 y=12520.967
+x=12487.026 y=12501.363
+x=21625.657 y=12463.445
+x=21146.401 y=12443.698
+x=21383.262 y=12430.005
+x=11928.327 y=12282.148
+x=11857.790 y=12097.720
+x=11323.707 y=12055.705
+x=11719.326 y=12026.276
+x=10925.809 y=12025.707
+x=11788.128 y=12021.038
+x=9939.980 y=12012.627
+x=11136.305 y=11960.545
+x=11617.700 y=11959.305
+x=11452.404 y=11947.222
+x=11229.177 y=11882.815
+x=11517.922 y=11839.557
+x=11045.047 y=11834.784
+root@1e3fed7d83ee:/app# cat > findpeaks.py << 'EOF'
+> import numpy as np
+> data = np.loadtxt('/tmp/graphene_conv.txt')
+> x = data[:,0]; y = data[:,1]
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+> w = 15
+> ker = np.ones(w)/w
+> ys = np.convolve(y, ker, mode='same')
+> maxs = []
+> for i in range(1, len(x)-1):
+>     if ys[i] > ys[i-1] and ys[i] >= ys[i+1]:
+>         maxs.append((ys[i], x[i], i))
+> maxs.sort(reverse=True)
+> print('Baseline rough (median y):', np.median(y))
+> print('Top smoothed local maxima:')
+> for v, xx, i in maxs[:20]:
+>     print('x=%.2f y=%.1f' % (xx, v))
+> EOF
+root@1e3fed7d83ee:/app# python3 findpeaks.py
+Baseline rough (median y): 2579.6785
+Top smoothed local maxima:
+x=19044.74 y=56462.9
+x=33847.73 y=20208.3
+x=40475.25 y=19586.4
+x=10421.39 y=18643.2
+x=16592.19 y=17169.3
+x=13103.89 y=12682.3
+x=12526.24 y=12535.0
+x=12605.47 y=12533.2
+x=12409.36 y=12513.7
+x=12294.75 y=12507.0
+x=11550.98 y=11900.6
+x=11355.59 y=11822.2
+x=11229.18 y=11791.1
+x=3745.05 y=11654.2
+x=6329.37 y=10395.8
+x=8761.79 y=8573.1
+x=8410.22 y=8243.6
+x=8213.52 y=8028.2
+x=8087.83 y=7872.3
+x=7996.27 y=7817.1
+root@1e3fed7d83ee:/app# cat > fit.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> import json
+>
+> data = np.loadtxt('/tmp/graphene_conv.txt')
+> x = data[:,0]; y = data[:,1]
+> order = np.argsort(x)
+> x = x[order]; y = y[order]
+>
+> def lor(x, x0, gamma, amp, offset):
+>     return offset + amp / (1.0 + ((x - x0)/gamma)**2)
+>
+> def fit_peak(xmin, xmax, name):
+>     m = (x >= xmin) & (x <= xmax)
+>     xw, yw = x[m], y[m]
+>     imax = np.argmax(yw)
+>     x0g = xw[imax]
+>     offg = np.percentile(yw, 10)
+>     ampg = yw[imax] - offg
+>     gammag = 80.0
+>     p0 = [x0g, gammag, ampg, offg]
+>     popt, pcov = curve_fit(lor, xw, yw, p0=p0, maxfev=100000)
+>     resid = np.sum((lor(xw, *popt) - yw)**2)
+>     print('%s: x0=%.3f gamma=%.3f amp=%.3f offset=%.3f (resid=%.2e)' % (name, *popt, resid))
+>     return popt
+>
+> pG = fit_peak(17000, 21000, 'G')
+> p2D = fit_peak(31000, 37000, '2D')
+>
+> results = {
+>     'G':  {'x0': float(pG[0]), 'gamma': float(abs(pG[1])), 'amplitude': float(pG[2]), 'offset': float(pG[3])},
+>     '2D': {'x0': float(p2D[0]), 'gamma': float(abs(p2D[1])), 'amplitude': float(p2D[2]), 'offset': float(p2D[3])},
+> }
+> with open('results.json','w') as f:
+>     json.dump(results, f, indent=2)
+> print('--- results.json ---')
+> print(open('results.json').read())
+> EOF
+root@1e3fed7d83ee:/app# python3 fit.py
+G: x0=19197.455 gamma=402.848 amp=73538.698 offset=12162.358 (resid=1.09e+09)
+2D: x0=33321.682 gamma=828.658 amp=2104.452 offset=19176.293 (resid=2.14e+06)
+--- results.json ---
+{
+  "G": {
+    "x0": 19197.45471201314,
+    "gamma": 402.8478406032997,
+    "amplitude": 73538.69757455996,
+    "offset": 12162.357947515173
+  },
+  "2D": {
+    "x0": 33321.6821465203,
+    "gamma": 828.6582923223713,
+    "amplitude": 2104.4519678667803,
+    "offset": 19176.293013657058
+  }
+}
+root@1e3fed7d83ee:/app# python3 -c "import json; print(json.load(open('results.json')))"
+{'G': {'x0': 19197.45471201314, 'gamma': 402.8478406032997, 'amplitude': 73538.69757455996, 'offset': 12162.357947515173}, '2D': {'x0': 33321.6821465203, 'gamma
+': 828.6582923223713, 'amplitude': 2104.4519678667803, 'offset': 19176.293013657058}}
+root@1e3fed7d83ee:/app# ls -la results.json
+-rw-r--r-- 1 root root 291 Jul  2 18:51 results.json
+root@1e3fed7d83ee:/app#

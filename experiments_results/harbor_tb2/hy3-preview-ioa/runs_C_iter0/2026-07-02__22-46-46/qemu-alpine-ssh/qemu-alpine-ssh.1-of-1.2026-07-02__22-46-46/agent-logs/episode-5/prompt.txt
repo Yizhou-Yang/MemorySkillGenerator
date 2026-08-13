@@ -1,0 +1,90 @@
+New Terminal Output:
+
+---
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  libburn4 libisoburn1 libisofs6 libjte2
+Suggested packages:
+  xorriso-tcltk jigit cdck
+The following NEW packages will be installed:
+  libburn4 libisoburn1 libisofs6 libjte2 xorriso
+0 upgraded, 5 newly installed, 0 to remove and 0 not upgraded.
+Need to get 1102 kB of archives.
+After this operation, 2356 kB of additional disk space will be used.
+E: You don't have enough free space in /var/cache/apt/archives/.
+root@f7750922546c:/app# which socat telnet nc ncat 2>&1; echo ---
+/usr/bin/telnet
+/bin/nc
+---
+root@f7750922546c:/app# cat > /tmp/iso_extract.py <<'EOF'
+or 'syslinux' in full.lower():
+        print('FILE', full, d)
+print('=== CFG ===')
+for full,e,d in files:
+    if full.lower().endswith('syslinux.cfg'):
+        f.seek(e*SECTOR); cfg=f.read(d).decode('ascii','replace')
+        print(cfg)
+EOF
+> import struct, os
+> ISO='/app/alpine.iso'
+> SECTOR=2048
+> f=open(ISO,'rb')
+> f.seek(16*SECTOR)
+> pvd=f.read(SECTOR)
+> assert pvd[0:1]==b'\x01', 'no PVD'
+> root_dr=pvd[156:190]
+> def parse_dr(dr):
+>     extent=struct.unpack('<I',dr[2:6])[0]
+>     dl=struct.unpack('<I',dr[10:14])[0]
+>     flags=dr[25]
+>     nl=dr[32]
+>     name=dr[33:33+nl]
+>     return extent,dl,flags,name
+> ext,dl,flags,name=parse_dr(root_dr)
+> files=[]
+> def walk(extent,length,path=''):
+>     f.seek(extent*SECTOR)
+>     data=f.read(length)
+>     off=0
+>     while off<len(data):
+>         rl=data[off]
+>         if rl==0:
+>             off=(off//SECTOR+1)*SECTOR
+>             continue
+>         e,d,fl,nm=parse_dr(data[off:off+rl])
+>         nm=nm.split(b';')[0].decode('ascii','replace')
+>         if nm in ('.','..'):
+>             off+=rl; continue
+>         full=(path+'/'+nm) if path else nm
+>         if fl&2:
+>             walk(e,d,full)
+>         else:
+>             files.append((full,e,d))
+>         off+=rl
+> walk(ext,dl)
+> for full,e,d in files:
+>     if '/boot/' in full.lower() or 'syslinux' in full.lower():
+>         print('FILE', full, d)
+> print('=== CFG ===')
+> for full,e,d in files:
+>     if full.lower().endswith('syslinux.cfg'):
+>         f.seek(e*SECTOR); cfg=f.read(d).decode('ascii','replace')
+>         print(cfg)
+> EOF
+root@f7750922546c:/app# python3 /tmp/iso_extract.py
+Traceback (most recent call last):
+  File "/tmp/iso_extract.py", line 37, in <module>
+    walk(ext,dl)
+  File "/tmp/iso_extract.py", line 33, in walk
+    walk(e,d,full)
+  File "/tmp/iso_extract.py", line 33, in walk
+    walk(e,d,full)
+  File "/tmp/iso_extract.py", line 33, in walk
+    walk(e,d,full)
+  [Previous line repeated 994 more times]
+  File "/tmp/iso_extract.py", line 19, in walk
+    f.seek(extent*SECTOR)
+RecursionError: maximum recursion depth exceeded while calling a Python object
+root@f7750922546c:/app#

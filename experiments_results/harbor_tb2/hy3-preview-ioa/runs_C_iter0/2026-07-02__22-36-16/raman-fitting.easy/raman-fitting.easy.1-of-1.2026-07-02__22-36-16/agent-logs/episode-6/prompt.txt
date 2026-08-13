@@ -1,0 +1,46 @@
+New Terminal Output:
+
+root@05e51a37be6c:/app# cat > /app/explore.py << 'EOF'
+> import numpy as np
+>
+> def load(path):
+>     raw = open(path, 'rb').read()
+>     txt = raw.decode('latin-1')
+>     lines = [ln for ln in txt.replace('\r','').split('\n') if ln.strip()]
+>     # try to drop any SKIPRAMAN header
+>     start = 0
+>     while start < len(lines) and (lines[start].startswith('#') or 'SKIPRAMAN' in lines[start]):
+>         start += 1
+>     xs, ys = [], []
+>     for ln in lines[start:]:
+>         parts = ln.replace(',', '.').split()
+>         if len(parts) >= 2:
+>             try:
+>                 xs.append(float(parts[0])); ys.append(float(parts[1]))
+>             except: pass
+>     return np.array(xs), np.array(ys)
+>
+> x, y = load('/app/graphene.dat')
+> print('n=', len(x))
+> print('xmin,xmax=', x.min(), x.max())
+> print('ymin,ymax=', y.min(), y.max())
+> print('first x', x[:5])
+> print('last x', x[-5:])
+> # find peaks near target wavenumbers
+> for tgt in (1580, 2700):
+>     i = np.argmin(np.abs(x - tgt))
+>     print('target', tgt, '-> x=', round(x[i],2), 'y=', round(y[i],2), 'at idx', i)
+> # global max
+> im = np.argmax(y)
+> print('global max x=', round(x[im],2), 'y=', round(y[im],2))
+> EOF
+root@05e51a37be6c:/app# python3 /app/explore.py
+n= 3565
+xmin,xmax= 1648.724404 47183.554644
+ymin,ymax= 40.090842 79400.095085
+first x [47183.554644 46588.360019 46008.191298 45442.488736 44890.718036]
+last x [1649.768294 1649.507095 1649.246046 1648.985151 1648.724404]
+target 1580 -> x= 1648.72 y= 5950.92 at idx 3564
+target 2700 -> x= 2699.85 y= 274.2 at idx 1671
+global max x= 19139.54 y= 79400.1
+root@05e51a37be6c:/app#

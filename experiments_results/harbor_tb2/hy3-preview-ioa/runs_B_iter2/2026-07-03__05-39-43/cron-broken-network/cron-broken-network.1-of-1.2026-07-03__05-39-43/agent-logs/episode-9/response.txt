@@ -1,0 +1,14 @@
+{
+  "analysis": "Important finding: `df` reports 'Avail 0 / 100% full', yet my 1MB write test to /tmp SUCCEEDED and `apt-get update` earlier downloaded 7.7MB to /var/lib/apt/lists without error. This is a fuse-overlayfs statfs quirk: it reports f_bavail=0 (so `df` and apt's free-space pre-check see 0 available), but root can actually write. That's why `apt-get install` aborts with 'not enough free space' despite real space existing. The actual root cause of the user's curl problem is still the fake /usr/bin/curl script. So I should bypass apt's space check by obtaining the .debs directly (print-uris + download) and installing with dpkg, which does not do that pre-check.",
+  "plan": "1) Check for a non-apt downloader (wget/python3). 2) Use `apt-get install --print-uris -y curl` to list the .deb URLs for curl and its dependencies (this command prints URIs without the space check). 3) Then download those .debs with wget/python and install them with `dpkg -i`. First, gather the tools and URIs.",
+  "commands": [
+    {
+      "keystrokes": "which wget python3 python 2>/dev/null; echo '---'\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "apt-get install --print-uris -y curl 2>&1 | grep -E \"^'http\" \n",
+      "duration": 2.0
+    }
+  ]
+}

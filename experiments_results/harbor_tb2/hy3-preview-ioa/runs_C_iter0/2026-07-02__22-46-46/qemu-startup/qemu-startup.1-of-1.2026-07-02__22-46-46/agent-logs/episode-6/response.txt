@@ -1,0 +1,12 @@
+I have the kernel and initramfs. Before deciding how to boot, I need to see the ISO's bootloader config to know the exact kernel cmdline and whether it outputs to serial.
+
+{
+  "analysis": "Successfully extracted vmlinuz-lts (11.8MB) and initramfs-lts (20.5MB) from the ISO. Now I need to decide the boot method. The most reliable is to let the ISO boot itself (via its ISOLINUX bootloader) so modloop/apks are found automatically. I need to inspect the bootloader config to confirm it outputs to serial (SERIAL directive + console=ttyS0 in APPEND). Let me recursively walk the ISO and dump any .cfg files.",
+  "plan": "Write a recursive ISO walker that prints all file paths and dumps .cfg contents. This reveals the exact APPEND line and whether serial is configured. Based on that I'll choose: (A) boot the ISO as -cdrom via its own bootloader (best if serial is set), or (B) -kernel/-initrd with the extracted cmdline plus -cdrom. Then I'll build the telnet relay and launch QEMU.",
+  "commands": [
+    {
+      "keystrokes": "cat << 'PYEOF' > /app/run/walk.py\nimport struct\nISO='/app/alpine.iso'\ndef read_sectors(f,lba,c):\n    f.seek(lba*2048); return f.read(2048*c)\ndef parse_entry(rec):\n    length=rec[0]\n    if length==0: return None\n    ext_lba=struct.unpack_from('<I',rec,2)[0]\n    data_len=struct.unpack_from('<I',rec,10)[0]\n    flags=rec[25]\n    name_len=rec[32]\n    name=rec[33:33+name_len]\n    nm=name.split(b';')[0]\n    return (ext_lba,data_len,bool(flags&2),nm)\ndef list_dir(f,lba,length):\n    buf=read_sectors(f,lba,(length+2047)//2048)\n    out=[]; off=0\n    while off<len(buf):\n        rl=buf[off]\n        if rl==0: break\n        e=parse_entry(buf[off:off+rl])\n        if e: out.append(e)\n        off+=rl\n    return out\nf=open(ISO,'rb')\nlba=16; pvd=None\nwhile True:\n    vd=read_sectors(f,lba,1)\n    if vd[1:6]!=b'CD001': break\n    if vd[0]==1: pvd=vd; break\n    if vd[0]==255: break\n    lba+=1\nroot=parse_entry(pvd[156:156+34])\ndef walk(e,path):\n    for x in list_dir(f,e[0],e[1]):\n        nm=x[3].decode('latin1')\n        if nm in ('\\x00','\\x01'): continue\n        full=path+'/'+nm\n        if x[2]:\n            walk(x,full)\n        else:\n            if nm.lower().endswith('.cfg'):\n                f.seek(x[0]*2048); data=f.read(x[1])\n                print('======== '+full+' ========')\n                print(data.decode('latin1','replace'))\n                print('------------------------------------')\nwalk(root,'')\nPYEOF\npython3 /app/run/walk.py\n",
+      "duration": 1.0
+    }
+  ]
+}

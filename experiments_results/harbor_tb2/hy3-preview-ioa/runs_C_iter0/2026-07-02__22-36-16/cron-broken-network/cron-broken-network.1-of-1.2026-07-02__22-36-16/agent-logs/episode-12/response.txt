@@ -1,0 +1,18 @@
+{
+  "analysis": "Strange: `du -sh /*` shows only ~250M used across the whole filesystem, yet `df` reports the overlay is 955G used / 0 available. This mismatch means the space is either consumed by a deleted-but-still-open file (counted by df, invisible to du) or lives in the overlay's backing store. The fix for 'curl' is to install the real binary, but that's blocked by no free space. I need to find what's eating space (likely a deleted open file) and free it, or find an alternate working tool.",
+  "plan": "1) Search for large files (>100M) the fake script could hide. 2) Look for deleted-but-open files via /proc (lsof alternative). 3) Check for alternate HTTP clients (python3, wget, busybox). Based on findings I'll either free space + install real curl, or replace the bogus curl with a working tool.",
+  "commands": [
+    {
+      "keystrokes": "find / -type f -size +50M 2>/dev/null\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "ls -la /proc/*/fd 2>/dev/null | grep -i deleted | head\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "which python3 wget busybox 2>/dev/null\n",
+      "duration": 0.1
+    }
+  ]
+}

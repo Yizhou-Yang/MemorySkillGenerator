@@ -1,0 +1,22 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+"find / -name 'graphene.dat' 2>/dev/null\n"
+'head -50 graphene.dat\n'
+"echo '----- TAIL -----'\n"
+'tail -20 graphene.dat\n'
+'python3 --version; python3 -m pip --version\n'
+'python3 -m pip install numpy scipy 2>&1 | tail -5\n'
+"cat > explore.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('graphene.dat', delimiter=' ', converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.'))})\nx = data[:,0]; y = data[:,1]\nprint('n =', len(x))\nprint('x range:', x.min(), x.max())\nprint('y range:', y.min(), y.max())\norder = np.argsort(x)\nx = x[order]; y = y[order]\n# top 10 intensity points\nidx = np.argsort(y)[::-1][:10]\nfor i in idx:\n    print('x=%.3f y=%.3f' % (x[i], y[i]))\nEOF\npython3 explore.py\n"
+"cat > explore.py << 'EOF'\nimport numpy as np\nwith open('graphene.dat') as f:\n    txt = f.read().replace(',', '.')\nwith open('/tmp/graphene_conv.txt','w') as f:\n    f.write(txt)\ndata = np.loadtxt('/tmp/graphene_conv.txt')\nx = data[:,0]; y = data[:,1]\nprint('n =', len(x))\nprint('x range:', x.min(), x.max())\nprint('y range:', y.min(), y.max())\norder = np.argsort(x)\nx = x[order]; y = y[order]\nidx = np.argsort(y)[::-1][:10]\nfor i in idx:\n    print('x=%.3f y=%.3f' % (x[i], y[i]))\nEOF\npython3 explore.py\n"
+"cat > scan.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('/tmp/graphene_conv.txt')\nx = data[:,0]; y = data[:,1]\norder = np.argsort(x)\nx = x[order]; y = y[order]\n# local maxima\nmaxs = []\nfor i in range(1, len(x)-1):\n    if y[i] > y[i-1] and y[i] >= y[i+1]:\n        maxs.append((y[i], x[i], i))\nmaxs.sort(reverse=True)\nprint('Top local maxima by intensity:')\nfor yy, xx, i in maxs[:15]:\n    print('x=%.3f y=%.3f' % (xx, yy))\nprint('--- peaks with y>10000 ---')\nfor yy, xx, i in maxs:\n    if yy > 10000:\n        print('x=%.3f y=%.3f' % (xx, yy))\nEOF\npython3 scan.py\n"
+"cat > findpeaks.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('/tmp/graphene_conv.txt')\nx = data[:,0]; y = data[:,1]\norder = np.argsort(x)\nx = x[order]; y = y[order]\nw = 15\nker = np.ones(w)/w\nys = np.convolve(y, ker, mode='same')\nmaxs = []\nfor i in range(1, len(x)-1):\n    if ys[i] > ys[i-1] and ys[i] >= ys[i+1]:\n        maxs.append((ys[i], x[i], i))\nmaxs.sort(reverse=True)\nprint('Baseline rough (median y):', np.median(y))\nprint('Top smoothed local maxima:')\nfor v, xx, i in maxs[:20]:\n    print('x=%.2f y=%.1f' % (xx, v))\nEOF\npython3 findpeaks.py\n"
+"cat > fit.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\nimport json\n\ndata = np.loadtxt('/tmp/graphene_conv.txt')\nx = data[:,0]; y = data[:,1]\norder = np.argsort(x)\nx = x[order]; y = y[order]\n\ndef lor(x, x0, gamma, amp, offset):\n    return offset + amp / (1.0 + ((x - x0)/gamma)**2)\n\ndef fit_peak(xmin, xmax, name):\n    m = (x >= xmin) & (x <= xmax)\n    xw, yw = x[m], y[m]\n    imax = np.argmax(yw)\n    x0g = xw[imax]\n    offg = np.percentile(yw, 10)\n    ampg = yw[imax] - offg\n    gammag = 80.0\n    p0 = [x0g, gammag, ampg, offg]\n    popt, pcov = curve_fit(lor, xw, yw, p0=p0, maxfev=100000)\n    resid = np.sum((lor(xw, *popt) - yw)**2)\n    print('%s: x0=%.3f gamma=%.3f amp=%.3f offset=%.3f (resid=%.2e)' % (name, *popt, resid))\n    return popt\n\npG = fit_peak(17000, 21000, 'G')\np2D = fit_peak(31000, 37000, '2D')\n\nresults = {\n    'G':  {'x0': float(pG[0]), 'gamma': float(abs(pG[1])), 'amplitude': float(pG[2]), 'offset': float(pG[3])},\n    '2D': {'x0': float(p2D[0]), 'gamma': float(abs(p2D[1])), 'amplitude': float(p2D[2]), 'offset': float(p2D[3])},\n}\nwith open('results.json','w') as f:\n    json.dump(results, f, indent=2)\nprint('--- results.json ---')\nprint(open('results.json').read())\nEOF\npython3 fit.py\n"
+''
+'python3 -c "import json; print(json.load(open(\'results.json\')))"\n'
+'ls -la results.json\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

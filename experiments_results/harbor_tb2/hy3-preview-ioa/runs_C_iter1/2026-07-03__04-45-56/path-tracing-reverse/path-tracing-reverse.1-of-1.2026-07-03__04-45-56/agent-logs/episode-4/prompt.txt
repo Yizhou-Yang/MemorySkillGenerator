@@ -1,0 +1,41 @@
+New Terminal Output:
+
+root@10b7ea957b2b:/app# cp image.ppm /tmp/ref.ppm && ls -la /tmp/ref.ppm
+-rw-r--r-- 1 root root 5362624 Jul  2 21:37 /tmp/ref.ppm
+root@10b7ea957b2b:/app# cat > /tmp/analyze.py << 'EOF'
+> import sys
+> toks=open('/tmp/ref.ppm').read().split()
+> assert toks[0]=='P3', toks[0]
+> W=int(toks[1]); H=int(toks[2]); M=int(toks[3])
+> print('W',W,'H',H,'M',M,'ntok',len(toks))
+> pix=list(map(int,toks[4:]))
+> def px(x,y):
+>     i=(y*W+x)*3
+>     return pix[i],pix[i+1],pix[i+2]
+> print('row0 first 12:', [px(x,0) for x in range(12)])
+> print('col0 first 12:', [px(0,y) for y in range(12)])
+> print('row299 first 12:', [px(x,299) for x in range(12)])
+> print('row599 first 12:', [px(x,599) for x in range(12)])
+> print('diag (x=y):', [px(i,i) for i in (0,100,200,300,400,500,599)])
+> print('center:', px(400,300))
+> # detect if row0 constant
+> r0=[px(x,0) for x in range(W)]
+> print('row0 all same?', len(set(r0)), 'distinct')
+> print('row0 distinct sample:', list(set(r0))[:10])
+> EOF
+root@10b7ea957b2b:/app# python3 /tmp/analyze.py
+W 800 H 600 M 255 ntok 1440004
+row0 first 12: [(159, 197, 255), (159, 197, 255), (158, 197, 255), (158, 197, 255), (158, 197, 255), (158, 197, 255), (158, 197, 255), (158, 197, 255), (158, 19
+7, 255), (158, 197, 255), (158, 197, 255), (158, 197, 255)]
+col0 first 12: [(159, 197, 255), (159, 197, 255), (159, 197, 255), (159, 197, 255), (159, 198, 255), (159, 198, 255), (159, 198, 255), (159, 198, 255), (159, 19
+8, 255), (159, 198, 255), (159, 198, 255), (159, 198, 255)]
+row299 first 12: [(191, 217, 255), (191, 217, 255), (191, 217, 255), (191, 217, 255), (191, 217, 255), (191, 217, 255), (191, 217, 255), (191, 217, 255), (191,
+217, 255), (191, 217, 255), (191, 217, 255), (191, 217, 255)]
+row599 first 12: [(152, 152, 152), (152, 152, 152), (152, 152, 152), (152, 152, 152), (152, 152, 152), (152, 152, 152), (152, 152, 152), (152, 152, 152), (152,
+152, 152), (152, 152, 152), (152, 152, 152), (152, 152, 152)]
+diag (x=y): [(159, 197, 255), (164, 201, 255), (174, 207, 255), (152, 152, 152), (20, 20, 20), (67, 67, 67), (152, 152, 152)]
+center: (51, 10, 10)
+row0 all same? 19 distinct
+row0 distinct sample: [(154, 195, 255), (147, 190, 255), (148, 191, 255), (157, 196, 255), (152, 193, 255), (149, 191, 255), (150, 192, 255), (154, 194, 255), (
+159, 197, 255), (156, 196, 255)]
+root@10b7ea957b2b:/app#

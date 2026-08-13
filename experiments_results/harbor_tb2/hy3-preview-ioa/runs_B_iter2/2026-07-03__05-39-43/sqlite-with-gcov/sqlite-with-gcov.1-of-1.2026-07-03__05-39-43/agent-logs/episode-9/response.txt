@@ -1,0 +1,14 @@
+{
+  "analysis": "The mount was denied (no CAP_SYS_ADMIN in this container), and `-o Acquire::Check-Free-Space=false` did not suppress apt's free-space pre-check even though real writes succeed (dd wrote 50MB fine). The fuse-overlayfs reports 0 avail via statvfs but actual writes work. I need another way to either bypass the check or give the apt cache a filesystem that reports honest free space. I'll probe whether `unshare -m` gives me a mount namespace where I can mount tmpfs over the apt cache, and what download tools (python3/perl) are available as a fallback.",
+  "plan": "1. Probe `unshare -m` availability and presence of python3/perl/curl. 2. If unshare works, mount a tmpfs over /var/cache/apt/archives inside the namespace and run apt-get to install gcc/make/wget — the tmpfs will report real free space so the check passes. 3. If unshare fails, fall back to fetching .debs with python3. I will NOT run any of the AVOID-list commands.",
+  "commands": [
+    {
+      "keystrokes": "unshare -m true 2>&1; echo UNSHARE_EXIT=$?\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "which python3 perl curl 2>&1; echo '---'\n",
+      "duration": 0.3
+    }
+  ]
+}

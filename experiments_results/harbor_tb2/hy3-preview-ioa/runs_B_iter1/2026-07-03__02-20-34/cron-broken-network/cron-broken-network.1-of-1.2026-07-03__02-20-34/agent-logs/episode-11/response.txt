@@ -1,0 +1,14 @@
+{
+  "analysis": "I have python3, perl, tar, and dpkg-deb — but no wget/ar/busybox, and the real curl is the fake script. apt refuses to download due to its statvfs space gate (which I've proven to be a false positive — the layer is actually writable). The fix is to fetch the genuine curl .deb directly with python3 (which uses the working system resolver) and extract the real binary. First I need the mirror URL and the exact .deb path for curl.",
+  "plan": "1) Read the deb822 sources file to learn the mirror base URL. 2) Use apt-cache to get curl's Filename (pool path) and Version. 3) Construct the full URL and download the .deb with python3. 4) Extract usr/bin/curl from the .deb with dpkg-deb -x and copy it over the fake /usr/bin/curl. 5) Verify curl --version and an actual fetch of example.com.",
+  "commands": [
+    {
+      "keystrokes": "cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | grep -Ei 'types|uris|suite|components' | head\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-cache show curl 2>/dev/null | grep -Ei '^Version:|^Filename:' | head\n",
+      "duration": 0.1
+    }
+  ]
+}

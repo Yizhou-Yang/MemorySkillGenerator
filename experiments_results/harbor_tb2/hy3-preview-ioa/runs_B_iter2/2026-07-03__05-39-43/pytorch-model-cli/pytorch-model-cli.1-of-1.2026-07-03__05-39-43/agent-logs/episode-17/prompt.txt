@@ -1,0 +1,143 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@cd63cf8efa91:/app# cat > /app/cli_tool.cpp << 'EOF'
+> #include <cstdio>
+> #include <cstdlib>
+> #include <cstring>
+[i] = relu(h1[i]);
+    linear(W2, b2, h1, 16, 16, h2);
+    for (int i = 0; i < 16; i++) h2[i] = relu(h2[i]);
+    linear(W3, b3, h2, 16, 10, out);
+
+    int pred = 0;
+    for (int i = 1; i < 10; i++) if (out[i] > out[pred]) pred = i;
+
+    printf("%d", pred);
+
+    std::string wstr(wpath);
+    size_t sl = wstr.find_last_of('/');
+    std::string dir = (sl == std::string::npos) ? std::string("./") : wstr.substr(0, sl + 1);
+    std::string predp = dir + "prediction.txt";
+    FILE* pf = fopen(predp.c_str(), "w");
+    if (pf) { fprintf(pf, "%d", pred); fclose(pf); }
+
+    return 0;
+}
+EOF
+echo done
+> #include <string>
+> #include <vector>
+> #include "cJSON.h"
+> #include "lodepng.h"
+>
+> static char* read_file(const char* path) {
+>     FILE* f = fopen(path, "rb");
+>     if (!f) return nullptr;
+>     fseek(f, 0, SEEK_END);
+>     long n = ftell(f);
+>     fseek(f, 0, SEEK_SET);
+>     char* buf = (char*)malloc((size_t)n + 1);
+>     if (!buf) { fclose(f); return nullptr; }
+>     size_t r = fread(buf, 1, (size_t)n, f);
+>     buf[r] = 0;
+>     fclose(f);
+>     return buf;
+> }
+>
+> static int load_array(cJSON* root, const char* key, double* dst, int n) {
+>     cJSON* a = cJSON_GetObjectItem(root, key);
+>     if (!a || !cJSON_IsArray(a)) return -1;
+>     if (cJSON_GetArraySize(a) != n) return -2;
+>     for (int i = 0; i < n; i++) {
+>         cJSON* e = cJSON_GetArrayItem(a, i);
+>         dst[i] = cJSON_GetNumberValue(e);
+>     }
+>     return 0;
+> }
+>
+> static void linear(const double* W, const double* b, const double* x, int in_dim, int out_dim, double* out) {
+>     for (int i = 0; i < out_dim; i++) {
+>         double s = b[i];
+>         const double* wrow = W + (size_t)i * in_dim;
+>         for (int j = 0; j < in_dim; j++) s += wrow[j] * x[j];
+>         out[i] = s;
+>     }
+> }
+>
+> static double relu(double v) { return v > 0.0 ? v : 0.0; }
+>
+> int main(int argc, char** argv) {
+>     if (argc < 3) {
+>         fprintf(stderr, "usage: %s weights.json image.png\n", argv[0]);
+>         return 1;
+>     }
+>     const char* wpath = argv[1];
+>     const char* ipath = argv[2];
+>
+>     char* jtext = read_file(wpath);
+>     if (!jtext) { fprintf(stderr, "cannot read %s\n", wpath); return 1; }
+>     cJSON* root = cJSON_Parse(jtext);
+>     free(jtext);
+>     if (!root) { fprintf(stderr, "json parse error\n"); return 1; }
+>
+>     double W1[16*784], b1[16], W2[16*16], b2[16], W3[10*16], b3[10];
+>     if (load_array(root, "input_layer.weight", W1, 16*784) ||
+>         load_array(root, "input_layer.bias", b1, 16) ||
+>         load_array(root, "hidden_layer.weight", W2, 16*16) ||
+>         load_array(root, "hidden_layer.bias", b2, 16) ||
+>         load_array(root, "output_layer.weight", W3, 10*16) ||
+>         load_array(root, "output_layer.bias", b3, 10)) {
+>         fprintf(stderr, "weight load error\n");
+>         cJSON_Delete(root);
+>         return 1;
+>     }
+>     cJSON_Delete(root);
+>
+>     std::vector<unsigned char> img;
+>     unsigned w = 0, h = 0;
+>     unsigned err = lodepng::decode(img, w, h, ipath);
+>     if (err) { fprintf(stderr, "png decode error %u\n", err); return 1; }
+>
+>     const int S = 28;
+>     double x[784];
+>     for (int yy = 0; yy < S; yy++) {
+>         for (int xx = 0; xx < S; xx++) {
+>             int sx = (int)(xx * w / (double)S);
+>             int sy = (int)(yy * h / (double)S);
+>             if (sx >= (int)w) sx = (int)w - 1;
+>             if (sy >= (int)h) sy = (int)h - 1;
+>             unsigned char g = img[(size_t)((size_t)sy * w + sx) * 4 + 0];
+>             double v = g / 255.0;
+>             v = (v - 0.1307) / 0.3081;
+>             x[yy * S + xx] = v;
+>         }
+>     }
+>
+>     double h1[16], h2[16], out[10];
+>     linear(W1, b1, x, 784, 16, h1);
+>     for (int i = 0; i < 16; i++) h1[i] = relu(h1[i]);
+>     linear(W2, b2, h1, 16, 16, h2);
+>     for (int i = 0; i < 16; i++) h2[i] = relu(h2[i]);
+>     linear(W3, b3, h2, 16, 10, out);
+>
+>     int pred = 0;
+>     for (int i = 1; i < 10; i++) if (out[i] > out[pred]) pred = i;
+>
+>     printf("%d", pred);
+>
+>     std::string wstr(wpath);
+>     size_t sl = wstr.find_last_of('/');
+>     std::string dir = (sl == std::string::npos) ? std::string("./") : wstr.substr(0, sl + 1);
+>     std::string predp = dir + "prediction.txt";
+>     FILE* pf = fopen(predp.c_str(), "w");
+>     if (pf) { fprintf(pf, "%d", pred); fclose(pf); }
+>
+>     return 0;
+> }
+> EOF
+root@cd63cf8efa91:/app# echo done
+done
+root@cd63cf8efa91:/app#

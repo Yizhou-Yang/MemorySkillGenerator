@@ -1,0 +1,75 @@
+New Terminal Output:
+
+root@60a81b02434b:/app# cat > /app/sitecustomize.py << 'PYEOF'
+> import ctypes as _ctypes
+> import os as _os
+>
+> # ---------------------------------------------------------------------------
+> # Workaround 1: torch import hangs because dlopen of a CUDA/nvidia .so blocks.
+> # We only need CPU, so skip loading those shared libs during startup.
+> # ---------------------------------------------------------------------------
+> _orig_CDLL = _ctypes.CDLL
+>
+> _CUDA_PREFIXES = (
+>     "libcublaslt", "libcublas", "libcudnn", "libnvrtc", "libnvrtc-builtins",
+>     "libcudart", "libcupti", "libcufft", "libcurand", "libnvjitlink",
+>     "libcusparse", "libcusparselt", "libcusolver", "libnccl", "libnvshmem",
+>     "libcufile", "libnvtoolsext", "libnvidia-ml",
+> )
+>
+>
+> def _is_cuda_lib(path):
+>     if not path:
+>         return False
+>     p = str(path).lower()
+>     if "nvidia" in p:
+>         return True
+>     base = _os.path.basename(p)
+>     return any(base.startswith(pre) for pre in _CUDA_PREFIXES)
+>
+>
+> class _NoopCDLL:
+>     def __init__(self, *a, **k):
+>         pass
+>     def __getattr__(self, n):
+>         raise AttributeError(n)
+>
+>
+> def _patched_CDLL(*args, **kwargs):
+>     path = args[0] if args else kwargs.get("name")
+>     if _is_cuda_lib(path):
+>         return _NoopCDLL()
+>     return _orig_CDLL(*args, **kwargs)
+>
+>
+> _ctypes.CDLL = _patched_CDLL
+>
+> # ---------------------------------------------------------------------------
+> # Workaround 2: mteb 1.36.8 imports AutoModelForVision2Seq from transformers,
+> # which transformers >= 5.x removed. We only use text models, so add a harmless
+> # placeholder to the already-imported transformers module.
+> # ---------------------------------------------------------------------------
+> try:
+>     import transformers
+>     if not hasattr(transformers, "AutoModelForVision2Seq"):
+>         class AutoModelForVision2Seq:
+>             """Placeholder; gme vision models are not used by this task."""
+>             pass
+>         transformers.AutoModelForVision2Seq = AutoModelForVision2Seq
+> except Exception:
+>     pass
+> PYEOF
+root@60a81b02434b:/app# time python3 -c "import mteb; print('mteb', mteb.__version__)" 2>&1 | tail -8
+    from mteb.models import model_meta_from_sentence_transformers
+  File "/usr/local/lib/python3.10/site-packages/mteb/models/__init__.py", line 5, in <module>
+    from mteb.models.overview import (
+  File "/usr/local/lib/python3.10/site-packages/mteb/models/overview.py", line 14, in <module>
+    from mteb.models import (
+  File "/usr/local/lib/python3.10/site-packages/mteb/models/gme_v_models.py", line 13, in <module>
+    from transformers import AutoModelForVision2Seq, AutoProcessor
+ImportError: cannot import name 'AutoModelForVision2Seq' from 'transformers' (/usr/local/lib/python3.10/site-packages/transformers/__init__.py)
+
+real    0m31.260s
+user    0m11.200s
+sys     0m2.284s
+root@60a81b02434b:/app#

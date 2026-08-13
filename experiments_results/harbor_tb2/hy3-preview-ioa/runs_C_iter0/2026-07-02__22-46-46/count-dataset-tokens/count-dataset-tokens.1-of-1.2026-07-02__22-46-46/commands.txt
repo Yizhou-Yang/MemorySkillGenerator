@@ -1,0 +1,27 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"python3 --version; pip list 2>/dev/null | grep -iE 'datasets|transformers|huggingface|tokenizers'\n"
+'ls -la /app\n'
+'pip list 2>/dev/null | head -50\n'
+"echo '---'; curl -sI https://huggingface.co 2>&1 | head -5\n"
+'python3 -c "import urllib.request; print(urllib.request.urlopen(\'https://huggingface.co\', timeout=10).status)"\n'
+'which wget git\n'
+'python3 -c "import urllib.request; print(urllib.request.urlopen(\'https://huggingface.co/datasets/open-thoughts/OpenThoughts-114k/raw/main/README.md\', timeout=20).read().decode())"\n'
+'df -h /\n'
+'pip install datasets tokenizers 2>&1 | tail -15\n'
+''
+''
+'mkdir -p /app/work && cd /app/work\n'
+'python3 -c "from huggingface_hub import hf_hub_download; p=hf_hub_download(repo_id=\'Qwen/Qwen2.5-1.5B-Instruct\', filename=\'tokenizer.json\'); print(\'TOK\', p)"\n'
+'cat > /app/work/explore.py << \'EOF\'\nfrom datasets import load_dataset\nds = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train", streaming=True)\nfrom collections import Counter\ndom = Counter()\nfor i, ex in enumerate(ds):\n    dom[ex[\'domain\']] += 1\n    if i >= 2000:\n        break\nprint(\'domain sample counts:\', dom)\nEOF\npython3 /app/work/explore.py\n'
+''
+''
+'cat > /app/work/run.py << \'EOF\'\nimport os\nfrom datasets import load_dataset\nfrom tokenizers import Tokenizer\n\nsnap = "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/tokenizer.json"\ntok = Tokenizer.from_file(snap)\n\nds = load_dataset("open-thoughts/OpenThoughts-114k", "metadata", split="train", streaming=True)\n\ntotal = 0\nscience_count = 0\nbatch = []\nbatch_limit = 2000\n\ndef flush():\n    global total\n    if not batch:\n        return\n    encs = tok.encode_batch(batch)\n    for e in encs:\n        total += len(e.ids)\n    batch.clear()\n\ntry:\n    for ex in ds:\n        d = ex.get(\'domain\')\n        if d == \'science\':\n            science_count += 1\n            r = ex.get(\'deepseek_reasoning\') or \'\'\n            s = ex.get(\'deepseek_solution\') or \'\'\n            batch.append(r)\n            batch.append(s)\n            if len(batch) >= batch_limit:\n                flush()\n                print(\'progress science=%d tokens=%d\' % (science_count, total), flush=True)\nfinally:\n    flush()\n\nprint(\'SCIENCE_COUNT\', science_count, flush=True)\nprint(\'TOTAL_TOKENS\', total, flush=True)\nwith open(\'/app/answer.txt\', \'w\') as f:\n    f.write(str(total))\n    f.flush()\nos._exit(0)\nEOF\necho written\n'
+'python3 /app/work/run.py 2>&1 | tail -5\n'
+''
+''
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

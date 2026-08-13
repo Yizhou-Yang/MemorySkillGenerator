@@ -1,0 +1,14 @@
+{
+  "analysis": "SSL certificate and key generated successfully at /app/.jupyter/mycert.pem and /app/.jupyter/mykey.key. The password hash is saved in pw_hash.txt. Now I need to write the jupyter config file. Jupyter Notebook (newer versions) uses ServerApp config keys. I'll write the config referencing the cert/key files and the password hash.",
+  "plan": "Write jupyter_notebook_config.py using the password hash from the file. I'll use a heredoc that reads the hash. Actually simpler: embed the hash via Python to build the config. Let me write the config with c.ServerApp settings: certfile, keyfile, password (the hash), port 8888, ip '0.0.0.0', allow_root True, and disable token. I'll construct it with a Python script to safely insert the hash.",
+  "commands": [
+    {
+      "keystrokes": "PW=$(cat /app/.jupyter/pw_hash.txt); python3 - \"$PW\" <<'EOF'\nimport sys\npw = sys.argv[1].strip()\ncfg = f'''\\nimport os\\nc = get_config()\\nc.ServerApp.ip = '0.0.0.0'\\nc.ServerApp.port = 8888\\nc.ServerApp.open_browser = False\\nc.ServerApp.certfile = '/app/.jupyter/mycert.pem'\\nc.ServerApp.keyfile = '/app/.jupyter/mykey.key'\\nc.ServerApp.password = '{pw}'\\nc.ServerApp.password_required = True\\nc.ServerApp.token = ''\\nc.ServerApp.allow_root = True\\nc.ServerApp.allow_origin = '*'\\nc.ServerApp.notebook_dir = '/app'\\n'''\nwith open('/app/.jupyter/jupyter_notebook_config.py','w') as f:\n    f.write(cfg)\nprint('config written')\nEOF\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "cat /app/.jupyter/jupyter_notebook_config.py\n",
+      "duration": 0.3
+    }
+  ]
+}

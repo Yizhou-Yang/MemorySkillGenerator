@@ -1,0 +1,167 @@
+New Terminal Output:
+
+root@d597f6d82497:/app# cat > /tmp/decode7z.py << 'PYEOF'
+> import struct, lzma, sys
+>
+> class Reader:
+>     def __init__(self, data):
+>         self.data = data; self.pos = 0
+>     def read_byte(self):
+>         b = self.data[self.pos]; self.pos += 1; return b
+>     def peek_byte(self):
+>         return self.data[self.pos]
+>     def read(self, n):
+>         d = self.data[self.pos:self.pos+n]; self.pos += n; return d
+>     def read_num(self):
+>         b = self.read_byte(); val = b & 0x7f; shift = 7
+>         while b & 0x80:
+>             b = self.read_byte(); val |= (b & 0x7f) << shift; shift += 7
+>         return val
+>     def eof(self):
+>         return self.pos >= len(self.data)
+>
+> def parse_folder(r):
+x7>     f = {}; n = r.read_num(); coders = []; tin = 0; tout = 0
+>     for _ in range(n):
+>         b = r.read_byte(); complex_c = b & 1; has_attrs = (b & 2) != 0
+>         idsize = (b >> 2) & 0x0F; mid = 0
+>         for i in range(idsize):
+'>             mid |= r.read_byte() << (8*i)
+>         c = {'id': mid}
+>         if complex_c:
+>             c['ni'] = r.read_num(); c['no'] = r.read_num()
+>         else:
+>             c['ni'] = 1; c['no'] = 1
+>         tin += c['ni']; tout += c['no']
+>         if has_attrs:
+>             pl = r.read_num(); c['props'] = r.read(pl)
+>         coders.append(c)
+>     f['coders'] = coders; f['ni'] = tin; f['no'] = tout
+>     if any(c.get('ni',1)!=1 or c.get('no',1)!=1 for c in coders):
+>         nb = n - 1
+>         for _ in range(nb):
+>             r.read_num(); r.read_num()
+>         for _ in range(tin - nb):
+>             r.read_num()
+>     return f
+>
+%> def parse_files_info(r):
+>     num = r.read_num(); names = []
+>     while not r.eof():
+>         t = r.read_byte()
+>         if t == 0x00: break
+>         sz = r.read_num(); buf = r.read(sz)
+>         if t == 0x11:
+>             s = buf.decode('utf-16-le'); names = s.split('\x00')[:num]
+>     return {'num': num, 'names': names}
+>
+> def parse_header_db(r):
+>     db = {'pack_sizes': [], 'pack_pos': 0, 'folders': [], 'files': {'names': []}}
+>     while not r.eof():
+>         id = r.read_byte()
+>         if id == 0x00: break
+>         elif id == 0x06:
+>             db['pack_pos'] = r.read_num(); num = r.read_num()
+>             while True:
+>                 t = r.read_byte()
+>                 if t == 0x09: db['pack_sizes'] = [r.read_num() for _ in range(num)]
+>                 elif t == 0x0A: r.read(4*num)
+>                 elif t == 0x00: break
+>                 else: raise Exception('bad pack %02x'%t)
+>         elif id == 0x07:
+>             while True:
+>                 t = r.read_byte()
+>                 if t == 0x0B:
+>                     nf = r.read_num(); ext = r.read_byte()
+>                     if ext == 0: db['folders'] = [parse_folder(r) for _ in range(nf)]
+>                     else: raise Exception('external folder')
+>                 elif t == 0x0C:
+>                     for f in db['folders']:
+>                         f['unpack_sizes'] = [r.read_num() for _ in range(f['no'])]
+>                 elif t == 0x0A:
+>                     for f in db['folders']: r.read_num()
+>                 elif t == 0x00: break
+>                 else: raise Exception('bad unpack %02x'%t)
+>         elif id == 0x08:
+>             while True:
+>                 t = r.read_byte()
+>                 if t == 0x00: break
+>                 if t == 0x0D:
+>                     for f in db['folders']: f['num_u'] = r.read_num()
+>                 elif t == 0x09:
+>                     total = sum(f.get('num_u',1) for f in db['folders'])
+>                     for _ in range(total): r.read_num()
+>                 elif t == 0x0A:
+>                     total = sum(f.get('num_u',1) for f in db['folders'])
+>                     for _ in range(total): r.read_num()
+>                 else: break
+>         elif id == 0x05:
+>             db['files'] = parse_files_info(r)
+>         elif id == 0x02:
+>             while True:
+>                 t = r.read_byte()
+>                 if t == 0x00: break
+>                 sz = r.read_num(); r.read(sz)
+>         else:
+>             raise Exception('unknown header id %02x'%id)
+>     return db
+>
+> def lzma2_dict(prop):
+>     if prop < 40:
+>         return (2 | (prop & 1)) << ((prop >> 1) + 11)
+>     return (3 | (prop & 3)) << ((prop >> 2) + 8)
+>
+> def decompress(props, data, method):
+>     if method == 0x00:
+>         return data
+>     if method == 0x030101:
+>         prop = props[0]; ds = struct.unpack('<I', props[1:5])[0]
+>         lc = prop % 9; rem = prop // 9; lp = rem % 5; pb = rem // 5
+>         filt = [{'id': lzma.FILTER_LZMA1, 'dict_size': ds, 'lc': lc, 'lp': lp, 'pb': pb}]
+>     elif method == 0x21:
+>         filt = [{'id': lzma.FILTER_LZMA2, 'dict_size': lzma2_dict(props[0])}]
+>     else:
+>         raise Exception('unsupported method %x'%method)
+>     d = lzma.LZMADecompressor(format=lzma.FORMAT_RAW, filters=filt)
+>     return d.decompress(data)
+>
+> # main
+> data = open('/app/secrets.7z','rb').read()
+> assert data[:6] == b'\x37\x7a\xbc\xaf\x27\x1c', 'not 7z'
+> next_off = struct.unpack('<Q', data[12:20])[0]
+> next_size = struct.unpack('<Q', data[20:28])[0]
+> nh = data[32+next_off: 32+next_off+next_size]
+> r = Reader(nh)
+> print('nh first byte', hex(r.peek_byte()), 'nh size', len(nh))
+> if r.peek_byte() == 0x17:
+>     enc_db = parse_header_db(r)
+>     enc_stream = nh[r.pos: r.pos + enc_db['pack_sizes'][0]]
+>     f = enc_db['folders'][0]; c = f['coders'][0]
+>     print('encoded coder id %x props' % c['id'], c['props'].hex())
+>     dec = decompress(c['props'], enc_stream, c['id'])
+>     print('decoded header len', len(dec), 'prefix', dec[:8].hex())
+>     r2 = Reader(dec); db = parse_header_db(r2)
+> else:
+>     db = parse_header_db(r)
+>
+> print('main folders', len(db['folders']), 'pack_pos', db['pack_pos'], 'pack_sizes', db['pack_sizes'])
+> f = db['folders'][0]; c = f['coders'][0]
+> print('main coder id %x props' % c['id'], (c['props'].hex() if 'props' in c else None))
+> stream = data[32 + db['pack_pos']: 32 + db['pack_pos'] + db['pack_sizes'][0]]
+> content = decompress(c['props'], stream, c['id'])
+> print('CONTENT len', len(content))
+> print('CONTENT:', repr(content))
+> print('NAMES:', db['files'].get('names'))
+> open('/app/solution.txt','wb').write(content.strip())
+> print('WROTE /app/solution.txt')
+> PYEOF
+root@d597f6d82497:/app# python3 /tmp/decode7z.py
+nh first byte 0x17 nh size 34
+Traceback (most recent call last):
+  File "/tmp/decode7z.py", line 134, in <module>
+    enc_db = parse_header_db(r)
+             ^^^^^^^^^^^^^^^^^^
+  File "/tmp/decode7z.py", line 103, in parse_header_db
+    raise Exception('unknown header id %02x'%id)
+Exception: unknown header id 17
+root@d597f6d82497:/app#

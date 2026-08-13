@@ -1,0 +1,18 @@
+{
+  "analysis": "Extraction worked. I got /tmp/vmlinuz (the LTS kernel, 11MB) and /tmp/initramfs (20MB). Note: Alpine's default inittab spawns a getty on ttyS0, so if I boot with an explicit `console=ttyS0`, the live initramfs/init should give me a root serial login. I'll relaunch qemu using -kernel/-initrd/-append with console=ttyS0, attach the ISO as a CD (so the initramfs can find modloop and apks), keep hostfwd 2222->22, and capture the serial console.",
+  "plan": "1) Relaunch qemu with -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append 'console=ttyS0,115200 modules=loop,squashfs,sd-mod,usb-storage' and -cdrom /app/alpine.iso. 2) Connect a python client to the serial TCP port and capture boot output, sending a newline to get a login prompt. 3) Confirm a 'login:' prompt appears on the serial console — that means I can drive the VM.",
+  "commands": [
+    {
+      "keystrokes": "nohup qemu-system-x86_64 -m 1024 -smp 2 -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append \"console=ttyS0,115200 modules=loop,squashfs,sd-mod,usb-storage\" -cdrom /app/alpine.iso -drive file=/app/alpine-disk.qcow2,format=qcow2,if=virtio -netdev user,id=net0,hostfwd=tcp::2222-:22 -device virtio-net-pci,netdev=net0 -display none -serial tcp:127.0.0.1:4555,server,nowait > /tmp/qemu.log 2>&1 &\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 1; cat /tmp/qemu.log\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "python3 /tmp/cap.py\n",
+      "duration": 33.0
+    }
+  ]
+}

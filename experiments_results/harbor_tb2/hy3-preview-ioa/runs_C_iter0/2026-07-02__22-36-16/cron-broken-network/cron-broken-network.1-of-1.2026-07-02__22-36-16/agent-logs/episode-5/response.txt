@@ -1,0 +1,18 @@
+{
+  "analysis": "Root cause found! `/usr/bin/curl` is NOT a real curl binary — it's a 3-line shell script that unconditionally prints 'DNS resolution error' and exits 11, regardless of what you pass it. That's why `curl --version` and even `curl http://93.184.216.34` (a literal IP, no DNS involved) all fail identically. DNS is actually fine — `getent hosts example.com` resolved correctly. The problem is that the real curl was replaced by this fake wrapper. The fix is to restore a genuine curl.",
+  "plan": "Confirm the file is a fake script, check whether curl is provided by a package and whether the real binary exists anywhere, then restore/install a genuine curl. I'll check disk for any backup and the package manager state.",
+  "commands": [
+    {
+      "keystrokes": "ls -la /usr/bin/curl\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "dpkg -l curl 2>/dev/null; rpm -q curl 2>/dev/null\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "find / -name 'curl' -type f 2>/dev/null | grep -v '/usr/bin/curl'\n",
+      "duration": 2.0
+    }
+  ]
+}

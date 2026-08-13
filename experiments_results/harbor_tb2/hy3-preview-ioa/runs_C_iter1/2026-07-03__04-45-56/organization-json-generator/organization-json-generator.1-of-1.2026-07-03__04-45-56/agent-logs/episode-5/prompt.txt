@@ -1,0 +1,168 @@
+New Terminal Output:
+
+root@8e9321c4b4f8:/app# cat > build.py << 'PYEOF'
+> import csv, json
+> from datetime import datetime, timezone
+> from jsonschema import validate
+>
+> SCHEMA_PATH = "schema.json"
+> DATA_DIR = "data"
+> OUT_PATH = "organization.json"
+>
+> # ---- Load schema at runtime ----
+> with open(SCHEMA_PATH) as f:
+>     schema = json.load(f)
+>
+o> # Derive structures directly from the schema (no hardcoded field names)
+> top_keys   = schema["required"]                      # metadata, organization, statistics
+> metadata_keys = schema["properties"]["metadata"]["required"]
+> org_keys   = schema["properties"]["organization"]["required"]
+>
+> dept_node  = schema["properties"]["organization"]["properties"]["departments"]["items"]
+> dept_required = dept_node["required"]
+> dept_props = dept_node["properties"]
+ >
+A> emp_node   = dept_props["employees"]["items"]
+> emp_required = emp_node["required"]
+meta> emp_props  = emp_node["properties"]
+>
+a> proj_node  = dept_props["projects"]["items"]
+> proj_required = proj_node["required"]
+> proj_props = proj_node["properties"]
+>
+> stat_node  = schema["properties"]["statistics"]
+> stat_keys  = stat_node["required"]         # exact statistic key names from schema
+> stat_props = stat_node["properties"]
+>
+> # Column-name mapping: schema field name -> csv column name
+> def csv_col(field, mapping):
+>     return mapping.get(field, field)
+>
+> # ---- Type coercion driven by the schema node ----
+> def coerce(value, node):
+>     t = node.get("type")
+>     if t == "integer":
+>         return int(value)
+>     if t == "number":
+>         return float(value)
+>     return value
+>
+> def read_csv(name):
+>     with open(f"{DATA_DIR}/{name}") as f:
+>         return list(csv.DictReader(f))
+>
+> departments = read_csv("departments.csv")
+> employees   = read_csv("employees.csv")
+> projects    = read_csv("projects.csv")
+>
+> # ---- Build employees grouped by department ----
+> emp_by_dept = {}
+> for e in employees:
+>     emp_by_dept.setdefault(e["department_id"], []).append(e)
+>
+> proj_by_dept = {}
+> for p in projects:
+>     proj_by_dept.setdefault(p["department_id"], []).append(p)
+>
+> # ---- Build departments structure (field names derived from schema) ----
+> built_departments = []
+> for d in departments:
+>     emp_list = []
+>     for e in emp_by_dept.get(d["id"], []):
+>         emp = {}
+>         for k in emp_required:
+>             node = emp_props[k]
+>             if node.get("type") == "array":
+>                 emp[k] = [s.strip() for s in e[k].split(";") if s.strip()]
+>             else:
+>                 emp[k] = coerce(e[k], node)
+>         emp_list.append(emp)
+>     proj_list = []
+>     for p in proj_by_dept.get(d["id"], []):
+>         proj = {}
+>         for k in proj_required:
+>             node = proj_props[k]
+>             col = csv_col(k, {"members": "member_ids"})
+>             if node.get("type") == "array":
+>                 proj[k] = [s.strip() for s in p[col].split(";") if s.strip()]
+>             else:
+>                 proj[k] = coerce(p[col], node)
+>         proj_list.append(proj)
+>     dept = {}
+>     for k in dept_required:
+>         node = dept_props[k]
+>         if k == "employees":
+>             dept[k] = emp_list
+>         elif k == "projects":
+>             dept[k] = proj_list
+>         else:
+>             dept[k] = coerce(d[k], node)
+>     built_departments.append(dept)
+>
+> # ---- Build statistics (keys derived exactly from schema) ----
+> budgets = [float(d["budget"]) for d in departments]
+> total_employees = len(employees)
+> skill_counts = {}
+> for e in employees:
+>     for s in e["skills"].split(";"):
+>         s = s.strip()
+>         if s:
+>             skill_counts[s] = skill_counts.get(s, 0) + 1
+> dep_sizes = {d["id"]: len(emp_by_dept.get(d["id"], [])) for d in departments}
+> status_counts = {}
+> for p in projects:
+>     status_counts[p["status"]] = status_counts.get(p["status"], 0) + 1
+> yos = [int(e["years_of_service"]) for e in employees]
+> avg_yos = sum(yos) / len(yos) if yos else 0
+>
+> computed = {
+>     "averageDepartmentBudget": sum(budgets) / len(budgets) if budgets else 0,
+>     "totalEmployees": total_employees,
+>     "skillDistribution": skill_counts,
+>     "departmentSizes": dep_sizes,
+>     "projectStatusDistribution": status_counts,
+>     "averageYearsOfService": avg_yos,
+> }
+>
+> # Map to exactly the schema-derived statistic key names
+> statistics = {}
+> for key in stat_keys:
+>     value = computed[key]
+>     node = stat_props[key]
+>     if node.get("type") == "integer":
+>         value = int(value)
+>     elif node.get("type") == "number":
+>         value = float(value)
+>     statistics[key] = value
+>
+> # ---- Build metadata (keys derived from schema) ----
+> metadata = {
+>     "version": "1.0",
+>     "timestamp": datetime.now(timezone.utc).isoformat(),
+>     "generator": "csv-to-json-processor",
+> }
+> metadata = {k: metadata[k] for k in metadata_keys}
+>
+> # ---- Build organization (keys derived from schema) ----
+> organization = {
+>     "name": "Global Tech Organization",
+>     "founded": "2015-01-01",
+>     "departments": built_departments,
+> }
+> organization = {k: organization[k] for k in org_keys}
+>
+> # ---- Assemble final object exactly from schema's top-level keys ----
+> output = {k: {"metadata": metadata, "organization": organization, "statistics": statistics}[k] for k in top_keys}
+>
+> # ---- Validate against schema before writing ----
+> validate(instance=output, schema=schema)
+> print("Schema validation: PASSED")
+>
+> with open(OUT_PATH, "w") as f:
+>     json.dump(output, f, indent=2)
+> print(f"Wrote {OUT_PATH}")
+> PYEOF
+root@8e9321c4b4f8:/app# python3 build.py
+Schema validation: PASSED
+Wrote organization.json
+root@8e9321c4b4f8:/app#

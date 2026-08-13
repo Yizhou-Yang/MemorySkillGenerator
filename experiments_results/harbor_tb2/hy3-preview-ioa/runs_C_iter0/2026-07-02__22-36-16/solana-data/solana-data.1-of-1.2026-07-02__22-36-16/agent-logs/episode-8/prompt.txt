@@ -1,0 +1,46 @@
+New Terminal Output:
+
+root@b539af01810d:/app# cat /etc/hosts; echo '---PORTS---'; (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || python3 -c "import socket;\n[print(p) for p in
+ [(h,int(p2)) for h in ['127.0.0.1'] for p2 in __import__('os').popen('cat /proc/net/tcp 2>/dev/null').read().split()]] if False]")
+127.0.0.1       localhost
+::1     localhost ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+192.168.48.2    b539af01810d
+---PORTS---
+  File "<string>", line 1
+    import socket;\n[print(p) for p in [(h,int(p2)) for h in ['127.0.0.1'] for p2 in __import__('os').popen('cat /proc/net/tcp 2>/dev/null').read().split()]] if
+ False]
+                   ^
+SyntaxError: unexpected character after line continuation character
+root@b539af01810d:/app# cat > /tmp/rpctest.py << 'EOF'
+> import urllib.request, json, socket
+>
+> def post(url, body, timeout=12, raw=False):
+>     data = json.dumps(body).encode()
+>     req = urllib.request.Request(url, data=data, headers={'Content-Type':'application/json'})
+>     try:
+>         r = urllib.request.urlopen(req, timeout=timeout)
+>         return r.status, r.read().decode()
+>     except Exception as e:
+>         return 'ERR', repr(e)
+>
+> # Try HTTP (not https) to Solana endpoints
+> tests = [
+>   ('http://api.devnet.solana.com', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),
+>   ('http://localhost:8899', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),
+>   ('https://localhost:8899', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),
+>   ('http://127.0.0.1:8899', {'jsonrpc':'2.0','id':1,'method':'getHealth'}),
+> ]
+> for url, body in tests:
+>     s, out = post(url, body)
+>     print(url, s, str(out)[:150])
+> EOF
+root@b539af01810d:/app# python3 /tmp/rpctest.py
+http://api.devnet.solana.com ERR <HTTPError 502: 'Server UnReachable'>
+http://localhost:8899 ERR URLError(ConnectionRefusedError(111, 'Connection refused'))
+https://localhost:8899 ERR URLError(ConnectionRefusedError(111, 'Connection refused'))
+http://127.0.0.1:8899 ERR URLError(ConnectionRefusedError(111, 'Connection refused'))
+root@b539af01810d:/app#

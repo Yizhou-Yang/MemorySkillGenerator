@@ -178,6 +178,7 @@ def _record_openai_usage(resp) -> None:
 # Some OpenAI-compatible proxies ONLY return SSE and ignore stream=false, so a
 # non-streaming create() gets a raw event stream ("'str' object has no attribute
 # 'choices'"). Set this to force streaming and reassemble the response ourselves.
+_CRITIC_TIMEOUT_S = int(os.environ.get("CRITIC_TIMEOUT_S", "25"))
 OPENAI_FORCE_STREAM = os.environ.get("OPENAI_FORCE_STREAM", "").strip().lower() in ("1", "true", "yes")
 
 
@@ -254,7 +255,31 @@ def _openai_notool_sync(system_prompt: str, user_prompt: str, timeout: int = 60,
 
     `model`/`base_url`/`api_key` override the backbone's endpoint (used to route the
     critic at a designated model instead of the backbone itself).
+
+    The whole call runs under a WALL-CLOCK deadline, not just the client's read
+    timeout. The read timeout resets on every byte, and the gateway keeps hung
+    streams alive with SSE keep-alives -- tau2's arm C sat in ep_poll for 3.5
+    hours on two such sockets, five seconds of CPU, store never persisted. A
+    deadline can only be enforced from outside the blocking iterator, so the
+    body runs in a worker thread; on expiry the thread is abandoned (one socket
+    leaks, bounded) and the caller gets the same error dict every failure path
+    already handles.
     """
+    _hard = timeout * 2 + 60
+    _pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        _fut = _pool.submit(_openai_notool_sync_body, system_prompt, user_prompt,
+                            timeout, model, base_url, api_key)
+        return _fut.result(timeout=_hard)
+    except concurrent.futures.TimeoutError:
+        return {"error": f"wall_clock_timeout after {_hard}s", "text": ""}
+    finally:
+        _pool.shutdown(wait=False)
+
+
+def _openai_notool_sync_body(system_prompt: str, user_prompt: str, timeout: int = 60,
+                             model: str | None = None, base_url: str | None = None,
+                             api_key: str | None = None) -> dict:
     if not _HAS_OPENAI:
         return {"text": "", "error": "openai_package_not_installed"}
     url = base_url if base_url is not None else _OPENAI_BASE_URL
@@ -332,21 +357,53 @@ def critic_model_id() -> str:
     return CRITIC_MODEL
 
 
+# api.mxzzz.xyz intermittently answers with an empty body -- probing gpt-5.6-terra
+# three times in a row returned a body, nothing, then a body. The preflight probes
+# once, so a healthy judge is declared dead about a third of the time and the gate
+# kills the sweep at second zero. That is the gate working on bad evidence, and it
+# cost two GAIA runs at 19:42.
+#
+# The gate itself stays strict: a judge that really is unreachable must still stop
+# the run, because a silent fall back to raw exact match is the failure it exists
+# to catch. Only the evidence gets better -- a few spaced attempts before the
+# verdict.
+_PREFLIGHT_TRIES = int(os.environ.get("PREFLIGHT_TRIES", "4"))
+_PREFLIGHT_SLEEP = (2, 6, 15)
+
+
+def _preflight_retry(probe):
+    """Run a (ok, detail) probe until it passes or the attempts run out."""
+    import time as _time
+    ok, detail = False, "not attempted"
+    for i in range(_PREFLIGHT_TRIES):
+        try:
+            ok, detail = probe()
+        except Exception as e:                     # noqa: BLE001 - probe must not raise
+            ok, detail = False, f"{type(e).__name__}: {str(e)[:150]}"
+        if ok:
+            if i:
+                detail = f"{detail} (after {i + 1} attempts)"
+            return ok, detail
+        if i < _PREFLIGHT_TRIES - 1:
+            _time.sleep(_PREFLIGHT_SLEEP[min(i, len(_PREFLIGHT_SLEEP) - 1)])
+    return ok, f"{detail} (x{_PREFLIGHT_TRIES} attempts)"
+
+
 def judge_preflight() -> tuple:
     """Probe the designated judge. A judge that cannot be reached does not fail
     the run -- it just never overrides a score -- so the arm looks judge-scored
     while every row is raw exact match."""
     if not JUDGE_MODEL:
         return True, "(backbone tie-break)"
-    try:
+    def _probe():
         # Route exactly as llm_judge_answer does, or the probe tests a different
         # endpoint than the judge will actually use.
         r = _openai_notool_sync("", "Reply with exactly: OK", 30,
                                 JUDGE_MODEL, JUDGE_BASE_URL, JUDGE_API_KEY)
         txt = (r.get("text") or "").strip()
-    except Exception as e:
-        return False, f"{type(e).__name__}: {str(e)[:150]}"
-    return (bool(txt), txt[:40] or "empty response")
+        return (bool(txt), txt[:40] or "empty response")
+
+    return _preflight_retry(_probe)
 
 
 def critic_preflight() -> tuple:
@@ -357,13 +414,13 @@ def critic_preflight() -> tuple:
     error==0 and looks healthy while carrying no critic judgment at all --
     which is the one thing arm C is supposed to measure.
     """
-    try:
+    def _probe():
         out = llm_critic_fn("Reply with exactly: OK")
-    except Exception as e:
-        return False, f"{type(e).__name__}: {str(e)[:160]}"
-    if not (out or "").strip():
-        return False, "empty response"
-    return True, (out or "").strip()[:40]
+        if not (out or "").strip():
+            return False, "empty response"
+        return True, (out or "").strip()[:40]
+
+    return _preflight_retry(_probe)
 
 
 def llm_critic_fn(prompt: str) -> str:
@@ -383,7 +440,12 @@ def llm_critic_fn(prompt: str) -> str:
             return loop.run_until_complete(_sdk_judge_call(prompt, CRITIC_MODEL, timeout=90))
         finally:
             _shutdown_loop(loop)
-    return _openai_notool_sync("", prompt, timeout=90, model=CRITIC_MODEL,
+    # 25s, not 90: healthy critic calls answer in ~4s even on 100k-char prompts,
+    # and the slow tail is sockets that never return headers rather than slow
+    # generation. A tighter bound turns a hung call from 90s of dead wall clock
+    # into 25s, which is what makes arm C's curation phase tractable.
+    return _openai_notool_sync("", prompt, timeout=_CRITIC_TIMEOUT_S,
+                               model=CRITIC_MODEL,
                                base_url=CRITIC_BASE_URL,
                                api_key=CRITIC_API_KEY).get("text", "")
 
@@ -420,6 +482,147 @@ def _openai_sync(prompt: str, max_turns: int = 1, timeout: int = 60) -> dict:
     return {"text": r.get("text", ""), "actions": [], "error": r.get("error")}
 
 
+# Some models answer an OpenAI-compatible endpoint by WRITING tool syntax as
+# prose instead of emitting a native tool call. Observed verbatim on
+# deepseek-v4-pro over api.deepseek.com:
+#
+#   <search>\nNASA Astronomy Picture of the Day August 2015\n</search>
+#   <function-calls><function-call>Search("...")</function-call></function-calls>
+#
+# The existing salvage only understands JSON shapes, so these reached the grader
+# as the model's final answer: the task scores 0 and the trace looks like a
+# reasoning failure rather than a protocol mismatch. Parsing them turns a lost
+# task back into a tool call.
+_XMLISH_CALL = __import__("re").compile(
+    r"<(?P<tag>[a-z][a-z0-9_-]{1,30})>\s*(?P<body>.*?)\s*</(?P=tag)>",
+    __import__("re").S | __import__("re").I)
+_FN_CALL_TEXT = __import__("re").compile(
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_]{1,40})\s*\(\s*(?P<arg>.*?)\s*\)",
+    __import__("re").S)
+# A wrapper body still holds the inner <function-call> tags; strip the markup
+# before looking for the call itself.
+_STRIP_TAGS = __import__("re").compile(r"</?[a-z][a-z0-9_:-]*>",
+                                       __import__("re").I)
+_WRAPPER_TAGS = {"function-calls", "function_calls", "tool_calls", "tools",
+                 "invoke", "antml:invoke"}
+
+
+def _salvage_xmlish(text: str, tools) -> list:
+    """Tool calls written as markup. Only names the caller actually offered are
+    accepted -- an unknown tag is far more likely to be prose than a call."""
+    if not text or "<" not in text or not tools:
+        return []
+    known, exact = {}, set()
+    for t in tools or []:
+        fn = (t.get("function") or t) if isinstance(t, dict) else {}
+        nm = fn.get("name")
+        if nm:
+            exact.add(str(nm))
+            # exact-case wins: with both `search` and `Search` offered, the tag
+            # <search> means the one spelled that way, not whichever was
+            # registered last.
+            known.setdefault(str(nm).lower(), str(nm))
+
+    def _resolve(tag):
+        return tag if tag in exact else known.get(tag.lower())
+    if not known:
+        return []
+    out = []
+    for m in _XMLISH_CALL.finditer(text):
+        tag, body = m.group("tag").lower(), (m.group("body") or "").strip()
+        if tag in _WRAPPER_TAGS:
+            inner = _FN_CALL_TEXT.search(_STRIP_TAGS.sub(' ', body))
+            nm = _resolve(inner.group("name")) if inner else None
+            if nm:
+                out.append((nm, inner.group("arg").strip().strip("\"'")))
+            continue
+        nm = _resolve(tag)
+        if nm and body:
+            # A body may itself be wrapped (<search><query>…</query></search>);
+            # the argument is the text, not the markup around it.
+            out.append((nm, _STRIP_TAGS.sub(" ", body).strip()))
+    return out
+
+
+def _xmlish_arg_key(tools, name: str) -> str:
+    """Which parameter the salvaged string belongs in: the tool's first required
+    property, else its first property, else `query`."""
+    for t in tools or []:
+        fn = (t.get("function") or t) if isinstance(t, dict) else {}
+        if str(fn.get("name") or "") != name:
+            continue
+        params = fn.get("parameters") or {}
+        req = params.get("required") or []
+        if req:
+            return str(req[0])
+        props = params.get("properties") or {}
+        if props:
+            return str(next(iter(props)))
+    return "query"
+
+
+def _salvage_tool_calls(text: str, tools) -> list:
+    """Tool calls a model wrote as text, in an envelope the parser missed.
+
+    Accepts both the correct {"name", "parameters"} shape and the schema echo
+    {"type": "function", "function": {"name", "parameters"}} that Llama-3.2-3B
+    produces under a large tool list, with or without a ``` fence, and however
+    many objects are concatenated. A name that is not in `tools` is dropped:
+    the point is to read what the model meant, not to invent a call.
+    """
+    if not text or "{" not in text:
+        # No JSON anywhere, but markup forms carry no braces at all, so this
+        # early return is exactly where <search>…</search> was being dropped.
+        return [{"name": nm, "arguments": {_xmlish_arg_key(tools, nm): arg}}
+                for nm, arg in _salvage_xmlish(text, tools)]
+    known = set()
+    for t in (tools or []):
+        fn = (t or {}).get("function") or {}
+        if fn.get("name"):
+            known.add(fn["name"])
+    out = []
+    dec = json.JSONDecoder()
+    i = 0
+    while i < len(text) and len(out) < 16:
+        j = text.find("{", i)
+        if j < 0:
+            break
+        try:
+            obj, end = dec.raw_decode(text[j:])
+        except ValueError:
+            i = j + 1
+            continue
+        i = j + end
+        if not isinstance(obj, dict):
+            continue
+        if isinstance(obj.get("function"), dict):
+            obj = obj["function"]
+        name = obj.get("name")
+        args = obj.get("parameters")
+        if args is None:
+            args = obj.get("arguments")
+        if not isinstance(name, str) or name not in known:
+            continue
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {}
+        out.append({"name": name, "arguments": args if isinstance(args, dict) else {}})
+    if not out:
+        # Nothing JSON-shaped. Some models write the call as markup instead --
+        # <search>…</search>, <function-calls><function-call>Search("…")</…>.
+        # Measured on deepseek-v4-pro over api.deepseek.com: 60% of responses
+        # carried one of these and every one reached the grader as the final
+        # answer, which is most of why that endpoint looked unusable (arm em 12
+        # against ~50 on the SDK route). Only names the caller offered are
+        # accepted.
+        for name, arg in _salvage_xmlish(text, tools):
+            out.append({"name": name,
+                        "arguments": {_xmlish_arg_key(tools, name): arg}})
+    return out
+
+
 def openai_tool_chat(messages: list, tools: list | None,
                      timeout: int = 120, model: str | None = None) -> dict:
     """One OpenAI-compatible chat turn with function-calling tools.
@@ -454,6 +657,27 @@ def openai_tool_chat(messages: list, tools: list | None,
                 except Exception:
                     args = {}
                 parsed.append({"id": tc.id, "name": tc.function.name, "arguments": args})
+        if not parsed:
+            # Nothing parsed server-side: see whether the model wrote calls into
+            # the text in an envelope the parser does not know.
+            # One at a time: the Llama 3.2 chat template rejects an assistant
+            # message carrying more than one tool call ("This model only
+            # supports single tool-calls at once!"), and a model that needed
+            # recovering is not one to trust with parallel calls anyway. The
+            # loop picks up the rest on later turns.
+            for i, call in enumerate(_salvage_tool_calls(assistant.get("content") or "",
+                                                         tools)[:1]):
+                cid = "recovered-%d" % i
+                parsed.append({"id": cid, "name": call["name"],
+                               "arguments": call["arguments"]})
+                assistant.setdefault("tool_calls", []).append(
+                    {"id": cid, "type": "function",
+                     "function": {"name": call["name"],
+                                  "arguments": json.dumps(call["arguments"])}})
+            if parsed:
+                # The text was the call, not an answer; leaving it in content
+                # makes the next turn re-read its own malformed attempt.
+                assistant["content"] = ""
         return {"assistant_message": assistant, "tool_calls": parsed, "error": None}
     except Exception as e:
         return {"assistant_message": None, "tool_calls": [], "error": str(e)[:200]}

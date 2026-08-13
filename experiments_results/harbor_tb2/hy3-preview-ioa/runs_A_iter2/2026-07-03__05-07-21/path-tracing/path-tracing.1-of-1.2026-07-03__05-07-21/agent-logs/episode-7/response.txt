@@ -1,0 +1,10 @@
+{
+  "analysis": "The high_res.ppm is P3 (ASCII) format, but my regex used 'P6'. That caused the crash before the rest ran. high_res is 8800x6600, downsampled to 800x600 (factor 11x). I don't need to load the 648MB high_res fully — just fix the header parse and analyze image.ppm.",
+  "plan": "Fix an3.py to use P3 regex for high_res header (read only first bytes, don't load the whole file). Re-run to get ASCII art, sphere detection, and sky gradient from image.ppm.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/an3.py << 'EOF'\nimport numpy as np, re\na=np.fromfile('image.ppm',dtype=np.uint8)\nm=re.match(rb'P6\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s', a[:30])\nw,h=int(m.group(1)),int(m.group(2)); off=len(m.group(0))\npx=a[off:].reshape(h,w,3).astype(np.float64)\nb=np.fromfile('high_res.ppm',dtype=np.uint8,count=40)\nmm=re.match(rb'P3\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s', b)\nprint('high_res', mm.groups() if mm else 'no match')\ncw,ch=100,50\nchars=' .:-=+*#%@'\nfor cy in range(ch):\n    row=''\n    for cx in range(cw):\n        y0=cy*h//ch; y1=(cy+1)*h//ch; x0=cx*w//cw; x1=(cx+1)*w//cw\n        blk=px[y0:y1,x0:x1,:].mean(0).mean(0)\n        L=0.299*blk[0]+0.587*blk[1]+0.114*blk[2]\n        row+=chars[min(9,int(L/256*10))]\n    print(row)\nprint('--- sphere detection (red) ---')\nsphere = (px[:,:,0]>120)&(px[:,:,0]-px[:,:,2]>40)&(px[:,:,0]-px[:,:,1]>40)\nys,xs=np.where(sphere)\nif len(xs):\n    print('count',len(xs),'bbox x',xs.min(),xs.max(),'y',ys.min(),ys.max(),'cx',round(xs.mean(),1),'cy',round(ys.mean(),1))\nprint('--- sky gradient (x=400) ---')\ncol=px[:,400,:]\nfor y in range(0,330,30):\n    print(y, col[y].astype(int))\nEOF\n.venv/bin/python /tmp/an3.py\n",
+      "duration": 2.0
+    }
+  ]
+}

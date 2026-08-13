@@ -1,0 +1,36 @@
+New Terminal Output:
+
+root@5ea94665f8e2:/app# cat > /app/dbg.py << 'PYEOF'
+> import subprocess, os, threading, queue
+> timeout=5
+> env=dict(os.environ); env['PYTHONUNBUFFERED']='1'
+> p=subprocess.Popen(['/app/maze_game.sh','1'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,env=env,bufsize=1)
+> q=queue.Queue()
+> def r():
+>     for line in p.stdout:
+>         q.put(line)
+>     q.put(None)
+> threading.Thread(target=r,daemon=True).start()
+> def rd():
+>     try:
+>         x=q.get(timeout=timeout); return x
+>     except queue.Empty:
+>         return '<<TIMEOUT>>'
+> for i in range(4):
+>     print('welcome',i,repr(rd()))
+> print('sending move N')
+> p.stdin.write('move N\n'); p.stdin.flush()
+> print('resp', repr(rd()))
+> p.stdin.write('exit\n'); p.stdin.flush()
+> p.kill()
+> print('done')
+> PYEOF
+root@5ea94665f8e2:/app# python3 /app/dbg.py
+welcome 0 'Welcome to the Blind Maze Explorer! (Maze ID: 1)\n'
+welcome 1 "You start at position 'S'. Use 'move N/S/E/W' commands to navigate.\n"
+welcome 2 "You can also use batch commands like 'move N & E', 'move S & S & W'.\n"
+welcome 3 "Type 'exit' to quit the game.\n"
+sending move N
+resp '> hit wall\n'
+done
+root@5ea94665f8e2:/app#

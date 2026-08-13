@@ -1,0 +1,16 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app/\n'
+'file /app/trunc.db\n'
+'xxd /app/trunc.db | head -40\n'
+'which sqlite3 python3 od hexdump xxd 2>/dev/null\n'
+"sqlite3 /app/trunc.db '.tables' 2>&1 | head\n"
+'od -A d -t x1z /app/trunc.db | head -20\n'
+'cat > /app/recover.py << \'PYEOF\'\nimport struct, json\n\ndef read_varint(data, off):\n    result = 0\n    for i in range(9):\n        b = data[off+i]\n        if i == 8:\n            result = (result << 8) | b\n            return result, off+9\n        result = (result << 7) | (b & 0x7f)\n        if not (b & 0x80):\n            return result, off+i+1\n    return result, off+9\n\ndef serial_size(t):\n    if t == 0: return 0\n    if t == 1: return 1\n    if t == 2: return 2\n    if t == 3: return 3\n    if t == 4: return 4\n    if t == 5: return 6\n    if t == 6: return 8\n    if t == 7: return 8\n    if t == 8: return 0\n    if t == 9: return 0\n    if t % 2 == 0: return (t-12)//2\n    return (t-13)//2\n\ndef read_value(t, data, off):\n    if t == 0: return None\n    if t == 1: return int.from_bytes(data[off:off+1], \'big\', signed=True)\n    if t == 2: return int.from_bytes(data[off:off+2], \'big\', signed=True)\n    if t == 3: return int.from_bytes(data[off:off+3], \'big\', signed=True)\n    if t == 4: return int.from_bytes(data[off:off+4], \'big\', signed=True)\n    if t == 5: return int.from_bytes(data[off:off+6], \'big\', signed=True)\n    if t == 6: return int.from_bytes(data[off:off+8], \'big\', signed=True)\n    if t == 7: return struct.unpack(\'>d\', data[off:off+8])[0]\n    if t == 8: return 0\n    if t == 9: return 1\n    if t % 2 == 0:\n        return data[off:off+serial_size(t)]\n    return data[off:off+serial_size(t)].decode(\'utf-8\', \'replace\')\n\ndata = open(\'/app/trunc.db\', \'rb\').read()\nassert data[0] == 0x0d, data[0]\nnum_cells = int.from_bytes(data[3:5], \'big\')\nrows = []\nfor i in range(num_cells):\n    ptr = int.from_bytes(data[8+2*i:10+2*i], \'big\')\n    off = ptr\n    payload_len, off = read_varint(data, off)\n    rowid, off = read_varint(data, off)\n    rec = data[off:off+payload_len]\n    hoff = 0\n    header_len, hoff = read_varint(rec, hoff)\n    serials = []\n    while hoff < header_len:\n        st, hoff = read_varint(rec, hoff)\n        serials.append(st)\n    body_off = header_len\n    cols = []\n    for st in serials:\n        sz = serial_size(st)\n        cols.append(read_value(st, rec, body_off))\n        body_off += sz\n    word = None\n    value = None\n    for c in cols:\n        if isinstance(c, str):\n            word = c\n        elif isinstance(c, (int, float)) and not isinstance(c, bool):\n            value = c\n    rows.append((rowid, word, value))\n\nrows.sort(key=lambda r: r[0])\nout = [{"word": w, "value": v} for (_, w, v) in rows]\nopen(\'/app/recover.json\', \'w\').write(json.dumps(out, indent=2))\nprint(json.dumps(out, indent=2))\nPYEOF\n'
+'python3 /app/recover.py\n'
+'python3 -c "import json; d=json.load(open(\'/app/recover.json\')); print(\'rows:\', len(d)); print(\'valid JSON\')"\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

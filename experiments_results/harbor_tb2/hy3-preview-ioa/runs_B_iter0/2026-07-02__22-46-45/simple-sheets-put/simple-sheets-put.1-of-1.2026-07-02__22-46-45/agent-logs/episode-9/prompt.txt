@@ -1,0 +1,20 @@
+New Terminal Output:
+
+root@d614a7f600cd:/app# cat > /tmp/test2.py << 'EOF'
+> import json, urllib.request, urllib.error
+> BASE='http://api:8000'
+> def req(method,path,body=None):
+>     url=BASE+path
+>     data=json.dumps(body).encode() if body is not None else None
+>     r=urllib.request.Request(url,data=data,method=method,headers={'Content-Type':'application/json'})
+>     try:
+>         with urllib.request.urlopen(r) as resp:
+>             return resp.read().decode()
+>     except urllib.error.HTTPError as e:
+>         return f'ERROR {e.code}: {e.read().decode()}'
+> batch=[{"cell_id":"A1","value":"Month"},{"cell_id":"B1","value":"Revenue"}]
+> print('list:', req('PUT','/sheets/1/cells/batch',{'updates':batch}))
+> EOF
+root@d614a7f600cd:/app# python3 /tmp/test2.py
+list: ERROR 400: {"detail":"Cell ID must be in A1 notation (e.g., A1, B2, AA1)"}
+root@d614a7f600cd:/app#

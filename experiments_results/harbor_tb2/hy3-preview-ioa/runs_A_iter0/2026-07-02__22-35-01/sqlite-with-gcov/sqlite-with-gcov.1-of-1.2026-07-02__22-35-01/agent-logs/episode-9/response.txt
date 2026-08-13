@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: / is a fuse-overlayfs and `statvfs` reports 0 available, which makes apt refuse with 'You don't have enough free space'. However, actual writes succeed (I wrote 200MB to /tmp fine). So the overlay's upper layer has space; only apt's statvfs-based check fails. Solution: bypass apt's download/free-space check by fetching the .deb packages directly via `apt-get --print-uris` (which prints download URLs) and `wget`, then install with `dpkg -i`, which doesn't enforce the apt free-space check. Let me first print the package URIs.",
+  "plan": "1. Use `apt-get --print-uris -y install build-essential wget` to list all needed .deb URLs. 2. wget them into /tmp/debs. 3. Install them all with `dpkg -i`. This avoids apt's statvfs free-space check. Start by printing URIs to a file.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /tmp/debs && cd /tmp/debs\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get --print-uris -y install build-essential wget > /tmp/uris.txt 2>/dev/null; wc -l /tmp/uris.txt; head -3 /tmp/uris.txt\n",
+      "duration": 2
+    }
+  ]
+}

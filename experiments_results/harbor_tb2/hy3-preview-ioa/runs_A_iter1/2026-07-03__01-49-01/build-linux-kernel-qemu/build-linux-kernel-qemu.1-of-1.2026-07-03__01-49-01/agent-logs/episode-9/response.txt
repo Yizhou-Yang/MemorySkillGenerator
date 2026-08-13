@@ -1,0 +1,14 @@
+{
+  "analysis": "Key finding: df reports the overlay filesystem as 100% full (0 avail), but I just successfully wrote a 200MB file to /tmp and it worked. This indicates the '0 available' is a fuse-overlayfs statfs quirk reporting the shared host device, while the container's own upper layer actually has writeable space. apt's install aborted on a free-space pre-check that's computing 0 available incorrectly. The du total is only ~200M because the 960G 'used' is mostly shared lower layers not visible here. \n\nStrategy: bypass apt's disk-space check by using `apt-get download` (which doesn't do the pre-check) to fetch .debs into /tmp, then install with `dpkg -i`. Let me first confirm a larger write works, then test apt-get download.",
+  "plan": "1. Confirm I can write a larger file (e.g. 1GB) to verify real available space. 2. Try `apt-get download` for a package into /tmp to confirm it avoids the free-space error. If that works, I'll download all needed packages and dpkg-install them.",
+  "commands": [
+    {
+      "keystrokes": "dd if=/dev/zero of=/tmp/big bs=1M count=1500 2>&1 | tail -2; ls -la /tmp/big; rm -f /tmp/big\n",
+      "duration": 10.0
+    },
+    {
+      "keystrokes": "cd /tmp && apt-get download build-essential 2>&1 | tail -5; ls -la /tmp/*.deb 2>/dev/null\n",
+      "duration": 5.0
+    }
+  ]
+}

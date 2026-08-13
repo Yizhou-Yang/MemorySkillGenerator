@@ -1,0 +1,18 @@
+{
+  "analysis": "My ISO9660 walker recursed ~1000 times (hit Python's recursion limit), which means it followed a cyclic set of directory extents. I need to break cycles by tracking visited extents and capping depth. The kernel files I need are at /boot/vmlinuz-lts and /boot/initramfs-lts, so a guarded walk will find them. Let me rewrite the extractor with a visited-set guard.",
+  "plan": "Rewrite /tmp/extract.py to track visited extents and limit recursion depth, preventing infinite loops. Run it to extract /app/vmlinuz and /app/initramfs. Then verify their sizes before booting qemu.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/extract.py << 'PYEOF'\nimport struct\nISO='/app/alpine.iso'\nwith open(ISO,'rb') as f:\n    pvd=None\n    for s in range(16,16+200):\n        buf=f.read(2048) if False else None\n    f.seek(0)\n    for s in range(16,16+200):\n        buf=f.read(2048)\n        if buf[1:6]==b'CD001' and buf[0]==1:\n            pvd=buf; break\n    assert pvd,'no PVD'\n    def parse_dr(d):\n        if len(d)<33: return None\n        return (struct.unpack('<I',d[2:6])[0],struct.unpack('<I',d[10:14])[0],d[25],d[33:33+d[32]])\n    def read_dir(ext,length):\n        f.seek(ext*2048)\n        data=f.read(((length+2047)//2048)*2048)\n        out=[]; off=0\n        while off<length:\n            lr=data[off]\n            if lr==0:\n                off=((off//2048)+1)*2048; continue\n            rec=data[off:off+lr]\n            e=parse_dr(rec)\n            if e: out.append(e)\n            off+=lr\n        return out\n    def nameof(b):\n        s=b.decode('latin1')\n        if ';' in s: s=s.split(';')[0]\n        return s\n    cands={'vmlinuz':[],'initramfs':[]}\n    seen=set()\n    def walk(entries,path,depth):\n        if depth>25: return\n        for ext,length,flags,name in entries:\n            if ext in seen: continue\n            nm=nameof(name)\n            if nm in ('.','..'): continue\n            isdir=bool(flags & 0x2)\n            full=path+'/'+nm\n            if isdir and depth<25:\n                seen.add(ext)\n                try:\n                    walk(read_dir(ext,length),full,depth+1)\n                except Exception as e:\n                    pass\n            else:\n                low=nm.lower()\n                if 'vmlinuz' in low: cands['vmlinuz'].append((ext,length,full))\n                if 'initramfs' in low: cands['initramfs'].append((ext,length,full))\n    root=parse_dr(pvd[156:156+34])\n    walk(read_dir(root[0],root[1]),'',0)\n    def pick(lst):\n        if not lst: return None\n        lts=[x for x in lst if 'lts' in x[2].lower()]\n        return lts[0] if lts else lst[0]\n    for k in ('vmlinuz','initramfs'):\n        x=pick(cands[k])\n        print(k,x)\n        if x:\n            ext,length,full=x\n            f.seek(ext*2048)\n            data=f.read(length)\n            open('/app/'+k,'wb').write(data)\n            print('wrote','/app/'+k,length)\nPYEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "python3 /tmp/extract.py\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "ls -la /app/vmlinuz /app/initramfs\n",
+      "duration": 0.2
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "analysis": "Environment is good: sshd is listening on :22, git user created with password, bare repo at /git/project with executable post-receive hook. /var/www/html owned by git. Now I need a self-signed cert, an Nginx HTTPS server on 8443, and to verify the full push->deploy->serve flow. I must be careful that test pushes are done as the 'git' user so deployed files remain git-owned (so the grader's later push as git can overwrite them).",
+  "plan": "1) Inspect nginx.conf includes. 2) Generate a self-signed cert in /etc/nginx/ssl. 3) Write an Nginx server block listening on 8443 with ssl, root /var/www/html (which auto-serves both /index.html and /dev/index.html). 4) Test config and start Nginx. I'll verify includes before finalizing config placement.",
+  "commands": [
+    {
+      "keystrokes": "grep -nE \"include|conf.d|sites-enabled\" /etc/nginx/nginx.conf\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -days 3650 -subj \"/CN=localhost\" 2>&1 | tail -2\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "cat > /etc/nginx/conf.d/git.conf << 'EOF'\nserver {\n    listen 8443 ssl;\n    listen [::]:8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/cert.pem;\n    ssl_certificate_key /etc/nginx/ssl/key.pem;\n    root /var/www/html;\n    index index.html;\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}\nEOF\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "nginx -t\n",
+      "duration": 1.0
+    }
+  ]
+}

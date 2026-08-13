@@ -1,0 +1,22 @@
+New Terminal Output:
+
+root@aaca0d5219aa:/app/astropy# python - <<'EOF'
+> import re
+> _command_re = r"READ [TS]ERR(\s+[0-9]+)+"
+> sep = r"\s+"
+> _new_re = rf"NO({sep}NO)+"
+> _decimal_re = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+> _data_re = rf"({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)"
+> _type_re = rf"^\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\s*(\!(?P<comment>.*))?\s*$"
+> rt = re.compile(_type_re, re.IGNORECASE)
+> for line in ['read serr 1 2', 'READ SERR 1 2', 'Read TErr 3', '1 0.5 1 0.5', 'NO NO NO', 'read terr 1 2 ! comment']:
+>     m = rt.match(line.strip())
+>     print(repr(line), '->', {k:v for k,v in m.groupdict().items() if v is not None} if m else None)
+> EOF
+'read serr 1 2' -> {'command': 'read serr 1 2'}
+'READ SERR 1 2' -> {'command': 'READ SERR 1 2'}
+'Read TErr 3' -> {'command': 'Read TErr 3'}
+'1 0.5 1 0.5' -> {'data': '1 0.5 1 0.5'}
+'NO NO NO' -> {'new': 'NO NO NO'}
+'read terr 1 2 ! comment' -> {'command': 'read terr 1 2', 'comment': ' comment'}
+root@aaca0d5219aa:/app/astropy#

@@ -1,0 +1,36 @@
+New Terminal Output:
+
+root@358bdf5f815d:/app# cat > /tmp/dl.py << 'PYEOF'
+> import re, os, time, urllib.request, concurrent.futures
+> os.makedirs('/tmp/debs', exist_ok=True)
+> uris=[]
+> for line in open('/tmp/uris.txt'):
+>     line=line.strip()
+>     m=re.match(r"^'([^']+)'\s+(\S+)\s+(\d+)", line)
+>     if m:
+>         uris.append((m.group(1), m.group(2)))
+> print(len(uris),'to download')
+> def fetch(item):
+>     url,name=item
+>     dest='/tmp/debs/'+name
+>     if os.path.exists(dest) and os.path.getsize(dest)>0:
+>         return name,'skip'
+>     for a in range(4):
+>         try:
+>             req=urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0'})
+>             data=urllib.request.urlopen(req, timeout=90).read()
+>             open(dest,'wb').write(data)
+>             return name,'ok'
+>         except Exception as e:
+>             time.sleep(1)
+>     return name,'FAIL'
+> with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+>     for name,status in ex.map(fetch, uris):
+>         if status=='FAIL':
+>             print('FAILED', name)
+> print('done')
+> PYEOF
+root@358bdf5f815d:/app# python3 /tmp/dl.py
+215 to download
+done
+root@358bdf5f815d:/app#

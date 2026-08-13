@@ -1,0 +1,10 @@
+{
+  "analysis": "Data loads with 3565 points, x from 1648.72 to 47183.55. The target 2700 is in range (y~274, quite low) but 1580 is just below the data's min x of 1648.72. This is suspicious. The max y is 79400, which is very high, so there must be prominent peaks somewhere. I need to find the actual peak locations (local maxima) to understand the structure before fitting.",
+  "plan": "Write a script to find local maxima in the data and report their x (which compares to 1580/2700) and y values. This will clarify where the G and 2D peaks actually are and whether the x-axis maps directly to cm-1.",
+  "commands": [
+    {
+      "keystrokes": "cat > peaks.py << 'EOF'\nimport numpy as np\ndata = np.loadtxt('graphene.dat', delimiter=None,\n                  converters={0: lambda s: float(s.replace(',','.')),\n                              1: lambda s: float(s.replace(',','.'))})\nx = data[:,0]; y = data[:,1]\n# local maxima (excluding edges)\nmask = (y[1:-1] > y[:-2]) & (y[1:-1] >= y[2:])\nidx = np.where(mask)[0] + 1\ntops = sorted(idx, key=lambda i: -y[i])[:15]\nprint('Top local maxima:')\nfor i in tops:\n    print(f'  x={x[i]:.2f}  y={y[i]:.2f}')\nprint('global max y at x=', x[np.argmax(y)], 'y=', y.max())\nEOF\npython3 peaks.py\n",
+      "duration": 2.0
+    }
+  ]
+}

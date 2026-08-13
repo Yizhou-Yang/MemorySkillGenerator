@@ -1,0 +1,189 @@
+New Terminal Output:
+
+root@7f298e3eab10:/app# cat > /app/convert.py << 'PYEOF'
+> import csv, struct
+>
+> BOOL_TRUE=1; BOOL_FALSE=2; BYTE=3; I16=4; I32=5; I64=6; DOUBLE=7; BINARY=8; LIST=9; SET=10; MAP=11; STRUCT=12
+>
+> PBOOLEAN=0; PINT32=1; PINT64=2; PINT96=3; PFLOAT=4; PDOUBLE=5; PBYTE_ARRAY=6; PFIXED_LEN_BYTE_ARRAY=7
+> REP_REQUIRED=0
+> CONVERTED_UTF8=0
+> CODEC_UNCOMPRESSED=0
+> ENC_PLAIN=0; ENC_RLE=3
+> PAGE_DATA_PAGE=0
+>
+> def write_varint(buf, n):
+>     while True:
+>         b = n & 0x7F
+>         n >>= 7
+>         if n:
+>             buf.append(b | 0x80)
+>         else:
+>             buf.append(b)
+>             break
+>
+> def zigzag(n):
+>     return (n << 1) if n >= 0 else ((-n << 1) - 1)
+>
+> def write_zigzag(buf, n):
+>     write_varint(buf, zigzag(n))
+>
+> def write_value(buf, ftype, value):
+>     if ftype == BOOL_TRUE or ftype == BOOL_FALSE:
+>         return
+>     if ftype == BYTE:
+>         buf.append(value & 0xFF)
+>     elif ftype in (I16, I32, I64):
+>         write_zigzag(buf, value)
+>     elif ftype == DOUBLE:
+>         buf += struct.pack('<d', value)
+>     elif ftype == BINARY:
+>         if isinstance(value, str):
+>             value = value.encode('utf-8')
+>         write_varint(buf, len(value))
+>         buf += value
+>     elif ftype == LIST:
+>         elem_type, items = value
+>         size = len(items)
+>         if size < 15:
+>             buf.append((size << 4) | (elem_type & 0x0F))
+>         else:
+>             buf.append((0x0F << 4) | (elem_type & 0x0F))
+>             write_varint(buf, size)
+>         for item in items:
+>             write_value(buf, elem_type, item)
+>     elif ftype == STRUCT:
+>         write_struct(buf, value)
+>     else:
+>         raise ValueError('unsupported type %r' % ftype)
+>
+> def write_struct(buf, fields):
+>     last = 0
+>     for fid, ftype, value in fields:
+>         delta = fid - last
+>         if 1 <= delta <= 15:
+>             buf.append((delta << 4) | (ftype & 0x0F))
+>         else:
+>             buf.append(ftype & 0x0F)
+>             write_zigzag(buf, fid)
+>         last = fid
+>         write_value(buf, ftype, value)
+>     buf.append(0x00)
+>
+> def encode_plain(values, coltype):
+>     out = bytearray()
+>     if coltype == PINT32:
+>         for v in values:
+>             out += struct.pack('<i', v)
+>     elif coltype == PINT64:
+>         for v in values:
+>             out += struct.pack('<q', v)
+>     elif coltype == PFLOAT:
+>         for v in values:
+>             out += struct.pack('<f', v)
+>     elif coltype == PDOUBLE:
+>         for v in values:
+>             out += struct.pack('<d', v)
+>     elif coltype == PBYTE_ARRAY:
+>         for v in values:
+>             if isinstance(v, str):
+>                 v = v.encode('utf-8')
+>             out += struct.pack('<I', len(v)) + v
+>     else:
+>         raise ValueError('unsupported coltype')
+>     return bytes(out)
+>
+> def infer_type(vals):
+>     intok = True; int64needed = False
+>     for v in vals:
+>         if v == '':
+>             continue
+>         try:
+>             iv = int(v)
+>         except ValueError:
+>             intok = False; break
+>         if abs(iv) > 0x7FFFFFFF:
+>             int64needed = True
+>     if intok:
+>         return PINT64 if int64needed else PINT32
+>     floatok = True
+>     for v in vals:
+>         if v == '':
+>             continue
+>         try:
+>             float(v)
+>         except ValueError:
+>             floatok = False; break
+>     if floatok:
+>         return PDOUBLE
+>     return PBYTE_ARRAY
+>
+> def main():
+>     with open('/app/data.csv', newline='') as f:
+>         rows = [r for r in csv.reader(f) if r]
+>     header = rows[0]
+>     data = rows[1:]
+>     ncols = len(header); nrows = len(data)
+>     cols = []
+>     for j in range(ncols):
+>         colvals = [data[i][j] for i in range(nrows)]
+>         t = infer_type(colvals)
+>         cols.append((header[j], t, colvals))
+>
+>     out = bytearray(); out += b'PAR1'
+>     row_group_columns = []; total_byte_size = 0
+>     for (name, t, colvals) in cols:
+>         page_data = encode_plain(colvals, t)
+>         data_page_header = [(1, I32, nrows), (2, I32, ENC_PLAIN), (3, I32, ENC_RLE), (4, I32, ENC_RLE)]
+>         page_header = [(1, I32, PAGE_DATA_PAGE), (2, I32, len(page_data)), (3, I32, len(page_data)), (5, STRUCT, data_page_header)]
+>         ph = bytearray(); write_struct(ph, page_header)
+>         page = bytes(ph) + page_data
+>         data_page_offset = len(out)
+>         out += page
+>         chunk_size = len(page); total_byte_size += chunk_size
+>         col_meta = [(1, I32, t), (2, LIST, (I32, [ENC_RLE, ENC_PLAIN])), (3, LIST, (BINARY, [name])),
+>                     (4, I32, CODEC_UNCOMPRESSED), (5, I32, nrows), (6, I64, chunk_size),
+>                     (7, I64, chunk_size), (9, I64, data_page_offset)]
+>         row_group_columns.append([(2, I64, data_page_offset), (3, STRUCT, col_meta)])
+>
+>     schema = [[(1, BINARY, 'schema'), (4, I32, REP_REQUIRED), (5, I32, ncols)]]
+>     for (name, t, colvals) in cols:
+>         f = [(1, BINARY, name), (2, I32, t), (4, I32, REP_REQUIRED), (5, I32, 0)]
+>         if t == PBYTE_ARRAY:
+>             f.append((6, I32, CONVERTED_UTF8))
+>         schema.append(f)
+>
+>     row_group = [(1, LIST, (STRUCT, row_group_columns)), (2, I64, total_byte_size), (3, I32, nrows)]
+>     file_meta = [(1, I32, 1), (2, LIST, (STRUCT, schema)), (3, I64, nrows),
+>                  (4, LIST, (STRUCT, [row_group])), (5, BINARY, 'minimal-parquet-writer/1.0')]
+>
+>     footer = bytearray(); write_struct(footer, file_meta)
+>     footer_bytes = bytes(footer)
+>     out += footer_bytes
+>     out += struct.pack('<I', len(footer_bytes))
+>     out += b'PAR1'
+>     with open('/app/data.parquet', 'wb') as f:
+>         f.write(out)
+>     print('wrote', len(out), 'bytes')
+>
+> main()
+> PYEOF
+root@7f298e3eab10:/app# python3 /app/convert.py
+Traceback (most recent call last):
+  File "/app/convert.py", line 166, in <module>
+    main()
+  File "/app/convert.py", line 133, in main
+    page_data = encode_plain(colvals, t)
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/convert.py", line 74, in encode_plain
+    out += struct.pack('<i', v)
+           ^^^^^^^^^^^^^^^^^^^^
+struct.error: required argument is not an integer
+root@7f298e3eab10:/app# ls -la /app/data.parquet
+ls: cannot access '/app/data.parquet': No such file or directory
+root@7f298e3eab10:/app# python3 -c "d=open('/app/data.parquet','rb').read(); print('head',d[:4]); print('tail',d[-4:]); print('footer_len',int.from_bytes(d[-8:-
+4],'little')); print('size',len(d))"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: '/app/data.parquet'
+root@7f298e3eab10:/app#

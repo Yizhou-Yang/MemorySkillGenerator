@@ -1,0 +1,102 @@
+New Terminal Output:
+
+root@bb13fb51ee56:/app# cat > process.py << 'EOF'
+> import csv, json, datetime
+>
+> def read_csv(path):
+>     with open(path, newline='', encoding='utf-8') as f:
+>         return list(csv.DictReader(f))
+>
+> departments = read_csv('data/departments.csv')
+> employees = read_csv('data/employees.csv')
+> projects = read_csv('data/projects.csv')
+>
+> # Index employees by id
+> emp_by_id = {e['id']: e for e in employees}
+>
+> # Group employees and projects by department
+> dept_emps = {}
+> for e in employees:
+>     dept_emps.setdefault(e['department_id'], []).append(e)
+>
+> dept_projs = {}
+> for p in projects:
+>     dept_projs.setdefault(p['department_id'], []).append(p)
+>
+> dept_list = []
+> for d in departments:
+>     did = d['id']
+>     emps = []
+>     for e in dept_emps.get(did, []):
+>         emps.append({
+>             'id': e['id'],
+>             'name': e['name'],
+>             'position': e['position'],
+>             'skills': [s.strip() for s in e['skills'].split(';') if s.strip()],
+>             'years_of_service': int(e['years_of_service'])
+>         })
+>     projs = []
+>     for p in dept_projs.get(did, []):
+>         projs.append({
+>             'name': p['name'],
+>             'status': p['status'],
+>             'members': [m.strip() for m in p['member_ids'].split(';') if m.strip()],
+>             'deadline': p['deadline']
+>         })
+>     dept_list.append({
+>         'id': d['id'],
+>         'name': d['name'],
+>         'budget': float(d['budget']),
+>         'employees': emps,
+>         'projects': projs
+>     })
+>
+> # Statistics
+> budgets = [float(d['budget']) for d in departments]
+> averageDepartmentBudget = sum(budgets) / len(budgets) if budgets else 0
+> totalEmployees = len(employees)
+>
+> skillDistribution = {}
+> for e in employees:
+>     for s in e['skills'].split(';'):
+>         s = s.strip()
+>         if s:
+>             skillDistribution[s] = skillDistribution.get(s, 0) + 1
+>
+> departmentSizes = {d['name']: len(dept_emps.get(d['id'], [])) for d in departments}
+>
+> projectStatusDistribution = {}
+> for p in projects:
+>     projectStatusDistribution[p['status']] = projectStatusDistribution.get(p['status'], 0) + 1
+>
+> years = [int(e['years_of_service']) for e in employees]
+> averageYearsOfService = sum(years) / len(years) if years else 0
+>
+> output = {
+>     'metadata': {
+>         'version': '1.0',
+>         'timestamp': datetime.datetime.now().astimezone().isoformat(),
+>         'generator': 'CSV-to-JSON Processor v1.0'
+>     },
+>     'organization': {
+>         'name': 'Acme Corporation',
+>         'founded': '2020-01-01',
+>         'departments': dept_list
+>     },
+>     'statistics': {
+>         'averageDepartmentBudget': averageDepartmentBudget,
+>         'totalEmployees': totalEmployees,
+>         'skillDistribution': skillDistribution,
+>         'departmentSizes': departmentSizes,
+>         'projectStatusDistribution': projectStatusDistribution,
+>         'averageYearsOfService': averageYearsOfService
+>     }
+> }
+>
+> with open('organization.json', 'w', encoding='utf-8') as f:
+>     json.dump(output, f, indent=2, ensure_ascii=False)
+>
+> print('Wrote organization.json')
+> EOF
+root@bb13fb51ee56:/app# python3 process.py
+

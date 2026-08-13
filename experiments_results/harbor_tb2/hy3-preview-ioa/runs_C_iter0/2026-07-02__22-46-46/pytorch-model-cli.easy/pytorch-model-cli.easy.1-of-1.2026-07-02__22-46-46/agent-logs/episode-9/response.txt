@@ -1,0 +1,16 @@
+The issue is `apt`'s pre-flight disk-space check: statfs reports 0 available on the overlay, but actual writes succeed (our `dd` test proved 10MB wrote fine). I'll bypass the check by mounting a tmpfs for apt's download cache.
+
+{
+  "analysis": "apt refuses because its download-cache filesystem reports 0 available (a fuse-overlayfs statvfs quirk). Writes to / actually work (dd wrote 10MB successfully). Solution: mount a tmpfs for apt's archives dir so the statfs check sees plenty of space. The actual dpkg install writes to /, which works fine.",
+  "plan": "1. Check free RAM. 2. Mount a 1G tmpfs at /mnt/aptcache. 3. Run apt-get install build-essential pointing Dir::Cache::archives to the tmpfs. This bypasses the bogus space check while downloads land in RAM-backed tmpfs.",
+  "commands": [
+    {
+      "keystrokes": "free -m\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "mkdir -p /mnt/aptcache && mount -t tmpfs -o size=1000M tmpfs /mnt/aptcache && df -h /mnt/aptcache\n",
+      "duration": 1.0
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "analysis": "The disk-space patch worked — RTE dataset downloaded and 5-shot sampling ran (10 examples). Now a new blocker: `load_metric('./metrics/super_glue', 'rte')` triggers an interactive `trust_remote_code=True` prompt and fails in datasets 2.21 (load_metric is deprecated and now requires trust_remote_code). The metric is only used to compute accuracy for RTE, so the most robust fix is to stop depending on `load_metric` and compute accuracy manually in `compute_metrics`. I need to see the exact `compute_metrics` body to patch it precisely.",
+  "plan": "1) Read the `compute_metrics` method in tasks/superglue/dataset.py (around lines 345-365). 2) Patch: remove the `self.metric = load_metric(...)` line and replace the `self.metric.compute(...)` call with a manual accuracy computation (correct for RTE, whose test_key is 'accuracy'). 3) Re-run run.py and monitor the log for training + the eval_metrics line with eval_accuracy.",
+  "commands": [
+    {
+      "keystrokes": "sed -n '345,370p' tasks/superglue/dataset.py\n",
+      "duration": 0.3
+    }
+  ]
+}

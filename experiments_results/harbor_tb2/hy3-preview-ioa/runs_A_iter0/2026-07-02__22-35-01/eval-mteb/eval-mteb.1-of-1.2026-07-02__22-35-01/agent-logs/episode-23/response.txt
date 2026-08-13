@@ -1,0 +1,18 @@
+{
+  "analysis": "Root cause confirmed: `import torch` hangs inside `_load_global_deps` -> `_preload_cuda_deps` -> `_preload_cuda_lib` at `ctypes.CDLL(lib_path)` for one of the nvidia/CUDA shared libraries. The dlopen of a CUDA lib blocks indefinitely. Since bge-small-en-v1.5 runs on CPU and needs no CUDA, I can prevent these CUDA lib loads during interpreter startup via a `sitecustomize.py` that wraps `ctypes.CDLL` to skip nvidia/CUDA libraries. The first load (`libtorch_global_deps.so`) works fine and isn't matched, so CPU torch should import normally.",
+  "plan": "1. Create /app/sitecustomize.py that patches `ctypes.CDLL` to return a no-op for CUDA/nvidia libraries (detected by name/path). 2. Set PYTHONPATH=/app so it's auto-imported. 3. Test that `import torch` succeeds and `torch.cuda.is_available()` returns quickly (no hang).",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/sitecustomize.py << 'PYEOF'\nimport ctypes as _ctypes\nimport os as _os\n\n_orig_CDLL = _ctypes.CDLL\n\n_CUDA_PREFIXES = (\n    \"libcublaslt\", \"libcublas\", \"libcudnn\", \"libnvrtc\", \"libnvrtc-builtins\",\n    \"libcudart\", \"libcupti\", \"libcufft\", \"libcurand\", \"libnvjitlink\",\n    \"libcusparse\", \"libcusparselt\", \"libcusolver\", \"libnccl\", \"libnvshmem\",\n    \"libcufile\", \"libnvtoolsext\", \"libnvidia-ml\",\n)\n\ndef _is_cuda_lib(path):\n    if not path:\n        return False\n    p = str(path).lower()\n    if \"nvidia\" in p:\n        return True\n    base = _os.path.basename(p)\n    for pre in _CUDA_PREFIXES:\n        if base.startswith(pre):\n            return True\n    return False\n\nclass _NoopCDLL:\n    def __init__(self, *a, **k):\n        pass\n    def __getattr__(self, n):\n        raise AttributeError(n)\n\ndef _patched_CDLL(*args, **kwargs):\n    path = args[0] if args else kwargs.get(\"name\")\n    if _is_cuda_lib(path):\n        return _NoopCDLL()\n    return _orig_CDLL(*args, **kwargs)\n\n_ctypes.CDLL = _patched_CDLL\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "export PYTHONPATH=/app\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "timeout 30 python3 -c \"import torch; print('torch', torch.__version__); print('cuda avail', torch.cuda.is_available())\" 2>&1 | tail -10\n",
+      "duration": 32.0
+    }
+  ]
+}

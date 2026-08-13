@@ -1,0 +1,33 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+"find . -name '*.py' | xargs grep -l 'class DirFileSystem' 2>/dev/null\n"
+"grep -rn 'class DirFileSystem' .\n"
+'cat ./fsspec/implementations/dirfs.py\n'
+"grep -n 'def open_async' fsspec/asyn.py\n"
+"sed -n '900,920p' fsspec/asyn.py\n"
+"python - <<'EOF'\nimport re\npath = 'fsspec/implementations/dirfs.py'\nwith open(path) as f:\n    src = f.read()\n\nanchor = '''    def open(\n        self,\n        path,\n        *args,\n        **kwargs,\n    ):\n        return self.fs.open(\n            self._join(path),\n            *args,\n            **kwargs,\n        )'''\n\nnew_method = '''    async def open_async(self, path, *args, **kwargs):\n        return await self.fs.open_async(\n            self._join(path),\n            *args,\n            **kwargs,\n        )\n\n    def open(\n        self,\n        path,\n        *args,\n        **kwargs,\n    ):\n        return self.fs.open(\n            self._join(path),\n            *args,\n            **kwargs,\n        )'''\n\nassert anchor in src, 'anchor not found'\nsrc = src.replace(anchor, new_method)\nwith open(path, 'w') as f:\n    f.write(src)\nprint('done')\nEOF\n"
+'tail -25 fsspec/implementations/dirfs.py\n'
+"python - <<'EOF'\nimport asyncio\nimport fsspec\n\nasync def async_test():\n    dirfs = fsspec.filesystem('dir', path='/tmp', asynchrnous=True)\n    file = await dirfs.open_async('hello_dirfs_test', 'wb')\n    await file.close()\n    print('sync-mode open_async OK')\n    print('has open_async:', hasattr(dirfs, 'open_async'))\n\nasyncio.run(async_test())\nEOF\n"
+''
+'pip install -e . 2>&1 | tail -5\n'
+''
+''
+"python - <<'EOF'\nimport asyncio\nimport fsspec\n\nasync def async_test():\n    dirfs = fsspec.filesystem('dir', path='/tmp', asynchrnous=True)\n    file = await dirfs.open_async('hello_dirfs_test', 'wb')\n    await file.close()\n    print('sync-mode open_async OK')\n    print('has open_async:', hasattr(dirfs, 'open_async'))\n\nasyncio.run(async_test())\nEOF\n"
+"grep -rn 'open_async' fsspec/implementations/ fsspec/asyn.py | head -40\n"
+"grep -rn 'open_async' fsspec/implementations/tests/test_dirfs.py 2>/dev/null; ls fsspec/implementations/tests/ | grep dir\n"
+'python - <<\'EOF\'\nimport asyncio\nimport fsspec\nfrom fsspec.asyn import AsyncFileSystem\n\ncalls = []\n\nclass DummyAsync(AsyncFileSystem):\n    protocol = "dummyasync"\n    async def open_async(self, path, mode="rb", **kwargs):\n        calls.append((path, mode, kwargs))\n        return "OPENED"\n\nfsspec.register_implementation("dummyasync", DummyAsync, clobber=True)\n\nasync def test():\n    fs = DummyAsync()\n    dirfs = fsspec.filesystem("dir", path="/my/base", fs=fs)\n    res = await dirfs.open_async("hello", "wb", some_kw="x")\n    print("result:", res)\n    print("calls:", calls)\n    assert calls == [("/my/base/hello", "wb", {"some_kw": "x"})], calls\n    print("DELEGATION OK")\n\nasyncio.run(test())\nEOF\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -20\n'
+'pip install pytest -q 2>&1 | tail -3\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -20\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py::test_open -q 2>&1 | tail -30\n'
+'pip install pytest-mock -q 2>&1 | tail -2\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -15\n'
+"python -m pytest 'fsspec/implementations/tests/test_dirfs.py::test_async_mkdir' -q 2>&1 | tail -25\n"
+'pip install pytest-asyncio -q 2>&1 | tail -2\n'
+'python -m pytest fsspec/implementations/tests/test_dirfs.py -q 2>&1 | tail -15\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

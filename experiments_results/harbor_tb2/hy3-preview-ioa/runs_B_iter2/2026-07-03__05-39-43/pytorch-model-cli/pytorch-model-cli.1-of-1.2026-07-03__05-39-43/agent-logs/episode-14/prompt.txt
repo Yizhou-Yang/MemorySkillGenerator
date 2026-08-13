@@ -1,0 +1,48 @@
+New Terminal Output:
+
+root@cd63cf8efa91:/app# cat > /app/explore.py << 'EOF'
+> import torch, numpy as np
+> from PIL import Image
+>
+> sd = torch.load('model.pth', map_location='cpu')
+> img = Image.open('image.png').convert('L').resize((28,28))
+> a = np.asarray(img, dtype=np.float64)
+> print('shape', a.shape, 'min', a.min(), 'max', a.max(), 'mean', round(a.mean(),3))
+>
+> class M(torch.nn.Module):
+>     def __init__(self):
+>         super().__init__()
+>         self.input_layer=torch.nn.Linear(784,16)
+>         self.hidden_layer=torch.nn.Linear(16,16)
+>         self.output_layer=torch.nn.Linear(16,10)
+>     def forward(self,x):
+>         x=torch.relu(self.input_layer(x))
+>         x=torch.relu(self.hidden_layer(x))
+>         return self.output_layer(x)
+> m=M(); m.load_state_dict(sd); m.eval()
+>
+> def infer(x):
+>     x=torch.tensor(x, dtype=torch.float32).reshape(1,784)
+>     with torch.no_grad():
+>         return m(x).numpy()[0]
+>
+> for name, x in [
+>     ('x/255', a/255.0),
+>     ('1-x/255', 1.0-a/255.0),
+>     ('(x/255-0.1307)/0.3081', (a/255.0-0.1307)/0.3081),
+>     ('(1-x/255-0.1307)/0.3081', ((1.0-a/255.0)-0.1307)/0.3081),
+> ]:
+>     logits=infer(x)
+>     print(name, '-> pred', int(logits.argmax()), 'logits', np.round(logits,2).tolist())
+> EOF
+root@cd63cf8efa91:/app# python3 /app/explore.py 2>&1 | grep -v UserWarning | grep -v conversion_method
+shape (28, 28) min 0.0 max 255.0 mean 37.83
+x/255 -> pred 2 logits [0.009999999776482582, -3.0899999141693115, 1.7000000476837158, -0.949999988079071, 0.25, -1.0499999523162842, 0.5600000023841858, -3.210
+0000381469727, -0.7599999904632568, -1.7599999904632568]
+1-x/255 -> pred 7 logits [-0.4399999976158142, -0.3100000023841858, -0.23999999463558197, -0.6200000047683716, -0.4399999976158142, -1.2599999904632568, -0.4900
+0000953674316, 1.3899999856948853, -2.2300000190734863, -0.7099999785423279]
+(x/255-0.1307)/0.3081 -> pred 2 logits [-0.8999999761581421, -12.970000267028809, 8.399999618530273, -3.7699999809265137, 0.28999999165534973, -3.30999994277954
+1, 1.8300000429153442, -16.3799991607666, -2.8299999237060547, -8.920000076293945]
+(1-x/255-0.1307)/0.3081 -> pred 7 logits [-1.3600000143051147, -0.36000001430511475, -0.3499999940395355, -2.0, -1.0199999809265137, -3.1700000762939453, -1.620
+0000047683716, 3.240000009536743, -6.070000171661377, -2.7100000381469727]
+root@cd63cf8efa91:/app#

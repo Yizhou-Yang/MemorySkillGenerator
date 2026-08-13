@@ -1,0 +1,74 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@07a4b9808a04:/app# cat > /tmp/p.py << 'EOF'
+> import struct, lzma
+>
+> data = open('/app/secrets.7z','rb').read()
+> print('file size', len(data))
+> print('sig', data[:6].hex())
+> next_off = struct.unpack('<Q', data[12:20])[0]
+> next_size = struct.unpack('<Q', data[20:28])[0]
+> next_crc = struct.unpack('<I', data[28:32])[0]
+> print('next_off', next_off, 'next_size', next_size, 'next_crc', hex(next_crc))
+> nh = data[32 + next_off : 32 + next_off + next_size]
+> print('nextheader', nh.hex())
+>
+> def read_num(b, pos):
+>     result = 0; shift = 0
+>     while True:
+>         byte = b[pos]; pos += 1
+>         result |= (byte & 0x7F) << shift
+>         if (byte & 0x80) == 0:
+>             break
+>         shift += 7
+>     return result, pos
+>
+> pos = 0
+> while pos < len(nh):
+>     try:
+>         idv, pos = read_num(nh, pos)
+>     except Exception as e:
+>         print('read err at', pos, e); break
+>     name = {0x00:'kEnd',0x01:'kHeader',0x06:'kPackInfo',0x07:'kUnpackInfo',0x08:'kSubStreamsInfo',0x09:'kSize',0x0A:'kCRC',0x0B:'kFolder',0x0C:'kCodersUnpackS
+ize',0x0D:'kNumUnpackStream',0x17:'kEncodedHeader',0x18:'kStartPos',0x19:'kDummy'}.get(idv, '?id')
+>     print('id', hex(idv), name, 'at', pos)
+>     if idv == 0x00:
+>         break
+>     if idv == 0x06:  # kPackInfo
+>         pack_pos, pos = read_num(nh, pos)
+>         num_pack, pos = read_num(nh, pos)
+>         print('  pack_pos', pack_pos, 'num_pack', num_pack)
+>         while pos < len(nh):
+>             idv2, pos = read_num(nh, pos)
+>             if idv2 == 0x09:
+>                 for _ in range(num_pack):
+>                     s, pos = read_num(nh, pos); print('   size', s)
+>             elif idv2 == 0x0A:
+>                 for _ in range(num_pack):
+>                     crc, pos = read_num(nh, pos); print('   crc', hex(crc))
+>             elif idv2 == 0x00:
+>                 break
+>             else:
+>                 print('  unexpected', hex(idv2)); break
+>     elif idv == 0x07:  # kUnpackInfo
+>         # expect kFolder 0x0B
+>         fid, pos = read_num(nh, pos)
+>         print('  unpack first id', hex(fid))
+> EOF
+root@07a4b9808a04:/app# python3 /tmp/p.py
+file size 215
+sig 377abcaf271c
+next_off 149 next_size 34 next_crc 0x950c89eb
+nextheader 1706100109808500070b01000123030101055d001000000c80a60a01224c2d3a0000
+id 0x17 kEncodedHeader at 1
+id 0x6 kPackInfo at 2
+  pack_pos 16 num_pack 1
+   size 640
+  unexpected 0x7
+id 0xb kFolder at 10
+id 0x1 kHeader at 11
+id 0x0 kEnd at 12
+root@07a4b9808a04:/app#

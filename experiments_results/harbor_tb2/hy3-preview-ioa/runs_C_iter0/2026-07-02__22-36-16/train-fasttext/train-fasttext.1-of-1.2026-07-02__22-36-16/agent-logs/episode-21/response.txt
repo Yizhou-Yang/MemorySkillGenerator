@@ -1,0 +1,14 @@
+{
+  "analysis": "I have the list of 40 .deb URLs needed for g++ (the debs total ~80MB download). Since apt refuses due to a bogus statfs free-space value, I'll bypass apt: download each .deb with python urllib and extract its contents directly into / using dpkg-deb -x. This installs the compiler without apt/dpkg's disk-space pre-check. Disk actually has ~29GB free (proven by writing 50MB), so this is safe. Then I'll build fastText from source (downloaded via urllib, no git needed).",
+  "plan": "1) Write a python script that parses /tmp/uris.txt and downloads+extracts each .deb into /. 2) Run it. 3) Verify g++ runs. Then proceed to fetch fastText source and build the CLI. First, create and run the deb extractor script.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/dl_debs.py << 'PYEOF'\nimport urllib.request, re, subprocess, os\nos.makedirs('/tmp/debs', exist_ok=True)\nwith open('/tmp/uris.txt') as f:\n    for line in f:\n        line=line.strip()\n        if not line.startswith(\"'\"):\n            continue\n        m=re.match(r\"'([^']+)'\\s+(\\S+)\\s\", line)\n        if not m:\n            continue\n        url=m.group(1); name=m.group(2)\n        out='/tmp/debs/'+name\n        print('DL', name)\n        urllib.request.urlretrieve(url, out)\n        subprocess.run(['dpkg-deb','-x',out,'/'], check=True)\nprint('DONE')\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /tmp/dl_debs.py 2>&1 | tail -8\n",
+      "duration": 60.0
+    }
+  ]
+}

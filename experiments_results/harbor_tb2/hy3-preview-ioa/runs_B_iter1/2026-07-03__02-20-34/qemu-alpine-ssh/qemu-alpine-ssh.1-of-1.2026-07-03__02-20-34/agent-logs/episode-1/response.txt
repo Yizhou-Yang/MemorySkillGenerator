@@ -1,0 +1,22 @@
+{
+  "analysis": "Environment: /app has alpine.iso (1GB) and a tiny alpine-disk.qcow2. qemu-system-x86_64, expect, and ssh are available (no sshpass). No run_vm.sh or setup scripts exist yet — the patch history just referenced them. I need to boot the alpine live ISO in qemu, set up user-mode networking with hostfwd tcp::2222->:22, then drive the console (via a TCP serial socket + expect) to set root password to 'password123', bring up eth0 via DHCP, install/start openssh with PermitRootLogin, and start sshd.",
+  "plan": "1) Create /app/run_vm.sh that launches qemu in the background: ISO as cdrom, virtio-net with hostfwd 2222->22, serial exported to a TCP socket at 127.0.0.1:9999 (so I can drive it with expect), and log to /app/qemu.log. 2) Launch it and confirm qemu started and is listening on port 9999. KVM likely unavailable, so it'll run under TCG (slower) — I'll allow generous wait time.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/run_vm.sh << 'EOF'\n#!/bin/sh\nqemu-system-x86_64 \\\n  -m 1024 \\\n  -smp 2 \\\n  -cdrom /app/alpine.iso \\\n  -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device virtio-net-pci,netdev=net0 \\\n  -display none \\\n  -serial tcp:127.0.0.1:9999,server,nowait \\\n  -pidfile /app/qemu.pid \\\n  > /app/qemu.log 2>&1 &\nEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "chmod +x /app/run_vm.sh\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "sh /app/run_vm.sh\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 2; cat /app/qemu.log; echo '--- pid ---'; cat /app/qemu.pid\n",
+      "duration": 3.0
+    }
+  ]
+}

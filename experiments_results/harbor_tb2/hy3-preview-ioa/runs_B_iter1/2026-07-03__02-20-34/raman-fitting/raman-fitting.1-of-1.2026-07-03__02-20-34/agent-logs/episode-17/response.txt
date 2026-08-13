@@ -1,0 +1,12 @@
+The 2D peak clearly fits best at ~33245 (R²=0.98) — confirming it's the true 2D peak, with the G/2D ratio ≈ 2.05, matching graphene. The G fit (R²=0.75) is dragged down by the rising baseline in a wide window. Let me tighten the G window to improve it.
+
+{
+  "analysis": "The 2D peak fits excellently at ~33245 (R²=0.98), making it the true 2D peak (G/2D ratio ≈ 2.05, consistent with graphene). The G peak at ~16245 fits poorly (R²=0.75) because the wide window includes a rising baseline that a constant-offset Lorentzian can't match. I'll test tighter, peak-centered windows for G to get a cleaner fit.",
+  "plan": "Test several G windows centered on 16245 to maximize R² while keeping x0 near 16245. Then choose the best window, finalize both fits, and write results.json.",
+  "commands": [
+    {
+      "keystrokes": "cat > gtest.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\ndata=[]\nwith open('graphene.dat') as f:\n    for line in f:\n        line=line.strip()\n        if not line: continue\n        p=line.replace(',','.').split()\n        if len(p)<2: continue\n        data.append((float(p[0]),float(p[1])))\nd=np.array(data); x=d[:,0]; y=d[:,1]\no=np.argsort(x); x=x[o]; y=y[o]\ndef lor(x,x0,gamma,amp,offset):\n    return offset + amp/(1.0+((x-x0)/gamma)**2)\ndef fit(xmin,xmax):\n    m=(x>=xmin)&(x<=xmax); xb=x[m]; yb=y[m]\n    off=float(np.median(yb)); i=int(np.argmax(yb)); x0c=xb[i]; a0=yb[i]-off\n    popt,_=curve_fit(lor,xb,yb,p0=[x0c,300,a0,off],maxfev=200000)\n    r=1-np.sum((yb-lor(xb,*popt))**2)/np.sum((yb-yb.mean())**2)\n    print(f'[{xmin},{xmax}] x0={popt[0]:.1f} gam={popt[1]:.1f} amp={popt[2]:.1f} off={popt[3]:.1f} R2={r:.4f}')\nfor w in [(15450,17050),(15600,16900),(15700,16700),(15800,16600),(15850,16550),(15900,16500)]:\n    fit(*w)\nEOF\npython3 gtest.py\n",
+      "duration": 3.0
+    }
+  ]
+}

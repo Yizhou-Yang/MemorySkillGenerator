@@ -1,0 +1,14 @@
+{
+  "analysis": "Key insight: `dd` successfully wrote 40MB to /tmp, proving the container CAN write despite `df` reporting 0 available. The reason: the filesystem is a fuse-overlayfs whose stats come from the host's backing disk, which is 100% full for unprivileged users but reserves ~5% (~49G) for root. apt fails because it downloads as the unprivileged `_apt` sandbox user, which sees 0 available space. The fix is to make apt run its download as root using `APT::Sandbox::User=root`, which can use the reserved space. I'll clean up my test file and retry the ffmpeg install with this override, then install yt-dlp.",
+  "plan": "1) Remove the test file. 2) Install ffmpeg via apt with the sandbox user set to root so it can use root's reserved disk space. 3) Install yt-dlp via pip. 4) Verify both work.",
+  "commands": [
+    {
+      "keystrokes": "rm -f /tmp/space_test\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get -o APT::Sandbox::User=root install -y ffmpeg >/tmp/ff.log 2>&1; echo EXIT_$?; tail -8 /tmp/ff.log\n",
+      "duration": 60.0
+    }
+  ]
+}

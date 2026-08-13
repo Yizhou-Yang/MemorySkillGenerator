@@ -1,0 +1,40 @@
+New Terminal Output:
+
+root@b374ed4bfe3a:/app# cat /tmp/btc.log
+nohup: ignoring input
+ * Serving Flask app 'bitcoin_service'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://172.20.0.2:5000
+Press CTRL+C to quit
+root@b374ed4bfe3a:/app# python3 - << 'PYEOF'
+> import urllib.request, json
+> base='http://127.0.0.1:5000'
+> tests=[
+>   ('/status', None),
+>   ('/block/notahex', 404),
+>   ('/block/'+'0'*64, 503),
+>   ('/transaction/xyz', 404),
+>   ('/transaction/'+'a'*64, 503),
+> ]
+> for path, expect in tests:
+>     try:
+>         r=urllib.request.urlopen(base+path, timeout=5)
+>         code=r.getcode(); body=r.read().decode()
+>     except urllib.error.HTTPError as e:
+>         code=e.code; body=e.read().decode()
+>     print(path, '->', code, body[:120], '' if expect is None else ('OK' if code==expect else 'EXPECT %s'%expect))
+> PYEOF
+/status -> 503 {"status":"Not connected to the Bitcoin network"}
+
+/block/notahex -> 404 {"error":"Invalid block hash"}
+ OK
+/block/0000000000000000000000000000000000000000000000000000000000000000 -> 503 {"error":"Not connected to the Bitcoin network"}
+ OK
+/transaction/xyz -> 404 {"error":"Invalid transaction ID"}
+ OK
+/transaction/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> 503 {"error":"Not connected to the Bitcoin network"}
+ OK
+root@b374ed4bfe3a:/app#

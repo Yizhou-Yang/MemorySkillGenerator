@@ -1,0 +1,30 @@
+New Terminal Output:
+
+find c4_sample/ -type f -size +15M | wc -l
+-rw-r--r-- 1 root root 108234 Jul  2 15:33 c4-mini-09893-of-10000.jsonl
+-rw-r--r-- 1 root root  80171 Jul  2 15:33 c4-mini-09894-of-10000.jsonl
+-rw-r--r-- 1 root root  54540 Jul  2 15:33 c4-mini-09895-of-10000.jsonl
+-rw-r--r-- 1 root root  70250 Jul  2 15:33 c4-mini-09896-of-10000.jsonl
+-rw-r--r-- 1 root root  69648 Jul  2 15:33 c4-mini-09897-of-10000.jsonl
+root@c0bfc2430d3f:/app# find c4_sample/ -type f -size +15M | wc -l
+0
+root@c0bfc2430d3f:/app# df -h /app
+Filesystem      Size  Used Avail Use% Mounted on
+fuse-overlayfs  984G  957G     0 100% /
+root@c0bfc2430d3f:/app# python3 - <<'PYEOF'
+> import os, shutil
+> src='c4_sample'
+> dst='c4_reshard'
+> os.makedirs(dst, exist_ok=True)
+> files=sorted(os.listdir(src))
+> per=30
+> for i in range(0,len(files),per):
+>     chunk=files[i:i+per]
+>     folder=os.path.join(dst,'%03d'%(i//per))
+>     os.makedirs(folder, exist_ok=True)
+>     for f in chunk:
+>         shutil.copy2(os.path.join(src,f), os.path.join(folder,f))
+> print('done', len(files), 'files into', (len(files)+per-1)//per, 'folders')
+> PYEOF
+done 9898 files into 330 folders
+root@c0bfc2430d3f:/app#

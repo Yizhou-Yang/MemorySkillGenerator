@@ -1,0 +1,22 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app\n'
+"find / -name 'graphene.dat' 2>/dev/null\n"
+'head -c 2000 /app/graphene.dat\n'
+'pip install numpy scipy 2>&1 | tail -5\n'
+''
+''
+''
+''
+''
+"cat > /app/fit.py << 'EOF'\nimport numpy as np\nimport json\nfrom scipy.optimize import curve_fit\n\n# Convert: replace decimal comma with dot\nwith open('/app/graphene.dat') as f:\n    data = f.read().replace(',', '.')\nwith open('/app/graphene_converted.dat', 'w') as f:\n    f.write(data)\n\nx, y = np.loadtxt('/app/graphene_converted.dat', unpack=True)\nprint('x range:', x.min(), x.max())\nprint('y range:', y.min(), y.max())\n\ndef lor(x, x0, gamma, amp, offset):\n    return amp / (1.0 + ((x - x0) / gamma) ** 2) + offset\n\nresults = {}\n\n# G peak\nmask_g = (x > 1200) & (x < 2000)\nxg, yg = x[mask_g], y[mask_g]\nig = np.argmax(yg)\np0 = [xg[ig], 20.0, yg[ig] - np.median(yg), np.median(yg)]\npopt, _ = curve_fit(lor, xg, yg, p0=p0, maxfev=100000)\nresults['G'] = {'x0': float(popt[0]), 'gamma': float(abs(popt[1])), 'amplitude': float(popt[2]), 'offset': float(popt[3])}\n\n# 2D peak\nmask_d = (x > 2300) & (x < 3200)\nxd, yd = x[mask_d], y[mask_d]\nid2 = np.argmax(yd)\np0 = [xd[id2], 30.0, yd[id2] - np.median(yd), np.median(yd)]\npopt, _ = curve_fit(lor, xd, yd, p0=p0, maxfev=100000)\nresults['2D'] = {'x0': float(popt[0]), 'gamma': float(abs(popt[1])), 'amplitude': float(popt[2]), 'offset': float(popt[3])}\n\nwith open('/app/results.json', 'w') as f:\n    json.dump(results, f, indent=2)\n\nprint(json.dumps(results, indent=2))\nEOF\n"
+'python3 /app/fit.py\n'
+''
+"cat > /app/diag.py << 'EOF'\nimport numpy as np\nx, y = np.loadtxt('/app/graphene_converted.dat', unpack=True)\nprint('n =', len(x))\nprint('x: min', x.min(), 'max', x.max())\nprint('y: min', y.min(), 'max', y.max())\nprint('x monotonic decreasing?', np.all(np.diff(x) < 0))\nprint('y monotonic decreasing?', np.all(np.diff(y) < 0))\n# top intensities\nidx = np.argsort(y)[::-1][:10]\nfor i in idx:\n    print('x=%.1f y=%.1f' % (x[i], y[i]))\nEOF\npython3 /app/diag.py\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+"cat > /app/diag2.py << 'EOF'\nimport numpy as np\nx, y = np.loadtxt('/app/graphene_converted.dat', unpack=True)\nfor lo, hi, name in [(1500,1750,'G-ish'),(2550,2850,'2D-ish'),(18000,20000,'giant'),(1600,3000,'full-raman')]:\n    m=(x>lo)&(x<hi)\n    if m.sum():\n        print(name, 'x in',lo,hi,'n=',m.sum(),'y min',y[m].min(),'max',y[m].max(),'argmax x=',x[m][np.argmax(y[m])])\n    else:\n        print(name,'no points in range')\nEOF\npython3 /app/diag2.py\n"
+['bash ', '/tests/run-tests.sh', 'Enter']
+''
+['C-d']
+['C-d']

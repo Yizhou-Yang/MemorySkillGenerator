@@ -1,0 +1,18 @@
+{
+  "analysis": "The push is hanging at the interactive password prompt because I ran it with GIT_TRACE but without an automated password provider. I need to cancel it and capture the real server-side error. The failure 'Could not read from remote repository' after successful auth means the remote command produced no valid protocol output. I'll diagnose by running git-receive-pack directly as the git user and via an expect capture to see the exact server error.",
+  "plan": "1) Ctrl-C the hung ssh. 2) Test git-receive-pack locally as the git user to confirm the command itself works. 3) Use an expect script to run git-receive-pack over SSH, send the password, then send EOF, capturing all output (including stderr) to see the true server error.",
+  "commands": [
+    {
+      "keystrokes": "C-c",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "sudo -u git git-receive-pack /git/project < /dev/null 2>&1 | head -5; echo '---exit---'\n",
+      "duration": 0.5
+    },
+    {
+      "keystrokes": "cat > /tmp/rcv.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 15\nspawn ssh git@localhost git-receive-pack /git/project\nexpect -re {[Pp]assword:} { send \"password\\r\" }\nsleep 1\nsend \"\\x04\"\nexpect eof\nEOF\nchmod +x /tmp/rcv.exp; expect /tmp/rcv.exp\n",
+      "duration": 4.0
+    }
+  ]
+}

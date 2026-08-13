@@ -1,0 +1,10 @@
+{
+  "analysis": "Key finding: I CAN write large files to /app (200MB wrote fine, EXIT=0), but df reports 0 available on the fuse-overlayfs root — this is a statvfs reporting quirk. apt's failure was its pre-flight free-space check (statvfs returns 0), not a real write limit. /sys/fs/cgroup is a tmpfs that reports accurate 32G available. I can bypass apt's check by relocating its cache to that tmpfs.",
+  "plan": "Create a tmpfs-backed apt cache under /sys/fs/cgroup (which reports real free space), and run apt-get install with -o Dir::Cache pointing there. This makes apt's statvfs disk-space check pass even though it unpacks to the overlay root (which actually can be written). I'll watch whether it proceeds or complains about / space.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /sys/fs/cgroup/aptcache/archives && apt-get -o Dir::Cache=/sys/fs/cgroup/aptcache install -y ffmpeg tesseract-ocr yt-dlp 2>&1 | tail -20\n",
+      "duration": 60.0
+    }
+  ]
+}

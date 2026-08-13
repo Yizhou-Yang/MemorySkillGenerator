@@ -1,0 +1,14 @@
+{
+  "analysis": "Crucial findings: `dd` wrote 2MB to /tmp successfully (EXIT=0), yet `df` reports the overlay root as 100% full / 0 avail. This means apt's free-space *pre-check* is the only blocker — actual writes to the overlay work. The check specifically targets `/var/cache/apt/archives/`. I have openssl, python3, and a working 2MB write. The cleanest fix is to redirect apt's download cache to the tmpfs `/dev/shm` (64M free), which bypasses the failing space check while files still unpack to the writable overlay.",
+  "plan": "1. Create /dev/shm/archives. 2. Run apt-get with Dir::Cache and Dir::Cache::archives pointed at /dev/shm so the space check passes. 3. Verify 7z and the perl module are now installed. Then I can use 7z2john.pl and 7z normally.",
+  "commands": [
+    {
+      "keystrokes": "mkdir -p /dev/shm/archives\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "apt-get -o Dir::Cache=/dev/shm -o Dir::Cache::archives=/dev/shm/archives install -y libcompress-raw-lzma-perl p7zip-full 2>&1 | tail -20\n",
+      "duration": 30.0
+    }
+  ]
+}

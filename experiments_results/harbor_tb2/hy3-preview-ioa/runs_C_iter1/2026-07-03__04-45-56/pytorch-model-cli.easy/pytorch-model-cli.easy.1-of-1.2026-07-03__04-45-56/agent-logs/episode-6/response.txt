@@ -1,0 +1,14 @@
+{
+  "analysis": "Shapes are correct: [12544, 16, 256, 16, 160, 10] = the 6 MLP params. PNG decodes to 28x28 grayscale. The bug is in mm(): I set o=len(Wt) (12544) instead of o=len(Wt)//inn. I just need to fix the output-dimension computation. The conversion path works (reading raw float32 from the zip), so torch isn't needed.",
+  "plan": "Fix proto.py's mm to compute o = len(Wt)//inn, then rerun to get the predicted digit under both preprocessings. This validates inference logic and tells me which preprocessing the model expects.",
+  "commands": [
+    {
+      "keystrokes": "sed -i 's/    o=len(Wt); inn=len(xin); out=.*/    o=len(Wt)\\/\\/inn; inn=len(xin); out=[0.0]*o/' /app/proto.py\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/proto.py\n",
+      "duration": 2.0
+    }
+  ]
+}

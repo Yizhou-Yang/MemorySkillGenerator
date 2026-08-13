@@ -1,0 +1,14 @@
+{
+  "analysis": "The qemu failure was just `-no-kvm` being an invalid flag; QEMU falls back to TCG automatically, so I drop it. The syslinux config shows: KERNEL /boot/vmlinuz-lts, INITRD intel-ucode.img,amd-ucode.img,initramfs-lts, APPEND modules=loop,squashfs,sd-mod,usb-storage quiet. My dump logic failed to write the files because ISO filenames have a trailing dot (e.g. '/BOOT/VMLINUZ_LTS.'), so my `endswith` check missed. I'll re-extract using substring matching, then launch qemu with -kernel/-initrd and append console=ttyS0,115200 so the login prompt appears over the telnet serial.",
+  "plan": "1. Re-extract kernel+initramfs to /tmp via substring match and confirm sizes. 2. Launch qemu with -kernel /tmp/vmlinuz -initrd /tmp/initramfs -append 'modules=loop,squashfs,sd-mod,usb-storage console=ttyS0,115200' plus -cdrom (so the ISO is available for the initramfs to find boot media), serial on telnet 6665, display none. 3. Re-run the login poller. Verify READY.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/extract3.py << 'PYEOF'\nSECTOR=2048\nf=open('/app/alpine.iso','rb')\ndef rd(lba,n):\n    f.seek(lba*SECTOR); return f.read(n*SECTOR)\npvd=rd(16,1)\ndef parse(rec):\n    L=rec[0]\n    if L==0: return None\n    loc=int.from_bytes(rec[2:6],'little'); dlen=int.from_bytes(rec[10:14],'little')\n    flags=rec[25]; nl=rec[32]; name=rec[33:33+nl]\n    return dict(loc=loc,dlen=dlen,is_dir=bool(flags&2),length=L)\nroot=parse(pvd[156:156+34])\nfound={}\ndef walk(rec,path):\n    data=rd(rec['loc'],max(1,(rec['dlen']+SECTOR-1)//SECTOR)); off=0\n    while off<len(data):\n        L=data[off]\n        if L==0: off+=SECTOR-(off%SECTOR); continue\n        nl=data[off+32]; nm=data[off+33:off+33+nl]\n        e=parse(data[off:off+L]); off+=L\n        if e is None: continue\n        try: n=nm.decode('ascii').strip()\n        except: n=repr(nm)\n        if ';' in n: n=n.split(';')[0]\n        fp=path+'/'+n\n        if not e['is_dir']: found[fp.upper()]=e\n        if e['is_dir'] and nm not in (b'\\x00',b'\\x01'): walk(e,fp)\nwalk(root,'')\nfor k,e in found.items():\n    if 'VMLINUZ_LTS' in k and 'INITRAMFS' not in k:\n        d=rd(e['loc'],(e['dlen']+SECTOR-1)//SECTOR)[:e['dlen']]\n        open('/tmp/vmlinuz','wb').write(d); print('kernel',k,len(d))\n    if 'INITRAMFS_LTS' in k:\n        d=rd(e['loc'],(e['dlen']+SECTOR-1)//SECTOR)[:e['dlen']]\n        open('/tmp/initramfs','wb').write(d); print('initrd',k,len(d))\nPYEOF\npython3 /tmp/extract3.py\n",
+      "duration": 3.0
+    },
+    {
+      "keystrokes": "ls -l /tmp/vmlinuz /tmp/initramfs\n",
+      "duration": 0.1
+    }
+  ]
+}

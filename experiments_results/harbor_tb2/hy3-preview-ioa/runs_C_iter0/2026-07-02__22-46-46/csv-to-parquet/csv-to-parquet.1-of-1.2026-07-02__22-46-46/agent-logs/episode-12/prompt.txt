@@ -1,0 +1,142 @@
+New Terminal Output:
+
+root@6ebe3529d47e:/app# cat > /app/mkparquet.py << 'PYEOF'
+> import csv, struct
+>
+> def write_varint(buf, n):
+>     while True:
+>         b = n & 0x7f
+>         n >>= 7
+>         if n:
+>             buf.append(b | 0x80)
+>         else:
+>             buf.append(b)
+>             break
+>
+> def zigzag(n):
+>     return (n << 1) ^ (n >> 63)
+>
+> def wb(buf, b):
+>     write_varint(buf, len(b))
+>     buf.extend(b)
+>
+> class TStruct:
+>     def __init__(self):
+>         self.buf = bytearray()
+>         self.last = 0
+>     def _hdr(self, fid, ftype):
+>         d = fid - self.last
+>         if 1 <= d <= 15:
+>             self.buf.append((d << 4) | ftype)
+>         else:
+>             self.buf.append(ftype)
+>             write_varint(self.buf, zigzag(fid))
+>         self.last = fid
+>     def i32(self, fid, v):
+>         self._hdr(fid, 5); write_varint(self.buf, zigzag(v))
+>     def i64(self, fid, v):
+>         self._hdr(fid, 6); write_varint(self.buf, zigzag(v))
+>     def binary(self, fid, b):
+>         self._hdr(fid, 8); write_varint(self.buf, len(b)); self.buf.extend(b)
+>     def string(self, fid, s):
+>         self.binary(fid, s.encode('utf-8'))
+>     def struct(self, fid, b):
+>         self._hdr(fid, 12); self.buf.extend(b)
+>     def list(self, fid, etype, items, wfn):
+>         self._hdr(fid, 9)
+>         n = len(items)
+>         if n < 15:
+>             self.buf.append((n << 4) | etype)
+>         else:
+>             self.buf.append((15 << 4) | etype)
+>             write_varint(self.buf, n)
+>         for it in items:
+>             wfn(self.buf, it)
+>     def finish(self):
+>         self.buf.append(0x00)
+>         return bytes(self.buf)
+>
+> def infer_type(vals):
+>     for v in vals:
+>         if v == '':
+>             continue
+>         try:
+>             int(v)
+>         except ValueError:
+>             return 'BYTE_ARRAY'
+>     return 'INT32'
+>
+> def main():
+>     with open('/app/data.csv', newline='') as f:
+>         rows = list(csv.reader(f))
+>     header = rows[0]
+>     data = rows[1:]
+>     n = len(data)
+>     cols = []
+>     for i, name in enumerate(header):
+>         vals = [r[i] for r in data]
+>         cols.append((name, infer_type(vals), vals))
+>
+>     out = bytearray(b'PAR1')
+>     recs = []
+>     off = 4
+>     for (name, t, vals) in cols:
+>         if t == 'INT32':
+>             page_data = b''.join(struct.pack('<i', int(v)) for v in vals)
+>         else:
+>             page_data = b''.join(struct.pack('<I', len(v.encode('utf-8'))) + v.encode('utf-8') for v in vals)
+>         dph = TStruct(); dph.i32(1, n); dph.i32(2, 0); dph.i32(3, 3); dph.i32(4, 3)
+>         dph_b = dph.finish()
+>         ph = TStruct(); ph.i32(1, 0); ph.i32(2, len(page_data)); ph.i32(3, len(page_data)); ph.struct(5, dph_b)
+>         ph_b = ph.finish()
+>         chunk = ph_b + page_data
+>         recs.append((name, t, off, ph_b, page_data))
+>         out.extend(chunk); off += len(chunk)
+>
+>     tc = {'INT32': 1, 'BYTE_ARRAY': 6}
+>     col_chunk = []
+>     total = 0
+>     for (name, t, data_page_offset, ph_b, page_data) in recs:
+>         ct = len(ph_b) + len(page_data); total += ct
+>         cm = TStruct()
+>         cm.i32(1, tc[t])
+>         cm.list(2, 5, [0, 3], lambda buf, e: write_varint(buf, zigzag(e)))
+>         cm.list(3, 8, [name], lambda buf, p: wb(buf, p.encode('utf-8')))
+>         cm.i32(4, 0)
+>         cm.i64(5, n); cm.i64(6, ct); cm.i64(7, ct); cm.i64(9, data_page_offset)
+>         cm_b = cm.finish()
+>         cc = TStruct(); cc.string(1, ''); cc.i64(2, data_page_offset); cc.struct(3, cm_b)
+>         col_chunk.append(cc.finish())
+>
+>     rg = TStruct()
+>     rg.list(1, 12, col_chunk, lambda buf, b: buf.extend(b))
+>     rg.i64(2, total); rg.i64(3, n); rg.i64(5, recs[0][2]); rg.i64(6, total)
+>     rg_b = rg.finish()
+>
+>     sb = []
+>     root = TStruct(); root.string(1, 'schema'); root.i32(4, 0); root.i32(5, len(cols))
+>     sb.append(root.finish())
+>     for (name, t, vals) in cols:
+>         s = TStruct(); s.string(1, name); s.i32(2, tc[t]); s.i32(4, 0)
+>         if t == 'BYTE_ARRAY':
+>             s.i32(6, 0)
+>         sb.append(s.finish())
+>
+>     fm = TStruct(); fm.i32(1, 1)
+>     fm.list(2, 12, sb, lambda buf, b: buf.extend(b))
+>     fm.i64(3, n); fm.list(4, 12, [rg_b], lambda buf, b: buf.extend(b))
+>     fm.string(6, 'pure-python-parquet-writer')
+>     footer = fm.finish()
+>
+>     out.extend(footer)
+>     out.extend(struct.pack('<I', len(footer)))
+>     out.extend(b'PAR1')
+>     with open('/app/data.parquet', 'wb') as f:
+>         f.write(out)
+>     print('wrote', len(out), 'bytes; footer', len(footer))
+>
+> main()
+> PYEOF
+root@6ebe3529d47e:/app# python3 /app/mkparquet.py
+wrote 378 bytes; footer 192
+root@6ebe3529d47e:/app#

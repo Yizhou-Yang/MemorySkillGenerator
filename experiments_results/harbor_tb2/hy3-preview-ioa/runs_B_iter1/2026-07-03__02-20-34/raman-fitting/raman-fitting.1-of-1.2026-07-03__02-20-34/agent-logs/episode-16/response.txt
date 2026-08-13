@@ -1,0 +1,12 @@
+The G peak is clear at ~16245, but my 2D window was on a rising baseline (no clean peak), causing the fit to escape. The peak at 33245 is more prominent. Let me empirically test which location is the real 2D peak by fitting both with bounds.
+
+{
+  "analysis": "Peak detection found real peaks at ~3745, 6329, 10394, 16178 (G band), 33245, plus a cosmic-ray spike at 19235. The 2D region I picked (~27019) is on a monotonic rising baseline with no clean peak, which is why curve_fit escaped. The peak at 33245 is more prominent. I need to empirically determine which location is the real 2D peak by fitting with proper bounds and comparing fit quality (R²). I'll also fix the G fit with bounds.",
+  "plan": "Write a robust fitting script that uses bounded curve_fit. Fit the G peak around 16245, and test two 2D candidates: ~27019 and ~33245. Compare R² to identify the true 2D peak. Then finalize results.json with the best fits. Use tight windows and bounds to prevent the optimizer from escaping.",
+  "commands": [
+    {
+      "keystrokes": "cat > fit2.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\n\ndata=[]\nwith open('graphene.dat') as f:\n    for line in f:\n        line=line.strip()\n        if not line: continue\n        p=line.replace(',','.').split()\n        if len(p)<2: continue\n        data.append((float(p[0]),float(p[1])))\nd=np.array(data); x=d[:,0]; y=d[:,1]\no=np.argsort(x); x=x[o]; y=y[o]\n\ndef lor(x,x0,gamma,amp,offset):\n    return offset + amp/(1.0+((x-x0)/gamma)**2)\n\ndef fit_band(xmin,xmax,center,label):\n    m=(x>=xmin)&(x<=xmax)\n    xb=x[m]; yb=y[m]\n    offset0=float(np.median(yb))\n    i=int(np.argmin(np.abs(xb-center)))\n    x00=xb[i]; amp0=max(yb[i]-offset0,1.0); gamma0=300.0\n    bnds=([center-2000,20,0,offset0-10000],[center+2000,3000,1e6,offset0+10000])\n    try:\n        popt,pcov=curve_fit(lor,xb,yb,p0=[x00,gamma0,amp0,offset0],bounds=bnds,maxfev=200000)\n    except Exception as e:\n        print(label,'FAILED',e); return None\n    resid=yb-lor(xb,*popt)\n    r2=1-np.sum(resid**2)/np.sum((yb-yb.mean())**2)\n    print(f'{label}: x0={popt[0]:.2f} gamma={popt[1]:.2f} amp={popt[2]:.2f} offset={popt[3]:.2f} R2={r2:.4f}  (n={len(xb)})')\n    return popt\n\nprint('G peak:')\ng=fit_band(15450,17050,16245,'G')\nprint('2D candidate A (~27019):')\nfit_band(25800,28200,27019,'2D_A')\nprint('2D candidate B (~33245):')\nfit_band(32000,34500,33245,'2D_B')\nEOF\npython3 fit2.py\n",
+      "duration": 3.0
+    }
+  ]
+}

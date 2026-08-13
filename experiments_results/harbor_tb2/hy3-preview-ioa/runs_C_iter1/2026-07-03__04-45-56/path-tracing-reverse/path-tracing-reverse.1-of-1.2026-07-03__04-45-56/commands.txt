@@ -1,0 +1,34 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'cd /app && ls -la\n'
+'file ./mystery\n'
+'./mystery; echo "EXIT=$?"\n'
+'ls -la > /tmp/before.txt && ./mystery > /tmp/out.txt 2>&1; echo "EXIT=$?"; ls -la > /tmp/after.txt; diff /tmp/before.txt /tmp/after.txt\n'
+'cat -A /tmp/out.txt\n'
+'wc -c /tmp/out.txt\n'
+"echo 'STEP 2: inspecting generated image.ppm and available tools'; ls -la image.ppm\n"
+'head -c 40 image.ppm | od -c | head\n'
+'which objdump strings readelf nm gdb xxd python3 gcc 2>/dev/null\n'
+'cp image.ppm /tmp/ref.ppm && ls -la /tmp/ref.ppm\n'
+"cat > /tmp/analyze.py << 'EOF'\nimport sys\ntoks=open('/tmp/ref.ppm').read().split()\nassert toks[0]=='P3', toks[0]\nW=int(toks[1]); H=int(toks[2]); M=int(toks[3])\nprint('W',W,'H',H,'M',M,'ntok',len(toks))\npix=list(map(int,toks[4:]))\ndef px(x,y):\n    i=(y*W+x)*3\n    return pix[i],pix[i+1],pix[i+2]\nprint('row0 first 12:', [px(x,0) for x in range(12)])\nprint('col0 first 12:', [px(0,y) for y in range(12)])\nprint('row299 first 12:', [px(x,299) for x in range(12)])\nprint('row599 first 12:', [px(x,599) for x in range(12)])\nprint('diag (x=y):', [px(i,i) for i in (0,100,200,300,400,500,599)])\nprint('center:', px(400,300))\n# detect if row0 constant\nr0=[px(x,0) for x in range(W)]\nprint('row0 all same?', len(set(r0)), 'distinct')\nprint('row0 distinct sample:', list(set(r0))[:10])\nEOF\npython3 /tmp/analyze.py\n"
+"echo 'STEP 3: symbol + libm analysis'; nm -D ./mystery 2>/dev/null | grep -iE 'U|sin|cos|sqrt|pow|exp|log'\n"
+'objdump -d -M intel ./mystery > /tmp/dis.txt 2>&1; wc -l /tmp/dis.txt\n'
+"grep -nE '<(main|render|[^>]+)>:' /tmp/dis.txt | head -50\n"
+"echo 'STEP 4: decompiling main()'; sed -n '125,565p' /tmp/dis.txt\n"
+"echo 'STEP 4: extracting rodata float constants'; objdump -s -j .rodata ./mystery | head -80\n"
+"grep -nE '^[ ]*[0-9a-f]+ <(sphere_intersect|plane_intersect|sky_color|is_in_shadow|trace|ray_at|ray_create|vector_normalize|vector_length|vector_dot|vector_multiply|vector_subtract|vector_add|vector_create):' /tmp/dis.txt\n"
+"grep -nE '<(sphere_intersect|plane_intersect|sky_color|is_in_shadow|trace|ray_at|ray_create|vector_)' /tmp/dis.txt\n"
+"echo 'STEP 5: reading vector + ray functions'; sed -n '637,772p' /tmp/dis.txt\n"
+"echo 'STEP 5b: sphere/plane/sky/is_in_shadow'; sed -n '770,1042p' /tmp/dis.txt\n"
+"echo 'STEP 6a: main render loop body (camera ray setup)'; sed -n '1290,1570p' /tmp/dis.txt\n"
+"echo 'STEP 6b: rest of sphere_intersect'; sed -n '886,973p' /tmp/dis.txt\n"
+'python3 -c "import struct;[print(hex(a),struct.unpack(\'<f\',bytes.fromhex(h))[0]) for a,h in [(0x3004,\'00008040\'),(0x3008,\'6f12833a\'),(0x300c,\'17b7d138\'),(0x3010,\'cdcc4c3e\'),(0x3014,\'6666663f\'),(0x3018,\'cdcccc3e\'),(0x301c,\'0000c0bf\'),(0x3020,\'cdcc4c3f\'),(0x3024,\'0000004b\'),(0x3028,\'71fd7f43\'),(0x302c,\'000080bf\'),(0x3030,\'0000c842\'),(0x3034,\'00001644\'),(0x3038,\'00c01544\'),(0x303c,\'00c04744\'),(0x3040,\'abaa2a40\'),(0x3044,\'abaaaa3f\'),(0x31ac,\'0000803f\'),(0x3170,\'0000003f\'),(0x3174,\'3333333f\'),(0x31a4,\'000000bf\'),(0x31a8,\'0000a0c0\')]]"\n'
+"echo 'STEP 6a: main loop part1 (camera ray)'; objdump -d -M intel --start-address=0x1290 --stop-address=0x1460 ./mystery\n"
+"echo 'STEP 6: is_in_shadow + write_image + allocate_image'; objdump -d -M intel --start-address=0x2070 --stop-address=0x2150 ./mystery; echo '---WI---'; objdump -d -M intel --start-address=0x2630 --stop-address=0x2850 ./mystery\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+"echo 'STEP 7a: main trace call + arg setup'; objdump -d -M intel --start-address=0x145e --stop-address=0x1670 ./mystery\n"
+"echo 'STEP 7b: rodata 0x31a0..0x31b0'; objdump -s -j .rodata --start-address=0x31a0 --stop-address=0x31b0 ./mystery\n"
+['C-d']
+['C-d']

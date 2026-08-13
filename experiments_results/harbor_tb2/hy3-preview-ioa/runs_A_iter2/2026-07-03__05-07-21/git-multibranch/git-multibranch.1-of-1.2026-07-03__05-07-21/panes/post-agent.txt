@@ -1,0 +1,284 @@
+root@52e1bb54e013:/app# cat /etc/os-release | head -3; echo '==='; which git nginx sshd openssl ssh-keygen; echo '==='; ls /etc/nginx 2>/dev/null; echo '==='; i
+d git 2>/dev/null
+PRETTY_NAME="Ubuntu 26.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+===
+/usr/bin/git
+/usr/sbin/nginx
+/usr/sbin/sshd
+/usr/bin/openssl
+/usr/bin/ssh-keygen
+===
+conf.d        fastcgi_params  koi-win     modules-available  nginx.conf    scgi_params      sites-enabled  uwsgi_params
+fastcgi.conf  koi-utf         mime.types  modules-enabled    proxy_params  sites-available  snippets       win-utf
+===
+root@52e1bb54e013:/app# useradd -m -s /bin/bash git 2>/dev/null || echo 'git exists'
+root@52e1bb54e013:/app# echo 'git:password' | chpasswd
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config; grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'Pas
+swordAuthentication yes' >> /etc/ssh/sshd_config
+root@52e1bb54e013:/app# sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config; grep -q '^PasswordAuthentication yes' /etc/ssh/
+sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+root@52e1bb54e013:/app# ssh-keygen -A
+root@52e1bb54e013:/app# mkdir -p /run/sshd; /usr/sbin/sshd; sleep 1; ss -tlnp | grep ':22' || netstat -tlnp 2>/dev/null | grep ':22'
+bash: ss: command not found
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      200/sshd: /usr/sbin
+tcp6       0      0 :::22                   :::*                    LISTEN      200/sshd: /usr/sbin
+root@52e1bb54e013:/app# mkdir -p /git && git init --bare /git/project
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /git/project/
+root@52e1bb54e013:/app# cat > /git/project/hooks/post-receive << 'EOF'
+> #!/bin/bash
+> unset GIT_DIR
+> while read oldrev newrev refname; do
+>     branch="${refname#refs/heads/}"
+>     case "$branch" in
+>         main) target=/var/www/html ;;
+>         dev)  target=/var/www/html/dev ;;
+>         *) continue ;;
+>     esac
+>     mkdir -p "$target"
+>     git --git-dir=/git/project archive "$branch" | tar -x -C "$target"
+> done
+> EOF
+root@52e1bb54e013:/app# chmod +x /git/project/hooks/post-receive && chown -R git:git /git/project && mkdir -p /var/www/html && chown -R git:git /var/www/html
+root@52e1bb54e013:/app# cat /git/project/hooks/post-receive
+#!/bin/bash
+unset GIT_DIR
+while read oldrev newrev refname; do
+    branch="${refname#refs/heads/}"
+    case "$branch" in
+        main) target=/var/www/html ;;
+        dev)  target=/var/www/html/dev ;;
+        *) continue ;;
+    esac
+    mkdir -p "$target"
+    git --git-dir=/git/project archive "$branch" | tar -x -C "$target"
+done
+root@52e1bb54e013:/app# grep -nE "include|conf.d|sites-enabled" /etc/nginx/nginx.conf
+6:include /etc/nginx/modules-enabled/*.conf;
+27:	include /etc/nginx/mime.types;
+60:	include /etc/nginx/conf.d/*.conf;
+61:	include /etc/nginx/sites-enabled/*;
+root@52e1bb54e013:/app# mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -days 3
+650 -subj "/CN=localhost" 2>&1 | tail -2
+..+.+.................+.+..+............+.+............+.........+........+............+.+..+.+......+++++++++++++++++++++++++++++++++++++++*...............+...
++...+........+.+.........+..+.......+..+.+..+..........+........+............+...+....+++++++++++++++++++++++++++++++++++++++*....+...........+.........+.+.....
+.........+.+..+...+.......+............+......++++++
+-----
+root@52e1bb54e013:/app# cat > /etc/nginx/conf.d/git.conf << 'EOF'
+> server {
+>     listen 8443 ssl;
+>     listen [::]:8443 ssl;
+>     server_name localhost;
+>     ssl_certificate /etc/nginx/ssl/cert.pem;
+>     ssl_certificate_key /etc/nginx/ssl/key.pem;
+>     root /var/www/html;
+>     index index.html;
+>     location / {
+>         try_files $uri $uri/ =404;
+>     }
+> }
+> EOF
+root@52e1bb54e013:/app# nginx -t
+2026/07/02 21:55:36 [warn] 289#289: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@52e1bb54e013:/app# grep -rn '8443' /etc/nginx/conf.d /etc/nginx/sites-enabled 2>/dev/null
+/etc/nginx/conf.d/git.conf:2:    listen 8443 ssl;
+/etc/nginx/conf.d/git.conf:3:    listen [::]:8443 ssl;
+root@52e1bb54e013:/app# nginx; sleep 1; curl -sk https://localhost:8443/ -o /dev/null -w '%{http_code}\n'
+2026/07/02 21:55:47 [warn] 326#326: conflicting server name "localhost" on 0.0.0.0:8443, ignored
+403
+root@52e1bb54e013:/app# which sshpass expect; echo done
+/usr/bin/expect
+done
+root@52e1bb54e013:/app# su - git -c 'git config --global user.email t@t; git config --global user.name t; git config --global core.sshCommand "ssh -o StrictHost
+KeyChecking=no -o UserKnownHostsFile=/dev/null"; mkdir -p ~/t && cd ~/t && git init -q && git checkout -q -b main && echo MAIN > index.html && git add . && git
+commit -qm m1 && git push ssh://git@localhost/git/project main 2>&1 | tail -5'
+git@localhost: Permission denied (publickey,password).
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@52e1bb54e013:/app# cat > /tmp/push.exp << 'EOF'
+> #!/usr/bin/expect -f
+> set timeout 30
+> set repo [lindex $argv 0]
+> spawn git push ssh://git@localhost/git/project $repo
+> expect {
+>   -re "(?i)password:" { send "password\r"; exp_continue }
+>   eof
+> }
+> EOF
+root@52e1bb54e013:/app# chmod +x /tmp/push.exp
+root@52e1bb54e013:/app# su - git -c 'cd ~/t && expect /tmp/push.exp main 2>&1 | tail -8'
+spawn git push ssh://git@localhost/git/project main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: protocol error: bad line length character: Welc
+root@52e1bb54e013:/app# which git-shell; chsh -s "$(which git-shell)" git; getent passwd git
+/usr/bin/git-shell
+chsh: Warning: /usr/bin/git-shell is an invalid shell
+git:x:1001:1001::/home/git:/usr/bin/git-shell
+root@52e1bb54e013:/app# su - git -c 'cd ~/t && expect /tmp/push.exp main 2>&1 | tail -8'
+fatal: unrecognized command 'cd ~/t && expect /tmp/push.exp main 2>&1 | tail -8'
+root@52e1bb54e013:/app# echo /usr/bin/git-shell >> /etc/shells; grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes'
+>> /etc/ssh/sshd_config; sed -i 's/^#*PrintMotd.*/PrintMotd no/' /etc/ssh/sshd_config; grep -q '^PrintMotd no' /etc/ssh/sshd_config || echo 'PrintMotd no' >> /e
+tc/ssh/sshd_config
+root@52e1bb54e013:/app# pkill -f /usr/sbin/sshd; sleep 1; /usr/sbin/sshd; sleep 1; netstat -tlnp 2>/dev/null | grep ':22'
+export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"; cd /home/git/t && expect /tmp/push.exp main 2>&1 | tail -8
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      571/sshd: /usr/sbin
+tcp6       0      0 :::22                   :::*                    LISTEN      571/sshd: /usr/sbin
+root@52e1bb54e013:/app# export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"; cd /home/git/t && expect /tmp/push.exp main 2>
+&1 | tail -8
+spawn git push ssh://git@localhost/git/project main
+fatal: detected dubious ownership in repository at '/home/git/t'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /home/git/t
+root@52e1bb54e013:/home/git/t# git config --global --add safe.directory /home/git/t; expect /tmp/push.exp main 2>&1 | tail -8
+spawn git push ssh://git@localhost/git/project main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: protocol error: bad line length character: Welc
+root@52e1bb54e013:/home/git/t# grep -n pam_motd /etc/pam.d/sshd; echo '---'; grep -n -i banner /etc/ssh/sshd_config; echo '---'; head -3 /etc/motd 2>/dev/null
+33:session    optional     pam_motd.so  motd=/run/motd.dynamic
+34:session    optional     pam_motd.so noupdate
+---
+131:# no default banner path
+132:#Banner none
+---
+root@52e1bb54e013:/home/git/t# sed -i 's/^session.*pam_motd.so/# &/' /etc/pam.d/sshd; grep -n pam_motd /etc/pam.d/sshd
+33:# session    optional     pam_motd.so  motd=/run/motd.dynamic
+34:# session    optional     pam_motd.so noupdate
+root@52e1bb54e013:/home/git/t# pkill -f /usr/sbin/sshd; sleep 1; /usr/sbin/sshd; sleep 1; netstat -tlnp 2>/dev/null | grep ':22'
+expect /tmp/push.exp main 2>&1 | tail -8
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      707/sshd: /usr/sbin
+tcp6       0      0 :::22                   :::*                    LISTEN      707/sshd: /usr/sbin
+root@52e1bb54e013:/home/git/t# expect /tmp/push.exp main 2>&1 | tail -8
+spawn git push ssh://git@localhost/git/project main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@52e1bb54e013:/home/git/t# su - git -s /bin/bash -c 'echo PATH=$PATH; which git-receive-pack git-shell'
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+/usr/bin/git-receive-pack
+/usr/bin/git-shell
+root@52e1bb54e013:/home/git/t# su - git -s /bin/bash -c 'git-shell -c "git-receive-pack /git/project" < /dev/null; echo EXIT=$?'
+fatal: bad argument
+EXIT=128
+root@52e1bb54e013:/home/git/t# GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -v' expect /tmp/push.exp main 2>&1 | tail -25
+debug1: Trying private key: /root/.ssh/id_ed25519
+debug1: Trying private key: /root/.ssh/id_ed25519_sk
+debug1: Next authentication method: password
+git@localhost's password:
+Authenticated to localhost ([::1]:22) using "password".
+debug1: channel 0: new session [client-session] (inactive timeout: 0)
+debug1: Requesting no-more-sessions@openssh.com
+debug1: Entering interactive session.
+debug1: pledge: network
+debug1: client_input_global_request: rtype hostkeys-00@openssh.com want_reply 0
+debug1: Sending environment.
+debug1: channel 0: setting env LC_CTYPE = "C.UTF-8"
+debug1: channel 0: setting env COLORTERM = "truecolor"
+debug1: Sending command: git-receive-pack '/git/project'
+debug1: pledge: fork
+debug1: client_input_channel_req: channel 0 rtype exit-status reply 0
+debug1: client_input_channel_req: channel 0 rtype eow@openssh.com reply 0
+debug1: channel 0: free: client-session, nchannels 1
+Transferred: sent 3316, received 3668 bytes, in 0.1 seconds
+Bytes per second: sent 60944.8, received 67414.2
+debug1: Exit status 254
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@52e1bb54e013:/home/git/t# chsh -s /bin/bash git; getent passwd git
+git:x:1001:1001::/home/git:/bin/bash
+root@52e1bb54e013:/home/git/t# GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' expect /tmp/push.exp main 2>&1 | tail -20
+spawn git push ssh://git@localhost/git/project main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@52e1bb54e013:/home/git/t# ls -la /git /git/project; echo '---'; stat -c '%U:%G %a %n' /git/project /git/project/HEAD
+/git:
+total 12
+drwxr-xr-x  3 root root 4096 Jul  2 21:54 .
+drwxr-xr-x 22 root root 4096 Jul  2 21:54 ..
+drwxr-xr-x  6 git  git  4096 Jul  2 21:54 project
+
+/git/project:
+total 36
+drwxr-xr-x 6 git  git  4096 Jul  2 21:54 .
+drwxr-xr-x 3 root root 4096 Jul  2 21:54 ..
+-rw-r--r-- 1 git  git    23 Jul  2 21:54 HEAD
+-rw-r--r-- 1 git  git    66 Jul  2 21:54 config
+-rw-r--r-- 1 git  git    73 Jul  2 21:54 description
+drwxr-xr-x 2 git  git  4096 Jul  2 21:54 hooks
+drwxr-xr-x 2 git  git  4096 Jul  2 21:54 info
+drwxr-xr-x 4 git  git  4096 Jul  2 21:54 objects
+drwxr-xr-x 4 git  git  4096 Jul  2 21:54 refs
+---
+git:git 755 /git/project
+git:git 644 /git/project/HEAD
+root@52e1bb54e013:/home/git/t# cat > /tmp/diag.exp << 'EOF'
+> #!/usr/bin/expect -f
+> set timeout 30
+> spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost "git-receive-pack /git/project"
+> expect {
+>   -re "(?i)password:" { send "password\r"; exp_continue }
+>   eof
+> }
+> EOF
+root@52e1bb54e013:/home/git/t# chmod +x /tmp/diag.exp; expect /tmp/diag.exp 2>&1 | tail -20
+spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost git-receive-pack /git/project
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+root@52e1bb54e013:/home/git/t# ls -la /git/project/refs/heads 2>/dev/null; echo '==WWW=='; cat /var/www/html/index.html 2>/dev/null; echo '==END=='
+total 8
+drwxr-xr-x 2 git git 4096 Jul  2 21:54 .
+drwxr-xr-x 4 git git 4096 Jul  2 21:54 ..
+==WWW==
+==END==
+root@52e1bb54e013:/home/git/t# cat > /tmp/diag2.exp << 'EOF'
+> #!/usr/bin/expect -f
+> set timeout 20
+> spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost "git-receive-pack '/git/project'"
+> expect {
+>   -re "(?i)password:" { send "password\r"; exp_continue }
+>   eof
+> }
+> EOF
+root@52e1bb54e013:/home/git/t# chmod +x /tmp/diag2.exp; expect /tmp/diag2.exp 2>&1 | cat -v | head -20
+spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost git-receive-pack '/git/project'^M
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.^M^M
+^Mgit@localhost's password: ^M
+root@52e1bb54e013:/home/git/t# GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' expect /tmp/push.exp main > /tmp/push.log 2>&1;
+ cat /tmp/push.log
+spawn git push ssh://git@localhost/git/project main
+Warning: Permanently added 'localhost' (ED25519) to the list of known hosts.
+git@localhost's password:
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+root@52e1bb54e013:/home/git/t#

@@ -1,0 +1,12 @@
+I have a valid results.json, but the 2D peak parameters are sensitive to window choice (offset varies from ~2000 to ~8000), which means the constant-offset model is ill-conditioned there. Before finalizing, I want to understand the 2D background shape and pick the most defensible fit.
+
+{
+  "analysis": "The G peak fit is excellent (rms at noise floor, rms/amp=2.2%). The 2D peak fit is less stable: with win=1000 I got gamma=487,amp=81939,off=2117; with the adaptive win=1382 I got gamma=445,amp=76938,off=7758. The offset is poorly determined because the 2D peak sits on a broad curved background. I need to understand the background shape around 2D and choose a robust window.",
+  "plan": "Print the 2D region finely (x from 16000 to 23000) and fit the 2D peak across a range of window widths (1000-4000) to map parameter stability. This reveals the true local baseline and the best window. Then I'll finalize results.json.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/diag2d.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import curve_fit\nd = np.loadtxt('/app/graphene.dat', delimiter=None,\n              converters={0: lambda s: float(s.replace(',','.')),\n                          1: lambda s: float(s.replace(',','.'))})\nx=d[:,0]; y=d[:,1]\norder=np.argsort(x); x=x[order]; y=y[order]\ndef lor(x,x0,g,a,off):\n    return off + a*g*g/((x-x0)**2+g*g)\nbounds=([0,0,0,-1e9],[1e6,1e6,1e9,1e9])\nm=(x>=16000)&(x<=23000)\nprint('2D region n=%d'%m.sum())\nxs,ys=x[m],y[m]\nfor i in range(0,len(xs),3):\n    print('x=%.1f y=%.1f'%(xs[i],ys[i]))\nprint('--- fit with various windows centered 19195 ---')\nfor w in [1000,2000,3000,4000]:\n    mm=(x>=19195-w)&(x<=19195+w)\n    xc,yc=x[mm],y[mm]\n    p0=[19195,450,77000,8000]\n    popt,_=curve_fit(lor,xc,yc,p0=p0,bounds=bounds,maxfev=400000)\n    r=lor(xc,*popt)-yc\n    print('win=%4d x0=%.1f g=%.1f amp=%.1f off=%.1f rms=%.1f n=%d'%(w,*popt,np.sqrt(np.mean(r**2)),len(xc)))\nEOF\npython3 /app/diag2d.py\n",
+      "duration": 3.0
+    }
+  ]
+}

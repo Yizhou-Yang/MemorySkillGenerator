@@ -1,0 +1,10 @@
+{
+  "analysis": "Found it: the page uses single-quoted hrefs and the actual path is `2026/sqlite-autoconf-3530300.tar.gz` (SQLite 3.53.3). So the download URL is https://www.sqlite.org/2026/sqlite-autoconf-3530300.tar.gz. I'll fix the fetch script to extract the `YEAR/filename` pattern and download+extract.",
+  "plan": "Rewrite the script to find the `YYYY/sqlite-autoconf-NNN.tar.gz` path, download it into /app/sqlite, extract, and list the resulting directory so I can configure with --coverage.",
+  "commands": [
+    {
+      "keystrokes": "cat > /tmp/get_sqlite.py <<'PY'\nimport urllib.request, re, os, tarfile\nhdr={'User-Agent':'Mozilla/5.0'}\nhtml=urllib.request.urlopen(urllib.request.Request('https://www.sqlite.org/download.html', headers=hdr), timeout=60).read().decode('utf-8','ignore')\nm=re.findall(r'(\\d{4})/sqlite-autoconf-(\\d+)\\.tar\\.gz', html)\nprint('matches:', m[:5])\nyear, num = m[0]\nurl=f'https://www.sqlite.org/{year}/sqlite-autoconf-{num}.tar.gz'\nprint('url:', url)\ndata=urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=120).read()\nopen('/app/sqlite/sqlite.tar.gz','wb').write(data)\nprint('downloaded bytes:', len(data))\nos.chdir('/app/sqlite')\ntarfile.open('sqlite.tar.gz').extractall('.')\nfor d in sorted(os.listdir('.')):\n    if os.path.isdir(d): print('extracted dir:', d)\nPY\npython3 /tmp/get_sqlite.py\n",
+      "duration": 15.0
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@3c66e5498bb6:/app/astropy# cd /tmp && python3 - <<'EOF'
+> import re
+>
+> def line_type(line, delimiter=None):
+>     _decimal_re = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+>     _command_re = r"READ [TS]ERR(\s+[0-9]+)+"
+>     sep = delimiter
+>     if delimiter is None:
+>         sep = r"\s+"
+>     _new_re = rf"NO({sep}NO)+"
+>     _data_re = rf"({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)"
+>     _type_re = rf"^\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\s*(\!(?P<comment>.*))?\s*$"
+>     _line_type_re = re.compile(_type_re, re.IGNORECASE)
+>     line = line.strip()
+>     if not line:
+>         return "comment"
+>     match = _line_type_re.match(line)
+>     if match is None:
+>         raise ValueError(f"Unrecognized QDP line: {line}")
+>     for type_, val in match.groupdict().items():
+>         if val is None:
+>             continue
+>         if type_ == "data":
+>             return f"data,{len(val.split(sep=delimiter))}"
+>         else:
+>             return type_
+>
+> for l in ["read serr 1 2", "READ SERR 1 2", "Read tErr 1 2", "no NO nO", "1 0.5 1 0.5"]:
+>     print(repr(l), '->', line_type(l))
+> print("OK: lowercase command accepted as 'command' (no ValueError)")
+> EOF
+'read serr 1 2' -> command
+'READ SERR 1 2' -> command
+'Read tErr 1 2' -> command
+'no NO nO' -> new
+'1 0.5 1 0.5' -> data,4
+OK: lowercase command accepted as 'command' (no ValueError)
+root@3c66e5498bb6:/tmp#

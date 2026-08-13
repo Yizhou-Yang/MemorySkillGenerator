@@ -1,0 +1,41 @@
+New Terminal Output:
+
+root@400c443fb1a5:/app# cat > /app/curl.py << 'EOF'
+> #!/usr/bin/env python3
+> import sys
+> import urllib.request
+> import urllib.error
+>
+> def fetch(url, timeout=10):
+>     req = urllib.request.Request(url, headers={"User-Agent": "robust-curl/1.0"})
+>     try:
+>         with urllib.request.urlopen(req, timeout=timeout) as resp:
+>             resp.read()
+>             return resp.status
+>     except urllib.error.HTTPError as e:
+>         # Server answered, but with a 4xx/5xx status.
+>         return e.code
+>     except Exception as e:
+>         # Transport-level failure: DNS resolution error, connection refused,
+>         # socket timeout, SSL error, etc. Report '000' like curl does
+>         # instead of letting the script die with a traceback.
+>         sys.stderr.write("transport error: %s\n" % e)
+>         return 0
+>
+> def main(argv):
+>     if len(argv) < 2:
+>         sys.stderr.write("usage: python3 curl.py URL\n")
+>         return 2
+>     code = fetch(argv[1])
+>     if code == 0:
+>         print("000")
+>     else:
+>         print(code)
+>
+> if __name__ == "__main__":
+>     sys.exit(main(sys.argv))
+> EOF
+root@400c443fb1a5:/app# chmod +x /app/curl.py
+root@400c443fb1a5:/app# python3 /app/curl.py http://example.com
+200
+root@400c443fb1a5:/app#

@@ -1,0 +1,14 @@
+{
+  "analysis": "Even the robust version (with reader thread + 15s timeout) hangs on the very first `move` command in maze 1, where the original script first succeeded. `ps`/`pkill` aren't available so I can't inspect leftover processes, but the hang is reproducible and clearly at the first server response. Rather than theorize, I'll write a minimal debug script that prints exactly what it reads from the server at each step, to see whether the server is even responding to my first command. This will pinpoint the protocol issue.",
+  "plan": "Create /app/dbg.py that spawns the server, prints each welcome line as read, sends 'move N', and prints the response (with a timeout). Run it to observe where/why it hangs. Based on results, fix the explorer.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/dbg.py << 'PYEOF'\nimport subprocess, os, threading, queue\ntimeout=5\nenv=dict(os.environ); env['PYTHONUNBUFFERED']='1'\np=subprocess.Popen(['/app/maze_game.sh','1'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,env=env,bufsize=1)\nq=queue.Queue()\ndef r():\n    for line in p.stdout:\n        q.put(line)\n    q.put(None)\nthreading.Thread(target=r,daemon=True).start()\ndef rd():\n    try:\n        x=q.get(timeout=timeout); return x\n    except queue.Empty:\n        return '<<TIMEOUT>>'\nfor i in range(4):\n    print('welcome',i,repr(rd()))\nprint('sending move N')\np.stdin.write('move N\\n'); p.stdin.flush()\nprint('resp', repr(rd()))\np.stdin.write('exit\\n'); p.stdin.flush()\np.kill()\nprint('done')\nPYEOF\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python3 /app/dbg.py\n",
+      "duration": 6.0
+    }
+  ]
+}

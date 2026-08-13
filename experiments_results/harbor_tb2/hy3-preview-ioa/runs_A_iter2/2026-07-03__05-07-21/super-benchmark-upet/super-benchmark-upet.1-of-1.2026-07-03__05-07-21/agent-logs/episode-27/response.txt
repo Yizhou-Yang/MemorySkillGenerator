@@ -1,0 +1,14 @@
+{
+  "analysis": "Metric works (accuracy=0.667 on the test). The smoke-test error is only in MY test script: `use_return_dict` isn't a valid RobertaConfig field (it's a 4.40.2 change). The repo itself never sets use_return_dict on config — my test did. I need to confirm how `get_model` builds the config (it must inject pre_seq_len etc. into the config). Let me check model/utils.py get_model, then fix my smoke test to mirror the real path.",
+  "plan": "1. Inspect model/utils.py get_model to see how it sets config.pre_seq_len and selects the model class for the chosen flags. 2. Fix the smoke test to use the real get_model path with a tiny RobertaConfig to validate the prefix model under 4.40.2.",
+  "commands": [
+    {
+      "keystrokes": "grep -n 'get_model\\|pre_seq_len\\|use_return_dict\\|PromptRoberta\\|RobertaPrefix\\|def get_model' model/utils.py | head -40\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "sed -n '/def get_model/,/return model/p' model/utils.py | head -80\n",
+      "duration": 0.1
+    }
+  ]
+}

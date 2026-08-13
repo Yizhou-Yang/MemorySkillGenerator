@@ -1,0 +1,59 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@9502a2af14f5:/app# python3 -u /app/solve.py
+cat > /app/dbg2.py <<'EOF'
+import subprocess, os, select
+
+DIRS=[('N',-1,0),('S',1,0),('E',0,1),('W',0,-1)]
+
+def run(mid):
+    p=subprocess.Popen(['python3','-u','/protected/maze_server.py',str(mid)],
+        stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+    fd=p.stdout.fileno()
+    buf=''
+    def read_until(tok):
+        nonlocal buf
+        while tok not in buf:
+            r,_,_=select.select([fd],[],[],5)
+            if not r:
+                raise TimeoutError('timeout waiting %r buf=%r'%(tok,buf))
+            d=os.read(fd,65536)
+            if not d: raise EOFError('closed')
+            buf+=d.decode(errors='replace')
+        i=buf.find(tok); buf=buf[i+len(tok):]
+    def read_result():
+        nonlocal buf
+        read_until('\n')
+        line,_,buf=buf.partition('\n')
+        return line.strip()
+    read_until('> ')
+    pos=(0,0); open_cells={(0,0)}; walls=set(); stack=[]; exit_pos=None; cmds=0
+    while True:
+        r,c=pos; moved=False
+        for d,dr,dc in DIRS:
+            nr,nc=r+dr,c+dc
+            if (nr,nc) in open_cells or (nr,nc) in walls: continue
+            p.stdin.write(('move '+d+'\n').encode()); p.stdin.flush()
+            cmds+=1
+            if cmds%200==0: print('  mid',mid,'cmds',cmds,'pos',pos,'open',len(open_cells))
+            res=read_result()
+            if res=='hit wall': walls.add((nr,nc))
+            else:
+                open_cells.add((nr,nc))
+                if res=='reached exit': exit_pos=(nr,nc)
+                stack.append((r,c)); pos=(nr,nc); moved=True; break
+        if not moved:
+            if stack: pos=stack.pop()
+            else: break
+    p.terminate()
+    print('maze',mid,'DONE cmds',cmds,'open',len(open_cells),'walls',len(walls))
+
+for m in [1,2,3]:
+    print('=== maze',m,'===')
+    run(m)
+EOF
+python3 -u /app/dbg2.py
+

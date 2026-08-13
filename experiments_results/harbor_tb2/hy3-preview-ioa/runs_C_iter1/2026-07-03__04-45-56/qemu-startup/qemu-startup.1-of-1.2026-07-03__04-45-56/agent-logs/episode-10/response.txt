@@ -1,0 +1,8 @@
+{
+  "analysis": "The telnet listener on 127.0.0.1:6665 is up (CONNECT_OK). Now I must verify a login prompt actually appears. Per the earlier attempt's lesson, I should connect, send CRLF, and read output until I see the login prompt. TCG emulation is slow, so booting to a getty may take some time. I'll write a blocking probe that periodically sends CRLF and waits for 'login'.",
+  "plan": "1) Write a probe script that connects to 6665, sends CRLF, reads data, and looks for 'login'. It will retry (reconnecting and sending CRLF) until a login prompt is seen or a timeout (e.g. 180s) elapses. 2) Run it. This blocks until ready and proves the user can telnet in and see a login prompt.",
+  "commands": [
+    {"keystrokes": "cat > /tmp/probe.py << 'PYEOF'\nimport socket, time, sys\n\nPORT=6665\nend=time.time()+240\nlast=0\nwhile time.time()<end:\n    try:\n        s=socket.socket()\n        s.settimeout(6)\n        s.connect(('127.0.0.1',PORT))\n        buf=b''\n        # send CRLF to coax a fresh prompt\n        s.sendall(b'\\r\\n')\n        t0=time.time()\n        while time.time()-t0<6:\n            try:\n                d=s.recv(4096)\n            except socket.timeout:\n                break\n            if not d: break\n            buf+=d\n            if b'login' in buf.lower():\n                print('LOGIN_PROMPT_RECEIVED')\n                print(buf.decode('latin1','replace')[-600:])\n                s.close()\n                sys.exit(0)\n        s.close()\n    except Exception as e:\n        pass\n    time.sleep(2)\nprint('TIMEOUT_NO_PROMPT')\nsys.exit(1)\nPYEOF\n", "duration": 0.2},
+    {"keystrokes": "python3 /tmp/probe.py\n", "duration": 30.0}
+  ]
+}

@@ -1,0 +1,36 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+- Extra text detected after JSON object
+
+New Terminal Output:
+
+root@0ee6ec3050e7:/app# cat > check.py << 'EOF'
+> import numpy as np
+> from scipy.optimize import curve_fit
+> d = np.loadtxt('graphene.dat', delimiter=None,
+>    converters={0: lambda s: float(str(s).replace(',','.')), 1: lambda s: float(str(s).replace(',','.'))})
+> x=d[:,0]; y=d[:,1]; o=np.argsort(x); x=x[o]; y=y[o]
+> def model(x,c,xg,gamg,ampg,xd,gamd,ampd):
+>     return c + ampg*gamg**2/((x-xg)**2+gamg**2) + ampd*gamd**2/((x-xd)**2+gamd**2)
+> m=(x>9000)&(x<20000)
+> p,_=curve_fit(model,x[m],y[m],p0=[9000,10400,350,10000,19200,430,70000],maxfev=300000)
+> print('combined: c=%.1f xg=%.1f gamg=%.1f x2d=%.1f gam2d=%.1f'%(p[0],p[1],p[2],p[4],p[5]))
+> EOF
+root@0ee6ec3050e7:/app# python3 check.py
+combined: c=12133.3 xg=10426.9 gamg=184.0 x2d=19203.7 gam2d=441.7
+cat results.json
+root@0ee6ec3050e7:/app# cat results.json
+{
+  "G": {
+    "x0": 10431.263458276975,
+    "gamma": 347.4153944095837,
+    "amplitude": 10577.805562940222,
+    "offset": 9131.504973749883
+  },
+  "2D": {
+    "x0": 19221.765158747417,
+    "gamma": 425.9709516594235,
+    "amplitude": 70088.08571518664,
+    "offset": 14402.297192297561
+  }
+}root@0ee6ec3050e7:/app#

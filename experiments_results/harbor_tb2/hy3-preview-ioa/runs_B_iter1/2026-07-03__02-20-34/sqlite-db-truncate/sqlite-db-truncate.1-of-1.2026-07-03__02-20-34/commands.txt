@@ -1,0 +1,16 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la /app/trunc.db\n'
+'xxd /app/trunc.db | head -40\n'
+'which sqlite3 python3\n'
+'python3 -c "d=open(\'/app/trunc.db\',\'rb\').read(); print(len(d)); print(d[:100])"\n'
+'python3 -c "d=open(\'/app/trunc.db\',\'rb\').read(); print(\' \'.join(\'%02x\'%b for b in d[:200]))"\n'
+'python3 -c "d=open(\'/app/trunc.db\',\'rb\').read(); print(\' \'.join(\'%02x\'%b for b in d[3913:4096]))"\n'
+"cat > /app/recover.py << 'PYEOF'\nimport struct, json\n\nd = open('/app/trunc.db','rb').read()\n\ndef read_varint(b, pos):\n    result = 0\n    for i in range(9):\n        byte = b[pos+i]\n        if i == 8:\n            result = (result << 8) | byte\n            return result, pos+1\n        result = (result << 7) | (byte & 0x7f)\n        if not (byte & 0x80):\n            return result, pos+i+1\n    return result, pos+9\n\nnum_cells = int.from_bytes(d[3:5], 'big')\nrows = []\nfor i in range(num_cells):\n    ptr = int.from_bytes(d[8+2*i:10+2*i], 'big')\n    pos = ptr\n    payload_len, pos = read_varint(d, pos)\n    rowid, pos = read_varint(d, pos)\n    payload = d[pos:pos+payload_len]\n    hpos = 0\n    header_len, hpos = read_varint(payload, hpos)\n    serial_types = []\n    while hpos < header_len:\n        st, hpos = read_varint(payload, hpos)\n        serial_types.append(st)\n    dpos = header_len\n    values = []\n    for st in serial_types:\n        if st == 0:\n            values.append(None)\n        elif st in (1,2,3,4,5,6):\n            n = {1:1,2:2,3:3,4:4,5:6,6:8}[st]\n            values.append(int.from_bytes(payload[dpos:dpos+n],'big',signed=True))\n            dpos += n\n        elif st == 7:\n            values.append(struct.unpack('>d', payload[dpos:dpos+8])[0])\n            dpos += 8\n        elif st == 8:\n            values.append(0)\n        elif st == 9:\n            values.append(1)\n        elif st >= 12:\n            n = (st-12)//2\n            values.append(payload[dpos:dpos+n].decode('utf-8','replace'))\n            dpos += n\n        else:\n            values.append(None)\n    rows.append((rowid, values))\n\nout = []\nfor rowid, vals in rows:\n    word = next((v for v in vals if isinstance(v,str)), None)\n    val = next((v for v in vals if isinstance(v,(int,float)) and not isinstance(v,bool)), None)\n    out.append({'word': word, 'value': val})\n\nprint(json.dumps(out, indent=2))\njson.dump(out, open('/app/recover.json','w'))\nPYEOF\n"
+'python3 /app/recover.py\n'
+'cat /app/recover.json\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

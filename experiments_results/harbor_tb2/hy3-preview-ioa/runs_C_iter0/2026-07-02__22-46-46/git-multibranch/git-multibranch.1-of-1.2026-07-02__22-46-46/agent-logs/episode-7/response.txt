@@ -1,0 +1,28 @@
+Nginx now serves on 8443 (403 because /var/www is empty — expected until a push). `expect` is available for testing SSH password auth. Let me do a full end-to-end test of the push → deploy flow.
+
+{
+  "analysis": "Default site removed; nginx now only serves my git.conf. 403 is expected since no content is pushed yet. sshd is running, expect is available. Now I need to validate the whole flow: SSH password auth + post-receive hook deploying main and dev to the correct paths within 3s.",
+  "plan": "Create a test repo with main (index.html) and dev (dev/index.html content differing) branches. Use an expect script to push both branches to git@localhost:/git/project with password 'password'. Then verify /var/www/index.html and /var/www/dev/index.html exist and match, and curl returns 200 on both endpoints. This validates the deployment works; if it does, the server is fully set up.",
+  "commands": [
+    {
+      "keystrokes": "rm -rf /tmp/work && mkdir -p /tmp/work && cd /tmp/work && git init -q && git config user.email t@t.t && git config user.name t\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "printf '<h1>MAIN PAGE</h1>\\n' > index.html && git add -A && git commit -qm main\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "git checkout -q -b dev && printf '<h1>DEV PAGE</h1>\\n' > index.html && git commit -qam dev && git checkout -q main\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "cat > /tmp/push.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 60\nspawn git -c core.sshCommand=\"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null\" push git@localhost:/git/project main dev\nexpect {\n  \"*assword*\" { send \"password\\r\"; exp_continue }\n  eof { }\n}\nEOF\nchmod +x /tmp/push.exp && echo exp-ready\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "time /tmp/push.exp\n",
+      "duration": 5.0
+    }
+  ]
+}

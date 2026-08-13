@@ -1,0 +1,14 @@
+{
+  "analysis": "Critical clue: my reader only received the single character 'W' and then nothing for 8 seconds, even though the server prints the full banner (proven earlier via printf). This is a Python text-mode buffering artifact — `TextIOWrapper.read(1)` does read-ahead and stalls on the '> ' prompt (which has no trailing newline). I should read raw bytes via `os.read` on the fileno in binary mode instead. Let me verify a binary-mode reader works.",
+  "plan": "Write dbg3.py that spawns the server with stdout=PIPE (binary) and reads raw bytes with os.read on the fileno, accumulating until the buffer ends with b'> '. If it captures the full banner + prompt, I'll rewrite explore.py around this reliable reader.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/dbg3.py << 'PYEOF'\nimport subprocess, select, os, sys, time\np = subprocess.Popen(['python3','-u','/protected/maze_server.py','1'],\n    stdin=subprocess.PIPE, stdout=subprocess.PIPE)\nfd = p.stdout.fileno()\nbuf=b''\nstart=time.time()\nwhile time.time()-start < 8:\n    r,_,_=select.select([fd],[],[],0.3)\n    if not r:\n        sys.stdout.write('[wait] '); sys.stdout.flush(); continue\n    ch=os.read(fd,1)\n    if ch==b'':\n        sys.stdout.write('[EOF] '); break\n    buf+=ch\n    sys.stdout.write(repr(ch)+' '); sys.stdout.flush()\n    if buf.endswith(b'> '):\n        sys.stdout.write('[PROMPT]'); break\nprint('\\nFINAL buf=',repr(buf))\np.terminate()\nPYEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "python3 /app/dbg3.py\n",
+      "duration": 10.0
+    }
+  ]
+}

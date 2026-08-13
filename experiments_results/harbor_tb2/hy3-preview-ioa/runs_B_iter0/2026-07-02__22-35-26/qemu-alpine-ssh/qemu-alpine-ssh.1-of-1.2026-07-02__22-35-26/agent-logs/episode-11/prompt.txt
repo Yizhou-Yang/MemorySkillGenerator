@@ -1,0 +1,56 @@
+New Terminal Output:
+
+root@a26b61f346b5:/tmp/ir# cat > /tmp/unpack.py << 'EOF'
+> import os, gzip, struct
+> src='/app/extracted/initramfs_lts'
+> data=open(src,'rb').read()
+> if data[:2]==b'\x1f\x8b':
+>     data=gzip.decompress(data); print('gzip decompressed to',len(data))
+> else:
+>     print('not gzip, using raw',len(data))
+> os.makedirs('/tmp/ir',exist_ok=True)
+> i=0
+> while i < len(data):
+>     if data[i:i+6] not in (b'070701',b'070702'):
+>         # skip until magic
+>         i+=1; continue
+>     hdr=data[i:i+110]
+>     names=['c_ino','c_mode','c_uid','c_gid','c_nlink','c_mtime','c_filesize','c_devmajor','c_devminor','c_rdevmajor','c_rdevminor','c_namesize','c_check']
+>     vals={}; off=6
+>     for n in names:
+>         vals[n]=int(hdr[off:off+8],16); off+=8
+>     name=data[i+110:i+110+vals['c_namesize']].rstrip(b'\x00').decode('latin1')
+>     dstart=i+110+vals['c_namesize']
+>     dstart=(dstart+3)&~3
+>     size=vals['c_filesize']
+>     body=data[dstart:dstart+size]
+>     nxt=dstart+((size+3)&~3)
+>     if name=='TRAILER!!!':
+>         break
+>     if name:
+>         out='/tmp/ir/'+name.lstrip('/')
+>         if name.endswith('/'):
+>             os.makedirs(out,exist_ok=True)
+>         else:
+>             os.makedirs(os.path.dirname(out),exist_ok=True)
+>             open(out,'wb').write(body)
+>     i=nxt
+> print('done')
+> EOF
+root@a26b61f346b5:/tmp/ir# cd /tmp; python3 /tmp/unpack.py
+gzip decompressed to 68684248
+Traceback (most recent call last):
+  File "/tmp/unpack.py", line 33, in <module>
+    open(out,'wb').write(body)
+IsADirectoryError: [Errno 21] Is a directory: '/tmp/ir/.'
+root@a26b61f346b5:/tmp# echo '--- files count ---'; find /tmp/ir -type f | wc -l; echo '--- modules ---'; find /tmp/ir -name '*.ko' | sed 's#.*/##' | sort | tr
+'\n' ' '; echo
+--- files count ---
+0
+--- modules ---
+
+root@a26b61f346b5:/tmp# echo '--- init grep ---'; grep -aoE 'ttyS[0-9]|getty|modloop|alpine_dev|find_media|console=' /tmp/ir/init 2>/dev/null | sort | uniq -c |
+ head; echo '--- head of init ---'; head -c 1500 /tmp/ir/init 2>/dev/null
+--- init grep ---
+--- head of init ---
+root@a26b61f346b5:/tmp#

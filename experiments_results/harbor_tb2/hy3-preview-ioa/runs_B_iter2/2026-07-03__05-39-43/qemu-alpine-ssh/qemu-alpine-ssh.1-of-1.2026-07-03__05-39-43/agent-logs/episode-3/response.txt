@@ -1,0 +1,15 @@
+{
+  "analysis": "QEMU (pid 159) is running under TCG and the serial console is listening on 127.0.0.1:9001 (nc connected successfully). Now I need to let Alpine boot and drive the serial console to: set root password, configure network via DHCP, install/start openssh, and permit root password login. I'll do this with an expect script that connects to the serial console over nc.",
+  "plan": "Write /app/setup.exp that: connects to the serial console via nc, logs in as root, brings up eth0 + udhcpc, sets password to password123, installs openssh, generates host keys, fixes sshd_config for root+password login, and starts sshd. Then run it (with a long timeout for apk). After it finishes, verify the host is listening on 2222 and test an actual ssh login.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/setup.exp <<'EOF'\n#!/usr/bin/expect -f\nset timeout 240\n\nproc cmd {c} {\n    send \"$c\\r\"\n    expect {\n        \"# \" {}\n        timeout { puts \"TIMEOUT_CMD: $c\"; exit 2 }\n    }\n}\n\nspawn nc 127.0.0.1 9001\nsleep 1\nsend \"\\r\"\nexpect {\n    \"login:\" {\n        send \"root\\r\"\n        expect {\n            \"Password:\" { send \"\\r\" }\n            \"# \" {}\n            timeout { puts \"TIMEOUT_AFTER_LOGIN\"; exit 1 }\n        }\n    }\n    \"# \" {}\n    timeout { puts \"TIMEOUT_WAITING\"; exit 1 }\n}\n\ncmd \"ip link set eth0 up\"\ncmd \"udhcpc -i eth0\"\ncmd \"echo root:password123 | chpasswd\"\ncmd \"apk add openssh\"\ncmd \"ssh-keygen -A\"\ncmd \"sed -i 's/^#\\\\?PermitRootLogin.*/PermitRootLogin yes/ ; s/^#\\\\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config\"\ncmd \"/usr/sbin/sshd\"\ncmd \"echo SETUP_DONE_OK\"\nexpect \"SETUP_DONE_OK\"\nsend \"exit\\r\"\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "expect /app/setup.exp\n",
+      "duration": 60.0
+    }
+  ],
+  "task_complete": false
+}

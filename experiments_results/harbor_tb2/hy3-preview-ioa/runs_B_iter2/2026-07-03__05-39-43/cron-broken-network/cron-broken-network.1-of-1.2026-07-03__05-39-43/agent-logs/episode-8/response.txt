@@ -1,0 +1,18 @@
+{
+  "analysis": "Critical clue: `df` reports the overlay at 959G used / 0 available (100% full), but `du` across every top-level directory totals only ~250M, and there are NO files >50M and NO deleted-but-open files in my earlier lsof scan. This is the classic df/du mismatch. The phantom space is almost certainly a deleted file still held open by a running process (so `du` doesn't see it but `df` still counts it), or space hidden beneath a mount point. `apt-get install` fails only because df reports 0 available. I need to locate the hidden space and reclaim it, then install the real curl to replace the fake /usr/bin/curl stub.",
+  "plan": "1) Run `lsof` looking specifically for 'deleted' entries (my earlier awk filter may have missed matches) — a large deleted-but-open file would explain the df/du gap. 2) Verify writes actually fail with a small `dd` test. 3) If a deleted file is found, truncate it via /proc/PID/fd to free space. 4) Re-check `df`, then retry `apt-get install -y curl` to overwrite the fake script. If lsof shows nothing, I'll inspect mount points / the overlay upper dir.",
+  "commands": [
+    {
+      "keystrokes": "lsof 2>/dev/null | grep -i deleted | awk '{print $7, $1, $2, $NF}' | sort -n | tail -n 15\n",
+      "duration": 2.0
+    },
+    {
+      "keystrokes": "df -h /; echo '--- write test ---'; dd if=/dev/zero of=/tmp/_wtest bs=1M count=1 2>&1; ls -la /tmp/_wtest 2>&1\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "cat /proc/mounts 2>/dev/null | grep -v 'cgroup\\|proc\\|sysfs\\|tmpfs\\|devpts' \n",
+      "duration": 0.5
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+New Terminal Output:
+
+root@f753479266fc:/app# cat > explore.py << 'EOF'
+> import numpy as np
+> data = np.loadtxt('graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.'))
+})
+> x = data[:,0]; y = data[:,1]
+> print('shape', data.shape)
+> print('x range', x.min(), x.max())
+> print('y range', y.min(), y.max())
+> # check for G ~1580 and 2D ~2700
+> for target in [1580, 2700]:
+>     idx = np.argmin(np.abs(x-target))
+>     print('target', target, '-> x=', x[idx], 'y=', y[idx])
+> EOF
+root@f753479266fc:/app# python3 explore.py
+Traceback (most recent call last):
+  File "/app/explore.py", line 2, in <lambda>
+    data = np.loadtxt('graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.'
+))})
+                                                                                     ^^^^^^^^
+AttributeError: 'str' object has no attribute 'decode'. Did you mean: 'encode'?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/app/explore.py", line 2, in <module>
+    data = np.loadtxt('graphene.dat', delimiter=None, converters={0: lambda s: float(s.decode().replace(',','.')), 1: lambda s: float(s.decode().replace(',','.'
+))})
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1381, in loadtxt
+    arr = _read(fname, dtype=dtype, comment=comment, delimiter=delimiter,
+                converters=converters, skiplines=skiprows, usecols=usecols,
+                unpack=unpack, ndmin=ndmin, encoding=encoding,
+                max_rows=max_rows, quote=quotechar)
+  File "/usr/local/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py", line 1035, in _read
+    arr = _load_from_filelike(
+        data, delimiter=delimiter, comment=comment, quote=quote,
+    ...<3 lines>...
+        encoding=encoding, filelike=filelike,
+        byte_converters=byte_converters)
+ValueError: could not convert string '47183,554644' to float64 at row 0, column 1.
+root@f753479266fc:/app#

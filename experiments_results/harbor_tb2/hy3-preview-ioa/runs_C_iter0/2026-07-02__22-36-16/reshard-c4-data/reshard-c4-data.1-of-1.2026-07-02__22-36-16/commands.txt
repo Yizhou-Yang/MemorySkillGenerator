@@ -1,0 +1,86 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+'ls -la\n'
+'find . -maxdepth 2 -type d | head -50\n'
+'ls -la c4_sample 2>/dev/null | head\n'
+'ls -la c4_sample |\n'
+'ls c4_sample | wc -l\n'
+'du -sh c4_sample\n'
+'find c4_sample -type f | wc -l\n'
+'find c4_sample -type d\n'
+'find c4_sample -type f | wc -l\n'
+'du -sh c4_sample\n'
+'ls -la c4_sample | tail -3\n'
+"stat -c '%s' c4_sample/*.jsonl | sort -n | tail -1\n"
+"cat > /app/revert.py << 'PYEOF'\n#!/usr/bin/env python3\n'''Revert c4_reshard/ back to the original c4_sample/ flat layout.\n\nc4_reshard was produced by reorganizing the files of c4_sample into\nsub-directories (each holding at most 30 files) for upload. This script\nmoves every file found under c4_reshard/ back into c4_sample/ and removes\nthe now-empty shards, restoring the original flat structure.\n'''\nimport os\nimport shutil\nimport sys\n\nBASE_DIR = os.path.dirname(os.path.abspath(__file__))\nRESHARD = os.path.join(BASE_DIR, 'c4_reshard')\nSAMPLE = os.path.join(BASE_DIR, 'c4_sample')\n\n\ndef main():\n    if not os.path.isdir(RESHARD):\n        print('Nothing to revert: ' + RESHARD + ' does not exist.', file=sys.stderr)\n        return 1\n\n    os.makedirs(SAMPLE, exist_ok=True)\n\n    moved = 0\n    for entry in sorted(os.listdir(RESHARD)):\n        shard = os.path.join(RESHARD, entry)\n        if not os.path.isdir(shard):\n            shutil.move(shard, os.path.join(SAMPLE, entry))\n            moved += 1\n            continue\n        for name in sorted(os.listdir(shard)):\n            src = os.path.join(shard, name)\n            if os.path.isfile(src):\n                shutil.move(src, os.path.join(SAMPLE, name))\n                moved += 1\n        try:\n            os.rmdir(shard)\n        except OSError:\n            pass\n\n    try:\n        os.rmdir(RESHARD)\n    except OSError:\n        pass\n\n    print('Reverted ' + str(moved) + ' file(s) from c4_reshard/ back into c4_sample/.')\n    return 0\n\n\nif __name__ == '__main__':\n    sys.exit(main())\nPYEOF\n"
+"python3 - << 'PREPEOF'\nimport os, shutil\nsrc = 'c4_sample'\ndst = 'c4_reshard'\nos.makedirs(dst, exist_ok=True)\nfiles = sorted(os.listdir(src))\nper = 30\npart = 0\ncount = 0\ncur = None\nfor f in files:\n    if cur is None or count == per:\n        cur = os.path.join(dst, 'part_%06d' % part)\n        os.makedirs(cur, exist_ok=True)\n        part += 1\n        count = 0\n    shutil.move(os.path.join(src, f), os.path.join(cur, f))\n    count += 1\nprint('moved', len(files), 'files into', part, 'parts')\nPREPEOF\n"
+"echo '--- prep result above ---'; find c4_reshard -type f | wc -l; ls c4_sample | wc -l\n"
+'echo \'max files per dir:\'; for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1\n'
+"echo 'num shards:'; ls -d c4_reshard/part_* | wc -l\n"
+"echo 'max file bytes:'; find c4_reshard -type f -printf '%s\\n' | sort -n | tail -1\n"
+'ls -la /app/revert.py\n'
+'\n'
+'find c4_reshard -type f | wc -l\n'
+'ls c4_sample | wc -l\n'
+'for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1\n'
+'ls -d c4_reshard/part_* | wc -l\n'
+"find c4_reshard -type f -printf '%s\\n' | sort -n | tail -1\n"
+'\n'
+"echo RESULT_START; find c4_reshard -type f | wc -l; ls c4_sample | wc -l; ls -d c4_reshard/part_* | wc -l; find c4_reshard -type f -printf '%s\\n' | sort -n | tail -1; echo RESULT_END\n"
+'\n'
+'C-c'
+'echo HELLO; pwd\n'
+'echo SAMPLE_REMAIN; ls c4_sample | wc -l\n'
+'echo PARTS; ls -d c4_reshard/part_* 2>/dev/null | wc -l\n'
+'echo COUNTS; for d in c4_reshard/part_*; do echo $(ls "$d" | wc -l); done | tr \'\\n\' \' \'; echo\n'
+"python3 - << 'PREPEOF'\nimport os, shutil\nsrc = 'c4_sample'\ndst = 'c4_reshard'\nos.makedirs(dst, exist_ok=True)\nper = 30\n\ndef part_for(i):\n    return os.path.join(dst, 'part_%06d' % i)\n\n# find highest existing part index\nidx = -1\nfor e in os.listdir(dst):\n    if e.startswith('part_'):\n        try:\n            n = int(e.split('_')[1])\n            idx = max(idx, n)\n        except ValueError:\n            pass\nif idx < 0:\n    idx = 0\n    os.makedirs(part_for(idx), exist_ok=True)\n\nfiles = sorted(os.listdir(src))\nmoved = 0\nfor f in files:\n    cur = part_for(idx)\n    if len(os.listdir(cur)) >= per:\n        idx += 1\n        cur = part_for(idx)\n        os.makedirs(cur, exist_ok=True)\n    shutil.move(os.path.join(src, f), os.path.join(cur, f))\n    moved += 1\nprint('continued, moved', moved, 'files; last part idx', idx)\nPREPEOF\n"
+'\n'
+'echo VERIFY_TOTAL; find c4_reshard -type f | wc -l\n'
+'echo SAMPLE_LEFT; ls c4_sample | wc -l\n'
+'echo MAXPER; for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1\n'
+'echo NUMPARTS; ls -d c4_reshard/part_* | wc -l\n'
+"echo MAXBYTES; find c4_reshard -type f -printf '%s\\n' | sort -n | tail -1\n"
+'\n'
+'echo DONE_TOTAL; find c4_reshard -type f | wc -l; ls c4_sample | wc -l; ls -d c4_reshard/part_* | wc -l; for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1; find c4_reshard -type f -printf \'%s\\n\' | sort -n | tail -1\n'
+'\n'
+'\n'
+'C-c\n'
+'echo READY\n'
+'\n'
+'C-c\n'
+'echo ALIVE_$$ \n'
+'C-c'
+'C-c'
+'\n'
+'echo R; ls c4_sample | wc -l; ls -d c4_reshard/part_* 2>/dev/null | wc -l; ls c4_reshard/part_* 2>/dev/null | tail -1 | xargs -r ls | wc -l\n'
+"python3 - << 'PREPEOF'\nimport os, shutil\nsrc = 'c4_sample'\ndst = 'c4_reshard'\nos.makedirs(dst, exist_ok=True)\nper = 30\n\ndef part_for(i):\n    return os.path.join(dst, 'part_%06d' % i)\n\nidx = -1\nfor e in os.listdir(dst):\n    if e.startswith('part_'):\n        try:\n            idx = max(idx, int(e.split('_')[1]))\n        except ValueError:\n            pass\nif idx < 0:\n    idx = 0\n    os.makedirs(part_for(idx), exist_ok=True)\n\nfiles = sorted(os.listdir(src))\nmoved = 0\nfor f in files:\n    cur = part_for(idx)\n    if len(os.listdir(cur)) >= per:\n        idx += 1\n        cur = part_for(idx)\n        os.makedirs(cur, exist_ok=True)\n    shutil.move(os.path.join(src, f), os.path.join(cur, f))\n    moved += 1\nprint('completed, moved', moved, 'files; last part idx', idx)\nPREPEOF\n"
+''
+''
+''
+'\n'
+'echo FINAL; ls c4_sample | wc -l; find c4_reshard -type f | wc -l\n'
+'find c4_reshard -type f | wc -l\n'
+'for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | uniq | tail -5\n'
+'ls -d c4_reshard/part_* | wc -l\n'
+"find c4_reshard -type f -printf '%s\\n' | sort -n | tail -1\n"
+''
+"python3 - << 'PYEOF'\nimport os\nsrc = 'c4_sample'\ndst = 'c4_reshard'\nos.makedirs(src, exist_ok=True)\n# 1) restore original flat c4_sample from current c4_reshard parts\nfor d in sorted(os.listdir(dst)):\n    sub = os.path.join(dst, d)\n    if os.path.isdir(sub):\n        for f in sorted(os.listdir(sub)):\n            os.rename(os.path.join(sub, f), os.path.join(src, f))\n        os.rmdir(sub)\n# now src has all files; dst is empty\n# 2) rebuild c4_reshard as reshaped hard-linked copy\nfiles = sorted(os.listdir(src))\nper = 30\nidx = 0\ncur = os.path.join(dst, 'part_%06d' % idx)\nos.makedirs(cur)\nfor i, f in enumerate(files):\n    if i % per == 0 and i != 0:\n        idx += 1\n        cur = os.path.join(dst, 'part_%06d' % idx)\n        os.makedirs(cur)\n    os.link(os.path.join(src, f), os.path.join(cur, f))\nprint('rebuilt: c4_sample has', len(os.listdir(src)), 'files; parts=', idx + 1)\nPYEOF\n"
+''
+''
+''
+''
+''
+'\n'
+"cat > /app/revert.py << 'PYEOF'\n#!/usr/bin/env python3\n'''Revert c4_reshard/ back to the original (flat) c4_sample/ layout.\n\nThe files of the original c4_sample/ were reshaped into c4_reshard/ for upload:\nthey were distributed into part_* sub-directories, each holding at most 30 files.\nThis script reverses that reshape: it moves every file found in any sub-directory\nof c4_reshard/ up to the top level of c4_reshard/ and removes the now-empty\nsub-directories. After running this, c4_reshard/ contains the same flat set of\nfiles that originally lived in c4_sample/, so the two match.\n'''\nimport os\nimport shutil\nimport sys\n\nBASE_DIR = os.path.dirname(os.path.abspath(__file__))\nRESHARD = os.path.join(BASE_DIR, 'c4_reshard')\n\n\ndef main():\n    if not os.path.isdir(RESHARD):\n        print('Nothing to revert: ' + RESHARD + ' does not exist.', file=sys.stderr)\n        return 1\n\n    moved = 0\n    for entry in sorted(os.listdir(RESHARD)):\n        sub = os.path.join(RESHARD, entry)\n        if not os.path.isdir(sub):\n            continue\n        for name in sorted(os.listdir(sub)):\n            src = os.path.join(sub, name)\n            if os.path.isfile(src):\n                dst = os.path.join(RESHARD, name)\n                if os.path.abspath(src) != os.path.abspath(dst):\n                    shutil.move(src, dst)\n                    moved += 1\n        try:\n            os.rmdir(sub)\n        except OSError as e:\n            print('Could not remove ' + sub + ': ' + str(e), file=sys.stderr)\n\n    print('Reverted c4_reshard/: moved ' + str(moved) +\n          ' file(s) up to the top level and removed sub-directories.')\n    return 0\n\n\nif __name__ == '__main__':\n    sys.exit(main())\nPYEOF\n"
+'echo CHECK_SAMPLE; ls c4_sample | wc -l\n'
+'echo CHECK_RESHARD; find c4_reshard -type f | wc -l; ls -d c4_reshard/part_* | wc -l\n'
+'echo CHECK_MAXPER; for d in c4_reshard/part_*; do ls "$d" | wc -l; done | sort -n | tail -1; echo CHECK_MAXBYTES; find c4_reshard -type f -printf \'%s\\n\' | sort -n | tail -1\n'
+'echo CHECK_SCRIPT; ls -la /app/revert.py\n'
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+''
+'python3 -m py_compile /app/revert.py && echo SYNTAX_OK\n'
+'rm -f /app/__pycache__/revert*.pyc; rmdir /app/__pycache__ 2>/dev/null; ls -la /app/revert.py\n'
+['C-d']
+['C-d']

@@ -1,0 +1,23 @@
+{
+  "analysis": "Environment is /app with alpine.iso (1GB) and an empty-ish alpine-disk.qcow2. Tools available: qemu-system-x86_64, expect, ssh, nc. No run_vm.sh exists. The task is to boot alpine.iso in qemu, set up sshd on the VM reachable via host localhost:2222 with root/password123. The default Alpine ISO boots to a root login (no password) and historically provides a getty on ttyS0. Plan: run qemu in background with a user-mode NIC forwarding host:2222->guest:22, expose the serial console over a TCP socket, then drive login/configuration via an expect script (set password, static IP 10.0.2.15, generate host keys, enable PermitRootLogin, start sshd).",
+  "plan": "Step 1: diagnostics (kvm, nc/socat/setsid availability). Step 2: write a start_vm.sh that launches qemu detached with hostfwd tcp::2222-:22 and serial on tcp:127.0.0.1:9001. Step 3: launch it and confirm the process is alive and listening. Then in a later batch I'll write the expect setup script and run it, then verify ssh.",
+  "commands": [
+    {
+      "keystrokes": "ls -l /dev/kvm 2>&1; echo '---'; which socat nc setsid; echo '---'; nc -h 2>&1 | head -2\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /app/start_vm.sh <<'EOF'\n#!/bin/sh\nnohup setsid qemu-system-x86_64 \\\n  -m 2048 -smp 2 \\\n  -machine pc,accel=kvm:tcg \\\n  -cdrom /app/alpine.iso \\\n  -drive file=/app/alpine-disk.qcow2,if=virtio,format=qcow2 \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device virtio-net-pci,netdev=net0 \\\n  -display none \\\n  -serial tcp:127.0.0.1:9001,server,nowait \\\n  -monitor none \\\n  -pidfile /tmp/qemu.pid \\\n  </dev/null >/tmp/qemu.log 2>&1 &\necho \"started qemu pid $!\"\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "sh /app/start_vm.sh\n",
+      "duration": 0.3
+    },
+    {
+      "keystrokes": "sleep 2; echo '=== qemu.log ==='; cat /tmp/qemu.log; echo '=== ports ==='; ss -ltnp 2>/dev/null | grep -E '9001|2222'; echo '=== proc ==='; pgrep -a qemu-system\n",
+      "duration": 3.0
+    }
+  ],
+  "task_complete": false
+}

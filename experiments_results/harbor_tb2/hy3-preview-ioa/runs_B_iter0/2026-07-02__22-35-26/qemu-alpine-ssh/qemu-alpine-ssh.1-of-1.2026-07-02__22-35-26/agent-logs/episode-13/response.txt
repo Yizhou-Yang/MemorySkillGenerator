@@ -1,0 +1,30 @@
+{
+  "analysis": "The initramfs unpack keeps hitting edge-case cpio entries, but I don't actually need to fully extract it. I have what matters: extracted vmlinuz-lts + initramfs-lts, openssh-server present in the ISO's local APK cache, host internet as backup, and no /dev/kvm (TCG). The reliable plan is to boot the extracted kernel+initramfs directly with console=ttyS0, attach the ISO as -cdrom so Alpine's initramfs can find modloop/apks, expose the serial console over a TCP socket (so qemu can keep running independently of any controlling terminal), forward host port 2222 to guest ssh (22), then drive a one-shot expect script over that TCP console to set the root password and start sshd. I'll have expect log the session to a file for debugging.",
+  "plan": "1) Write /app/run_vm.sh that launches qemu in the background with: -kernel/-initrd/-append console=ttyS0, -cdrom alpine.iso, -netdev user hostfwd 2222->22, -device e1000, -serial tcp:127.0.0.1:4555,server,nowait, -display none, -monitor none. 2) Write /app/setup.exp that connects to the serial TCP socket, waits for the login prompt, logs in as root, then runs a sequence of commands (set password, bring up eth0 via DHCP, apk add openssh, ssh-keygen -A, start sshd with -o PermitRootLogin=yes -o PasswordAuthentication=yes, verify). 3) Launch qemu in background, then poll until the login prompt appears before running setup.exp. Let me first create the two scripts and start qemu.",
+  "commands": [
+    {
+      "keystrokes": "pkill -f qemu-system 2>/dev/null; sleep 1; echo cleaned\n",
+      "duration": 1.5
+    },
+    {
+      "keystrokes": "cat > /app/run_vm.sh << 'EOF'\n#!/bin/sh\ncd /app\nnohup qemu-system-x86_64 \\\n  -m 1536 -smp 1 \\\n  -kernel /app/extracted/vmlinuz_lts \\\n  -initrd /app/extracted/initramfs_lts \\\n  -append \"modules=loop,squashfs,sd-mod,usb-storage console=ttyS0 console=tty0\" \\\n  -cdrom /app/alpine.iso \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device e1000,netdev=net0 \\\n  -display none \\\n  -serial tcp:127.0.0.1:4555,server,nowait \\\n  -monitor none \\\n  > /app/qemu.log 2>&1 &\necho $! > /app/qemu.pid\necho \"qemu pid $(cat /app/qemu.pid)\"\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "cat > /app/setup.exp << 'EOF'\n#!/usr/bin/expect -f\nset timeout 600\nspawn nc 127.0.0.1 4555\nlog_file /app/serial.log\nexpect {\n  -re \"login:\" { send \"root\\r\"; exp_continue }\n  -re \"# \" { }\n  timeout { puts \"NO PROMPT\"; exit 1 }\n}\nproc run {c} {\n  send \"$c; echo __OK__\\$?\\r\"\n  expect {\n    \"__OK__\" { }\n    timeout { puts \"TIMEOUT: $c\"; exit 1 }\n  }\n}\nrun \"echo 'root:password123' | chpasswd\"\nrun \"modprobe e1000 2>/dev/null; true\"\nrun \"ip link set eth0 up\"\nrun \"udhcpc -i eth0 -t 10 -n\"\nrun \"apk add openssh\"\nrun \"ssh-keygen -A\"\nrun \"/usr/sbin/sshd -o PermitRootLogin=yes -o PasswordAuthentication=yes\"\nrun \"ip -4 addr show eth0\"\nrun \"ss -ltn 2>/dev/null | grep ':22 '\"\nputs \"SETUP_COMPLETE\"\nexit 0\nEOF\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "chmod +x /app/run_vm.sh /app/setup.exp\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "sh /app/run_vm.sh\n",
+      "duration": 1.0
+    },
+    {
+      "keystrokes": "sleep 2; cat /app/qemu.log; echo '--- pid ---'; cat /app/qemu.pid\n",
+      "duration": 3.0
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "analysis": "Critical clue: `import torch` was Terminated at 60s but only consumed 3.5s user + 0.7s sys CPU. So it is NOT CPU-bound — it is blocked waiting on something (I/O, a lock, or a network call) for the entire 60s. This is why `import mteb` never completes. I need to find where torch import is blocked. I'll force a faulthandler traceback to see the blocking call.",
+  "plan": "Run `import torch` under `python3 -X faulthandler` and send SIGABRT after 20s. faulthandler will dump the Python traceback of the blocked main thread, revealing where it hangs. Then I can address the root cause.",
+  "commands": [
+    {
+      "keystrokes": "timeout -s SIGABRT 20 python3 -X faulthandler -c \"import torch; print('loaded')\" 2>&1 | tail -30\n",
+      "duration": 22.0
+    }
+  ]
+}

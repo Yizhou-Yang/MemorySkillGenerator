@@ -1,0 +1,47 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+"cat /etc/os-release | head -3; echo '==='; which git nginx sshd openssl ssh-keygen; echo '==='; ls /etc/nginx 2>/dev/null; echo '==='; id git 2>/dev/null\n"
+"useradd -m -s /bin/bash git 2>/dev/null || echo 'git exists'\n"
+"echo 'git:password' | chpasswd\n"
+"sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config; grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config\n"
+'ssh-keygen -A\n'
+"mkdir -p /run/sshd; /usr/sbin/sshd; sleep 1; ss -tlnp | grep ':22' || netstat -tlnp 2>/dev/null | grep ':22'\n"
+'mkdir -p /git && git init --bare /git/project\n'
+'cat > /git/project/hooks/post-receive << \'EOF\'\n#!/bin/bash\nunset GIT_DIR\nwhile read oldrev newrev refname; do\n    branch="${refname#refs/heads/}"\n    case "$branch" in\n        main) target=/var/www/html ;;\n        dev)  target=/var/www/html/dev ;;\n        *) continue ;;\n    esac\n    mkdir -p "$target"\n    git --git-dir=/git/project archive "$branch" | tar -x -C "$target"\ndone\nEOF\n'
+'chmod +x /git/project/hooks/post-receive && chown -R git:git /git/project && mkdir -p /var/www/html && chown -R git:git /var/www/html\n'
+'cat /git/project/hooks/post-receive\n'
+'grep -nE "include|conf.d|sites-enabled" /etc/nginx/nginx.conf\n'
+'mkdir -p /etc/nginx/ssl && openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -days 3650 -subj "/CN=localhost" 2>&1 | tail -2\n'
+"cat > /etc/nginx/conf.d/git.conf << 'EOF'\nserver {\n    listen 8443 ssl;\n    listen [::]:8443 ssl;\n    server_name localhost;\n    ssl_certificate /etc/nginx/ssl/cert.pem;\n    ssl_certificate_key /etc/nginx/ssl/key.pem;\n    root /var/www/html;\n    index index.html;\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}\nEOF\n"
+'nginx -t\n'
+"grep -rn '8443' /etc/nginx/conf.d /etc/nginx/sites-enabled 2>/dev/null\n"
+"nginx; sleep 1; curl -sk https://localhost:8443/ -o /dev/null -w '%{http_code}\\n'\n"
+'which sshpass expect; echo done\n'
+'su - git -c \'git config --global user.email t@t; git config --global user.name t; git config --global core.sshCommand "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"; mkdir -p ~/t && cd ~/t && git init -q && git checkout -q -b main && echo MAIN > index.html && git add . && git commit -qm m1 && git push ssh://git@localhost/git/project main 2>&1 | tail -5\' \n'
+'cat > /tmp/push.exp << \'EOF\'\n#!/usr/bin/expect -f\nset timeout 30\nset repo [lindex $argv 0]\nspawn git push ssh://git@localhost/git/project $repo\nexpect {\n  -re "(?i)password:" { send "password\\r"; exp_continue }\n  eof\n}\nEOF\nchmod +x /tmp/push.exp\n'
+"su - git -c 'cd ~/t && expect /tmp/push.exp main 2>&1 | tail -8'\n"
+'which git-shell; chsh -s "$(which git-shell)" git; getent passwd git\n'
+"su - git -c 'cd ~/t && expect /tmp/push.exp main 2>&1 | tail -8'\n"
+"echo /usr/bin/git-shell >> /etc/shells; grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config; sed -i 's/^#*PrintMotd.*/PrintMotd no/' /etc/ssh/sshd_config; grep -q '^PrintMotd no' /etc/ssh/sshd_config || echo 'PrintMotd no' >> /etc/ssh/sshd_config\n"
+"pkill -f /usr/sbin/sshd; sleep 1; /usr/sbin/sshd; sleep 1; netstat -tlnp 2>/dev/null | grep ':22'\n"
+'export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"; cd /home/git/t && expect /tmp/push.exp main 2>&1 | tail -8\n'
+'git config --global --add safe.directory /home/git/t; expect /tmp/push.exp main 2>&1 | tail -8\n'
+"grep -n pam_motd /etc/pam.d/sshd; echo '---'; grep -n -i banner /etc/ssh/sshd_config; echo '---'; head -3 /etc/motd 2>/dev/null\n"
+"sed -i 's/^session.*pam_motd.so/# &/' /etc/pam.d/sshd; grep -n pam_motd /etc/pam.d/sshd\n"
+"pkill -f /usr/sbin/sshd; sleep 1; /usr/sbin/sshd; sleep 1; netstat -tlnp 2>/dev/null | grep ':22'\n"
+'expect /tmp/push.exp main 2>&1 | tail -8\n'
+"su - git -s /bin/bash -c 'echo PATH=$PATH; which git-receive-pack git-shell'\n"
+'su - git -s /bin/bash -c \'git-shell -c "git-receive-pack /git/project" < /dev/null; echo EXIT=$?\'\n'
+"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -v' expect /tmp/push.exp main 2>&1 | tail -25\n"
+'chsh -s /bin/bash git; getent passwd git\n'
+"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' expect /tmp/push.exp main 2>&1 | tail -20\n"
+"ls -la /git /git/project; echo '---'; stat -c '%U:%G %a %n' /git/project /git/project/HEAD\n"
+'cat > /tmp/diag.exp << \'EOF\'\n#!/usr/bin/expect -f\nset timeout 30\nspawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost "git-receive-pack /git/project"\nexpect {\n  -re "(?i)password:" { send "password\\r"; exp_continue }\n  eof\n}\nEOF\nchmod +x /tmp/diag.exp; expect /tmp/diag.exp 2>&1 | tail -20\n'
+"ls -la /git/project/refs/heads 2>/dev/null; echo '==WWW=='; cat /var/www/html/index.html 2>/dev/null; echo '==END=='\n"
+'cat > /tmp/diag2.exp << \'EOF\'\n#!/usr/bin/expect -f\nset timeout 20\nspawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null git@localhost "git-receive-pack \'/git/project\'"\nexpect {\n  -re "(?i)password:" { send "password\\r"; exp_continue }\n  eof\n}\nEOF\nchmod +x /tmp/diag2.exp; expect /tmp/diag2.exp 2>&1 | cat -v | head -20\n'
+"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' expect /tmp/push.exp main > /tmp/push.log 2>&1; cat /tmp/push.log\n"
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']

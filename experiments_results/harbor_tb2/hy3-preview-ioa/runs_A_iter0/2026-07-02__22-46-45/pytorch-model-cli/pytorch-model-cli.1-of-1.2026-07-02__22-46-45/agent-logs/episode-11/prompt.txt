@@ -1,0 +1,78 @@
+Previous response had warnings:
+WARNINGS: - Extra text detected before JSON object
+
+New Terminal Output:
+
+root@8f1cad3dd2eb:/app# cat > /app/test_pp.py << 'PYEOF'
+> import json, struct, zlib
+>
+> with open('/app/weights.json') as f:
+>     W = json.load(f)
+>
+> def load_png(path):
+>     with open(path,'rb') as f:
+>         data=f.read()
+>     assert data[:8]==b'\x89PNG\r\n\x1a\n'
+>     pos=8; w=h=bd=ct=None
+>     idat=b''
+>     while pos < len(data):
+>         ln=struct.unpack('>I', data[pos:pos+4])[0]
+>         typ=data[pos+4:pos+8]
+>         chunk=data[pos+8:pos+8+ln]
+>         if typ==b'IHDR':
+>             w,h,bd,ct=struct.unpack('>IIBB', chunk[:10])
+>         elif typ==b'IDAT':
+>             idat+=chunk
+>         elif typ==b'IEND':
+>             break
+>         pos+=12+ln
+>     raw=zlib.decompress(idat)
+>     # grayscale 8-bit, ct=0, bd=8
+>     stride=w
+>     out=[]
+>     p=0
+>     for y in range(h):
+>         flt=raw[p]; p+=1
+>         line=raw[p:p+stride]; p+=stride
+>         row=list(line)
+>         out.append(row)
+>     return w,h,out
+>
+> w,h,rows=load_png('/app/image.png')
+> print('img',w,h)
+> pix=[rows[y][x] for y in range(h) for x in range(w)]
+>
+> def matvec(W,b,x):
+>     n=len(b); m=len(W[0])
+>     return [sum(W[i][j]*x[j] for j in range(m))+b[i] for i in range(n)]
+>
+> def relu(v):
+>     return [max(0.0,vv) for vv in v]
+>
+> def predict(x):
+>     h1=relu(matvec(W['input_layer.weight'],W['input_layer.bias'],x))
+>     h2=relu(matvec(W['hidden_layer.weight'],W['hidden_layer.bias'],h1))
+>     o=matvec(W['output_layer.weight'],W['output_layer.bias'],h2)
+>     return max(range(len(o)), key=lambda i:o[i]), o
+>
+> # preprocessing A: /255
+> xa=[p/255.0 for p in pix]
+> print('A /255 digit', predict(xa)[0])
+> # preprocessing B: normalize
+> xb=[(p/255.0-0.1307)/0.3081 for p in pix]
+> print('B norm  digit', predict(xb)[0])
+> PYEOF
+root@8f1cad3dd2eb:/app# python3 /app/test_pp.py
+img 28 28
+Traceback (most recent call last):
+  File "/app/test_pp.py", line 54, in <module>
+    print('A /255 digit', predict(xa)[0])
+                          ~~~~~~~^^^^
+  File "/app/test_pp.py", line 47, in predict
+    h1=relu(matvec(W['input_layer.weight'],W['input_layer.bias'],x))
+            ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/test_pp.py", line 40, in matvec
+    n=len(b); m=len(W[0])
+                    ~^^^
+KeyError: 0
+root@8f1cad3dd2eb:/app#

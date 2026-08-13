@@ -1,0 +1,25 @@
+New Terminal Output:
+
+root@4758e662acd5:/app# cat > /app/explore4.py << 'EOF'
+> import numpy as np, io
+> from scipy.ndimage import uniform_filter1d
+> with open('/app/graphene.dat') as f:
+>     txt = f.read().replace(',', '.')
+> data = np.loadtxt(io.StringIO(txt))
+> x = data[:,0]; y = data[:,1]
+> if x[0] > x[-1]:
+>     x = x[::-1]; y = y[::-1]
+> s = uniform_filter1d(y, size=25)
+> gmax = s.max()
+> print('global smoothed max', gmax, 'at x', x[np.argmax(s)])
+> peaks=[]
+> for i in range(2, len(s)-2):
+>     if s[i]>s[i-1] and s[i]>=s[i+1] and s[i] > 0.3*gmax:
+>         peaks.append((x[i], s[i], y[i]))
+> peaks.sort()
+> print('significant peaks (x, smoothed_y, raw_y):')
+> for xi, si, yi in peaks:
+>     print(f'  x={xi:9.2f}  sy={si:9.2f}  ry={yi:9.2f}')
+> EOF
+root@4758e662acd5:/app# python3 /app/explore4.py
+

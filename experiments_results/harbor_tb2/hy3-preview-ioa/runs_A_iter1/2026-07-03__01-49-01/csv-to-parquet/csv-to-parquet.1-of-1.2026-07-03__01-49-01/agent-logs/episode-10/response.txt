@@ -1,0 +1,12 @@
+The schema and row-group parsed correctly, but reading the first page header threw `ttype 4` (I16). That means the `offset` I'm reading at isn't the real page start — I need to see what `col[1]` actually is. Let me debug empirically.
+
+{
+  "analysis": "The verify tool parsed the footer (schema + row group) correctly, but failed reading the first PageHeader with 'unknown ttype 4' (I16). Since my encoder never writes I16, the reader must be reading at the wrong offset (col[1] is not the real page start) or the page-header bytes are off. I need to inspect col[1] and the raw bytes at that offset to find the real bug.",
+  "plan": "Run a debug snippet that reuses the footer parser and prints, for the first column, col[1] (file_offset) and the hex bytes at that offset plus a manual walk of the PageHeader. This will reveal why read_struct sees an I16.",
+  "commands": [
+    {
+      "keystrokes": "cat > /app/dbg.py << 'PYEOF'\nimport struct\nfrom verify import read_struct, read_uv, read_zv\nwith open('/app/data.parquet','rb') as f:\n    data=f.read()\nfooter_len=int.from_bytes(data[-8:-4],'little')\nfooter=data[len(data)-8-footer_len:len(data)-8]\nfm,_=read_struct(footer,0)\nrg=fm[4][0]\ncols=rg[1]\nfor i,c in enumerate(cols):\n    print('col',i,'file_offset=',c.get(1),'meta_keys=',sorted(c.get(2,{}).keys()))\n    off=c.get(1)\n    print('  bytes at off:', data[off:off+16].hex())\nPYEOF\npython3 /app/dbg.py\n",
+      "duration": 1.0
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+The blocker is `astropy/wcs/setup_package.py` importing `setuptools.dep_util`, removed from modern setuptools. I can patch that import to use stdlib `distutils.dep_util` just to be able to build the extensions for verification.
+
+{
+  "analysis": "The in-place build fails because `astropy/wcs/setup_package.py` (only used during build) imports `setuptools.dep_util`, which no longer exists. This is a build-helper import, not needed for the modeling fix itself. For local verification I'll patch that import to use the stdlib `distutils.dep_util`, build the extensions, then verify the fix. The actual fix (separable.py) is already correct.",
+  "plan": "Temporarily patch `astropy/wcs/setup_package.py` to import `newer_group` from `distutils.dep_util`, then run the in-place extension build. After that, verify the fix with the reproduction script and run the separable test suite.",
+  "commands": [
+    {
+      "keystrokes": "sed -i 's/from setuptools.dep_util import newer_group/from distutils.dep_util import newer_group/' astropy/wcs/setup_package.py\n",
+      "duration": 0.2
+    },
+    {
+      "keystrokes": "grep -n 'dep_util' astropy/wcs/setup_package.py\n",
+      "duration": 0.1
+    },
+    {
+      "keystrokes": "python setup.py build_ext --inplace 2>&1 | tail -15\n",
+      "duration": 60.0
+    }
+  ]
+}
