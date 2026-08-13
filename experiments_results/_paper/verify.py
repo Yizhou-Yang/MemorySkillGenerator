@@ -157,6 +157,7 @@ CELLS = [
     ("tab:main GAIA2/DS Patched", 36.72, PAPER+"gaia2/deepseek-v4/patched.jsonl", "raw_patch", 2, "score"),
     ("tab:main GAIA2/DS A-Mem", 33.65, PAPER+"gaia2/deepseek-v4/amem.jsonl", "amem", 2, "score"),
     ("tab:main GAIA2/DS Mem0", 37.09, PAPER+"gaia2/deepseek-v4/mem0.jsonl", "mem0", 2, "score"),
+    ("tab:main GAIA2/DS        CuratorMem", 53.42, PAPER+"gaia2/deepseek-v4/curatormem.jsonl", "curated_patch", 2, "score"),
 
     ("tab:main LoCoMo/DS Raw", 22.40, PAPER+"locomo/deepseek-v4/raw.jsonl", "no_mem", 2, "score"),
     ("tab:main LoCoMo/DS Patched", 28.40, PAPER+"locomo/deepseek-v4/patched.jsonl", "raw_patch", 2, "score"),
