@@ -93,6 +93,73 @@ def _load_mem(state: str):
     return _MEM_CACHE["mem"]
 
 
+# Ceiling on what any arm may put in a prompt. Blocks grow with the store, and
+# on a small-context backbone an oversized one kills the arm instead of just
+# crowding the prompt.
+_BLOCK_MAX_CH = int(os.environ.get("MEM_BLOCK_MAX_CH", "10000"))
+
+_INJ_COUNT = [0]
+
+
+def _msg_role_content(m):
+    """(role, content) from a pydantic Message or a plain dict."""
+    if isinstance(m, dict):
+        return m.get("role"), m.get("content")
+    return getattr(m, "role", None), getattr(m, "content", None)
+
+
+def _state_user_texts(state, incoming):
+    """(opening user message, all user turns) from an LLMAgentState.
+
+    The wrapper runs before the base method appends `incoming`, so on the first
+    turn state.messages is empty and the opener IS the incoming message.
+    """
+    parts = []
+    for m in list(getattr(state, "messages", None) or []):
+        role, content = _msg_role_content(m)
+        if role == "user" and isinstance(content, str) and content.strip():
+            parts.append(content)
+    role, content = _msg_role_content(incoming)
+    if role == "user" and isinstance(content, str) and content.strip():
+        parts.append(content)
+    if not parts:
+        return "", ""
+    return parts[0][:2000], "\n".join(parts)[:2000]
+
+
+def _prefix_state_system(state, block: str) -> None:
+    """Prepend `block` to the state's system message, idempotently."""
+    sys_msgs = getattr(state, "system_messages", None)
+    if sys_msgs is None:
+        return
+    for m in sys_msgs:
+        role, content = _msg_role_content(m)
+        if role == "system" and isinstance(content, str):
+            if any(mk in content for mk in _MARKERS):
+                return
+            new = f"{block}\n\n---\n\n{content}"
+            if isinstance(m, dict):
+                m["content"] = new
+            else:
+                try:
+                    object.__setattr__(m, "content", new)
+                except Exception:
+                    m.content = new
+            _INJ_COUNT[0] += 1
+            if _INJ_COUNT[0] == 1 or _INJ_COUNT[0] % 25 == 0:
+                print(f"[CuratedTau2Agent] injected {_INJ_COUNT[0]} blocks "
+                      f"(latest {len(block)} chars)", flush=True)
+            return
+    # no system message to extend: add one carrying just the block
+    if sys_msgs and not isinstance(sys_msgs[0], dict):
+        try:
+            sys_msgs.insert(0, type(sys_msgs[0])(role="system", content=block))
+            return
+        except Exception:
+            pass
+    sys_msgs.insert(0, {"role": "system", "content": block})
+
+
 def _inject_block(opening_text: str, query_text: str) -> str:
     """Arm-gated memory block for the current scenario (read-only on the store).
 
@@ -114,7 +181,10 @@ def _inject_block(opening_text: str, query_text: str) -> str:
         key = _task_key(opening_text)
         task = {"task_id": key, "description": query_text or opening_text,
                 "metadata": {"chain_id": key}}
-        return mem.inject(task) or ""
+        _blk = mem.inject(task) or ""
+        if len(_blk) > _BLOCK_MAX_CH:
+            _blk = _blk[:_BLOCK_MAX_CH] + "\n[block truncated]"
+        return _blk
     except Exception as e:  # never break the official agent over memory I/O
         print(f"[CuratedTau2Agent] inject skipped: {type(e).__name__}: {e}", flush=True)
         return ""
@@ -171,11 +241,25 @@ class CuratedTau2Agent(_BaseAgent):
             if isinstance(v, list) and v and isinstance(v[0], dict) and "role" in v[0]:
                 msgs = v
                 break
-        if msgs is None:
+        if msgs is not None:
+            block = _inject_block(*_user_texts(msgs))
+            if block:
+                _prefix_system(msgs, block)
             return
-        block = _inject_block(*_user_texts(msgs))
+        # The pinned tau2 calls generate_next_message(message, state) and never
+        # passes raw dicts, so the search above finds nothing. Read the transcript
+        # off the state instead and prefix the state's system message.
+        state = incoming = None
+        for v in list(args) + list(kwargs.values()):
+            if hasattr(v, "messages") and hasattr(v, "system_messages"):
+                state = v
+            elif _msg_role_content(v)[0] is not None:
+                incoming = v
+        if state is None:
+            return
+        block = _inject_block(*_state_user_texts(state, incoming))
         if block:
-            _prefix_system(msgs, block)
+            _prefix_state_system(state, block)
 
 
 def _make_wrapper(method_name: str):
