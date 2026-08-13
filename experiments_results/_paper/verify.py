@@ -127,6 +127,7 @@ CELLS = [
     ("tab:main tau2/DS Patched", 77.50, PAPER+"tau2/deepseek-v4/patched.jsonl", "raw_patch", 2, "score"),
     ("tab:main tau2/DS A-Mem", 73.75, PAPER+"tau2/deepseek-v4/amem.jsonl", "amem", 2, "score"),
     ("tab:main tau2/DS Mem0", 82.50, PAPER+"tau2/deepseek-v4/mem0.jsonl", "mem0", 2, "score"),
+    ("tab:main tau2/DS          CuratorMem", 86.25, PAPER+"tau2/deepseek-v4/curatormem.jsonl", "curated_patch", 2, "score"),
 
     # -- The DeepSeek rows. These were printed in the table for weeks without a
     #    single entry here, which is precisely the hole this file exists to close:
