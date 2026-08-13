@@ -16,15 +16,17 @@ and the `trace.jsonl` files themselves).
 
 Every benchmark is run under three **arms** (the `group` field in each trace row):
 
-| Arm | Trace key¹ | What it does |
-|-----|-----------|--------------|
-| **A** | `A_baseline` | No memory. The plain agent. This is the control. |
-| **B** | `B_evomem` | **Raw patch memory.** Injects the raw record of what worked on *earlier iterations of the same task* (chain-scoped), verbatim. |
-| **C** | `C_gpr` | **Curated patch memory** (the method under test). Same patches as B, but each is refined (generalized + a causal lesson), scored by an independent critic, low-quality ones enriched rather than dropped, retrieval is effectiveness-weighted, and failed attempts contribute an "avoid this" channel. |
+| Arm | `group` in the trace | What it does |
+|-----|--------------------|--------------|
+| **A** | `no_mem` | No memory. The plain agent. This is the control. |
+| **B** | `raw_patch` | **Raw patch memory.** Injects the raw record of what worked on *earlier iterations of the same task* (chain-scoped), verbatim. |
+| **C** | `curated_patch` | **Curated patch memory** (the method under test). Same patches as B, but each is refined (generalized + a causal lesson), scored by an independent critic, low-quality ones enriched rather than dropped, retrieval is effectiveness-weighted, and failed attempts contribute an "avoid this" channel. |
+| — | `amem` / `mem0` | The two external memory layers, run behind the same record/inject interface. |
 
-¹ Trace keys are **legacy code identifiers** and are on the rename list — read
-`A_baseline`/`B_evomem`/`C_gpr` as simply **A/B/C**. (Some older frozen snapshots
-use `B_evoarena`/`C_skillforge` for B/C — same meaning.)
+Snapshots archived before the rename carry `A_baseline`/`B_evomem`/`C_gpr` (and
+older still, `B_evoarena`/`C_skillforge`). `scripts/latest/analyze_results.py`
+maps every one of them onto the names above on read, so a mixed directory still
+aggregates correctly.
 
 **The claim being tested is C > B** (curation beats raw patches), with B > A as a
 secondary check (memory beats no-memory). A run that cannot cleanly compare C

@@ -48,36 +48,24 @@ class SkillForgeLatest:
         exp = analyze_execution(task_id, task_desc, agent_actions, oracle_actions,
                                 token_cost=token_cost, time_cost=time_cost,
                                 augmentation_used=augmentation_used)
-        # Override the action-overlap score with the real task score when known
-        # (benchmarks like GAIA/LoCoMo are graded on the final answer, not an
-        # oracle action trace — without this every experience looks like a
-        # "failure" and refinement frames the wrong lesson). Must run BEFORE
-        # ai_review so the refined lesson and the critic see the true outcome.
+        # Override the action-overlap score with the real task score when known.
+        # Must run BEFORE ai_review so the lesson and critic see the true outcome.
         if score is not None:
             exp.score = float(score)
             exp.outcome = ("success" if exp.score >= 0.8
                            else "partial" if exp.score >= 0.4 else "failure")
-        # Provenance of the score this entry carries — the store's one honest
-        # record of whether its own evidence is grounded or asserted. "gold"/"env"
-        # come from the benchmark's scorer or executed tests; "self_assessment" is
-        # the backbone grading its own attempt, which on a weak backbone endorses
-        # its own failures 90% of the time (Llama-3.3-70B on GAIA, vs 36% for
-        # DeepSeek-v4-pro). Without this field the store cannot tell the two apart
-        # and selection silently trusts an opinion as if it were a measurement.
-        # Falls back to the oracle-action overlap that analyze_execution computes.
+        # Score provenance: "gold"/"env" are measured, "self_assessment" is the
+        # backbone grading itself. Selection must not treat the two alike.
         exp.revision_trigger = (score_provenance
                                 or ("oracle_overlap" if score is None else "unknown"))
         exp.is_error_patch = bool(exp.outcome == "failure")
-        # Attach reasoning trace from response_filter (AI-evaluated valuable reasoning)
         if reasoning_trace:
             exp.reasoning_trace = reasoning_trace
-        # Attach EvoMem-style within-task intermediate state patches
         if intermediate_states:
             exp.intermediate_states = intermediate_states
         if baseline_score is not None and augmentation_used:
             exp.augmentation_helped = exp.score > baseline_score
 
-        # Version history — find previous attempts at same/similar task
         prev = self._find_previous_versions(task_id, task_desc)
         if prev:
             latest = prev[-1]
@@ -92,10 +80,8 @@ class SkillForgeLatest:
                 "new_missing": [s for s in exp.missing_steps if s not in latest.missing_steps],
             }]
 
-        # AI refinement — the narrative metadata below is authored by whoever
-        # holds the reviewer pen (llm_metadata_fn: HY3 under METADATA_AUTHOR=
-        # critic, the backbone under =backbone). Stamp the author on the entry
-        # so a store mixing the two can never pass for one mechanism.
+        # Stamp the metadata author (METADATA_AUTHOR=critic|backbone) so a store
+        # mixing the two can never pass for one mechanism.
         try:
             from scripts.latest.llm_client import metadata_author_id
         except ImportError:
@@ -121,19 +107,16 @@ class SkillForgeLatest:
                 for p in exp.patch_history if p.get("fixed_missing") or p.get("score_delta", 0) > 0
             ]
 
-        # Cross-agent critic: ALWAYS evaluate, low-score triggers forced refine (never discard)
+        # Critic always evaluates; a low score forces refinement, never a discard.
         if critic_fn is not None:
             from .refine import cross_agent_evaluate_skill, critic_refine_experience
             verdict = cross_agent_evaluate_skill(exp, llm_fn=critic_fn)
             exp.failure_taxonomy["critic_quality"] = verdict.get("total", 5)
-            # External critic's judgment of the OUTCOME itself (correct/wrong/
-            # unsure, no reference answer). The repair gate reads this instead
-            # of the actor's self-assessment — self never carries weight.
+            # The repair gate reads this verdict, never the actor's self-assessment.
             exp.failure_taxonomy["critic_outcome_verdict"] = \
                 str(verdict.get("outcome_verdict", "unsure")).lower()
             exp.failure_taxonomy["critic_verdict"] = verdict.get("verdict", "inject")
 
-            # Low quality OR noise/info-loss detected → forced refine/expand (never discard).
             # `enrich` gates this stage so the ablation can run "+critic, no enrich".
             if enrich and (verdict.get("total", 5) < critic_threshold or verdict.get("verdict") == "low_confidence"):
                 refinement = critic_refine_experience(exp, verdict, llm_fn=critic_fn)
@@ -159,7 +142,6 @@ class SkillForgeLatest:
                     if len(enhanced_transfer) > len(existing_transfer):
                         exp.failure_taxonomy["transferability"] = enhanced_transfer
 
-                    # Add new fields (recovery strategies, preconditions)
                     if refinement.get("recovery_strategies"):
                         exp.failure_taxonomy["recovery_strategies"] = refinement["recovery_strategies"]
                     if refinement.get("preconditions"):
@@ -172,10 +154,8 @@ class SkillForgeLatest:
         return exp
 
     def _find_previous_versions(self, task_id: str, task_desc: str) -> list[Experience]:
-        # Version history is CHAIN-SCOPED: same task_id only. The old >0.7
-        # word-overlap fallback could attach a *different* task's history and
-        # contaminate the refiner's "evolution" context (audit item). Our chains
-        # always share task_id (iteration variants keep it), so exact is enough.
+        # CHAIN-SCOPED: exact task_id only. A word-overlap fallback would attach a
+        # different task's history and contaminate the refiner's evolution context.
         exact = [e for e in self.library.experiences if e.task_id == task_id]
         return sorted(exact, key=lambda e: e.version) if exact else []
 

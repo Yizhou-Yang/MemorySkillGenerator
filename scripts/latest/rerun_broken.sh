@@ -10,7 +10,7 @@
 #        - gaia2 : B_evomem + C_gpr (dataset /tmp failure) -> keep A (A had 0
 #                  errors and no memory, so it stays valid under the same data)
 #        - locomo: B_evomem (0-injection bug, now fixed)    -> keep A + C
-#      gaia and terminal_bench_2 are left as-is: RESUME continues them, and the
+#      gaia is left as-is: RESUME continues it, and the
 #      fix is a no-op on GAIA (its short-question path already injected).
 #   3. Launches latest_runner.py with RESUME=1 and a persistent GAIA2_SCENARIO_DIR.
 #
@@ -77,7 +77,7 @@ def clean(bench, drop_groups, keep_note):
     print(f"  {bench:18s} dropped {removed:4d} {sorted(drop_groups)} | kept {len(kept)} ({keep_note})")
 clean("gaia2", {"B_evomem", "C_gpr"}, "A only")
 clean("locomo", {"B_evomem"}, "A + C")
-print("  gaia / terminal_bench_2: untouched (RESUME continues them)")
+print("  gaia: untouched (RESUME continues it)")
 PY
 
 # 3) relaunch (background, resumes everything not dropped)

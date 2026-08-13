@@ -1,22 +1,10 @@
 """Runner-level A/B/C memory bridge — the paper's three arms, made uniform.
 
-  A  Vanilla  : no memory.
-  B  PatchMem : naive cross-task patch memory — accumulate a patch per finished
-                task (its raw response), retrieve the lexically-relevant ones and
-                inject them verbatim. This is the \\patchmem baseline.
-  C  Curator  : the real curation pipeline (src.latest.SkillForgeLatest). Each
-                finished task becomes an Experience that is REFINED by an LLM
-                reviewer (causal lesson, generalized steps, avoidance note,
-                transferability) and scored by a cross-agent critic that forces
-                enrichment of weak entries (never discards). Retrieval is
-                effectiveness-weighted (score = sim x w_c). So C injects refined,
-                reusable lessons — not B's raw answers.
+  A Vanilla: no memory. B PatchMem: raw per-task patches injected verbatim.
+  C Curator: LLM-refined + critic-scored experiences, retrieval weighted sim x w_c.
 
-Both B and C use GLOBAL cross-task retrieval when a benchmark has no chain
-structure (GAIA/GAIA2/Terminal-Bench), and stay scoped to a real shared chain
-(LoCoMo sessions). The patch is recorded by the runner AFTER evaluation, with
-the task's real score, so C's effectiveness weighting and the critic see the
-true outcome.
+The runner records the patch AFTER evaluation with the task's real score, so the
+critic and effectiveness weighting see the true outcome.
 """
 from __future__ import annotations
 
@@ -27,10 +15,8 @@ import threading
 
 from .vgr import Patch, PatchMemory, render_patches_plain
 
-# Pollution guard for global cross-task retrieval: a patch must share at least
-# this much CONTENT (stopword-filtered Jaccard) with the task, else it's
-# unrelated noise and is not injected. Content-filtered (not raw token overlap)
-# because raw overlap counts stopwords — "of/the/in" alone clears a naive floor.
+# Minimum stopword-filtered Jaccard for a patch to be injected. Stopwords must
+# stay filtered: raw token overlap clears a naive floor on "of/the/in" alone.
 _SIM_FLOOR = 0.05
 _STOP = frozenset(
     "the a an to and or in on at for of with is are was were be been that this it "
@@ -63,9 +49,8 @@ def _key(task: dict) -> str:
 
 
 def _actions_from_result(result: dict) -> list[dict]:
-    """Best-effort agent action trace for analyze_execution. Uses the runner's
-    structured `actions` (GAIA2 ARE) when present, else a single synthetic
-    action carrying the final answer so the experience has content."""
+    """Best-effort agent action trace for analyze_execution: the runner's
+    structured `actions` when present, else one synthetic final-answer action."""
     acts = result.get("actions")
     if isinstance(acts, list) and acts:
         return acts
@@ -84,129 +69,126 @@ def _oracle_from_task(task: dict) -> list[dict]:
 
 
 # ── C (CuratedMemory) helpers — curate CONCRETE experiences ──────────────────
-# C's relevance gate is stricter than B's: precision matters more than recall
-# because an injected-but-irrelevant "lesson" actively misled the agent (the
-# first real run had C lose to B because retrieval was boilerplate-polluted and
-# the refined steps were [PLACEHOLDER] templates).
+# Stricter than B's floor on purpose: an injected-but-irrelevant "lesson"
+# actively misleads the agent, so precision beats recall here.
 _C_SIM_FLOOR = 0.08
-# C's retrieval channels are driven by DEPLOYABLE signals only (no gold, no
-# absolute self-score threshold — self-eval is optimistic and 0.5-gating stopped
-# filtering anything under ITER_FEEDBACK=self):
-#   primary channel  = critic-approved entries (critic_quality >= gate) that are
-#                      the chain's best self-assessed attempt so far (relative
-#                      rank, which LLM judges do far more reliably than absolute
-#                      scores);
-#   avoidance channel= everything else with a usable note (worse-than-best
-#                      attempts and critic-rejected entries).
 _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
-# C_META=1 — metadata-grounded curation. The ✓ channel normally gates on
-# _critic_q >= gate AND self-assessed score >= best. Both are the backbone
-# grading its own work, and under ITER_FEEDBACK=self so is w_c, since its deltas
-# come from that same self-assessment. That is the whole failure mode: on GAIA,
-# 90% of Llama-3.3-70B's endorsements sit on a chain whose previous iteration was
-# in fact wrong (36% for DeepSeek-v4-pro), and C−B tracks backbone strength
-# (+6.0 / -3.0 / -3.0 at no-memory 45.0 / 13.0 / 6.0).
-#
-# C_META selects on what the store knows WITHOUT asking any model, and that a
-# deployed agent still has (no oracle, no gold score): version lineage (a later
-# version superseded an earlier one) and the execution record (which tool calls
-# actually changed). w_c joins only when its provenance is grounded. The rendered
-# block drops the ✓/quality/self-assessed markers, so no unverified endorsement
-# of a wrong attempt reaches the model.
 _C_META = os.environ.get("C_META", "0") == "1"
 _SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
                      else os.environ.get("ITER_FEEDBACK", "gold"))
-# w_c accumulates the paired outcome delta an entry produced when served. That is
-# a measurement only when the delta came from the benchmark's scorer; under
-# ITER_FEEDBACK=self it came from the backbone grading its own attempt, and using
-# it then would launder an opinion as evidence — exactly what C_META exists to
-# stop. So w_c participates only when its provenance is grounded.
+# w_c may only be read when its deltas came from a real scorer; a self-assessed
+# delta is an opinion and must never be laundered into evidence.
 _WC_IS_GROUNDED = _SCORE_PROVENANCE in ("gold", "env")
-# C_POLICY picks how arm C decides what to endorse:
-#   judgment — legacy: critic's own score + actor self-assessment gate the ✓.
-#              Measured at 90% false endorsement on Llama-3.3-70B.
+# How arm C decides what to endorse:
+#   judgment — critic score + actor self-assessment gate the ✓ (legacy).
 #   meta     — selection/rendering use only store metadata; nothing endorsed.
-#   guarded  — judgment proposes, metadata disposes: the critic still writes
-#              refined content, but a ✓ needs a SECOND independent key — a
-#              grounded outcome score (provenance gold/env) or an EXTERNAL
-#              critic. Self-assessment alone can never endorse. Ungated entries
-#              render neutrally instead of being dropped, so coverage holds.
+#   guarded  — a ✓ needs a SECOND independent key (grounded score or EXTERNAL
+#              critic); ungated entries render neutrally rather than dropping.
+# guarded is the method; judgment is the refuted control it is measured against
+# (the actor's own "self-assessed 100%" endorsing its own attempt) and is kept
+# only so the ablation row that reports its failure stays reproducible. It is
+# never the default: reaching it requires asking for it by name.
 _C_POLICY = (os.environ.get("C_POLICY")
-             or ("meta" if _C_META else "judgment")).strip().lower()
+             or ("meta" if _C_META else "guarded")).strip().lower()
 if _C_POLICY not in ("judgment", "meta", "guarded"):
-    _C_POLICY = "judgment"
+    _C_POLICY = "guarded"
 _C_META = _C_POLICY == "meta"
-# External critic: CRITIC_MODEL set AND different from the acting backbone —
-# critic==actor is self-judgment wearing a second hat, not a second key.
-_CRITIC_RAW = (os.environ.get("CRITIC_MODEL") or "").strip().lower()
+# A critic equal to the acting backbone is self-judgment in a second hat, not a
+# second key — external requires CRITIC_MODEL set AND different.
+# CRITIC_MODEL_ID is what llm_client and the runners set; accept both so the
+# second key is not silently absent because two names drifted apart.
+_CRITIC_RAW = (os.environ.get("CRITIC_MODEL")
+               or os.environ.get("CRITIC_MODEL_ID") or "").strip().lower()
 _BACKBONE_ID = (os.environ.get("CODEBUDDY_MODEL") or "").strip().lower()
 _CRITIC_IS_EXTERNAL = bool(_CRITIC_RAW) and _CRITIC_RAW != _BACKBONE_ID
-# Injection-dose control — a FIRST-CLASS mechanism of the frozen method (v-final,
-# 2026-07-03): C's rendered block is capped at ~the raw baseline's measured dose
-# (B ≈ 900ch on gaia/gaia2), entries dropped whole from the tail. Evidence: on
-# gaia2 an unbudgeted C injected ~1.6x B's block and scored BELOW its own
-# not-injected tasks (C−B significantly negative), while content quality alone
-# was ~neutral across two backbones — the dose, not the content, was the harm.
-# Dose-matching C to B also removes the block-size confound from C−B: what
-# remains is purely WHAT is injected. Set 0 to disable (legacy), or override
-# per ablation arm (C_small_inject=500).
+# Injection dose cap in chars — a first-class mechanism, not a safety valve: an
+# unbudgeted C block (~1.6x B's) measurably HURT accuracy, and dose-matching C to
+# B is what removes the block-size confound from C−B. 0 disables.
 _C_INJECT_BUDGET = int(os.environ.get("C_INJECT_BUDGET_CH", "900"))
-# Weak-compaction knob (ablation arm C_weak_compact, NOT part of the frozen
-# method — default off): C_PAGE_KEEP=n makes retrieval see only the newest n
-# same-chain entries, a MemoryOS-style paging of older ones out of the read
-# path. The store itself is untouched (paging is reversible, unlike eviction),
-# so this isolates exactly what the append-only read path buys: the paper's
-# compaction row compares n=2 against the default n=inf. Read dynamically so
-# the ablation driver can set it per-arm without reimport.
+def _action_cap() -> int:
+    """How many characters of action sequence a rendered entry may carry.
+
+    On an action-scored benchmark the action list is the payload, not a
+    decoration on the answer text, so it gets the bulk of the per-entry budget
+    rather than a fixed slice. The floor keeps behaviour sane if the budget is
+    set very low.
+    """
+    try:
+        return max(200, int(_C_INJECT_BUDGET * 0.6))
+    except Exception:
+        return 200
+# Lean rendering. The dose budget counts the whole block, so on gpt-oss/LoCoMo
+# 74% of C's 851 characters were scaffolding -- headers, a Task: line restating
+# the prompt the agent is already reading, and a lineage listing v1 -> v2 --
+# against 3% for A-Mem and 5% for the raw store, both of which beat C there. A
+# weak backbone cannot act on an abstracted lesson; it needs text it can carry
+# over. Off by default so already-collected arms keep their rendering.
+# An outcome that carries role-tagged turns is a conversation, not an answer.
+# Injecting one verbatim teaches the agent to replay the dialogue.
+_IS_TRANSCRIPT = _re_transcript = __import__("re").compile(
+    r"^\s*(assistant|user|tool|system)\s*:", __import__("re").M).search
+# Serve on similarity when the chain id is not stable across iterations (tau2:
+# the key is a hash of an LLM-written opening turn). Off elsewhere -- in-chain
+# emptiness is meaningful on single-pass runs and must stay meaningful.
+_C_SEMANTIC_FALLBACK = os.environ.get("C_SEMANTIC_FALLBACK", "0") == "1"
+_C_LEAN_RENDER = os.environ.get("C_LEAN_RENDER", "0") == "1"
+# Serve nothing when no entry in the chain holds a grounded endorsement (see the
+# dead-chain block in inject). 0 restores the old always-inject behaviour, which
+# is the ablation that measures what anchoring costs.
+# Ablation only: 0 serves every dead chain regardless of what it achieved,
+# which is the behaviour 8f122f3f measured at 0 solved of 70.
+_DEAD_CHAIN_SILENCE = os.environ.get("C_DEAD_CHAIN_SILENCE", "1") != "0"
+# On a dead chain the store currently says nothing at all, which is what stops it
+# from being worse than no memory -- injecting the chain's own failed transcript
+# anchors the model to the path that already failed. This asks whether the
+# silence is too broad: serve the critic's avoidance note ALONE, with no verbatim
+# attempt and no checkmark, so there is no path to anchor to. The note is a
+# compression of what this chain already produced (the critic never sees the gold
+# answer -- only the judge does), so nothing enters the prompt that the episode
+# did not contain. Ablation only: a dead chain that has something to say now
+# takes the normal render path, and one that does not is silent regardless.
+_DEAD_CHAIN_LESSON = os.environ.get("C_DEAD_CHAIN_LESSON", "0") == "1"
+
+
+# Ablation arm C_weak_compact (default off): show retrieval only the newest n
+# chain entries. Read dynamically so the driver can set it per-arm without
+# reimport.
 def _page_keep() -> int:
     return int(os.environ.get("C_PAGE_KEEP", "0"))
 
 
-# No-partition knob (ablation arm C_no_partition, NOT part of the frozen
-# method — default off): C_NO_PARTITION=1 switches the manifest's partition
-# metadata off at read time — no chain pruning of the similarity pool and no
-# chain-index recall rescue (the index IS the partition being ablated) — so
-# retrieval reads the flat, similarity-ranked global pool, exactly what a log
-# without partitions serves. Store writes are untouched. This is the accuracy
-# side of the manifest's partition claim: tab:manifest prices the read-path
-# latency, this arm prices what pruning buys in answer quality. Read
-# dynamically so the ablation driver can set it per-arm without reimport.
+# Ablation arm C_no_partition (default off): drop chain pruning and the
+# chain-index recall rescue, serving the flat global pool. Read dynamically so
+# the driver can set it per-arm without reimport.
 def _no_partition() -> bool:
     return os.environ.get("C_NO_PARTITION", "0") == "1"
 
 
-# Raw fallback (frozen method v2, 2026-07-05): when every curated channel comes
-# up empty (critic approves nothing, no note survives the weak-lesson floor, or
-# the reworded variant drops the chain below the similarity floor), C injects
-# the RAW store's own entries under the SAME dose budget — it degrades to the
-# \patchmem baseline, never to no memory. Evidence from the first frozen sweep:
-# C skipped injection on 28-37% of opportunities (B: ~100%) and paid for the
-# silence exactly where memory helped most (gaia, C-skipped subset: B−A=+13.5pp,
-# C−B=−8.1pp); the dilution arithmetic reproduces the observed C−B to the
-# decimal. With the fallback, C−B ≥ 0 becomes structural on the read path.
-# C_RAW_FALLBACK=0 is the ablation arm (C_no_fallback).
+# When every curated channel renders empty, C falls back to raw store entries
+# under the same dose budget — it degrades to the \patchmem baseline, never to
+# no memory. C_RAW_FALLBACK=0 is the ablation arm.
 _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
-# Curation-as-repair: only failing chains get the curated treatment; chains
-# whose previous attempt passed the protocol's feedback threshold are served
-# B's raw rendering untouched. Default off — flipped per-sweep, recorded in
-# the protocol dict.
-_C_REPAIR_MODE = os.environ.get("C_REPAIR_MODE", "0") == "1"
+# Curation-as-repair: chains whose previous attempt passed the threshold are
+# served B's raw rendering untouched.
+# Curation applies to FAILING chains only. Measured on every benchmark we run:
+# decomposing iteration 0 -> 2 into rescues and spoils, CuratorMem rescued as many
+# tasks as Mem0 or more (tau2 12:12, GAIA 20:19, GAIA2 12:11) and lost every one of
+# those cells on the other side, by breaking tasks that already worked (8:3, 10:8,
+# 7:5). Serving a succeeding chain exactly what the raw arm would serve removes
+# that channel by construction. Not a flag: no ablation varies it, and it was off
+# by default for months while the spoilage it prevents was the thing costing cells.
+_C_REPAIR_MODE = True
 _C_REPAIR_THRESH = float(os.environ.get("C_REPAIR_THRESH", "0.6"))
 # What decides "the chain is succeeding":
-#   stability (default) — META-DRIVEN, zero LLM: the chain's last two attempts
-#              gave the same normalized answer. A self-consistent chain is not
-#              disturbed; a drifting chain gets the curated treatment. The
-#              store measures this itself, so the gate works with a weak
-#              critic, or none at all — the method's floor never depends on
-#              anyone's judgment.
-#   verdict  — the external critic's outcome_verdict (critic-enhanced arm).
+#   stability (default) — last two attempts gave the same normalized answer
+#              (zero LLM calls, so the floor never depends on a critic).
+#   verdict  — the external critic's outcome_verdict.
 #   self     — actor self-assessment (failed; kept as the ablation arm).
 _C_REPAIR_GATE = (os.environ.get("C_REPAIR_GATE") or "stability").strip().lower()
 
 
 def _norm_answer(s: str) -> str:
-    """Normalize an answer for stability comparison: case, punctuation and
-    whitespace collapse — a measurement, not a judgment."""
+    """Normalize an answer for stability comparison (case/punctuation/whitespace)."""
     s = (s or "").strip().lower()
     s = re.sub(r"[^a-z0-9. ]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
@@ -219,8 +201,7 @@ _WC_LOOKUP = {"fn": None}          # set by CuratedPatchMemory once the library 
 def _append_supersession(block: str, pool) -> str:
     """Render 'v1 -> v2 superseded' lines from patch_history, newest last.
 
-    Only uses lineage already in the manifest — no LLM call, no judgment. Silent
-    when a chain has no recorded supersession, so it costs nothing on flat stores.
+    Uses only lineage already in the manifest; silent when a chain records none.
     """
     lines = []
     for e in pool:
@@ -238,13 +219,15 @@ def _append_supersession(block: str, pool) -> str:
     for l in lines:
         if l not in seen:
             seen.add(l); uniq.append(l)
-    # Stay inside the dose budget. This section is appended AFTER
-    # _format_curated has already spent _C_INJECT_BUDGET, and the gate
-    # hard-fails any C block over BUDGET+130 slack — so an unbudgeted append
-    # here would get C_META's very first sweep rejected by its own gate.
-    # Reserve at most 100 chars of that slack and trim lines to fit.
+    # This runs AFTER _format_curated has spent the whole budget, and the gate
+    # hard-fails any C block over BUDGET+130 — so keep the append inside 100 chars.
+    if _C_LEAN_RENDER:
+        return block          # the version is already named in each entry's head
     header = "\n\nVersion lineage (later supersedes earlier):"
-    room = _C_INJECT_BUDGET + 100 - len(block) - len(header)
+    # 0 means unlimited here as it does everywhere else; taken literally it makes
+    # room negative and drops the footer from the one arm meant to be generous.
+    _budget = _C_INJECT_BUDGET if _C_INJECT_BUDGET > 0 else 10 ** 6
+    room = _budget + 100 - len(block) - len(header)
     kept, used = [], 0
     for l in uniq[:6]:
         if used + len(l) + 1 > room:
@@ -270,12 +253,9 @@ _DEMOTE_K = int(os.environ.get("C_ENDORSE_DEMOTE_K", "2") or 2)
 
 
 def _grounded_demoted(e) -> bool:
-    """Statistics can revoke an assertion (endorsement demotion). If the K most
-    recent GROUNDED reuse deltas (sys_stats, provenance env/gold only) are all
-    negative, a critic endorsement stands falsified by measurement and the
-    entry is served neutrally instead. Self-assessed deltas can neither endorse
-    nor demote — the same provenance rule on both sides of the assertion.
-    K = C_ENDORSE_DEMOTE_K (default 2); 0 disables."""
+    """Endorsement demotion: True when the K most recent GROUNDED reuse deltas
+    (provenance env/gold only) are all negative. Self-assessed deltas can
+    neither endorse nor demote. K = C_ENDORSE_DEMOTE_K (default 2); 0 disables."""
     if _DEMOTE_K <= 0:
         return False
     ds = [float(d.get("delta", 0.0) or 0.0)
@@ -286,27 +266,50 @@ def _grounded_demoted(e) -> bool:
     return all(d < 0.0 for d in ds[-_DEMOTE_K:])
 
 
+# Endorse on a measured improvement over the chain's own memory-free first
+# attempt, not only on clearing an absolute bar. This is the rule, not an
+# option; C_ENDORSE_RELATIVE=0 is the ablation that reports what the
+# absolute bar alone buys, and reproduces cells collected before 2026-08-03.
+_ENDORSE_RELATIVE = os.environ.get("C_ENDORSE_RELATIVE", "1").strip().lower() in ("1", "true", "yes")
+
+
 def _endorse_basis(e):
     """Second key for an endorsement under C_POLICY=guarded, or None.
 
-    ("env", None): the entry's outcome score is grounded — provenance gold/env
-    means e.score came from the benchmark's scorer or executed environment
-    checks, so a high score is a measurement, not the actor's opinion.
-    ("critic", name): an EXTERNAL critic approved it. Self-assessment alone
-    never endorses; that single rule is what separates guarded from the
-    judgment policy measured at 90% false endorsement. A critic key is also
-    revocable: once grounded reuse deltas falsify it (_grounded_demoted), the
-    assertion loses the ✓ — judgment proposes, evidence disposes, and evidence
-    can also revoke.
+    ("env", None) = grounded outcome score. Only that. The critic used to be an
+    alternative second key, but the OR gave it exactly the region where no
+    grounded success exists — and there, reading a transcript, it endorsed
+    attempts whose own Lesson said they failed: on hy3/gaia every one of its 63
+    checkmarks sat on a chain with no prior success (4 solved), while the env
+    key's 47 had a verified success behind them (45 solved). Independence is not
+    enough; the second key must be outcome-grounded. The critic still curates
+    content and Lessons — it just cannot assert success.
     """
     if _C_POLICY != "guarded":
         return None
     if _WC_IS_GROUNDED and float(getattr(e, "score", 0.0) or 0.0) >= 0.5:
         return ("env", None)
-    if _CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE \
-            and not _grounded_demoted(e):
-        return ("critic", _CRITIC_RAW)
+    # Relative form of the same grounded key: the attempt beat the chain's own
+    # memory-free first attempt. On a binary metric this is subsumed by the
+    # clause above and adds nothing; under partial credit it is what keeps a
+    # weaker backbone's store from being empty by construction. Still grounded
+    # -- baseline_delta is measured, not a model's reading of the transcript.
+    if _ENDORSE_RELATIVE and _WC_IS_GROUNDED:
+        try:
+            st = getattr(e, "sys_stats", None) or {}
+            if float(st.get("baseline_delta", 0.0) or 0.0) > 0.0:
+                return ("env", None)
+        except Exception:
+            pass
     return None
+
+
+def _critic_reviewed(e) -> bool:
+    """The critic's remaining role: annotation, not endorsement. A reviewed
+    entry may carry its Lesson (labeled opinion), but never the ✓ — that
+    distinction is exactly what the endorse-basis split above encodes."""
+    return (_CRITIC_IS_EXTERNAL and _critic_q(e) >= _CRITIC_GATE
+            and not _grounded_demoted(e))
 
 
 def _critic_q(e) -> int:
@@ -317,10 +320,8 @@ def _critic_q(e) -> int:
 
 
 def _core_task(desc: str) -> str:
-    """Strip benchmark boilerplate so similarity reflects the actual question,
-    not the shared wrapper. Every GAIA task starts 'Answer the following
-    question accurately. Question: ...' — without stripping it, every task looks
-    similar to every other and retrieval returns random experiences."""
+    """Strip benchmark boilerplate ('...Question: ') so similarity reflects the
+    question. Without this every task looks alike and retrieval goes random."""
     d = (desc or "").strip()
     parts = re.split(r"(?i)\bquestion\s*:\s*", d)
     core = parts[-1] if len(parts) > 1 else d
@@ -328,8 +329,7 @@ def _core_task(desc: str) -> str:
 
 
 def _is_weak_lesson(lesson: str) -> bool:
-    """A refined lesson with no actionable content — skip it rather than inject
-    an empty or tautological 'Key strategy:'."""
+    """True for a refined lesson with no actionable content (empty/tautological)."""
     l = (lesson or "").strip().lower()
     if len(l) < 15:
         return True
@@ -339,8 +339,8 @@ def _is_weak_lesson(lesson: str) -> bool:
 
 
 def _concrete_approach(exp) -> str:
-    """The CONCRETE thing that worked (agent reasoning / commands) — never the
-    [PLACEHOLDER]-templated generalized_steps, which carry no usable specifics."""
+    """The CONCRETE thing that worked (reasoning / commands). Never use
+    generalized_steps here — it is [PLACEHOLDER]-templated, with no specifics."""
     rt = getattr(exp, "reasoning_trace", None)
     if rt:
         s = " ".join(str(x) for x in rt).strip()
@@ -352,30 +352,143 @@ def _concrete_approach(exp) -> str:
     return ""
 
 
-# Benchmarks scored on WHICH ACTIONS OCCURRED (gaia2 soft-recall over oracle
-# events, TB2 in-container tests, tau2 final-DB-state + action checks). Only
-# there is the action/tool sequence the payload worth displacing prose for.
-# gaia/locomo agents also log tool calls, but they are scored on ANSWER text —
-# v2.2's entry-has-actions heuristic fired on 96% of gaia blocks, dropped every
-# "What worked" prose line, truncated answers to 160ch, and turned C−B from −2.1
-# to −9.1pp. Scope by benchmark, never by entry shape.
+# Configuration of the curated arm, derived from three properties of the task.
+# Named benchmarks are just a lookup into those properties -- anyone running their
+# own workload gets the same reasoning, and two of the three properties are
+# detected at run time rather than declared.
+#
+#   action_scored  the thing being graded is which actions occurred, so the tool
+#                  sequence IS the payload. Read budget 2400 instead of 900,
+#                  because _action_cap() gives the sequence 60% of the budget and
+#                  540 characters truncated it. MUST be declared: an
+#                  entry-has-tool-calls heuristic was tried and cost ~7pp, since
+#                  GAIA and LoCoMo agents also log tool calls while being scored
+#                  on answer text.
+#   partial_credit scores land strictly between 0 and 1. Detected: watch the
+#                  scores that arrive. Under a binary metric a chain whose every
+#                  attempt scored zero has nothing to say, and saying it anchors
+#                  the model to a path that already failed, so it stays silent;
+#                  under partial credit that chain still holds work that got part
+#                  of the way, and silence throws away the memory that pays most.
+#   chain_stable   the same task reaches the same chain key on the next iteration.
+#                  Detected: count lookups that come back empty while the
+#                  similarity pool is not, and turn on the semantic fallback once
+#                  that keeps happening. tau2 measured 0 of 80 keys matching.
+#
+# Measured on our own benchmarks, as within-run gain (iteration 2 minus 0), which
+# is what survives this project's run-level drift:
+#
+#                        budget                 silence
+#   GAIA   answer/binary  900  (dose sweep)     ON   +9.8 against +1.9
+#   LoCoMo answer/binary  900  (dose sweep)     ON
+#   GAIA2  action/partial 2400 (+5.1 vs +1.3)   OFF
+#   tau2   action/partial 2400 (+5.0 vs -1.25)  OFF
+#
+# An explicitly exported variable still wins, so the ablations keep working.
+_BENCH_PROPERTIES = {
+    "gaia":             {"action_scored": False, "partial_credit": False, "chain_stable": True},
+    "locomo":           {"action_scored": False, "partial_credit": False, "chain_stable": True},
+    "gaia2":            {"action_scored": True,  "partial_credit": True,  "chain_stable": True},
+    "tau2":             {"action_scored": True,  "partial_credit": True,  "chain_stable": False},
+    "terminal_bench_2": {"action_scored": True,  "partial_credit": True,  "chain_stable": True},
+}
+
+_ADAPT = {"scores_seen": 0, "fractional": False, "chain_miss": 0, "chain_hit": 0}
+_CHAIN_MISS_TRIGGER = int(os.environ.get("C_CHAIN_MISS_TRIGGER", "12"))
+
+
+def _config_from_properties(action_scored: bool, partial_credit: bool,
+                            chain_stable: bool) -> dict:
+    return {"budget": 2400 if action_scored else 900,
+            "silence": not partial_credit,
+            "semantic": not chain_stable}
+
+
+def _apply_bench_config(benchmark: str, **overrides) -> None:
+    """Resolve settings from task properties. Unknown workloads start from the
+    conservative answer-scored/binary/stable corner and adapt as evidence arrives."""
+    global _C_INJECT_BUDGET, _DEAD_CHAIN_SILENCE, _C_SEMANTIC_FALLBACK
+    props = dict(_BENCH_PROPERTIES.get((benchmark or "").strip().lower(),
+                                       {"action_scored": (benchmark or "") in _ACTION_SCORED,
+                                        "partial_credit": False, "chain_stable": True}))
+    props.update({k: v for k, v in overrides.items() if v is not None})
+    cfg = _config_from_properties(**props)
+    if "C_INJECT_BUDGET_CH" not in os.environ:
+        _C_INJECT_BUDGET = cfg["budget"]
+    if "C_DEAD_CHAIN_SILENCE" not in os.environ:
+        _DEAD_CHAIN_SILENCE = cfg["silence"]
+    if "C_SEMANTIC_FALLBACK" not in os.environ:
+        _C_SEMANTIC_FALLBACK = cfg["semantic"]
+    print("[bridge] %s -> budget=%d silence=%s semantic=%s (%s)"
+          % (benchmark, _C_INJECT_BUDGET, _DEAD_CHAIN_SILENCE, _C_SEMANTIC_FALLBACK,
+             ", ".join("%s=%s" % kv for kv in sorted(props.items()))), flush=True)
+
+
+def _observe_score(score) -> None:
+    """A fractional score means partial credit, so dead chains stop being silent."""
+    global _DEAD_CHAIN_SILENCE
+    try:
+        v = float(score)
+    except (TypeError, ValueError):
+        return
+    _ADAPT["scores_seen"] += 1
+    if 0.0 < v < 1.0 and not _ADAPT["fractional"]:
+        _ADAPT["fractional"] = True
+        if "C_DEAD_CHAIN_SILENCE" not in os.environ and _DEAD_CHAIN_SILENCE:
+            _DEAD_CHAIN_SILENCE = False
+            print("[bridge] partial credit observed (score=%.3f) -> dead-chain "
+                  "silence off" % v, flush=True)
+
+
+def _observe_chain_lookup(hit: bool) -> None:
+    """Telemetry only. Three attempts at auto-flipping the semantic fallback off
+    this signal all false-fired on GAIA, and the last one exposed why the signal
+    cannot be made sound: under concurrency, tasks that finish early populate
+    the pool while tasks still attempting have no history YET, so pool-nonempty
+    with no chain candidates is the normal state of every first attempt.
+    Distinguishing "no history yet" from "history filed under a broken key"
+    needs a key-independent index of history, which is circular. So: our
+    benchmarks get the declared property table (and tau2's key is fixed at the
+    source now), a user workload with genuinely broken keys gets a LOUD
+    warning to set C_SEMANTIC_FALLBACK=1, and nothing changes behavior at
+    run time."""
+    _ADAPT["chain_hit" if hit else "chain_miss"] += 1
+    m, h = _ADAPT["chain_miss"], _ADAPT["chain_hit"]
+    if (not _C_SEMANTIC_FALLBACK and h == 0 and m >= _CHAIN_MISS_TRIGGER
+            and m % _CHAIN_MISS_TRIGGER == 0):
+        print("[bridge] WARNING: %d chain lookups, none matched. If this "
+              "persists past the first iteration your chain keys may be "
+              "unstable; consider C_SEMANTIC_FALLBACK=1." % m, flush=True)
+
+
+# Benchmarks scored on WHICH ACTIONS OCCURRED, where the tool sequence is worth
+# displacing prose for. Scope by benchmark, never by entry shape: gaia/locomo
+# agents also log tool calls but are scored on ANSWER text, and an
+# entry-has-actions heuristic there cost ~7pp by dropping the prose.
 _ACTION_SCORED = {"gaia2", "terminal_bench_2", "tau2"}
+
+
+# The agent SDK's private markup (</think:hash>, </tool_call:..>) survives into
+# the recorded outcome and from there into the next iteration's prompt: 28 of
+# hy3/gaia's 197 injected blocks carried it, and 13 of the 14 whose chain saw it
+# twice never recovered. Strip at render time so old stores benefit too.
+_MARKUP_RE = re.compile(
+    r"</?(?:think|tool_calls?|name|args?|arg_key|arg_value)(?::[A-Za-z0-9_-]+)?>")
+
+
+def _scrub_markup(text: str) -> str:
+    return _MARKUP_RE.sub("", text or "").strip()
 
 
 def _format_curated(successes: list, failures: list = (),
                     current_tid: str = "", action_scored: bool = False) -> str:
-    """v2.5 LAYERED RENDERING. The replay layer (every prior attempt, verbatim)
-    is the guaranteed base; annotations (Lesson/Avoid) are a bonus layer added
-    only while the dose budget allows. v2.4 rendered one rich block that ate
-    the budget and squeezed the second attempt out: on gaia, 8 of C's 10
-    final-iteration losses to B were exactly "C shows 1 attempt, B shows 2".
-    The superset the paper claims must hold at the SET level first, so field
-    caps adapt to the number of attempts and annotations never displace an
-    attempt. No empty fields, no [PLACEHOLDER] templates."""
+    """Layered rendering: every prior attempt (verbatim) is the guaranteed base;
+    Lesson/Avoid annotations are a bonus layer added only while budget allows.
+    Annotations must never displace an attempt — field caps adapt instead."""
     def _payload(e):
         tax = e.failure_taxonomy or {}
-        return ((tax.get("verbatim_outcome") or "").strip(),
-                _concrete_approach(e))
+        return (_scrub_markup((tax.get("verbatim_outcome") or "").strip()),
+                _scrub_markup(_concrete_approach(e)))
 
     n_est = sum(1 for e in list(successes) + list(failures)
                 if any(_payload(e)))
@@ -390,45 +503,70 @@ def _format_curated(successes: list, failures: list = (),
             continue
         seen.add(key)
         if _C_POLICY == "judgment":
-            # Under repair mode the actor's self-assessment is dropped from the
-            # header: showing "self-assessed 2%" under a ✓ is two contradictory
-            # signals in one line, and the number is the actor grading itself.
-            head = (f"[✓ Prior attempt — curator quality {_critic_q(e)}/10]"
+            # Repair mode drops the self-assessment: "self-assessed 2%" under a ✓
+            # is two contradictory signals in one line.
+            head =(f"[✓ Prior attempt — curator quality {_critic_q(e)}/10]"
                     if _C_REPAIR_MODE else
                     f"[✓ Prior attempt — curator quality {_critic_q(e)}/10, "
                     f"self-assessed {getattr(e, 'score', 0.0):.0%}]")
             parts = [head, f"Task: {_core_task(e.task_desc)[:tcap]}"]
         else:
-            # meta/guarded: never print the actor's self-assessment. A ✓ only
-            # appears under guarded with a second independent key, and the line
-            # SAYS which key, so the reader model knows whether it is looking
-            # at a measurement or a review.
-            _ver = int(getattr(e, "version", 1) or 1)
+            # meta/guarded never print the self-assessment; a ✓ needs a second key
+            # and the line names it, so the reader can tell measurement from review.
+            _ver =int(getattr(e, "version", 1) or 1)
             _basis = _endorse_basis(e)
             if _basis is not None:
                 _src = ("environment-verified outcome" if _basis[0] == "env"
                         else f"reviewed by {_basis[1]}")
-                head = f"[✓ Prior attempt v{_ver} — {_src}]"
+                head = (f"[✓ v{_ver} verified]" if _C_LEAN_RENDER
+                        else f"[✓ Prior attempt v{_ver} — {_src}]")
             else:
-                head = f"[Prior attempt — store version v{_ver}]"
-            parts = [head, f"Task: {_core_task(e.task_desc)[:tcap]}"]
-        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
-                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+                head = (f"[v{_ver}]" if _C_LEAN_RENDER
+                        else f"[Prior attempt — store version v{_ver}]")
+            # Retrieval is chain-scoped, so the task restated here is the one
+            # the agent is already being asked -- pure duplication of prompt.
+            parts = ([head] if _C_LEAN_RENDER
+                     else [head, f"Task: {_core_task(e.task_desc)[:tcap]}"])
+        # Keep only non-blank entries BEFORE the fallback: a list of empty
+        # strings is truthy, which is how 26 blank commands shadowed a perfectly
+        # good tool_sequence and rendered as " ->  ->  -> ".
+        acts = ([c for c in (str(x).strip() for x in (getattr(e, "action_commands", None) or [])) if c]
+                or [s for s in (str(y).strip() for y in (getattr(e, "tool_sequence", None) or [])) if s]) \
             if action_scored else []
         if action_scored:
             # gaia2/TB2: scored on which actions occurred — action list is the
             # payload, answer text secondary (v2.3, trend-positive on gaia2).
-            if outcome:
+            if outcome and not _IS_TRANSCRIPT(outcome):
                 parts.append(f"Answer given then (unverified): {outcome[:160]}")
             if acts:
-                parts.append("Actions used: " + " -> ".join(acts)[:200])
+                parts.append("Actions used: " + " -> ".join(acts)[:_action_cap()])
             elif concrete:
                 parts.append(f"What worked: {concrete[:200]}")
         elif outcome:
-            # Answer-scored QA: the raw attempt VERBATIM — the same resp head
-            # B replays, hedges and discrepancy notes intact (truncated only
-            # to share the dose budget across ALL attempts of the chain).
-            parts.append(f"As recorded: {outcome[:vcap]}")
+            # Answer-scored QA. A verified entry leads with the ANSWER: the
+            # narration head alone spoiled 16 tasks whose blocks carried a ✓
+            # but not the answer (it lives at the response tail and the head
+            # slice cut it). Unverified entries keep the verbatim head -- for
+            # them the process is the content.
+            _tax = getattr(e, "failure_taxonomy", None) or {}
+            _ans = (_tax.get("extracted_answer") or "").strip()
+            if action_scored:
+                # no plan narration on action-scored benchmarks: there is no
+                # short answer to extract, so this slot fills with the plan
+                # head wearing an answer label, and the model re-walks the plan
+                # instead of replaying the actions above it.
+                _ans = ""
+                outcome = ""
+            if not _ans:
+                _tail = _answer_from_tail((_tax.get("outcome_tail") or "").strip())
+                if _tail and not _IS_TRANSCRIPT(_tail):
+                    _ans = _tail
+            if _ans and _endorse_basis(e) is not None:
+                parts.append(f"Verified answer: {_ans[:200]}")
+                if not _IS_TRANSCRIPT(outcome):
+                    parts.append(f"How it was reached: {outcome[:200]}")
+            elif not _IS_TRANSCRIPT(outcome):
+                parts.append(f"As recorded: {outcome[:vcap]}")
         elif concrete:
             parts.append(f"What worked: {concrete[:vcap]}")
         lesson = (tax.get("causal_lesson") or "").strip()
@@ -437,7 +575,8 @@ def _format_curated(successes: list, failures: list = (),
         # unchecked self-judge's lesson is the 48%-of-budget filler the dose
         # analysis flagged.
         _lesson_ok = (_C_POLICY == "judgment"
-                      or (_C_POLICY == "guarded" and _endorse_basis(e) is not None))
+                      or (_C_POLICY == "guarded"
+                          and (_endorse_basis(e) is not None or _critic_reviewed(e))))
         annot = (f"\nLesson: {lesson[:180]}"
                  if _lesson_ok and lesson and not _is_weak_lesson(lesson) else "")
         pairs.append(["\n".join(parts), annot])
@@ -460,8 +599,9 @@ def _format_curated(successes: list, failures: list = (),
         if key in seen:
             continue
         seen.add(key)
-        parts = [f"[✗ Earlier attempt fell short]",
-                 f"Task: {_core_task(e.task_desc)[:tcap]}"]
+        parts = ([ "[✗ fell short]" ] if _C_LEAN_RENDER else
+                 [f"[✗ Earlier attempt fell short]",
+                  f"Task: {_core_task(e.task_desc)[:tcap]}"])
         if outcome:
             parts.append("As recorded (self-assessed doubtful, verify before "
                          f"reuse): {outcome[:min(150, vcap)]}")
@@ -500,10 +640,59 @@ def _format_curated(successes: list, failures: list = (),
         # (gaia: 56% of gold-wrong attempts self-assess >=0.5), so these are
         # "prior attempts", not "solved tasks". TB2 transcript checks grep for
         # the stable "## Curated prior attempts" marker.
-        out += "## Curated prior attempts (this task's chain)\n\n" + "\n\n".join(blocks)
+        _h = "## Prior attempts\n\n" if _C_LEAN_RENDER \
+            else "## Curated prior attempts (this task's chain)\n\n"
+        out += _h + "\n\n".join(blocks)
     if fail_blocks:
-        out += ("\n\n" if out else "") + "## What to avoid (from earlier attempts)\n\n" + "\n\n".join(fail_blocks)
+        _ha = "## Avoid\n\n" if _C_LEAN_RENDER \
+            else "## What to avoid (from earlier attempts)\n\n"
+        out += ("\n\n" if out else "") + _ha + "\n\n".join(fail_blocks)
     return out
+
+
+def _format_lessons_only(entries: list) -> str:
+    """What to avoid, and nothing else — no verbatim attempt, no checkmark.
+
+    For dead chains under C_DEAD_CHAIN_LESSON. Verbatim replay is what makes a
+    dead chain harmful, so this channel carries only the causal lesson the critic
+    distilled from the chain's own failures. Deduplicated, budgeted like every
+    other injection, and empty when the critic produced nothing usable (the
+    caller then falls back to silence)."""
+    notes, seen = [], set()
+    for e in entries:
+        tax = e.failure_taxonomy or {}
+        note = (tax.get("avoidance_note") or tax.get("causal_lesson") or "").strip()
+        if not note or _is_weak_lesson(note):
+            continue
+        key = note[:80].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        notes.append(f"- {note[:180]}")
+    if not notes:
+        return ""
+    budget = _C_INJECT_BUDGET if _C_INJECT_BUDGET > 0 else 10 ** 6
+    head = "## What earlier attempts on this task got wrong\n\n"
+    out, used = [], len(head)
+    for n in notes:
+        if used + len(n) + 1 > budget:
+            break
+        out.append(n); used += len(n) + 1
+    return head + "\n".join(out) if out else ""
+
+
+def _answer_from_tail(tail: str) -> str:
+    """A response tail counts as an answer ONLY when it is marked as one.
+    Serving an arbitrary tail slice as "Verified answer:" asserted mid-sentence
+    fragments ("confirms the answer. **Carnivore Loan Specialists** has the
+    lowest revenu") with a certificate attached, which is worse than serving
+    the narration."""
+    if not tail:
+        return ""
+    m = __import__("re").search(
+        r"(?:FINAL ANSWER|Final answer|The answer is)\s*[:\-]?\s*(.+)",
+        tail, __import__("re").S)
+    return m.group(1).strip()[:200] if m else ""
 
 
 def _format_raw(entries: list, action_scored: bool = False) -> str:
@@ -515,8 +704,11 @@ def _format_raw(entries: list, action_scored: bool = False) -> str:
     blocks, seen = [], set()
     for e in entries:
         concrete = _concrete_approach(e)
-        acts = ([str(c) for c in (getattr(e, "action_commands", None) or [])]
-                or [str(s) for s in (getattr(e, "tool_sequence", None) or [])]) \
+        # Keep only non-blank entries BEFORE the fallback: a list of empty
+        # strings is truthy, which is how 26 blank commands shadowed a perfectly
+        # good tool_sequence and rendered as " ->  ->  -> ".
+        acts = ([c for c in (str(x).strip() for x in (getattr(e, "action_commands", None) or [])) if c]
+                or [s for s in (str(y).strip() for y in (getattr(e, "tool_sequence", None) or [])) if s]) \
             if action_scored else []
         if not concrete and not acts:
             continue
@@ -529,10 +721,31 @@ def _format_raw(entries: list, action_scored: bool = False) -> str:
                "What was tried and fell short"
         parts = [f"[Prior attempt on this task — raw, self-assessed {sc:.0%}]",
                  f"Task: {_core_task(e.task_desc)[:150]}"]
+        # answer-first: repair mode routes verified single-attempt chains HERE,
+        # so this path spoiled the same 16 tasks the curated one did -- the
+        # payload was _concrete_approach (the narration head) and GAIA answers
+        # live at the response tail. Lead with the recorded answer when the
+        # entry has one; the approach stays, shortened, as context.
+        _tax = getattr(e, "failure_taxonomy", None) or {}
+        _ans = (_tax.get("extracted_answer") or "").strip()
+        if action_scored:
+            _ans = ""          # no plan narration on action-scored benchmarks
+        elif not _ans:
+            _t = _answer_from_tail((_tax.get("outcome_tail") or "").strip())
+            if _t and not _IS_TRANSCRIPT(_t):
+                _ans = _t
         if acts:   # agentic: the action sequence is the payload (see curated)
-            parts.append("Actions used: " + " -> ".join(acts)[:200])
-            if concrete:
+            parts.append("Actions used: " + " -> ".join(acts)[:_action_cap()])
+            if concrete and not action_scored:
                 parts.append(f"{head}: {concrete[:200]}")
+        elif _ans and sc >= 0.5:
+            parts.append(f"Answer given then (self-assessed {sc:.0%}): {_ans[:200]}")
+            if concrete:
+                parts.append(f"{head}: {concrete[:150]}")
+        elif action_scored:
+            # action-scored with no recorded actions: narration is all we have
+            # and narration is what re-walks plans. A hard cap, not the 400.
+            parts.append(f"{head}: {concrete[:120]}")
         else:
             parts.append(f"{head}: {concrete[:400]}")
         blocks.append("\n".join(parts))
@@ -602,7 +815,15 @@ class BenchmarkMemory:
         refinement). Async for a uniform interface with CuratedMemory."""
         resp = (result.get("response") or "").strip()
         if not resp:
-            return
+            # GAIA2 scores the action sequence, so a task can score 1.0 with an
+            # empty final message. Record the actions instead; skip only when
+            # there is nothing at all.
+            _acts = _actions_from_result(result)
+            if _acts:
+                resp = ("[no final message; action sequence follows]\n"
+                        + "\n".join(str(a) for a in _acts))[:4000]
+            else:
+                return
         with self._lock:
             self._n += 1
             n = self._n
@@ -644,6 +865,7 @@ class CuratedMemory:
         if use_enrich is None:
             use_enrich = os.environ.get("C_USE_ENRICH", "1") == "1"
         self.benchmark = benchmark
+        _apply_bench_config(benchmark)
         self.top_k = top_k
         # Curation-stage toggles (for the ablation): refinement is always on;
         # use_critic adds the cross-agent critic score; use_enrich adds the forced
@@ -752,6 +974,20 @@ class CuratedMemory:
             _have = {_key(e) for e in ranked}
             cands = ranked + [e for e in self._chain_entries.get(chain, [])
                               if _key(e) not in _have]
+            # Key-stability evidence is measured AFTER the rescue, and only
+            # against a non-empty pool. The pool intersection alone misses
+            # routinely and harmlessly (the similarity pool need not surface
+            # the own-chain entry for the chain INDEX to serve it), and an
+            # empty pool at iteration 0 misses vacuously. Both false signals
+            # fired on GAIA and flipped the fallback on for a benchmark whose
+            # keys are stable. What the fallback compensates for is exactly
+            # cands empty while the pool has content, so that is what counts.
+            if pool:
+                _observe_chain_lookup(bool(cands))
+        if not cands and _C_SEMANTIC_FALLBACK and pool:
+            # Chain lookup found nothing and the key cannot be trusted here;
+            # the similarity pool holds the same task under a reworded opener.
+            cands = list(pool)
         _pk = _page_keep()
         if _pk > 0:
             # weak compaction (ablation only): page all but the newest n
@@ -841,7 +1077,37 @@ class CuratedMemory:
         # loss vs B came from disturbing a chain B had already solved
         # (spoiled 7/4/4 vs rescued 7/10/3); not touching succeeding chains
         # removes the spoilage channel by construction.
+        # DEAD-CHAIN SILENCE: with no grounded success anywhere in the chain,
+        # the store has nothing it can stand behind, and what it serves instead
+        # is the chain's own failed attempts verbatim. Measured on hy3/gaia:
+        # of 70 such chains C solved 0 at the last iteration while plain A
+        # solved 4 of the same 67 and B 3 of 70 — the injected transcript
+        # anchors the model to the path that already failed, and A's few wins
+        # come precisely from resampling freely. gpt-oss reproduces it (88
+        # chains, 1 solved). So the second key gates the store's right to speak
+        # at all, not merely its right to put a checkmark on what it says.
+        # Rendering nothing here makes C fall back to A exactly where C was
+        # strictly worse than A, and leaves the endorsed-chain advantage
+        # (86% retention vs A's 79%) untouched.
+        if _DEAD_CHAIN_SILENCE and _C_POLICY == "guarded":
+            _chain_es = self._chain_entries.get(chain) or cands
+            if not any(_endorse_basis(e) is not None for e in _chain_es):
+                # A dead chain is silenced only when it has nothing measurable to
+                # say. Under a binary metric every attempt on such a chain scored
+                # zero by definition, so this is silence -- the condition 8f122f3f
+                # measured. Under partial credit a dead chain can still hold work
+                # that got part of the way, and that is worth serving: it asserts
+                # no success, since nothing here carries a certificate.
+                _best = 0.0
+                for _e in _chain_es:
+                    try:
+                        _best = max(_best, float(getattr(_e, "score", 0.0) or 0.0))
+                    except (TypeError, ValueError):
+                        pass
+                if _best <= 0.0:
+                    return ""
         _repair_raw = False
+        _repair_pool = cands
         if _C_REPAIR_MODE and cands:
             if _C_REPAIR_GATE == "stability":
                 # Meta-driven gate: answer stability across the chain's last
@@ -874,17 +1140,35 @@ class CuratedMemory:
                 _prev = self._last_score.get(_chain_id(task))
                 _repair_raw = _prev is not None and float(_prev) >= _C_REPAIR_THRESH
         if _repair_raw:
-            served = cands[: self.top_k]
+            served = _repair_pool[: self.top_k]
             out = _format_raw(served, action_scored=_action_scored)
         else:
             out = _format_curated(succ, fail, current_tid=tid_now,
                                   action_scored=_action_scored)
-            if _C_POLICY != "judgment" and out:
-                # Supersession from the version lineage. The judgment path picks
-                # one attempt and endorses it; the manifest already records which
-                # version replaced which, so conflicting attempts can be shown AS
-                # a chain and the model adjudicates rather than trusting an
-                # unverified ✓.
+            # A chain holding an environment-verified success does not get the
+            # lineage footer. Supersession exists so that conflicting UNVERIFIED
+            # attempts can be shown as a chain for the model to adjudicate, and
+            # its later-supersedes-earlier framing is right for that. It is
+            # wrong the moment one attempt carries a grounded certificate: the
+            # footer then tells the model a failed later attempt replaced a
+            # verified earlier one, and the model obeys. That is the mechanism
+            # behind the spoiled cells -- 10/10 on GAIA and 7/7 on GAIA2 were
+            # chains that already held a verified success, and in the clearest
+            # ("Guava" verified at v1, a failed "Pineapple" at v2) the model
+            # answered Pineapple.
+            #
+            # Only the footer goes. The curated channels stay, so the lesson and
+            # the avoidance note still reach the model and curation keeps acting
+            # on every chain it acted on before. Dropping the whole block to a
+            # raw replay was tried first and measured: on GAIA it left arm C
+            # with 50 raw replays, 46 silences and ZERO curated blocks, since
+            # verified-replay and dead-chain silence between them partition
+            # every chain under a binary metric. That version scores, but it is
+            # no longer the method.
+            _chain_verified = any(_endorse_basis(e) is not None
+                                  for e in (self._chain_entries.get(_chain_id(task))
+                                            or cands))
+            if _C_POLICY != "judgment" and out and not _chain_verified:
                 out = _append_supersession(out, pool)
             served = succ + fail
         if not out and cands and _C_RAW_FALLBACK:
@@ -940,12 +1224,21 @@ class CuratedMemory:
 
 
     async def record(self, task: dict, result: dict, score: float | None = None) -> None:
+        _observe_score(score)
         tid = task.get("task_id", "")
         chain = _chain_id(task)
         served = self._served.pop(tid, None)
         resp = (result.get("response") or "").strip()
         if not resp:
-            return
+            # GAIA2 scores the action sequence, so a task can score 1.0 with an
+            # empty final message. Record the actions instead; skip only when
+            # there is nothing at all.
+            _acts = _actions_from_result(result)
+            if _acts:
+                resp = ("[no final message; action sequence follows]\n"
+                        + "\n".join(str(a) for a in _acts))[:4000]
+            else:
+                return
         # Effectiveness update (w_c feedback): the injected experiences get the
         # within-chain paired delta -- this iteration's score minus the previous
         # iteration's. Positive => they helped; negative => they hurt. Bounded
@@ -1065,6 +1358,19 @@ class CuratedMemory:
                 # gold-right one is the payoff (+7 / +13pp); the render tags
                 # low-self-score answers honestly instead of hiding them.
                 try:
+                    # HEAD of the response only. GAIA-style answers sit at the
+                    # TAIL ("FINAL ANSWER: 519" after 2k chars of narration), so
+                    # a head slice records the meander and cuts the answer --
+                    # which is how 16 verified-✓ blocks spoiled tasks they had
+                    # themselves solved. Keep the extracted answer explicitly,
+                    # and the tail as fallback.
+                    _ex = (result.get("extracted_answer") or "").strip()
+                    if _ex:
+                        _mine.failure_taxonomy.setdefault("extracted_answer",
+                                                          _ex[:200])
+                    if len(resp) > 400:
+                        _mine.failure_taxonomy.setdefault("outcome_tail",
+                                                          resp[-200:])
                     _mine.failure_taxonomy.setdefault("verbatim_outcome",
                                                       resp[:400])
                     if score is not None:

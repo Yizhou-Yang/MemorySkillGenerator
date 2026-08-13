@@ -1,20 +1,10 @@
-# RETIRED (2026-07-03): TB2 paper numbers come from the OFFICIAL harbor
-# harness via scripts/latest/tb2_harbor_bridge.py. This simplified loop is
-# kept for reference/tests only — do not use it for reported results.
+# RETIRED: reported TB2 numbers come from the official harbor harness
+# (scripts/latest/tb2_harbor_bridge.py); this loop is reference/tests only.
 """
 Terminus 2 agent -- Docker-based terminal execution for Terminal-Bench-2.0.
 
-Uses Docker directly (not Harbor CLI) with CodeBuddy SDK as the LLM backend.
-Each terminal-bench-2.0 task runs in its specified Docker container, with the
-agent calling CodeBuddy SDK for reasoning and executing commands via docker exec.
-
-Architecture:
-  Mode 1 (Docker): Pull task image, run agent via CodeBuddy SDK + docker exec
-  Mode 2 (Shell):  Direct shell subprocess -- runs commands locally (no isolation)
-  Mode 3 (Prompt): LLM-only -- generates commands without execution (no Docker)
-
-SkillForge role: Injects cross-task experience into the system prompt before
-the agent executes, regardless of which mode is active.
+Modes, in fallback order: Docker (isolated), local shell (no isolation),
+prompt-only (no execution).
 """
 from __future__ import annotations
 import json as _json
@@ -30,26 +20,19 @@ from pathlib import Path
 from .base import BaseAgent
 
 
-# Path to Python 3.12 env where harbor is installed
 _HARBOR_PYTHON = "/root/.conda/envs/harbor312/bin/python"
 
-# Cache dir for downloaded terminal-bench-2.0 tasks
 _TERMINAL_BENCH_CACHE = Path("/tmp/skillforge_terminal_bench_cache")
 
-# Max agent turns for terminal-bench tasks. 10 was far too few for multi-step build
-# tasks (install deps, configure, compile, test); leaderboard agents run many more.
-# Env-tunable.
+# Multi-step build tasks need many turns; anything near 10 floors them.
 _MAX_AGENT_TURNS = int(os.environ.get("TB2_MAX_TURNS", "40"))
 
-# The CodeBuddy SDK leaks fragments of its internal tool-call markup into text
-# blocks, shaped like </arg_value:6124c78e>, </tool_call:...>, <think:...>.
-# When one rides a CMD: line the executed command becomes a bash syntax error
-# (rc=2) — the n=48 A-arm trace shows this poisoned 26/38 zero-score tasks.
+# The SDK leaks tool-call markup (</arg_value:...>, <think:...>) into text
+# blocks; on a CMD: line it makes the command a bash syntax error.
 _SDK_MARKUP_RE = re.compile(
     r"</?(?:think|tool_calls?|name|args?|arg_key|arg_value)(?::[A-Za-z0-9_-]+)?>"
 )
-# Per-command timeout inside the container. 60s killed apt-get installs and compiles
-# mid-run (rc=-1 [TIMEOUT]); raise so build steps can finish.
+# Must stay well above apt-get/compile durations, or build steps die at rc=-1.
 _CMD_TIMEOUT = int(os.environ.get("TB2_CMD_TIMEOUT", "180"))
 
 
@@ -70,14 +53,9 @@ def _has_docker() -> bool:
 
 
 class Terminus2Agent(BaseAgent):
-    """Terminal command agent for Terminal-Bench-2.0.
+    """Terminal command agent for Terminal-Bench-2.0 and GAIA CLI tasks.
 
-    Uses Docker containers for isolated execution with CodeBuddy SDK
-    as the LLM reasoning backend.
-
-    Benchmark mapping:
-      - terminal_bench_2: Terminal-Bench 2.0 tasks via Docker
-      - gaia2: GAIA CLI tasks executed in a container
+    Runs tasks in Docker containers with an LLM as the reasoning backend.
     """
 
     BENCHMARKS = {"terminal_bench_2", "gaia2"}
@@ -97,26 +75,15 @@ class Terminus2Agent(BaseAgent):
     async def run_task(self, task: dict, experience_section: str = "",
                        group: str = "A",
                        within_task_patch_mode: str | None = None) -> dict:
-        """Execute a terminal/CLI task with SkillForge experience injection.
-
-        Priority:
-          1. Docker mode -- full isolation, real container execution
-          2. Local shell mode -- runs commands directly (no isolation)
-          3. Prompt-only mode -- LLM generates command text only
-        """
-        # Try Docker mode first
+        """Execute a terminal/CLI task with SkillForge experience injection."""
         if self._docker_available:
             try:
                 result = await self._run_via_docker(task, experience_section, group,
                                                     within_task_patch_mode)
                 if result.get("response") and not result.get("error"):
                     return result
-                # Docker is available but THIS task's docker run failed
-                # (image pull / container start / download / empty response).
-                # Do NOT downgrade to shell/prompt-only: those cannot run the
-                # docker-based pytest harness, so they would silently score 0
-                # (or false-positive to 1.0). Surface the real reason instead —
-                # this is what makes the 14/39 empty-test_output cases diagnosable.
+                # Never downgrade a failed docker run to shell/prompt-only: they
+                # can't run the pytest harness, so scores would be silently wrong.
                 reason = result.get("error") or "empty_docker_response"
                 print(f"  [terminus2] Docker run failed ({reason}); surfacing "
                       f"instead of downgrading to an untestable mode.")
@@ -127,18 +94,14 @@ class Terminus2Agent(BaseAgent):
                 return result
             except Exception as e:
                 print(f"  [terminus2] Docker mode exception: {e}")
-                # Unexpected exception (not a clean error result): fall through.
 
-        # Shell / prompt-only are used ONLY when docker is unavailable. They run
-        # outside the task container, so the terminal-bench tests cannot run —
-        # results are marked untested (test_passed=False) and score 0 honestly.
+        # These run outside the task container, so tests stay unrun (score 0).
         try:
             return await self._run_via_shell(task, experience_section, group,
                                              within_task_patch_mode)
         except Exception as e:
             print(f"  [terminus2] Shell mode exception: {e}")
 
-        # Final fallback: prompt-only
         return await self._run_prompt_only(task, experience_section, group,
                                            within_task_patch_mode)
 
@@ -151,16 +114,8 @@ class Terminus2Agent(BaseAgent):
                                within_task_patch_mode: str | None = None) -> dict:
         """Run terminal-bench-2.0 task in Docker container.
 
-        Flow:
-          1. Download full task from HuggingFace (task.toml, instruction.md,
-             tests/, environment/Dockerfile)
-          2. Pull the Docker image specified in task.toml
-          3. Start container with task directory mounted
-          4. Agent loop: CodeBuddy SDK generates commands, docker exec runs them
-          5. Run pytest tests in container for evaluation
-          6. Parse pass/fail and return result
-
-        All steps stream real-time output for intermediate state visibility.
+        Downloads the task from HuggingFace, pulls its image, runs the agent
+        loop against it, then runs the in-container pytest harness.
         """
         from scripts.latest.llm_client import _llm_call_notool, _check_api_error
         from scripts.latest.trace import APIUnavailableError
@@ -178,7 +133,6 @@ class Terminus2Agent(BaseAgent):
                   "turns_used": 0, "end_reason": "", "cmds_executed": 0}
         t0 = time.time()
 
-        # Step 1: Download full task
         task_dir = self._download_terminal_bench_task(
             task_id, instruction, metadata
         )
@@ -187,7 +141,6 @@ class Terminus2Agent(BaseAgent):
             result["time_cost"] = time.time() - t0
             return result
 
-        # Step 2: Read Docker image from task.toml
         docker_image = self._read_docker_image(task_dir)
         if not docker_image:
             result["error"] = "no_docker_image_in_task_toml"
@@ -196,14 +149,12 @@ class Terminus2Agent(BaseAgent):
 
         print(f"  [terminal-bench] {task_id}: image={docker_image}")
 
-        # Step 3: Pull Docker image
         pull_ok = self._docker_pull(docker_image)
         if not pull_ok:
             result["error"] = f"docker_pull_failed:{docker_image}"
             result["time_cost"] = time.time() - t0
             return result
 
-        # Step 4: Start container
         container_id = self._docker_start(docker_image, task_dir)
         if not container_id:
             result["error"] = "docker_start_failed"
@@ -213,7 +164,6 @@ class Terminus2Agent(BaseAgent):
         print(f"  [terminal-bench] {task_id}: container={container_id[:12]}")
 
         try:
-            # Step 5: Set up container environment
             self._docker_exec(
                 container_id,
                 "mkdir -p /logs/verifier /workspace && "
@@ -221,12 +171,8 @@ class Terminus2Agent(BaseAgent):
             )
             print(f"  [terminal-bench] Environment ready")
 
-            # Step 5.5: Pre-agent baseline test run. Some tasks' tests partially
-            # pass on the UNTOUCHED workspace (the n=48 A-arm trace has
-            # pytest_partial_1_5-style scores from runs that executed zero
-            # commands), so raw pytest ratios credit the agent for work it never
-            # did. Record the baseline here; evaluate_task subtracts it.
-            # Disable with TB2_PRETEST=0.
+            # Some tasks' tests partially pass on an UNTOUCHED workspace; record
+            # that baseline so evaluate_task can subtract it.
             if os.environ.get("TB2_PRETEST", "1") != "0":
                 self._docker_exec(
                     container_id,
@@ -240,8 +186,7 @@ class Terminus2Agent(BaseAgent):
                 result["pre_test_passed"] = pre_passed
                 result["pre_test_output"] = pre_output[:5000]
                 print(f"  [terminal-bench] pre-agent baseline: passed={pre_passed}")
-                # Scrub verifier state and restore task files so the agent starts
-                # clean and the post-agent run cannot read a stale reward.txt.
+                # Required, else the post-agent run reads a stale reward.txt.
                 self._docker_exec(
                     container_id,
                     "rm -rf /logs/verifier/* /workspace/.pytest_cache 2>/dev/null; "
@@ -251,7 +196,6 @@ class Terminus2Agent(BaseAgent):
                     "true"
                 )
 
-            # Step 6: Agent loop
             agent_log, loop_meta = await self._agent_loop(
                 container_id, instruction, experience_section,
                 max_turns=_MAX_AGENT_TURNS,
@@ -263,14 +207,12 @@ class Terminus2Agent(BaseAgent):
             result["cmds_executed"] = loop_meta.get("cmds_executed", 0)
             result["actions"] = self._extract_actions_from_log(agent_log)
 
-            # Step 6: Run pytest tests
             test_passed, test_output = self._run_tests(container_id)
             result["test_passed"] = test_passed
             result["test_output"] = test_output[:5000]
         except Exception as e:
             result["error"] = f"agent_error:{e}"
         finally:
-            # Step 7: Clean up container
             self._docker_stop(container_id)
 
         result["time_cost"] = time.time() - t0
@@ -283,11 +225,9 @@ class Terminus2Agent(BaseAgent):
     def _download_terminal_bench_task(
         self, task_id: str, instruction: str, metadata: dict
     ) -> Path | None:
-        """Download full terminal-bench-2.0 task from HuggingFace.
+        """Download a full terminal-bench-2.0 task from HuggingFace.
 
-        Downloads all files: task.toml, instruction.md, environment/Dockerfile,
-        tests/test.sh, tests/test_outputs.py, solution/solve.sh.
-        Returns path to task directory, or None on failure.
+        Returns the task directory, or None on failure.
         """
         cache_dir = _TERMINAL_BENCH_CACHE / task_id
         if cache_dir.exists() and (cache_dir / "task.toml").exists():
@@ -295,12 +235,10 @@ class Terminus2Agent(BaseAgent):
 
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write instruction.md (already loaded by benchmark loader)
         inst_path = cache_dir / "instruction.md"
         with open(inst_path, "w") as f:
             f.write(instruction)
 
-        # Download remaining files from HuggingFace
         try:
             from huggingface_hub import hf_hub_download, list_repo_files
 
@@ -311,7 +249,7 @@ class Terminus2Agent(BaseAgent):
             task_files = [f for f in files if f.startswith(task_prefix)]
 
             for f in task_files:
-                rel_path = f[len(task_prefix):]  # e.g., "task.toml", "tests/test.sh"
+                rel_path = f[len(task_prefix):]
                 local_path = cache_dir / rel_path
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 try:
@@ -323,7 +261,6 @@ class Terminus2Agent(BaseAgent):
                 except Exception as e:
                     print(f"  [terminal-bench] warn: failed to download {f}: {e}")
 
-            # Verify minimum required files
             required = ["task.toml", "instruction.md"]
             for rf in required:
                 if not (cache_dir / rf).exists():
@@ -382,7 +319,6 @@ class Terminus2Agent(BaseAgent):
                     print(f"    {line[:120]}")
             proc.wait(timeout=300)
             if proc.returncode != 0:
-                # Check if image exists locally already
                 check = subprocess.run(
                     ["docker", "image", "inspect", image],
                     capture_output=True, text=True
@@ -397,10 +333,7 @@ class Terminus2Agent(BaseAgent):
             return False
 
     def _docker_start(self, image: str, task_dir: Path) -> str | None:
-        """Start Docker container with task directory mounted.
-
-        Returns container ID or None.
-        """
+        """Start Docker container with task directory mounted; returns container ID."""
         try:
             proc = subprocess.run(
                 [
@@ -476,15 +409,12 @@ class Terminus2Agent(BaseAgent):
     ) -> tuple[str, dict]:
         """Run the agentic loop: LLM reasons, docker exec runs commands.
 
-        Returns (agent execution log, loop metadata). The metadata records
-        turns_used / end_reason / cmds_executed so a task that died at turn 1
-        is distinguishable in the trace from one that genuinely worked and
-        failed — the n=48 A-arm run was undiagnosable without this.
+        Returns (log, meta). meta's turns_used/end_reason/cmds_executed are what
+        make a turn-1 death distinguishable from a genuine failure in the trace.
         """
         from scripts.latest.llm_client import _llm_call_notool, _check_api_error
         from scripts.latest.trace import APIUnavailableError
 
-        # Build system prompt
         system_prompt = (
             "You are an expert terminal agent solving technical tasks in a "
             "Linux container. You have access to a shell where you can run "
@@ -508,15 +438,12 @@ class Terminus2Agent(BaseAgent):
             "CMD must be an executable bash one-liner."
         )
 
-        # Check for a pre-built solution file to give the agent a head start
         task_dir = self._find_task_dir(container_id)
         has_solution = self._check_solution_exists(container_id)
 
-        # EvoMem: the retrieved cross-task patch block is NOT pasted into the prompt
-        # prefix (Terminus-2 degrades on long prefixes). It is materialized inside the
-        # container at /tmp/EVOMEM.md (written below) -- deliberately outside /workspace
-        # so it cannot perturb a task verifier that inspects the working tree (e.g. a
-        # `git status` check). The prompt carries only a short reference to it.
+        # The patch block goes to a file, not the prompt prefix (long prefixes
+        # degrade Terminus-2), and must stay outside /workspace or it perturbs
+        # verifiers that inspect the working tree (e.g. git status).
         if experience_section:
             system_prompt += (
                 "\n\n## Memory\nRelevant prior solutions for this task are materialized "
@@ -525,10 +452,6 @@ class Terminus2Agent(BaseAgent):
                 "instruction remains authoritative."
             )
 
-        # EvoMem mode: instruct the agent to use patch history for
-        # tracking what has been tried, recovering overwritten knowledge,
-        # and avoiding repeated failures. This follows the EvoArena
-        # paper's patch-based memory paradigm (Sec 3.1).
         if within_task_patch_mode in ("evoarena", "skillforge"):
             system_prompt += (
                 "\n\n## EvoMem Patch Memory (Evolution-Aware)\n"
@@ -544,7 +467,6 @@ class Terminus2Agent(BaseAgent):
                 "your memory of what has happened so far in this task."
             )
 
-        # Set up working directory in container and detect environment
         self._docker_exec(container_id,
             "mkdir -p /workspace /tests /logs/verifier && "
             "cp -r /task/* /workspace/ 2>/dev/null; "
@@ -553,9 +475,7 @@ class Terminus2Agent(BaseAgent):
             "true"
         )
 
-        # Materialize the EvoMem patch block as a file the agent reads on demand,
-        # rather than inflating the prompt prefix. base64 so arbitrary content
-        # survives the shell unscathed; /tmp so it never touches the evaluated tree.
+        # base64 so arbitrary content survives the shell.
         if experience_section:
             import base64
             _mem_b64 = base64.b64encode(experience_section.encode("utf-8")).decode("ascii")
@@ -564,7 +484,6 @@ class Terminus2Agent(BaseAgent):
                 f"echo {_mem_b64} | base64 -d > /tmp/EVOMEM.md"
             )
 
-        # Detect available tools
         detect_out, _ = self._docker_exec(
             container_id,
             "echo 'PYTHON:' && (which python3 || which python || echo 'NONE') && "
@@ -572,8 +491,7 @@ class Terminus2Agent(BaseAgent):
             "echo 'PYTHON_VER:' && (python3 --version 2>/dev/null || python --version 2>/dev/null || echo 'NONE')"
         )
         print(f"    [agent] env detect: {detect_out[:200]}")
-        
-        # Determine python command
+
         if "python3" in detect_out:
             python_cmd = "python3"
             pip_cmd = "pip3" if "pip3" in detect_out else ("pip" if "pip" in detect_out else None)
@@ -583,8 +501,7 @@ class Terminus2Agent(BaseAgent):
         else:
             python_cmd = "python3"
             pip_cmd = "pip3"
-        
-        # Install pytest if possible
+
         if pip_cmd:
             self._docker_exec(
                 container_id,
@@ -600,12 +517,6 @@ class Terminus2Agent(BaseAgent):
         agent_log_parts = [f"TASK: {instruction[:200]}"]
         last_command_outputs: list[str] = []
 
-        # EvoMem patch history — append-only record of what was tried,
-        # what changed, and why. Each patch = {turn, command, rc, output,
-        # rationale, evidence}. Follows the EvoArena paper's patch-based
-        # memory paradigm: patches preserve the evolution trail so the
-        # agent can recover overwritten knowledge and avoid repeating
-        # failed approaches.
         patches: list[dict] = []
         empty_streak = 0    # tolerate transient empty replies from the model
         noncmd_streak = 0   # tolerate replies that lack a parseable CMD/DONE
@@ -614,7 +525,6 @@ class Terminus2Agent(BaseAgent):
 
         for turn in range(max_turns):
             turns_used = turn + 1
-            # Build the prompt with recent command outputs
             context = conversation
             if last_command_outputs:
                 recent = last_command_outputs[-3:]
@@ -624,11 +534,8 @@ class Terminus2Agent(BaseAgent):
 
             context += "\n## Your Response\n"
 
-            # EvoMem: inject recent patches so the agent can see what
-            # has been tried, what succeeded, and what failed — following
-            # the EvoArena paper's principle of traceable memory evolution.
             if patches and within_task_patch_mode in ("evoarena", "skillforge"):
-                recent_patches = patches[-5:]  # last 5 patches
+                recent_patches = patches[-5:]
                 context += "\n## EvoMem Patch History (recent)\n"
                 for p in recent_patches:
                     status = "OK" if p["rc"] == 0 else f"FAIL(rc={p['rc']})"
@@ -641,14 +548,10 @@ class Terminus2Agent(BaseAgent):
             if _check_api_error(r):
                 raise APIUnavailableError("API unavailable")
 
-            # Strip leaked SDK tool-call markup BEFORE parsing: a reply that is
-            # only markup is effectively empty, and a CMD line carrying a
-            # trailing </arg_value:...> tag is a guaranteed bash syntax error.
             response_text = _SDK_MARKUP_RE.sub("", r.get("text", "")).strip()
             if not response_text:
-                # An empty reply from the model is usually transient (rate-limit /
-                # truncation). Do NOT end the task on the first one -- retry, and give up
-                # only after several in a row. Breaking here floored many tasks at turn 1.
+                # Empty replies are transient; breaking on the first one floored
+                # many tasks at turn 1.
                 agent_log_parts.append(f"[Turn {turn+1}] Empty response")
                 empty_streak += 1
                 if empty_streak >= 4:
@@ -657,9 +560,7 @@ class Terminus2Agent(BaseAgent):
                 continue
             empty_streak = 0
 
-            # Parse THINK / CMD / DONE from response
-            # Model outputs "THINK:" and "CMD:" (preferred), but also
-            # accept "THINKING:" and "COMMAND:" for backward compatibility.
+            # "THINKING:"/"COMMAND:" are accepted aliases of THINK:/CMD:.
             thinking_match = re.search(
                 r'(?:THINK(?:ING)?):\s*(.+?)(?=\n(?:COMMAND|CMD|DONE):|\Z)',
                 response_text, re.DOTALL | re.IGNORECASE
@@ -685,7 +586,7 @@ class Terminus2Agent(BaseAgent):
                 break
 
             if not command:
-                # Try to extract any bash-looking line
+                # Fall back to any bash-looking line.
                 for line in response_text.split("\n"):
                     line = line.strip()
                     if line and not line.startswith(("THINK", "#", "//", "/*")):
@@ -698,7 +599,6 @@ class Terminus2Agent(BaseAgent):
                             break
 
             if command:
-                # Clean the command
                 command = command.strip().strip("`").strip()
                 noncmd_streak = 0
                 agent_log_parts.append(
@@ -707,7 +607,6 @@ class Terminus2Agent(BaseAgent):
                 )
                 print(f"    [agent] turn {turn+1}: {command[:120]}")
 
-                # Execute in container
                 cmd_output, cmd_rc = self._docker_exec(
                     container_id,
                     f"cd /workspace && {command}",
@@ -720,13 +619,9 @@ class Terminus2Agent(BaseAgent):
                 last_command_outputs.append(
                     f"COMMAND: {command}\nRC={cmd_rc}\n{output_summary}"
                 )
-                # Keep only last 5 outputs
                 if len(last_command_outputs) > 5:
                     last_command_outputs = last_command_outputs[-5:]
 
-                # EvoMem: record a patch capturing what was tried and
-                # what happened. This append-only history lets the agent
-                # trace its own evolution during the task.
                 patches.append({
                     "turn": turn + 1,
                     "command": command,
@@ -741,20 +636,14 @@ class Terminus2Agent(BaseAgent):
                     f"RESULT (rc={cmd_rc}):\n{output_summary[:2000]}\n"
                 )
 
-                # Auto-detect test success
                 if cmd_rc == 0 and any(
                     kw in cmd_output.lower()
                     for kw in ["passed", "ok", "success", "all tests passed"]
                 ):
                     agent_log_parts.append("[Auto-detect] Tests appear to pass!")
             else:
-                # Same lesson as the empty-reply break (8a1b930): ONE malformed
-                # reply must not end the task. 31/38 zero-score tasks in the
-                # n=48 A-arm died right here — the model opened with THINK-only
-                # prose (its CMD swallowed by the SDK's tool-call parsing) and
-                # the loop broke at turn 1 with the workspace untouched.
-                # Nudge the model back into the format and retry; give up only
-                # after several non-command replies in a row.
+                # As with empty replies: ONE malformed reply must not end the
+                # task. Nudge back into the format and retry.
                 agent_log_parts.append(
                     f"[Turn {turn+1}] No command parsed: {response_text[:200]}"
                 )
@@ -796,14 +685,11 @@ class Terminus2Agent(BaseAgent):
     def _run_tests(self, container_id: str) -> tuple[bool, str]:
         """Run pytest tests in container. Returns (passed, output).
 
-        Evaluation priority:
-          1. /logs/verifier/reward.txt (1=pass, 0=fail) -- official indicator
-          2. pytest output parsing (X passed, Y failed)
-          3. check.py fallback
+        Pass/fail priority: /logs/verifier/reward.txt (official, 1/0), then
+        pytest summary parsing, then check.py.
         """
         print(f"  [terminal-bench] Running tests...")
 
-        # Detect python command
         detect_out, _ = self._docker_exec(
             container_id,
             "(which python3 2>/dev/null && echo 'PYTHON_CMD=python3') || "
@@ -816,16 +702,15 @@ class Terminus2Agent(BaseAgent):
                 python_cmd = line.split("=", 1)[1].strip()
                 break
 
-        # Install pytest if pip is available (test.sh uses uvx, not pip)
+        # test.sh uses uvx, not pip, so pytest may be absent.
         self._docker_exec(
             container_id,
             "pip install pytest pytest-timeout 2>/dev/null || "
             "pip3 install pytest pytest-timeout 2>/dev/null || true"
         )
 
-        # Run the test script if available, otherwise run pytest directly
-        # NOTE: test.sh always exits rc=0 (last cmd is echo), so rc is NOT reliable.
-        # The actual pass/fail is in /logs/verifier/reward.txt.
+        # test.sh always exits rc=0 (last cmd is echo) — rc is NOT a pass signal;
+        # the real verdict is /logs/verifier/reward.txt.
         test_cmd = (
             "cd /workspace && "
             "if [ -f tests/test.sh ]; then bash tests/test.sh 2>&1; "
@@ -839,7 +724,6 @@ class Terminus2Agent(BaseAgent):
 
         output_lower = output.lower()
 
-        # Primary: read official reward.txt
         passed = False
         reward_out, _ = self._docker_exec(
             container_id,
@@ -851,9 +735,7 @@ class Terminus2Agent(BaseAgent):
         elif reward_val == "0":
             passed = False
 
-        # Secondary: if no reward.txt, parse pytest output carefully
-        # Only count as passed if we have explicit passing test results
-        # and NO failures.
+        # No reward.txt: only pass on an explicit passing count with zero failures.
         if reward_val == "NOT_FOUND":
             import re as _re
             no_tests_ran = "no tests ran" in output_lower
@@ -864,7 +746,6 @@ class Terminus2Agent(BaseAgent):
             if no_tests:
                 passed = False
             elif has_failures:
-                # Check if reward.txt was created by a check.py script
                 check_output, _ = self._docker_exec(
                     container_id,
                     f"cd /workspace && {python_cmd} check.py 2>/dev/null || echo 'NO_CHECK'"
@@ -872,26 +753,22 @@ class Terminus2Agent(BaseAgent):
                 if "true" in check_output.lower() and "false" not in check_output.lower():
                     passed = True
                 else:
-                    # Parse pytest summary line: "X passed, Y failed"
+                    # Parse pytest summary "X passed, Y failed".
                     m = _re.search(r'(\d+)\s+passed', output_lower)
                     f = _re.search(r'(\d+)\s+failed', output_lower)
                     n_passed = int(m.group(1)) if m else 0
                     n_failed = int(f.group(1)) if f else 0
-                    # All tests must pass (no failures) and at least one test ran
                     passed = (n_passed > 0 and n_failed == 0)
             elif has_passes:
-                # Verify there are actually passing tests with a count
                 m = _re.search(r'(\d+)\s+passed', output_lower)
                 if m and int(m.group(1)) > 0:
-                    # Double check no failures
                     f = _re.search(r'(\d+)\s+failed', output_lower)
                     n_failed = int(f.group(1)) if f else 0
                     passed = (n_failed == 0)
                 else:
-                    # "passed" appeared but not in a test count context
+                    # "passed" appeared outside a test-count context.
                     passed = False
 
-        # Show test summary
         for line in output.split("\n"):
             line_stripped = line.strip()
             if any(kw in line_stripped.lower() for kw in
@@ -919,11 +796,8 @@ class Terminus2Agent(BaseAgent):
                        within_task_patch_mode: str | None = None) -> dict:
         """Run task by executing commands directly on local shell.
 
-        First generates a single bash command via LLM. If the LLM response
-        is reasoning text (not a command) or exceeds turn limits, falls
-        through to prompt-only mode by raising an exception.
-
-        No Docker isolation -- use with trusted tasks only.
+        No Docker isolation -- trusted tasks only. Raises to fall through to
+        prompt-only mode when the LLM returns prose instead of a command.
         """
         from scripts.latest.llm_client import _llm_call, _check_api_error
         from scripts.latest.trace import APIUnavailableError
@@ -932,7 +806,6 @@ class Terminus2Agent(BaseAgent):
         instruction = task.get("description", "")
         expected = task.get("expected", "")
 
-        # Set up files
         files = {}
         try:
             files = _json.loads(task.get("context", "{}"))
@@ -953,7 +826,6 @@ class Terminus2Agent(BaseAgent):
                                  "tests require docker; not run]"}
         t0 = time.time()
 
-        # Generate command via LLM
         system = (
             "You are a terminal command agent. Given a task instruction, "
             "output the exact bash command to accomplish it. "
@@ -975,13 +847,12 @@ class Terminus2Agent(BaseAgent):
 
         command = r.get("text", "").strip()
 
-        # Detect unusable responses -- fall through to prompt-only mode
+        # Unusable response -- fall through to prompt-only mode.
         if not command or "Max turns" in command or len(command) < 3:
             raise RuntimeError(f"shell_mode_unusable: {command[:100]}")
 
         result["response"] = command
 
-        # Execute locally
         try:
             proc = subprocess.run(
                 command, shell=True, cwd=self.sandbox_dir,
@@ -1005,17 +876,10 @@ class Terminus2Agent(BaseAgent):
     async def _run_prompt_only(self, task: dict, experience_section: str,
                                group: str,
                                within_task_patch_mode: str | None = None) -> dict:
-        """Solve task via multi-turn LLM reasoning -- no code execution.
+        """Solve task via LLM reasoning -- no code execution.
 
-        Used when neither Docker nor shell execution is available.
-        The LLM reasons through the problem with multiple turns (up to 5),
-        then outputs the final answer. The response is compared against
-        the expected output string by the benchmark evaluator.
-
-        For Terminal-Bench-2.0 coding tasks, the LLM is expected to:
-        1. Analyze the problem requirements
-        2. Reason about the solution approach
-        3. Produce the correct output/code/answer
+        Last resort when neither Docker nor shell is available; the response is
+        string-compared against `expected` by the benchmark evaluator.
         """
         from scripts.latest.llm_client import _llm_call_notool, _check_api_error
         from scripts.latest.trace import APIUnavailableError

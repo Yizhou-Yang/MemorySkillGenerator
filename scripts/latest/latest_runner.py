@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SkillForge Latest ? Main Orchestrator (v5 ? 5 primary benchmarks, EvoArena injection)."""
 import asyncio
+import datetime as _dtm
 import json
 import os
 import re
@@ -66,13 +67,38 @@ from scripts.latest.eval import (
 # Fingerprint every trace row with the code revision that produced it, so a
 # resumed sweep can be audited for rows that predate a bug fix (a stale-row
 # resume once kept 300 pre-fix arm-B rows and silently voided a comparison).
-try:
-    import subprocess as _sp
-    _CODE_REV = _sp.check_output(["git", "rev-parse", "--short", "HEAD"],
-                                 cwd=str(PROJECT_ROOT), text=True,
-                                 stderr=_sp.DEVNULL).strip()
-except Exception:
-    _CODE_REV = "unknown"
+def _code_rev() -> str:
+    """Identify the code that actually ran, not the commit it was filed under.
+
+    A bare git HEAD lies whenever files are copied onto a box without committing
+    -- the usual way a fix reaches a running experiment -- so two traces can
+    carry the same rev while different code produced them, which is exactly what
+    poolable.py has to be able to see. Append a digest of the files that can move
+    a score, so any edit to them changes the stamp.
+    """
+    import hashlib, subprocess as _sp
+    try:
+        head = _sp.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                cwd=str(PROJECT_ROOT), text=True,
+                                stderr=_sp.DEVNULL).strip()
+    except Exception:
+        head = "nogit"
+    h = hashlib.sha256()
+    for rel in ("scripts/latest", "benchmarks", "memlayer", "src/latest"):
+        root = PROJECT_ROOT / rel
+        if not root.exists():
+            continue
+        for f in sorted(root.rglob("*.py")):
+            if "__pycache__" in f.parts or "obsolete" in f.parts:
+                continue
+            try:
+                h.update(f.read_bytes())
+            except Exception:
+                pass
+    return f"{head}.{h.hexdigest()[:8]}"
+
+
+_CODE_REV = _code_rev()
 
 # --- Sub-runners (per-benchmark EvoArena-style within-agent injection) ---
 from scripts.latest.gaia_runner import run_gaia_task, run_gaia_task_controlled
@@ -168,6 +194,10 @@ except Exception:
 # Which curation policy arm C ran: judgment (critic score + self-assessment) or
 # metadata (measured w_c + version lineage). Different methods, never poolable.
 _C_META = os.environ.get("C_META", "0") == "1"
+# Two renderings of the same store are not the same treatment; record which
+# one produced a row so protocol_hash separates them and no analysis pools
+# a lean arm with a verbose one.
+_C_LEAN = os.environ.get("C_LEAN_RENDER", "0") == "1"
 _C_POLICY = (os.environ.get("C_POLICY")
              or ("meta" if _C_META else "judgment")).strip().lower()
 if _C_POLICY not in ("judgment", "meta", "guarded"):
@@ -189,6 +219,7 @@ def _protocol_dict() -> dict:
     return {
         "code_rev": _CODE_REV,
         "c_policy": _C_POLICY,
+        "c_lean_render": _C_LEAN,
         "critic_model": _CRITIC_MODEL,
         "judge_model": _JUDGE_MODEL,
         "metadata_author": _METADATA_AUTHOR,
@@ -205,12 +236,19 @@ def _protocol_dict() -> dict:
         "c_repair_thresh": os.environ.get("C_REPAIR_THRESH", "0.6"),
         "c_repair_gate": os.environ.get("C_REPAIR_GATE", "stability"),
         "c_raw_fallback": os.environ.get("C_RAW_FALLBACK", "1"),
+        # Both of these decide whether a chain gets a store at all, so a run
+        # that leaves them unrecorded cannot be told apart from one that had
+        # them off -- which is how a sweep spent two hours exporting
+        # C_ENDORSE_RELATIVE=1 into code that never read it.
+        "c_endorse_relative": os.environ.get("C_ENDORSE_RELATIVE", "1"),
+        "c_dead_chain_lesson": os.environ.get("C_DEAD_CHAIN_LESSON", "0"),
         "c_use_critic": os.environ.get("C_USE_CRITIC", "1"),
         "c_use_enrich": os.environ.get("C_USE_ENRICH", "1"),
         "c_no_partition": os.environ.get("C_NO_PARTITION", "0"),
         "w_c_disabled": os.environ.get("W_C_DISABLED", "0"),
         "reprompt_control": os.environ.get("REPROMPT_CONTROL", "0"),
         "passk": os.environ.get("PASSK", "0"),
+        "passk_final": os.environ.get("PASSK_FINAL", "0"),
         "external_mems": os.environ.get("EXTERNAL_MEMS", "(none)"),
     }
 
@@ -355,6 +393,23 @@ def _is_transient(err: str) -> bool:
     return any(k in err for k in _TRANSIENT_MARKERS)
 
 
+# A response that is really the transport describing its own failure. Matched on
+# the response text because that is where it arrives: these never set an error
+# field, which is exactly what made them dangerous.
+_INFRA_PLACEHOLDER_PAT = __import__("re").compile(
+    r"^\s*(empty stream\b"
+    r"|upstream gateway\b"
+    r"|.{0,80}?placeholder chunks\b"
+    r"|.{0,80}?without any model output\b"
+    r"|no response from (the )?(model|upstream|gateway)\b"
+    r"|request failed with status\b)", __import__("re").I)
+
+
+def _INFRA_PLACEHOLDER(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(t) and bool(_INFRA_PLACEHOLDER_PAT.match(t))
+
+
 async def _build_with_retry(build_coro, task: dict) -> dict:
     """Retry wrapper + infra accounting. Beyond `_build_with_retry_inner`'s
     per-task retries, this (a) marks a still-empty result as an explicit infra
@@ -369,6 +424,16 @@ async def _build_with_retry(build_coro, task: dict) -> dict:
         # No answer, no actions, no recorded error: the loop never engaged.
         # That is an infra zero, not a task result — mark it as such.
         r["error"] = err = "empty_response_after_retries"
+    elif not err and _INFRA_PLACEHOLDER(resp):
+        # The check above only catches an EMPTY string. When a gateway fails it
+        # often hands back a sentence describing its own failure, and that
+        # sentence is a non-empty response, so it sailed through here, got
+        # scored as the model's answer, and produced a 300-row GAIA trace with
+        # error=0 on every row while 87%, 99% and 35% of the three iterations
+        # were the string "Empty stream: upstream gateway sent only placeholder
+        # chunks without any model output". Every gate passed. The arm looked
+        # measured. Anything shaped like an infra message is infra.
+        r["error"] = err = "gateway_placeholder_response"
     if _is_transient(err) or err == "empty_response_after_retries":
         _api_down_streak += 1
         if _api_down_streak >= API_DOWN_LIMIT:
@@ -790,8 +855,19 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
             if stale:
                 print(f"  [resume] existing trace has iter_total != {ITER_CHAIN}; "
                       "clearing stale trace and starting fresh")
-            trace_path.unlink()
-            print(f"  Cleared stale trace: {trace_path}")
+            # Keep the rows instead of dropping them. Without RESUME a run that
+            # only tops up one arm still lands here, and the arms already
+            # collected -- hours of backbone time that no longer exist anywhere
+            # -- go with it. Rename, so the mistake costs a file move.
+            try:
+                _bak = trace_path.with_suffix(
+                    ".jsonl.replaced-%s" % _dtm.datetime.now().strftime("%m%d-%H%M%S"))
+                trace_path.rename(_bak)
+                print(f"  Previous trace moved aside: {_bak.name} "
+                      f"({sum(1 for _ in open(_bak))} rows kept)")
+            except Exception as _e:
+                trace_path.unlink()
+                print(f"  Cleared stale trace: {trace_path} (backup failed: {_e})")
     _trace.clear_benchmark(benchmark)
 
     test_tasks = tasks
@@ -906,6 +982,15 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                 fb = None
                 if mem is not None and isinstance(r, dict):
                     try:
+                        # evaluate_task ran just above and extracted the final
+                        # answer; record() only ever saw `r`, which lacks it.
+                        # That gap is why verified blocks led with a mid-sentence
+                        # response tail instead of the answer ("Verified answer:
+                        # confirms the answer. **Carnivore Loan Specialists**...")
+                        # -- the fallback had nothing better to offer.
+                        if isinstance(ev, dict) and ev.get("extracted_answer"):
+                            r.setdefault("extracted_answer",
+                                         ev["extracted_answer"])
                         fb = await _feedback_score(cur_task, r, ev, benchmark)
                         await mem.record(cur_task, r, fb)
                     except Exception:
@@ -923,6 +1008,12 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                            score=ev.get("score", 0.0),
                            extra={"em": ev.get("em", 0.0),
                                   "method": ev.get("method", ""),
+                                  # the normalised answer, not the whole
+                                  # transcript: a deployable selection rule
+                                  # over resamples needs something two
+                                  # attempts can agree on, and full responses
+                                  # match verbatim only 11% of the time.
+                                  "extracted_answer": ev.get("extracted_answer", ""),
                                   "execution_mode": exec_mode,
                                   "error": str(r.get("error") or "")[:200],
                                   # category/type and difficulty (when provided)
@@ -958,6 +1049,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                   "metadata_author": _METADATA_AUTHOR,
                                   "c_meta": _C_META,
                                   "c_policy": _C_POLICY,
+                                  "c_lean_render": _C_LEAN,
                                   "score_provenance": _SCORE_PROVENANCE,
                                   "judge_model": _JUDGE_MODEL,
                                   "protocol_hash": _protocol_hash(),
@@ -969,19 +1061,43 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                       "cmds_executed", "pre_test_passed")
                                      if isinstance(r, dict) and k in r},
                                   **{f"prof_{k}": v for k, v in prof.items()}})
-                # ── FINAL-ITERATION resampling for the raw-patch arm
-                # (PASSK_FINAL=k): after the chain's last iteration, draw k-1
-                # extra independent solves of the SAME variant with the SAME
-                # frozen memory state (no record between samples), logged as
-                # groups raw_patch_passk_s1..s{k-1}; the normal final row is
-                # sample 0. This is the fair counterpart to the no-memory
-                # pass@k control: B keeps its chain advantage and spends the
-                # extra calls on resampling, exactly the budget C spends on
-                # curation. Set PASSK_FINAL from the START of the B run —
-                # RESUME skips completed chains and will not backfill samples.
-                _PKF = int(os.environ.get("PASSK_FINAL", "0"))
-                if (_PKF > 1 and group_key == "raw_patch"
-                        and _it == ITER_CHAIN - 1):
+                # ── FINAL-ITERATION resampling, any arm (PASSK_FINAL=k):
+                # after the chain's last iteration, draw k-1 extra independent
+                # solves of the SAME variant with the SAME frozen memory state
+                # (no record between samples), logged as <group>_passk_s1..
+                # s{k-1}; the normal final row is sample 0. This is what makes
+                # the cost comparison answerable: every arm's score is then
+                # available at a budget of one, two or three attempts, so
+                # curation's extra write-time calls can be weighed against what
+                # the cheaper arms buy by simply trying again. It used to apply
+                # to raw_patch alone, which left the external layers with no
+                # pass@k of their own. Set PASSK_FINAL from the START of the run
+                # — RESUME skips completed chains and will not backfill samples.
+                # Per-group budgets: "no_mem:4,raw_patch:4,curated_patch:2" gives
+                # each arm its own attempt count, which is what lets the
+                # comparison be budget-matched rather than attempt-matched. A
+                # curated attempt costs more than an uncurated one, so equal
+                # attempts would hand the cheaper arms a smaller total; equal
+                # totals is the constraint that answers the cost question. A bare
+                # integer in PASSK_FINAL still applies to every listed group.
+                _PKF_DEFAULT = int(os.environ.get("PASSK_FINAL", "0"))
+                _PK_SPEC = {}
+                for _g in os.environ.get(
+                        "PASSK_FINAL_GROUPS",
+                        "no_mem,raw_patch,curated_patch,mem0,amem").split(","):
+                    _g = _g.strip()
+                    if not _g:
+                        continue
+                    if ":" in _g:
+                        _name, _k = _g.split(":", 1)
+                        try:
+                            _PK_SPEC[_name.strip()] = int(_k)
+                        except ValueError:
+                            _PK_SPEC[_name.strip()] = _PKF_DEFAULT
+                    else:
+                        _PK_SPEC[_g] = _PKF_DEFAULT
+                _PKF = _PK_SPEC.get(group_key, 0)
+                if _PKF > 1 and _it == ITER_CHAIN - 1:
                     for _s in range(1, _PKF):
                         if needs_docker and docker_sem is not None:
                             async with docker_sem:
@@ -992,7 +1108,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                 _rs = await _run_bounded(build_coro, cur_task, False)
                         _evs = await evaluate_task(_rs, benchmark)
                         _trace.log(
-                            benchmark=benchmark, group=f"raw_patch_passk_s{_s}",
+                            benchmark=benchmark, group=f"{group_key}_passk_s{_s}",
                             phase="test", task_id=_rs.get("task_id", tid),
                             task_desc=cur_task.get("description", ""),
                             augmented_prompt=_rs.get("_aug_prompt", ""),
@@ -1001,6 +1117,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                             extra={"em": _evs.get("em", 0.0),
                                    "iteration": _it, "iter_total": ITER_CHAIN,
                                    "sample_idx": _s,
+                                   "extracted_answer": _evs.get("extracted_answer", ""),
                                    "patch_injected": bool(_rs.get("_aug_prompt")),
                                    "aug_len": len(_rs.get("_aug_prompt") or ""),
                                    **({k: v for k, v in (_rs.get("_wc") or {}).items()}
@@ -1011,6 +1128,7 @@ async def run_benchmark(benchmark: str, tasks: list) -> dict:
                                    "metadata_author": _METADATA_AUTHOR,
                                    "c_meta": _C_META,
                                    "c_policy": _C_POLICY,
+                                   "c_lean_render": _C_LEAN,
                                    "score_provenance": _SCORE_PROVENANCE,
                                    "judge_model": _JUDGE_MODEL,
                                    "protocol_hash": _protocol_hash()})
@@ -1287,6 +1405,19 @@ async def main():
                 f"would run on the fallback quality score and still report no errors. "
                 f"Point CRITIC_BASE_URL/CRITIC_API_KEY/CRITIC_MODEL_ID at a live model "
                 f"(note: HY3_BASE_URL, if set, overrides CRITIC_BASE_URL).")
+    # A judge that cannot be reached never overrides a score, so every row is raw
+    # exact match while the trace still records the judge's name.
+    try:
+        from scripts.latest.llm_client import judge_preflight, JUDGE_MODEL as _JM
+        _jok, _jwhy = judge_preflight()
+    except Exception as e:
+        _jok, _jwhy = False, f"{type(e).__name__}: {e}"
+        _JM = os.environ.get("JUDGE_MODEL", "")
+    print(f"  Judge: {_JM or '(backbone)'} -> {'OK' if _jok else 'UNREACHABLE'} ({_jwhy})")
+    if not _jok and os.environ.get("ALLOW_DEAD_JUDGE") != "1":
+        raise SystemExit(
+            f"[gate] judge '{_JM}' is unreachable ({_jwhy}). Scores would silently "
+            f"fall back to raw exact match while the trace still names this judge.")
     # ── Knob banner: echo EVERY method/protocol knob at launch (Mem0-style
     # config echo). One glance at the log answers "what exactly ran?" — the
     # stale-checkout incident (C rerun on pre-v2 code) would have been caught
@@ -1294,6 +1425,7 @@ async def main():
     _knobs = {
         "protocol_hash": _protocol_hash(),
         "code_rev": _CODE_REV, "critic_model": _CRITIC_MODEL, "c_meta": _C_META,
+        "c_lean_render": _C_LEAN,
         "metadata_author": _METADATA_AUTHOR,
         "score_provenance": _SCORE_PROVENANCE,
         "ARMS": ",".join(sorted(_ARMS)),
@@ -1444,6 +1576,15 @@ async def main():
         else:
             print(f"  {name:>20}: {report}")
     await asyncio.sleep(2)
+    # A benchmark that died on api_unavailable still printed "ALL BENCHMARKS
+    # COMPLETE" and exited 0, so an orchestrating script moved on and a partial
+    # trace (67 of 100 tasks) looked like a finished arm. Report it in the exit
+    # code, which is the only thing the caller checks.
+    _failed = [n for n, r in all_reports.items()
+               if isinstance(r, dict) and "error" in r]
+    if _failed:
+        print(f"\n  INCOMPLETE: {', '.join(_failed)} — exiting non-zero", flush=True)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

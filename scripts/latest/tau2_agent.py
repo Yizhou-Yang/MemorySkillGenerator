@@ -93,31 +93,114 @@ def _load_mem(state: str):
     return _MEM_CACHE["mem"]
 
 
-def _inject_block(user_text: str) -> str:
-    """Arm-gated memory block for the current scenario (read-only on the store)."""
+# Ceiling on what any arm may put in a prompt. Blocks grow with the store, and
+# on a small-context backbone an oversized one kills the arm instead of just
+# crowding the prompt.
+_BLOCK_MAX_CH = int(os.environ.get("MEM_BLOCK_MAX_CH", "10000"))
+
+_INJ_COUNT = [0]
+
+
+def _msg_role_content(m):
+    """(role, content) from a pydantic Message or a plain dict."""
+    if isinstance(m, dict):
+        return m.get("role"), m.get("content")
+    return getattr(m, "role", None), getattr(m, "content", None)
+
+
+def _state_user_texts(state, incoming):
+    """(opening user message, all user turns) from an LLMAgentState.
+
+    The wrapper runs before the base method appends `incoming`, so on the first
+    turn state.messages is empty and the opener IS the incoming message.
+    """
+    parts = []
+    for m in list(getattr(state, "messages", None) or []):
+        role, content = _msg_role_content(m)
+        if role == "user" and isinstance(content, str) and content.strip():
+            parts.append(content)
+    role, content = _msg_role_content(incoming)
+    if role == "user" and isinstance(content, str) and content.strip():
+        parts.append(content)
+    if not parts:
+        return "", ""
+    return parts[0][:2000], "\n".join(parts)[:2000]
+
+
+def _prefix_state_system(state, block: str) -> None:
+    """Prepend `block` to the state's system message, idempotently."""
+    sys_msgs = getattr(state, "system_messages", None)
+    if sys_msgs is None:
+        return
+    for m in sys_msgs:
+        role, content = _msg_role_content(m)
+        if role == "system" and isinstance(content, str):
+            if any(mk in content for mk in _MARKERS):
+                return
+            new = f"{block}\n\n---\n\n{content}"
+            if isinstance(m, dict):
+                m["content"] = new
+            else:
+                try:
+                    object.__setattr__(m, "content", new)
+                except Exception:
+                    m.content = new
+            _INJ_COUNT[0] += 1
+            if _INJ_COUNT[0] == 1 or _INJ_COUNT[0] % 25 == 0:
+                print(f"[CuratedTau2Agent] injected {_INJ_COUNT[0]} blocks "
+                      f"(latest {len(block)} chars)", flush=True)
+            return
+    # no system message to extend: add one carrying just the block
+    if sys_msgs and not isinstance(sys_msgs[0], dict):
+        try:
+            sys_msgs.insert(0, type(sys_msgs[0])(role="system", content=block))
+            return
+        except Exception:
+            pass
+    sys_msgs.insert(0, {"role": "system", "content": block})
+
+
+def _inject_block(opening_text: str, query_text: str) -> str:
+    """Arm-gated memory block for the current scenario (read-only on the store).
+
+    The chain key comes from the OPENING user message alone. It used to be
+    hashed from the concatenation of every user turn so far, which changes the
+    sha1 on every turn of the dialogue: record() (bridge, keyed on the opener)
+    wrote to one chain while inject() read from a different one each turn, so
+    the store filled with single-entry orphan chains and the curated arm
+    retrieved other dialogues' fragments -- rewards fell iteration over
+    iteration while the uncurated arm, injecting verbatim text, held flat. The
+    full concatenation survives only as the retrieval QUERY, where growing with
+    the dialogue is what you want and no key stability is required."""
     arm = os.environ.get("TAU2_ARM", "A").upper()
     state = os.environ.get("TAU2_MEM_STATE", "")
-    if arm == "A" or not state or not os.path.exists(state) or not user_text:
+    if arm == "A" or not state or not os.path.exists(state) or not opening_text:
         return ""
     try:
         mem = _load_mem(state)        # BenchmarkMemory (B) / CuratedMemory (C) / external (mem0)
-        task = {"task_id": _task_key(user_text), "description": user_text,
-                "metadata": {"chain_id": _task_key(user_text)}}
-        return mem.inject(task) or ""
+        key = _task_key(opening_text)
+        task = {"task_id": key, "description": query_text or opening_text,
+                "metadata": {"chain_id": key}}
+        _blk = mem.inject(task) or ""
+        if len(_blk) > _BLOCK_MAX_CH:
+            _blk = _blk[:_BLOCK_MAX_CH] + "\n[block truncated]"
+        return _blk
     except Exception as e:  # never break the official agent over memory I/O
         print(f"[CuratedTau2Agent] inject skipped: {type(e).__name__}: {e}", flush=True)
         return ""
 
 
-def _first_user_text(messages: list) -> str:
-    """The scenario key material: the user turns seen so far, oldest first. The
-    opening user message alone is enough for a stable chain id; later user turns
-    enrich the retrieval query without changing the key (we key on the whole
-    concatenation, which is dominated by and prefixed with the opener)."""
+def _user_texts(messages: list) -> tuple[str, str]:
+    """(opening user message, all user turns so far). The opener is the chain
+    key -- it never changes across the dialogue, so it MUST be hashed alone; a
+    hash is not prefix-stable, so hashing the growing concatenation changes the
+    chain id on every turn. The concatenation is retrieval query material only."""
     parts = [m.get("content") for m in messages
              if isinstance(m, dict) and m.get("role") == "user"
              and isinstance(m.get("content"), str) and m.get("content").strip()]
-    return "\n".join(parts)[:2000]
+    if not parts:
+        return "", ""
+    return parts[0][:2000], "\n".join(parts)[:2000]
 
 
 def _prefix_system(messages: list, block: str) -> None:
@@ -158,11 +241,25 @@ class CuratedTau2Agent(_BaseAgent):
             if isinstance(v, list) and v and isinstance(v[0], dict) and "role" in v[0]:
                 msgs = v
                 break
-        if msgs is None:
+        if msgs is not None:
+            block = _inject_block(*_user_texts(msgs))
+            if block:
+                _prefix_system(msgs, block)
             return
-        block = _inject_block(_first_user_text(msgs))
+        # The pinned tau2 calls generate_next_message(message, state) and never
+        # passes raw dicts, so the search above finds nothing. Read the transcript
+        # off the state instead and prefix the state's system message.
+        state = incoming = None
+        for v in list(args) + list(kwargs.values()):
+            if hasattr(v, "messages") and hasattr(v, "system_messages"):
+                state = v
+            elif _msg_role_content(v)[0] is not None:
+                incoming = v
+        if state is None:
+            return
+        block = _inject_block(*_state_user_texts(state, incoming))
         if block:
-            _prefix_system(msgs, block)
+            _prefix_state_system(state, block)
 
 
 def _make_wrapper(method_name: str):

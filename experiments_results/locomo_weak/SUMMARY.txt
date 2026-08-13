@@ -1,0 +1,42 @@
+LoCoMo under the memory systems' own protocol -- weak backbones
+
+Answerer served locally by vLLM on 2x V100 (float16; sm_70 has no bf16).
+n=497 questions per system, BENCH_N=3, five arms.
+
+Grader: two models touched this block. gpt-5.6-sol graded ours/amem/nomem and
+then began returning SERVICE_UNAVAILABLE on ~9 of 10 requests even with no
+traffic routed to it, so mem0 and raw were graded by gpt-5.5. Rather than
+compare arms across graders, the three sol-graded arms were re-graded from
+their stored predictions into results_judge55.jsonl -- only the grader changed,
+no answer was regenerated. The J column below is that single-grader view; the
+two graders agree within 3.6 points and on every ordering. Neither model is a
+backbone here, so nothing grades itself.
+
+answerer         system        J%     F1%      n
+llama-3.2-1b     nomem       4.8     5.2    497
+llama-3.2-1b     raw        31.0    20.1    497
+llama-3.2-1b     amem       18.9    11.8    497
+llama-3.2-1b     mem0       40.4    24.1    497
+llama-3.2-1b     ours       38.2    26.4    497
+llama-3.2-3b     nomem       7.2     8.9    497
+llama-3.2-3b     raw        40.0    33.9    497
+llama-3.2-3b     amem       23.1    14.9    497
+llama-3.2-3b     mem0       48.9    40.8    497
+llama-3.2-3b     ours       47.9    41.1    497
+qwen2.5-1.5b     nomem       7.2    10.7    497
+qwen2.5-1.5b     raw        35.6    32.0    497
+qwen2.5-1.5b     amem       20.1    21.2    497
+qwen2.5-1.5b     mem0       46.1    38.3    497
+qwen2.5-1.5b     ours       40.8    39.0    497
+
+Read before quoting: Mem0 leads CuratorMem on J on all three backbones and
+trails it on F1 on all three. That is checked, not a broken arm -- identical
+question sets, zero empty predictions, zero Mem0 ingestion skips. At 1B it is
+partly length (Mem0 averages 16.4 words against our 12.6, gold is 4.9, and a
+longer answer is likelier to satisfy a judge and likelier to be diluted under
+token overlap). At qwen2.5-1.5b the arms answer at the same length and Mem0 is
+simply judged right on 44 more questions.
+
+A-Mem lost 33-38 note constructions per run to gateway 500s; its build path is
+not covered by the retry added to _chat and to mem0's LLM, so the A-Mem numbers
+are a mild under-estimate.

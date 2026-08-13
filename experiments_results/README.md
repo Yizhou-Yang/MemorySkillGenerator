@@ -8,17 +8,21 @@ deciding whether a run is valid. Most runs that look interesting fail a gate.
 
 Every benchmark is run under three arms (the `group` field in each trace row):
 
-- **A — no memory** (`A_baseline`): the plain agent; the control.
-- **B — raw patch memory** (`B_evomem`): injects the raw record of what worked on
+- **A — no memory** (`no_mem`): the plain agent; the control.
+- **B — raw patch memory** (`raw_patch`): injects the raw record of what worked on
   earlier iterations of the *same* task, verbatim. Chain-scoped.
-- **C — curated patch memory** (`C_gpr`): the method under test — B's patches, but
-  refined (generalized + causal lesson), critic-scored, low-quality ones enriched
-  not dropped, retrieval effectiveness-weighted, plus an "avoid this" channel from
-  failed attempts.
+- **C — curated patch memory** (`curated_patch`): the method under test — B's
+  patches, but refined (generalized + causal lesson), critic-scored, low-quality
+  ones enriched not dropped, retrieval effectiveness-weighted, plus an "avoid
+  this" channel from failed attempts.
 
-The headline comparison is **C vs B**; **B vs A** is the secondary check. Trace
-keys are legacy identifiers — read them as A/B/C. (Older frozen snapshots use
-`B_evoarena`/`C_skillforge`.)
+Two external memory layers run behind the same record/inject interface: `amem`
+(A-Mem) and `mem0` (Mem0).
+
+The headline comparison is **C vs B**; **B vs A** is the secondary check.
+Snapshots archived before the rename carry `A_baseline`/`B_evomem`/`C_gpr` (and
+older still, `B_evoarena`/`C_skillforge`); `scripts/latest/analyze_results.py`
+maps all of them onto the names above on read.
 
 ## Layout
 
@@ -39,7 +43,7 @@ experiments_results/
 `locomo_native/` is separate: LoCoMo under Mem0/A-Mem's own protocol (memory-layer
 comparison, not the A/B/C arms) — see `RUNNING_EXPERIMENTS.md`.
 
-Benchmarks: `gaia`, `gaia2`, `locomo`, `terminal_bench_2`. Runs only ever write to
+Benchmarks: `gaia`, `gaia2`, `locomo`, `tau2`. Runs only ever write to
 `latest/`; `formal/` snapshots are locked (never written by a run).
 
 ## `trace.jsonl` schema (one row per task × arm × iteration)
@@ -78,7 +82,7 @@ raising the task set lengthens the queue, it does not raise peak CPU/RAM):
 | Env | Meaning | Default |
 |-----|---------|---------|
 | `TASK_CONCURRENCY` | global heavy-task cap | auto = `min(cpu-1, 8)` |
-| `DOCKER_CONCURRENCY` | container cap for `terminal_bench_2` | 2 |
+| `DOCKER_CONCURRENCY` | container cap for Docker-backed benchmarks | 2 |
 | `BENCH_CONCURRENCY` | benchmarks allowed to interleave | 6 |
 | `PER_TASK_GB` | RAM budget per task for auto-sizing | 1.2 |
 | `EMBED_NUM_THREADS` | CPU threads per embedding encode | 1 |

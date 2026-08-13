@@ -1,6 +1,6 @@
 # Experiment Runner
 
-The A/B/C ablation runner for `gaia`, `gaia2`, `locomo`, and `terminal_bench_2`.
+The A/B/C ablation runner for `gaia`, `gaia2`, `locomo`, and `tau2`.
 
 ## Files
 
@@ -37,7 +37,7 @@ identifiers (`A_baseline` / `B_evomem` / `C_gpr`) — read them as A/B/C.
    same task*, not cross-task transfer. Retrieval is chain-scoped, so a single
    pass over independent tasks injects nothing (A=B=C) — use `ITER_CHAIN>1`.
 3. **Metrics.** Exact-match for QA (`gaia`, `locomo`), soft recall for `gaia2`,
-   pytest pass for `terminal_bench_2`.
+   task reward for `tau2`.
 
 ## Run
 
