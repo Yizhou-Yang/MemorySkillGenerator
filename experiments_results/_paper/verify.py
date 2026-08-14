@@ -106,7 +106,7 @@ CELLS = [
     ("tab:main tau2/HY3 Patched", 72.50, PAPER+"tau2/hy3/patched.jsonl", "raw_patch", 2, "score"),
     ("tab:main tau2/HY3 A-Mem", 71.25, PAPER+"tau2/hy3/amem.jsonl", "amem", 2, "score"),
     ("tab:main tau2/HY3 Mem0", 68.75, PAPER+"tau2/hy3/mem0.jsonl", "mem0", 2, "score"),
-    ("tab:main tau2/HY3 CuratorMem", 70.00, PAPER+"tau2/hy3/curatormem.jsonl", "curated_patch", 2, "score"),
+        ("tab:main tau2/HY3         CuratorMem", 77.50, PAPER+"tau2/hy3/curatormem.jsonl", "curated_patch", 2, "score"),
 
     # -- tau2 GPT-5.5 and DeepSeek. Both measured after the three tau2 repairs
     #    (injection reaches the prompt, record and inject agree on the chain key,
