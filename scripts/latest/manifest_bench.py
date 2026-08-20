@@ -42,10 +42,22 @@ def _exp(i: int, chain: str):
                                 "avoidance_note": "do not trust one source",
                                 "verbatim_outcome": f"attempt {i}: " + "x" * 300},
               reasoning_trace=[f"reasoned about {i}"], action_commands=[],
-              tool_sequence=[], version=i, timestamp=float(i))
+              tool_sequence=[], version=i, timestamp=float(i),
+              # fields the real ExperienceLibrary.record() reads; without them
+              # the "real library" path falls back to the stub and measures
+              # nothing the system does.
+              augmentation_used=False, augmentation_helped=None,
+              task_complexity="medium", outcome="success", sys_stats={})
 
 
-def _mk(n_chains: int, per_chain: int):
+def _mk(n_chains: int, per_chain: int, real_library: bool = False):
+    """Build a store of n_chains x per_chain entries.
+
+    real_library=True wires the actual ExperienceLibrary, so the read exercises
+    the retriever the system really runs -- including its partition index. The
+    stub below is kept for the store-size sweep, where the point is the
+    manifest lookup rather than the retriever.
+    """
     m = object.__new__(CuratedMemory)
     m.top_k = 3
     m.benchmark = "gaia"
@@ -59,7 +71,14 @@ def _mk(n_chains: int, per_chain: int):
         ents = [_exp(i, ch) for i in range(per_chain)]
         m._chain_entries[ch] = ents
         pool += ents
-    m._sf = NS(library=NS(retrieve_similar=lambda q, top_k: pool[:top_k]))
+    if real_library:
+        from memlayer.experience import ExperienceLibrary
+        lib = ExperienceLibrary()
+        for e in pool:
+            lib.record(e)
+        m._sf = NS(library=lib)
+    else:
+        m._sf = NS(library=NS(retrieve_similar=lambda q, top_k: pool[:top_k]))
     return m
 
 
@@ -97,33 +116,35 @@ def main() -> None:
               f"{len(blob)/1e6:.1f} |")
         n *= 10
 
-    # M5: hold the store at 9,990 patches; move them between many short chains
-    # and few long ones. The read is chain-pruned, so this is the axis on which
-    # its cost CAN grow -- measure it instead of asserting it away. Per-write
-    # cost = one append + one lineage update; embedding is cached at write time
-    # in the live system, so it is reported separately by the latency benchmark.
+    # M5: hold the store at 10,000 patches and move them between many short
+    # chains and few long ones. The read is chain-pruned, so chain length is the
+    # axis on which its cost can still grow -- measure it rather than assert it
+    # away. Both columns use the REAL library and the REAL write path: an
+    # earlier version scored a stubbed retriever and timed a bare list append,
+    # which measured neither the retrieval nor the write the system performs.
     print()
-    print("| per-chain length | chains | M5 inject p50 (ms) | M5 append (µs) |")
+    print("| per-chain length | chains | M5 inject p50 (ms) | M5 record (ms) |")
     print("|---|---|---|---|")
-    total = 9990
-    for per_chain in (3, 30, 333, 3330):
-        m = _mk(total // per_chain, per_chain)
-        task = {"task_id": "chain1", "description":
-                "task chain1 variant 1 with some realistic description words"}
+    total = 10_000
+    for per_chain in (10, 100, 1000, 10_000):
+        m = _mk(total // per_chain, per_chain, real_library=True)
+        task = {"task_id": "chain0", "description":
+                "task chain0 variant 1 with some realistic description words"}
         ts = []
         for _ in range(50):
             t0 = time.perf_counter()
             m.inject(task)
             ts.append((time.perf_counter() - t0) * 1000)
         m5r = sorted(ts)[len(ts) // 2]
-        ents = m._chain_entries["chain1"]
-        t0 = time.perf_counter()
-        for i in range(200):
-            e = _exp(len(ents) + i, "chain1")
-            ents.append(e)          # the append the store performs per write
-        m5w = (time.perf_counter() - t0) / 200 * 1e6
-        del ents[-200:]
-        print(f"| {per_chain} | {total // per_chain} | {m5r:.2f} | {m5w:.1f} |")
+        lib = m._sf.library
+        ws = []
+        for i in range(50):
+            e = _exp(total + i, "chain0")
+            t0 = time.perf_counter()
+            lib.record(e)                 # the store's real append + index update
+            ws.append((time.perf_counter() - t0) * 1000)
+        m5w = sorted(ws)[len(ws) // 2]
+        print(f"| {per_chain:,} | {total // per_chain:,} | {m5r:.2f} | {m5w:.3f} |")
 
 
 if __name__ == "__main__":

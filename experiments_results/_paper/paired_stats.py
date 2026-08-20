@@ -134,9 +134,13 @@ def main() -> int:
     ap.add_argument("--tex", action="store_true")
     a = ap.parse_args()
 
+    # Backbone order follows the main table (HY3, DeepSeek, GPT-5.5) rather than
+    # the filesystem's alphabetical order, so a reader can line the two up.
+    BB_ORDER = {"hy3": 0, "deepseek-v4": 1, "gpt-5.5": 2}
     prov, rng, out = _provenance(), random.Random(SEED), []
     for bench_dir in sorted(p for p in TAB.iterdir() if p.is_dir()):
-        for bb_dir in sorted(p for p in bench_dir.iterdir() if p.is_dir()):
+        for bb_dir in sorted((p for p in bench_dir.iterdir() if p.is_dir()),
+                             key=lambda d: (BB_ORDER.get(d.name, 99), d.name)):
             bench, bb = bench_dir.name, bb_dir.name
             arms = {f.stem: _scores_by_iter(f) for f in bb_dir.glob("*.jsonl")}
             for hi, lo in COMPARISONS:
