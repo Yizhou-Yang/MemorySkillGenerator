@@ -72,10 +72,16 @@ def _mk(n_chains: int, per_chain: int, real_library: bool = False):
         m._chain_entries[ch] = ents
         pool += ents
     if real_library:
+        # Bulk-load rather than record() one by one: record() pre-warms each
+        # entry's embedding, which is the real per-write cost but would make
+        # building a 10,000-entry store take hours here. The per-write cost is
+        # measured separately, on fresh entries, against a store already built.
         from memlayer.experience import ExperienceLibrary
         lib = ExperienceLibrary()
-        for e in pool:
-            lib.record(e)
+        lib.experiences = list(pool)
+        lib._by_task = {}
+        for i, e in enumerate(pool):
+            lib._by_task.setdefault(e.task_id, []).append(i)
         m._sf = NS(library=lib)
     else:
         m._sf = NS(library=NS(retrieve_similar=lambda q, top_k: pool[:top_k]))
@@ -138,12 +144,18 @@ def main() -> None:
         m5r = sorted(ts)[len(ts) // 2]
         lib = m._sf.library
         ws = []
-        for i in range(50):
+        for i in range(20):
+            # Unique text per configuration: the embedding cache is keyed by
+            # text, so reusing the same synthetic description across configs
+            # turned every write after the first config into a cache hit and
+            # reported 0.001 ms as the write cost.
             e = _exp(total + i, "chain0")
+            e.task_desc = f"{e.task_desc} [cfg {per_chain} write {i}]"
             t0 = time.perf_counter()
-            lib.record(e)                 # the store's real append + index update
+            lib.record(e)         # real write: append, index update, embed
             ws.append((time.perf_counter() - t0) * 1000)
         m5w = sorted(ws)[len(ws) // 2]
+        del lib.experiences[-20:]
         print(f"| {per_chain:,} | {total // per_chain:,} | {m5r:.2f} | {m5w:.3f} |")
 
 

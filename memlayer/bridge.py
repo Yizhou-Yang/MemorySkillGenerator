@@ -965,8 +965,13 @@ class CuratedMemory:
             # the old flat scan on purpose.
             _ids = None
             if not _no_partition():
+                # From the chain index only. Deriving these by scanning
+                # _chain_of for members of this chain walks the whole store on
+                # every read, which is the cost partitioning is here to avoid --
+                # measured at 1.28 ms per read on a 100k store. record() appends
+                # to _chain_entries and _chain_of together, so the index alone
+                # is complete.
                 _ids = {e.task_id for e in (self._chain_entries.get(chain) or ())}
-                _ids |= {t for t, c in self._chain_of.items() if c == chain}
                 _ids.add(task.get("task_id", ""))
                 _ids.discard("")
             pool = self._sf.library.retrieve_similar(
