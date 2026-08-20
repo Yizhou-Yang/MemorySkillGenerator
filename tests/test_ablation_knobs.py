@@ -120,5 +120,15 @@ o_hi = build(h2, mixed()).inject(TASK)
 check("floor changes what a mixed chain serves", o_lo.strip() != o_hi.strip(),
       f"lo={len(o_lo)}ch hi={len(o_hi)}ch")
 
+# --- render-kind telemetry ------------------------------------------------
+b2 = fresh()
+m2 = build(b2, ENTRIES())
+m2.inject(TASK)
+st = m2.pop_wc_stats() or {}
+check("render_kind reported", st.get("render_kind") in
+      ("curated", "repair_raw", "raw_fallback", "silence", "gated_raw", "empty"),
+      str(st.get("render_kind")))
+check("read-once semantics", m2.pop_wc_stats() is None)
+
 print("\n" + ("ALL KNOBS VERIFIED" if ok else "SOME CHECKS FAILED"))
 sys.exit(0 if ok else 1)

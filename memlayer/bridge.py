@@ -1115,6 +1115,7 @@ class CuratedMemory:
                     except (TypeError, ValueError):
                         pass
                 if _best <= 0.0:
+                    self._last_render = "silence"
                     return ""
         _repair_raw = False
         _repair_pool = cands
@@ -1152,11 +1153,13 @@ class CuratedMemory:
         if _repair_raw:
             served = _repair_pool[: self.top_k]
             out = _format_raw(served, action_scored=_action_scored)
+            self._last_render = "repair_raw"
         elif _C_RENDER_RAW:
             # Ablation foil: the gate chose these entries; serve them exactly
             # as B would (verbatim, no lesson, no checkmark, no footer).
             served = succ
             out = _format_raw(succ, action_scored=_action_scored)
+            self._last_render = "gated_raw"
         else:
             out = _format_curated(succ, fail, current_tid=tid_now,
                                   action_scored=_action_scored)
@@ -1186,7 +1189,9 @@ class CuratedMemory:
             if _C_POLICY != "judgment" and out and not _chain_verified:
                 out = _append_supersession(out, pool)
             served = succ + fail
+            self._last_render = "curated" if out else "empty"
         if not out and cands and _C_RAW_FALLBACK:
+            self._last_render = "raw_fallback"
             # Curated channels rendered nothing -> degrade to the raw store
             # under the same budget, never to no memory (see _C_RAW_FALLBACK).
             # Same-task-first order makes the fallback replay this task's own
@@ -1231,10 +1236,16 @@ class CuratedMemory:
         return out
 
     def pop_wc_stats(self) -> dict | None:
-        """w_c of the entries served by the last inject(), or None. Read-once so
-        a row can never inherit a previous task's weights."""
+        """w_c of the entries served by the last inject(), plus which render
+        path produced the block (silence / repair_raw / curated / raw_fallback /
+        gated_raw / empty), or None. Read-once so a row can never inherit a
+        previous task's stats."""
         w = getattr(self, "_last_wc", None)
-        self._last_wc = None
+        k = getattr(self, "_last_render", None)
+        self._last_wc, self._last_render = None, None
+        if k is not None:
+            w = dict(w or {})
+            w["render_kind"] = k
         return w
 
 
