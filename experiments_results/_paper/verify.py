@@ -339,5 +339,55 @@ for model, system, want_j, want_f1 in WEAK:
         ok += 1
 
 
+
+# ── tab:gaia2strict: benchmark-native pass@1 beside the paper's soft recall ──
+# Recomputed as the share of tasks scoring a full 1.0, which is what the
+# official all-or-nothing rule awards. Same files, same iteration as tab:main.
+def strict_rate(rel, group, iteration=2):
+    p = os.path.join(ROOT, rel)
+    if not os.path.exists(p):
+        return None
+    per = collections.defaultdict(list)
+    for line in open(p, errors="replace"):
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get("error") or d.get("group") != group or d.get("iteration") != iteration:
+            continue
+        v = d.get("score")
+        if v is not None:
+            per[d.get("task_id")].append(float(v))
+    if not per:
+        return None
+    vals = [sum(v) / len(v) for v in per.values()]
+    return round(100 * sum(1 for v in vals if v >= 1.0 - 1e-9) / len(vals), 2), len(vals)
+
+
+STRICT = [
+    ("HY3", "hy3", [("Raw", "raw", "no_mem", 11.00), ("Patched", "patched", "raw_patch", 5.05),
+                    ("A-Mem", "amem", "amem", 5.00), ("Mem0", "mem0", "mem0", 9.00),
+                    ("CuratorMem", "curatormem", "curated_patch", 9.00)]),
+    ("GPT-5.5", "gpt-5.5", [("Raw", "raw", "no_mem", 13.13), ("Patched", "patched", "raw_patch", 18.18),
+                            ("A-Mem", "amem", "amem", 9.00), ("Mem0", "mem0", "mem0", 18.00),
+                            ("CuratorMem", "curatormem", "curated_patch", 12.00)]),
+    ("DeepSeek-v4", "deepseek-v4", [("Raw", "raw", "no_mem", 9.00), ("Patched", "patched", "raw_patch", 16.00),
+                                    ("A-Mem", "amem", "amem", 13.00), ("Mem0", "mem0", "mem0", 17.00),
+                                    ("CuratorMem", "curatormem", "curated_patch", 16.00)]),
+]
+print()
+for disp, slug, arms in STRICT:
+    for name, fname, group, want in arms:
+        label = "tab:gaia2strict %-12s %-11s" % (disp, name)
+        got = strict_rate(PAPER + "gaia2/%s/%s.jsonl" % (slug, fname), group)
+        if got is None:
+            print("MISSING  %s" % label); miss += 1
+            continue
+        val, n = got
+        if abs(val - want) > 0.005:
+            print("FAIL     %s  want %.2f got %.2f (n=%d)" % (label, want, val, n)); bad += 1
+        else:
+            print("ok       %s  %.2f (n=%d)" % (label, val, n)); ok += 1
+
 print("\n%d ok, %d failed, %d missing" % (ok, bad, miss))
 sys.exit(1 if (bad or miss) else 0)
