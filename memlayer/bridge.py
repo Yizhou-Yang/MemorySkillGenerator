@@ -71,7 +71,7 @@ def _oracle_from_task(task: dict) -> list[dict]:
 # ── C (CuratedMemory) helpers — curate CONCRETE experiences ──────────────────
 # Stricter than B's floor on purpose: an injected-but-irrelevant "lesson"
 # actively misleads the agent, so precision beats recall here.
-_C_SIM_FLOOR = 0.08
+_C_SIM_FLOOR = float(os.environ.get("C_SIM_FLOOR", "0.08"))
 _CRITIC_GATE = int(os.environ.get("C_CRITIC_GATE", "5"))
 _C_META = os.environ.get("C_META", "0") == "1"
 _SCORE_PROVENANCE = ("self_assessment" if os.environ.get("ITER_FEEDBACK", "gold") == "self"
@@ -168,6 +168,12 @@ def _no_partition() -> bool:
 # under the same dose budget — it degrades to the \patchmem baseline, never to
 # no memory. C_RAW_FALLBACK=0 is the ablation arm.
 _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
+# Ablation foils (appendix factorial): C_RANK=sim keeps retrieve_similar's
+# similarity order instead of the lineage tuple, isolating the ordering;
+# C_RENDER_RAW=1 serves the gate-selected entries verbatim (B's format),
+# isolating the curated text from the read policy around it.
+_C_RANK = (os.environ.get("C_RANK") or "lineage").strip().lower()
+_C_RENDER_RAW = os.environ.get("C_RENDER_RAW", "0") == "1"
 # Curation-as-repair: chains whose previous attempt passed the threshold are
 # served B's raw rendering untouched.
 # Curation applies to FAILING chains only. Measured on every benchmark we run:
@@ -1049,7 +1055,11 @@ class CuratedMemory:
                           if d.get("provenance") in ("env", "gold")]
                 reuse = sum(deltas) / len(deltas) if deltas else 0.0
                 return (-ver, -moved, -reuse)
-            if _C_POLICY == "guarded":
+            if _C_RANK == "sim":
+                # Ablation foil: keep the retriever's similarity order and let
+                # neither endorsement nor lineage reorder it.
+                scored = list(pool)
+            elif _C_POLICY == "guarded":
                 # Endorsed-first, then lineage: judgment proposes, but only
                 # entries holding a second key wear the ✓.
                 scored = sorted(pool, key=lambda e: (
@@ -1142,6 +1152,11 @@ class CuratedMemory:
         if _repair_raw:
             served = _repair_pool[: self.top_k]
             out = _format_raw(served, action_scored=_action_scored)
+        elif _C_RENDER_RAW:
+            # Ablation foil: the gate chose these entries; serve them exactly
+            # as B would (verbatim, no lesson, no checkmark, no footer).
+            served = succ
+            out = _format_raw(succ, action_scored=_action_scored)
         else:
             out = _format_curated(succ, fail, current_tid=tid_now,
                                   action_scored=_action_scored)

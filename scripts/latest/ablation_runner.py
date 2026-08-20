@@ -78,6 +78,16 @@ ARMS = {
                         "C", "curated_patch"),
     "C_weak_compact":  ({"ARMS": "C", "C_PAGE_KEEP": "2"},
                         "C", "curated_patch"),
+    # Factorial isolation (reviewer request): the Patched-vs-CuratorMem gap
+    # bundles four changes (text, floor, ranking, channels). These separate
+    # them by moving ONE at a time off C, so each arm differs from full C in
+    # exactly one factor and the candidate set stays paired.
+    "C_theta_B":       ({"ARMS": "C", "C_SIM_FLOOR": "0.05"},
+                        "C", "curated_patch"),
+    "C_rank_sim":      ({"ARMS": "C", "C_RANK": "sim"},
+                        "C", "curated_patch"),
+    "C_render_raw":    ({"ARMS": "C", "C_RENDER_RAW": "1"},
+                        "C", "curated_patch"),
     "ctrl_reprompt":   ({"ARMS": "A", "REPROMPT_CONTROL": "1",
                          "REPROMPT_CALLS": os.environ.get("REPROMPT_CALLS", "2")},
                         "A", "no_mem"),
