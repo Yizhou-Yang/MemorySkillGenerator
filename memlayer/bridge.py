@@ -956,6 +956,24 @@ class CuratedMemory:
         try:
             # No outcome filter here: we want both prior successes (to copy) and
             # prior failures (to avoid) from this chain.
+            #
+            # Hand the retriever the chain's own task ids so it prunes to the
+            # partition BEFORE scoring. Without this the read scored every
+            # experience in the store and the chain filter below threw the rest
+            # away, which made a chain-scoped read cost O(store) -- the thing
+            # partitioning exists to prevent. The no-partition ablation keeps
+            # the old flat scan on purpose.
+            _ids = None
+            if not _no_partition():
+                _ids = {e.task_id for e in (self._chain_entries.get(chain) or ())}
+                _ids |= {t for t, c in self._chain_of.items() if c == chain}
+                _ids.add(task.get("task_id", ""))
+                _ids.discard("")
+            pool = self._sf.library.retrieve_similar(
+                core, top_k=self.top_k * 6,
+                **({"task_ids": _ids} if _ids else {}))
+        except TypeError:
+            # SDK installs may carry a retriever without the task_ids parameter.
             pool = self._sf.library.retrieve_similar(core, top_k=self.top_k * 6)
         except Exception:
             pool = []  # the chain index below still serves

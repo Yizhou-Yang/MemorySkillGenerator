@@ -37,8 +37,8 @@ def main() -> int:
     for arm, k in KEY.items():
         r = rows[arm]
         for pct in ("50", "95", "99"):
-            subs[f"LAT_{k}_{pct}"] = f"{r['p' + pct]:.2f}"
-        subs[f"LAT_{k}_SERVED"] = "$%d/%d$" % (r["served"], r["n"])
+            subs[f"LAT{k}{pct}"] = f"{r['p' + pct]:.2f}"
+        subs[f"LAT{k}SERVED"] = "$%d/%d$" % (r["served"], r["n"])
     out, n = tex, 0
     for name, val in subs.items():
         out, c = re.subn(r"\b%s\b" % name, val, out)

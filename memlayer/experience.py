@@ -162,6 +162,10 @@ def _tf_idf_fallback(query: str, doc: str) -> float:
 # store (profile 2026-08-20). Encoding is deterministic, so caching changes
 # read cost only, never a similarity value. Keyed by text; bounded FIFO so a
 # long-running process cannot grow it without limit.
+# Read once: this was consulted per candidate per read, so a scoped read paid
+# thousands of os.environ lookups for a value that cannot change mid-run.
+_W_C_DISABLED = os.environ.get("W_C_DISABLED") == "1"
+
 _EMB_CACHE: dict[str, "object"] = {}
 _EMB_CACHE_MAX = 50000
 
@@ -195,11 +199,25 @@ def compute_similarity(query: str, doc: str) -> float:
 class ExperienceLibrary:
     def __init__(self):
         self.experiences: list[Experience] = []
+        self._by_task: dict[str, list[int]] = {}
         self._augment_stats: dict[str, dict] = {}
         self._exp_effectiveness: dict[str, dict] = {}  # exp.task_id → {injected_count, total_score_delta}
 
+    def __setstate__(self, state: dict) -> None:
+        """Rebuild the task index for libraries pickled before it existed."""
+        self.__dict__.update(state)
+        if not self.__dict__.get("_by_task"):
+            idx: dict[str, list[int]] = {}
+            for i, e in enumerate(self.__dict__.get("experiences", [])):
+                idx.setdefault(getattr(e, "task_id", None), []).append(i)
+            self._by_task = idx
+
     def record(self, exp: Experience):
         self.experiences.append(exp)
+        # Position index by task id. Without it a chain-scoped read still had to
+        # score every experience in the store and filter afterwards, so the
+        # partition bought nothing on the read path it was introduced for.
+        self._by_task.setdefault(exp.task_id, []).append(len(self.experiences) - 1)
         # Pay the embedding at write time, off the read path: the first read
         # after N writes would otherwise encode all N docs in one call.
         try:
@@ -243,8 +261,7 @@ class ExperienceLibrary:
             This is equivalent to a temperature-adjusted Boltzmann distribution
             that adapts based on empirical reward signals.
         """
-        import os as _os
-        if _os.environ.get("W_C_DISABLED") == "1":
+        if _W_C_DISABLED:
             return 1.0  # ablation arm C_no_wc: pure-similarity retrieval
         stats = self._exp_effectiveness.get(exp_id)
         if not stats or stats["count"] < 2:
@@ -256,7 +273,8 @@ class ExperienceLibrary:
     def retrieve_similar(self, task_desc: str, top_k: int = 3,
                          outcome_filter: str | None = None,
                          exclude_tool_failures: bool = False,
-                         min_similarity: float = 0.1) -> list[Experience]:
+                         min_similarity: float = 0.1,
+                         task_ids: "set[str] | None" = None) -> list[Experience]:
         """Retrieve top-k similar experiences above minimum similarity threshold.
 
         SRDP Theory — Retrieval Strategy μ(c|s,M):
@@ -278,7 +296,17 @@ class ExperienceLibrary:
                 are still retrievable. With 1M context, injecting slightly less
                 relevant experiences is acceptable — the model can ignore them.
         """
-        candidates = self.experiences
+        if task_ids is not None:
+            # Prune to the partition BEFORE scoring. Scoring the whole store and
+            # filtering after is what made a chain-scoped read cost O(store):
+            # on a 240-entry store every read computed 240 similarities to keep
+            # one chain's worth. Falls back to the full list only when the index
+            # has no entry for any requested id (pre-index pickles).
+            idx = [i for t in task_ids for i in self._by_task.get(t, ())]
+            candidates = ([self.experiences[i] for i in sorted(set(idx))] if idx
+                          else [e for e in self.experiences if e.task_id in task_ids])
+        else:
+            candidates = self.experiences
         if outcome_filter:
             candidates = [e for e in candidates if e.outcome == outcome_filter]
         if exclude_tool_failures:

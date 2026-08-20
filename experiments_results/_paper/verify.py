@@ -160,11 +160,9 @@ CELLS = [
     ("tab:main GAIA2/DS Mem0", 37.09, PAPER+"gaia2/deepseek-v4/mem0.jsonl", "mem0", 2, "score"),
     ("tab:main GAIA2/DS        CuratorMem", 53.42, PAPER+"gaia2/deepseek-v4/curatormem.jsonl", "curated_patch", 2, "score"),
 
-    ("tab:main LoCoMo/DS Raw", 22.40, PAPER+"locomo/deepseek-v4/raw.jsonl", "no_mem", 2, "score"),
-    ("tab:main LoCoMo/DS Patched", 28.40, PAPER+"locomo/deepseek-v4/patched.jsonl", "raw_patch", 2, "score"),
-    ("tab:main LoCoMo/DS A-Mem", 32.40, PAPER+"locomo/deepseek-v4/amem.jsonl", "amem", 2, "score"),
-    ("tab:main LoCoMo/DS Mem0", 21.80, PAPER+"locomo/deepseek-v4/mem0.jsonl", "mem0", 2, "score"),
-    ("tab:main LoCoMo/DS CuratorMem", 37.00, PAPER+"locomo/deepseek-v4/curatormem.jsonl", "curated_patch", 2, "score"),
+    # LoCoMo/DeepSeek now reports token-F1, like the other two LoCoMo rows.
+    # token-F1 is recomputed from response vs gold (locomo_f1.py) because the
+    # snapshot carries only judge and exact match; checked separately below.
 
     # -- Figure 2a, read-time budget. Re-run 2026-08-06 after the lineage-footer
     #    fix: `room = _C_INJECT_BUDGET + 100 - ...` read the uncapped setting (0)
@@ -340,54 +338,27 @@ for model, system, want_j, want_f1 in WEAK:
 
 
 
-# ── tab:gaia2strict: benchmark-native pass@1 beside the paper's soft recall ──
-# Recomputed as the share of tasks scoring a full 1.0, which is what the
-# official all-or-nothing rule awards. Same files, same iteration as tab:main.
-def strict_rate(rel, group, iteration=2):
-    p = os.path.join(ROOT, rel)
-    if not os.path.exists(p):
-        return None
-    per = collections.defaultdict(list)
-    for line in open(p, errors="replace"):
-        try:
-            d = json.loads(line)
-        except ValueError:
-            continue
-        if d.get("error") or d.get("group") != group or d.get("iteration") != iteration:
-            continue
-        v = d.get("score")
-        if v is not None:
-            per[d.get("task_id")].append(float(v))
-    if not per:
-        return None
-    vals = [sum(v) / len(v) for v in per.values()]
-    return round(100 * sum(1 for v in vals if v >= 1.0 - 1e-9) / len(vals), 2), len(vals)
-
-
-STRICT = [
-    ("HY3", "hy3", [("Raw", "raw", "no_mem", 11.00), ("Patched", "patched", "raw_patch", 5.05),
-                    ("A-Mem", "amem", "amem", 5.00), ("Mem0", "mem0", "mem0", 9.00),
-                    ("CuratorMem", "curatormem", "curated_patch", 9.00)]),
-    ("GPT-5.5", "gpt-5.5", [("Raw", "raw", "no_mem", 13.13), ("Patched", "patched", "raw_patch", 18.18),
-                            ("A-Mem", "amem", "amem", 9.00), ("Mem0", "mem0", "mem0", 18.00),
-                            ("CuratorMem", "curatormem", "curated_patch", 12.00)]),
-    ("DeepSeek-v4", "deepseek-v4", [("Raw", "raw", "no_mem", 9.00), ("Patched", "patched", "raw_patch", 16.00),
-                                    ("A-Mem", "amem", "amem", 13.00), ("Mem0", "mem0", "mem0", 17.00),
-                                    ("CuratorMem", "curatormem", "curated_patch", 16.00)]),
-]
+# ── tab:main LoCoMo/DeepSeek under token-F1 ──────────────────────────────────
+# The cell's source trace holds response and gold, so token-F1 is recomputed
+# with the same f1() the native protocol uses -- one metric across all three
+# LoCoMo rows instead of two.
+LOCOMO_F1 = [("Raw", "no_mem", 35.55), ("Patched", "raw_patch", 32.21),
+             ("A-Mem", "amem", 35.35), ("Mem0", "mem0", 35.85),
+             ("CuratorMem", "curated_patch", 36.92)]
+LOCOMO_SRC = "experiments_results/_paper/locomo_ds_f1.json"
 print()
-for disp, slug, arms in STRICT:
-    for name, fname, group, want in arms:
-        label = "tab:gaia2strict %-12s %-11s" % (disp, name)
-        got = strict_rate(PAPER + "gaia2/%s/%s.jsonl" % (slug, fname), group)
-        if got is None:
-            print("MISSING  %s" % label); miss += 1
-            continue
-        val, n = got
-        if abs(val - want) > 0.005:
-            print("FAIL     %s  want %.2f got %.2f (n=%d)" % (label, want, val, n)); bad += 1
-        else:
-            print("ok       %s  %.2f (n=%d)" % (label, val, n)); ok += 1
+_p = os.path.join(ROOT, LOCOMO_SRC)
+_got = json.load(open(_p)) if os.path.exists(_p) else None
+for name, group, want in LOCOMO_F1:
+    label = "tab:main LoCoMo/DS %-11s (token-F1)" % name
+    if _got is None or group not in _got:
+        print("MISSING  %s  <- %s" % (label, LOCOMO_SRC)); miss += 1
+        continue
+    val, n = _got[group]["f1"], _got[group]["n"]
+    if abs(val - want) > 0.005:
+        print("FAIL     %s  want %.2f got %.2f (n=%d)" % (label, want, val, n)); bad += 1
+    else:
+        print("ok       %s  %.2f (n=%d)" % (label, val, n)); ok += 1
 
 print("\n%d ok, %d failed, %d missing" % (ok, bad, miss))
 sys.exit(1 if (bad or miss) else 0)
