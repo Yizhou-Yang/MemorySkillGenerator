@@ -116,6 +116,8 @@ def _tasks_for(mem, limit: int) -> list[dict]:
                 push(getattr(e, "task_id", ""), getattr(e, "task_desc", ""), chain)
                 if len(out) >= limit:
                     return out
+        return out
+
     inner = getattr(mem, "_mem", None)                 # PatchedMemory
     if inner is not None and getattr(inner, "_patches", None):
         for p in inner._patches:
@@ -123,36 +125,74 @@ def _tasks_for(mem, limit: int) -> list[dict]:
                  or getattr(p, "content", ""), getattr(p, "chain_id", ""))
             if len(out) >= limit:
                 return out
-    pc = getattr(mem, "_per_chain", None)              # A-Mem
+        return out
+
+    bench = getattr(mem, "benchmark", "")
+
+    # A-Mem: _per_chain is keyed by the FULL namespace ("{bench}:{chain}"), but
+    # inject() rebuilds that namespace from the task, so handing it the stored
+    # key verbatim produces "{bench}:{bench}:{chain}" and matches nothing. Strip
+    # the prefix, and take the query from the note itself so it is the real task
+    # text rather than an id.
+    pc = getattr(mem, "_per_chain", None)
     if isinstance(pc, dict) and pc:
-        for chain, notes in pc.items():
-            push(chain, " ".join(str(n) for n in (notes or []))[:2000] or chain, chain)
+        notes = getattr(mem, "_dehydrated_notes", None) or []
+        by_id = {}
+        for n in notes:
+            if isinstance(n, dict) and n.get("id"):
+                by_id[n["id"]] = str(n.get("content") or "")
+        for ns, ids in pc.items():
+            chain = ns.split(":", 1)[1] if ns.startswith(bench + ":") else ns
+            text = ""
+            for i in (ids or []):
+                text = by_id.get(i, "")
+                if text:
+                    break
+            # notes are stored as "Task: <description>\n..." -- recover the task
+            if text.startswith("Task:"):
+                text = text[len("Task:"):].strip()
+            text = text.split("\n")[0].strip()
+            push(chain, text or chain, chain)
             if len(out) >= limit:
                 return out
+        return out
+
     ms = getattr(mem, "_mems", None)                   # Mem0 (per-chain stores)
     if isinstance(ms, dict) and ms:
         for chain in ms:
             push(chain, chain, chain)
             if len(out) >= limit:
                 return out
+        return out
+
     # Mem0 keeps state on disk (one qdrant dir per chain) and drops its client
     # dict across a pickle, so the live chain list has to come from the store
-    # root rather than from the object.
-    if type(mem).__name__ == "Mem0Memory" and not out:
+    # root. Directory name is "mem0_" + slug(_ns) and _ns is "{bench}:{chain}",
+    # so the chain id is what follows "mem0_{bench}_". The query text comes from
+    # the memories mem0 itself stored, so the search is a real one.
+    if type(mem).__name__ == "Mem0Memory":
         try:
-            from scripts.latest.baseline_memories import _STORE_ROOT
+            from scripts.latest.baseline_memories import _STORE_ROOT, _ns
         except Exception:
             return out
-        # Directory name is "mem0_" + slug(_ns(benchmark, task)) and _ns is
-        # "{benchmark}:{chain_id}", so the chain id is what follows
-        # "mem0_{benchmark}_". Passing the whole directory name instead adds a
-        # second benchmark prefix and every search lands on a namespace that
-        # does not exist -- a real qdrant query returning nothing, which is the
-        # most misleading kind of zero.
-        pre = "mem0_%s_" % mem.benchmark
+        pre = "mem0_%s_" % bench
         for d in sorted(q.name for q in Path(_STORE_ROOT).glob(pre + "*")):
             chain = d[len(pre):]
-            push(chain, chain, chain)
+            text = ""
+            try:
+                ns = _ns(bench, {"task_id": chain, "metadata": {"chain_id": chain}})
+                got = mem._mem_for(ns).get_all(filters={"user_id": ns}, limit=1)
+                items = got.get("results", got) if isinstance(got, dict) else got
+                for it in (items or []):
+                    if isinstance(it, dict):
+                        text = str(it.get("memory") or it.get("text") or "")
+                        if text:
+                            break
+            except Exception:
+                text = ""
+            if not text:
+                continue          # empty namespace: nothing to query it with
+            push(chain, text, chain)
             if len(out) >= limit:
                 return out
     return out
@@ -189,7 +229,7 @@ def main() -> int:
     ap.add_argument("--benchmark", default="gaia2")
     ap.add_argument("--n", type=int, default=200)
     ap.add_argument("--warmup", type=int, default=5)
-    ap.add_argument("--arms", default="curatormem,patched,amem,mem0")
+    ap.add_argument("--arms", default="curatormem,amem,mem0")
     ap.add_argument("--store-dir", default="",
                     help="directory holding tau2_mem_*.pkl from a real run")
     a = ap.parse_args()
