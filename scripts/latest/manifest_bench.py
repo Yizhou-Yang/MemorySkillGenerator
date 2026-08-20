@@ -14,6 +14,9 @@ not touch the frozen method):
   M2  time-travel: reconstruct the injected context as of iteration k
   M3  crash recovery: pickle round-trip time + size vs store size
   M4  write amplification: bytes appended per Augment vs per Append
+  M5  per-chain history length: read latency and per-write cost as ONE chain
+      grows (the never-delete objection: reviewers asked what happens when the
+      thing that grows is the chain the read must touch, not the store around it)
 
 Usage: python scripts/latest/manifest_bench.py [maxN]
 Fills the paper's manifest microbenchmark table (appendix).
@@ -47,6 +50,8 @@ def _mk(n_chains: int, per_chain: int):
     m.top_k = 3
     m.benchmark = "gaia"
     m._chain_of, m._chain_entries, m._served = {}, {}, {}
+    m._served_keys, m._last_score, m._chain_base = {}, {}, {}
+    m._last_wc = m._last_render = None
     pool = []
     for c in range(n_chains):
         ch = f"chain{c}"
@@ -91,6 +96,34 @@ def main() -> None:
         print(f"| {n:,} | {m1:.2f} | {m2:.2f} | {m3:.0f} | "
               f"{len(blob)/1e6:.1f} |")
         n *= 10
+
+    # M5: hold the store at 9,990 patches; move them between many short chains
+    # and few long ones. The read is chain-pruned, so this is the axis on which
+    # its cost CAN grow -- measure it instead of asserting it away. Per-write
+    # cost = one append + one lineage update; embedding is cached at write time
+    # in the live system, so it is reported separately by the latency benchmark.
+    print()
+    print("| per-chain length | chains | M5 inject p50 (ms) | M5 append (µs) |")
+    print("|---|---|---|---|")
+    total = 9990
+    for per_chain in (3, 30, 333, 3330):
+        m = _mk(total // per_chain, per_chain)
+        task = {"task_id": "chain1", "description":
+                "task chain1 variant 1 with some realistic description words"}
+        ts = []
+        for _ in range(50):
+            t0 = time.perf_counter()
+            m.inject(task)
+            ts.append((time.perf_counter() - t0) * 1000)
+        m5r = sorted(ts)[len(ts) // 2]
+        ents = m._chain_entries["chain1"]
+        t0 = time.perf_counter()
+        for i in range(200):
+            e = _exp(len(ents) + i, "chain1")
+            ents.append(e)          # the append the store performs per write
+        m5w = (time.perf_counter() - t0) / 200 * 1e6
+        del ents[-200:]
+        print(f"| {per_chain} | {total // per_chain} | {m5r:.2f} | {m5w:.1f} |")
 
 
 if __name__ == "__main__":

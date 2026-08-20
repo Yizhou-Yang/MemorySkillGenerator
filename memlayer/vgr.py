@@ -130,6 +130,24 @@ class PatchMemory:
         self._embedder = embedder
         self._emb = None                    # row i <-> self._patches[i]
 
+    def __setstate__(self, state: dict) -> None:
+        """Rebuild the chain index for stores pickled before it existed.
+
+        Unpickling bypasses __init__, so a pre-index store came back without
+        _by_chain and every chain-scoped read raised AttributeError -- arm B's
+        read path fails outright on any store written before the partition
+        index was added. The index is derived from _patches, so rebuilding it
+        is exact rather than a guess.
+        """
+        self.__dict__.update(state)
+        self.__dict__.setdefault("_embedder", None)
+        self.__dict__.setdefault("_emb", None)
+        if self.__dict__.get("_by_chain") is None:
+            idx: dict[str, list[int]] = {}
+            for i, p in enumerate(self.__dict__.get("_patches", [])):
+                idx.setdefault(getattr(p, "chain_id", None), []).append(i)
+            self._by_chain = idx
+
     def __len__(self) -> int:
         return len(self._patches)
 
