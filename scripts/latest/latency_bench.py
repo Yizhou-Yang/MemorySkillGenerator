@@ -89,28 +89,70 @@ def _store_size(mem) -> dict:
     return out
 
 
-def _tasks_from_store(store_dir: Path, limit: int) -> list[dict]:
-    """Queries taken from the tasks the run actually issued.
+def _tasks_for(mem, limit: int) -> list[dict]:
+    """Queries drawn from the arm's OWN store.
 
-    The curated store records each attempt's task id and text, so replaying
-    those is the closest thing to the live read pattern: the ids hit real
-    chains instead of missing every partition, which is what a loader's task
-    list would do against a store keyed by chain. All arms get this one list,
-    so the comparison stays paired.
+    Chain ids are per-run content hashes, so the arms' key spaces are disjoint:
+    querying every arm with the curated store's ids made three arms miss every
+    partition and report the cost of an empty lookup as if it were their read
+    latency. Each arm is therefore queried with tasks it actually holds, which
+    is the read it would really perform. Query text comes from the same
+    benchmark either way, so the comparison stays like-for-like even though the
+    id lists differ.
     """
-    mem = _load_store("curatormem", store_dir)
-    if mem is None:
-        return []
-    seen, out = set(), []
-    for chain, entries in (getattr(mem, "_chain_entries", None) or {}).items():
-        for e in entries:
-            tid = getattr(e, "task_id", "")
-            desc = (getattr(e, "task_desc", "") or "").strip()
-            if not tid or tid in seen or not desc:
-                continue
-            seen.add(tid)
-            out.append({"task_id": tid, "description": desc,
-                        "metadata": {"chain_id": chain}})
+    out, seen = [], set()
+
+    def push(tid, desc, chain):
+        if not tid or not desc or tid in seen:
+            return
+        seen.add(tid)
+        out.append({"task_id": str(tid), "description": str(desc)[:4000],
+                    "metadata": {"chain_id": chain}})
+
+    ce = getattr(mem, "_chain_entries", None)          # CuratorMem
+    if isinstance(ce, dict) and ce:
+        for chain, entries in ce.items():
+            for e in entries:
+                push(getattr(e, "task_id", ""), getattr(e, "task_desc", ""), chain)
+                if len(out) >= limit:
+                    return out
+    inner = getattr(mem, "_mem", None)                 # PatchedMemory
+    if inner is not None and getattr(inner, "_patches", None):
+        for p in inner._patches:
+            push(getattr(p, "chain_id", ""), getattr(p, "evidence", "")
+                 or getattr(p, "content", ""), getattr(p, "chain_id", ""))
+            if len(out) >= limit:
+                return out
+    pc = getattr(mem, "_per_chain", None)              # A-Mem
+    if isinstance(pc, dict) and pc:
+        for chain, notes in pc.items():
+            push(chain, " ".join(str(n) for n in (notes or []))[:2000] or chain, chain)
+            if len(out) >= limit:
+                return out
+    ms = getattr(mem, "_mems", None)                   # Mem0 (per-chain stores)
+    if isinstance(ms, dict) and ms:
+        for chain in ms:
+            push(chain, chain, chain)
+            if len(out) >= limit:
+                return out
+    # Mem0 keeps state on disk (one qdrant dir per chain) and drops its client
+    # dict across a pickle, so the live chain list has to come from the store
+    # root rather than from the object.
+    if type(mem).__name__ == "Mem0Memory" and not out:
+        try:
+            from scripts.latest.baseline_memories import _STORE_ROOT
+        except Exception:
+            return out
+        # Directory name is "mem0_" + slug(_ns(benchmark, task)) and _ns is
+        # "{benchmark}:{chain_id}", so the chain id is what follows
+        # "mem0_{benchmark}_". Passing the whole directory name instead adds a
+        # second benchmark prefix and every search lands on a namespace that
+        # does not exist -- a real qdrant query returning nothing, which is the
+        # most misleading kind of zero.
+        pre = "mem0_%s_" % mem.benchmark
+        for d in sorted(q.name for q in Path(_STORE_ROOT).glob(pre + "*")):
+            chain = d[len(pre):]
+            push(chain, chain, chain)
             if len(out) >= limit:
                 return out
     return out
@@ -161,12 +203,7 @@ def main() -> int:
               "an empty store measures nothing", file=sys.stderr)
         return 1
 
-    tasks = _tasks_from_store(store_dir, a.n)
-    if not tasks:
-        print(f"[latency] no queries recoverable from {store_dir}", file=sys.stderr)
-        return 1
-    print(f"[latency] {a.benchmark} / {a.model}: {len(tasks)} queries "
-          f"from {store_dir}", flush=True)
+    print(f"[latency] {a.benchmark} / {a.model}: stores from {store_dir}", flush=True)
 
     want = [x.strip() for x in a.arms.split(",") if x.strip()]
     rows = []
@@ -182,12 +219,24 @@ def main() -> int:
         if mem is None:
             print(f"[latency] {arm}: no {_PICKLE[arm]} in {store_dir}", flush=True)
             continue
+        tasks = _tasks_for(mem, a.n)
+        if not tasks:
+            # An arm whose store is empty cannot be timed; reporting its
+            # empty-lookup cost as a read latency would be the wrong number.
+            print(f"[latency] {arm}: store holds nothing queryable "
+                  f"({_store_size(mem)}) -- skipped", flush=True)
+            rows.append({"arm": arm, "skipped": "empty store",
+                         "store": _store_size(mem)})
+            continue
         r = _bench(arm, mem, tasks, a.warmup)
         r["store"] = _store_size(mem)
         rows.append(r)
         print(f"  {arm:12s} p50={r['p50']:>9.3f}ms  p95={r['p95']:>9.3f}ms  "
               f"served={r['served']}/{r['n']}  err={r['errors']}  "
               f"store={r['store']}", flush=True)
+        if not r["served"]:
+            print(f"  {'':12s} WARNING: served 0 blocks -- the numbers above time "
+                  f"a lookup that found nothing, not a real read", flush=True)
         rel = getattr(mem, "release", None)
         if callable(rel):
             try:
@@ -201,7 +250,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     f = out / f"{a.model}_{a.benchmark}.json"
     f.write_text(json.dumps(
-        {"model": a.model, "benchmark": a.benchmark, "queries": len(tasks),
+        {"model": a.model, "benchmark": a.benchmark,
          "store_dir": str(store_dir),
          "note": "inject() wall time; no LLM in the loop; stores as written by "
                  "the paper's runs",

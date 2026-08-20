@@ -112,6 +112,9 @@ class SkillForgeLatest:
             from .refine import cross_agent_evaluate_skill, critic_refine_experience
             verdict = cross_agent_evaluate_skill(exp, llm_fn=critic_fn)
             exp.failure_taxonomy["critic_quality"] = verdict.get("total", 5)
+            # True when the critic could not be reached and the 5/10 default was
+            # used instead; without it a gateway outage looks like a real grade.
+            exp.failure_taxonomy["critic_failed"] = bool(verdict.get("critic_failed"))
             # The repair gate reads this verdict, never the actor's self-assessment.
             exp.failure_taxonomy["critic_outcome_verdict"] = \
                 str(verdict.get("outcome_verdict", "unsure")).lower()

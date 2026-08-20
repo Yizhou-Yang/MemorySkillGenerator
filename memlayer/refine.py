@@ -6,6 +6,8 @@ scores them and forces enrichment of weak entries (never discards).
 from __future__ import annotations
 from json_repair import repair_json
 import json
+import os
+import time
 from .experience import Experience
 
 AI_REVIEW_PROMPT = """You are a skill quality optimizer. REFINE this experience to maximize reusability.
@@ -256,6 +258,19 @@ def _unrefined_fallback(exp: Experience) -> dict:
         "refined": False,
     }
 
+# Critic-call resilience. The default verdict is total=5, which is the inject
+# threshold, so an unavailable critic is indistinguishable from a mediocre one
+# unless failures are retried and then counted.
+_CRITIC_TRIES = int(os.environ.get("C_CRITIC_TRIES", "4"))
+_CRITIC_BACKOFF_S = float(os.environ.get("C_CRITIC_BACKOFF_S", "3"))
+_CRITIC_FAILURES = {"n": 0}
+
+
+def critic_failure_count() -> int:
+    """How many experiences were graded by the fallback rather than the critic."""
+    return _CRITIC_FAILURES["n"]
+
+
 def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     """Cross-agent quality evaluation: an independent LLM judges skill quality.
 
@@ -263,7 +278,7 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     triggers critic_refine_experience (forced enrichment, never discard).
     """
     default = {"total": 5, "verdict": "inject", "reason": "no evaluator available",
-               "outcome_verdict": "unsure",
+               "outcome_verdict": "unsure", "critic_failed": True,
                "actionability": 2, "generalizability": 2, "correctness": 1, "novelty": 0}
 
     if llm_fn is None:
@@ -288,22 +303,38 @@ def cross_agent_evaluate_skill(exp: Experience, llm_fn=None) -> dict:
     if reasoning_context:
         prompt += reasoning_context
 
-    try:
-        response = llm_fn(prompt)
-        repaired = repair_json(response, return_objects=True)
-        if isinstance(repaired, dict):
-            repaired.setdefault("verdict", "inject" if repaired.get("total", 0) >= 5 else "skip")
-            repaired.setdefault("outcome_verdict", "unsure")
-            return repaired
-        if isinstance(repaired, list) and repaired and isinstance(repaired[0], dict):
-            result = repaired[0]
-            result.setdefault("verdict", "inject" if result.get("total", 0) >= 5 else "skip")
-            result.setdefault("outcome_verdict", "unsure")
-            return result
-    except Exception:
-        pass
-
-    return default
+    # The gateway serving the critic returns 503 in bursts (measured 2026-08-20:
+    # one model 0/24, two others ~25% failures at concurrency 8). A failed call
+    # used to fall straight through to `default`, which is total=5 -- exactly the
+    # inject threshold -- so an outage silently graded every experience as barely
+    # passing and nothing in the trace said so. Retry first, and when every try
+    # fails mark the result so the row is countable rather than indistinguishable
+    # from a real score of 5.
+    last = ""
+    for attempt in range(_CRITIC_TRIES):
+        try:
+            response = llm_fn(prompt)
+            repaired = repair_json(response, return_objects=True)
+            if isinstance(repaired, list) and repaired and isinstance(repaired[0], dict):
+                repaired = repaired[0]
+            if isinstance(repaired, dict) and repaired:
+                repaired.setdefault("verdict",
+                                    "inject" if repaired.get("total", 0) >= 5 else "skip")
+                repaired.setdefault("outcome_verdict", "unsure")
+                repaired["critic_failed"] = False
+                return repaired
+            last = "unparseable response"
+        except Exception as e:                       # noqa: BLE001 - reported below
+            last = f"{type(e).__name__}: {str(e)[:80]}"
+        if attempt + 1 < _CRITIC_TRIES:
+            time.sleep(_CRITIC_BACKOFF_S * (attempt + 1))
+    out = dict(default)
+    out["reason"] = f"critic unavailable after {_CRITIC_TRIES} tries ({last})"
+    _CRITIC_FAILURES["n"] += 1
+    if _CRITIC_FAILURES["n"] <= 3 or _CRITIC_FAILURES["n"] % 25 == 0:
+        print(f"  [critic] FAILED {_CRITIC_FAILURES['n']}x -- experience graded at the "
+              f"default 5/10, not by the critic ({last})", flush=True)
+    return out
 
 
 CRITIC_REFINE_PROMPT = """You are a skill quality enhancer. A cross-agent critic found this experience LOW QUALITY.
