@@ -156,13 +156,36 @@ def _tf_idf_fallback(query: str, doc: str) -> float:
         union = q_words | d_words
         return len(intersection) / len(union) if union else 0.0
 
+# Embedding cache. Without it, retrieve_similar re-encoded EVERY stored doc --
+# and the query itself -- once per candidate on every read: at 320 entries that
+# is 640 BERT forward passes per inject(), measured at ~57s/read on the tau2
+# store (profile 2026-08-20). Encoding is deterministic, so caching changes
+# read cost only, never a similarity value. Keyed by text; bounded FIFO so a
+# long-running process cannot grow it without limit.
+_EMB_CACHE: dict[str, "object"] = {}
+_EMB_CACHE_MAX = 50000
+
+
+def _embed_cached(text: str):
+    e = _EMB_CACHE.get(text)
+    if e is not None:
+        return e
+    model = _get_embedding_model()
+    if model is None:
+        return None
+    e = model.encode([text], normalize_embeddings=True)[0]
+    if len(_EMB_CACHE) >= _EMB_CACHE_MAX:
+        _EMB_CACHE.pop(next(iter(_EMB_CACHE)))
+    _EMB_CACHE[text] = e
+    return e
+
+
 def compute_similarity(query: str, doc: str) -> float:
     """Semantic similarity: embedding cosine (preferred) or TF-IDF cosine (fallback)."""
-    model = _get_embedding_model()
-    if model is not None:
+    q, d = _embed_cached(query), _embed_cached(doc)
+    if q is not None and d is not None:
         import numpy as np
-        embs = model.encode([query, doc], normalize_embeddings=True)
-        return float(np.dot(embs[0], embs[1]))
+        return float(np.dot(q, d))
     return _tf_idf_fallback(query, doc)
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -177,6 +200,12 @@ class ExperienceLibrary:
 
     def record(self, exp: Experience):
         self.experiences.append(exp)
+        # Pay the embedding at write time, off the read path: the first read
+        # after N writes would otherwise encode all N docs in one call.
+        try:
+            _embed_cached(exp.task_desc)
+        except Exception:
+            pass                       # cost optimization only; reads self-heal
         if exp.augmentation_used:
             key = exp.task_complexity or "unknown"
             if key not in self._augment_stats:
