@@ -174,6 +174,11 @@ _C_RAW_FALLBACK = os.environ.get("C_RAW_FALLBACK", "1") == "1"
 # isolating the curated text from the read policy around it.
 _C_RANK = (os.environ.get("C_RANK") or "lineage").strip().lower()
 _C_RENDER_RAW = os.environ.get("C_RENDER_RAW", "0") == "1"
+# C_NO_MOVED=1 drops the tool-sequence-movement term from the ranking key, leaving
+# version lineage and the grounded reuse delta. Reviewers asked what that term is
+# worth on its own; under a three-iteration chain candidates rarely share a version,
+# so the expectation is that it changes little.
+_C_NO_MOVED = os.environ.get("C_NO_MOVED", "0") == "1"
 # Curation-as-repair: chains whose previous attempt passed the threshold are
 # served B's raw rendering untouched.
 # Curation applies to FAILING chains only. Measured on every benchmark we run:
@@ -1077,7 +1082,7 @@ class CuratedMemory:
                           for d in (getattr(e, "sys_stats", None) or {}).get("reuse_deltas", [])
                           if d.get("provenance") in ("env", "gold")]
                 reuse = sum(deltas) / len(deltas) if deltas else 0.0
-                return (-ver, -moved, -reuse)
+                return (-ver, 0, -reuse) if _C_NO_MOVED else (-ver, -moved, -reuse)
             if _C_RANK == "sim":
                 # Ablation foil: keep the retriever's similarity order and let
                 # neither endorsement nor lineage reorder it.

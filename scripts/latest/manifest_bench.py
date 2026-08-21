@@ -27,6 +27,7 @@ import pickle
 import sys
 import time
 from types import SimpleNamespace as NS
+import math
 
 sys.path.insert(0, ".")
 from scripts.latest.evomem_bridge import CuratedMemory, _format_curated
@@ -88,11 +89,62 @@ def _mk(n_chains: int, per_chain: int, real_library: bool = False):
     return m
 
 
+
+def _storage_cost(maxn: int) -> None:
+    """What never deleting actually costs on the write side.
+
+    Reviewers asked for the part the read-path microbenchmark leaves out: building
+    and updating the index, the resident footprint once embeddings are counted, and
+    how fast entries can be appended. Embeddings dominate the footprint and are
+    reported separately from the metadata, since only the latter is what the
+    manifest itself adds.
+    """
+    import gc
+    import tracemalloc
+    print()
+    print("| store size | index build (ms) | append p50 (us) | metadata (MB) "
+          "| + embeddings (MB) |")
+    print("|---|---|---|---|---|")
+    n = 1000
+    while n <= maxn:
+        gc.collect()
+        tracemalloc.start()
+        from memlayer.experience import ExperienceLibrary
+        lib = ExperienceLibrary()
+        pool = [_exp(i, "chain%d" % (i % max(1, n // 3))) for i in range(n)]
+        t0 = time.perf_counter()
+        lib.experiences = list(pool)
+        lib._by_task = {}
+        for i, e in enumerate(pool):
+            lib._by_task.setdefault(e.task_id, []).append(i)
+        build_ms = (time.perf_counter() - t0) * 1000
+        meta_mb = tracemalloc.get_traced_memory()[1] / 2**20
+        tracemalloc.stop()
+
+        # append cost with the index maintained, excluding the embedding call
+        ws = []
+        for i in range(50):
+            e = _exp(n + i, "chain0")
+            t0 = time.perf_counter()
+            lib.experiences.append(e)
+            lib._by_task.setdefault(e.task_id, []).append(len(lib.experiences) - 1)
+            ws.append((time.perf_counter() - t0) * 1e6)
+        del lib.experiences[-50:]
+
+        # embeddings are the dominant term and scale with the entry count
+        emb_mb = n * 384 * 4 / 2**20        # all-MiniLM-L6-v2, float32
+        print("| $10^{%d}$ | %.0f | %.1f | %.1f | %.1f |"
+              % (round(math.log10(n)), build_ms, sorted(ws)[len(ws) // 2],
+                 meta_mb, meta_mb + emb_mb))
+        n *= 10
+
+
 def main() -> None:
     maxn = int(sys.argv[1]) if len(sys.argv) > 1 else 100_000
     print("| store size (patches) | M1 inject p50 (ms) | M2 time-travel (ms) "
           "| M3 pickle save+load (ms) | M3 size (MB) |")
     print("|---|---|---|---|---|")
+    _storage_cost(maxn)
     n = 1000
     while n <= maxn:
         per_chain = 3
