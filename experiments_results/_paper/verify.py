@@ -360,5 +360,31 @@ for name, group, want in LOCOMO_F1:
     else:
         print("ok       %s  %.2f (n=%d)" % (label, val, n)); ok += 1
 
+# ── tab:horizon: accuracy vs evidence depth (locomo native, existing runs) ──
+# Values are produced by experiments_results/_paper/horizon.py from the native
+# results files plus the dataset's own evidence annotations. The JSON snapshot
+# is committed; rerunning horizon.py must reproduce it.
+HORIZON_SRC = "experiments_results/_paper/horizon_snapshot.json"
+HORIZON = [  # (backbone, system, recent, mid, deep, multi)
+    ("hy3", "nomem", 9.3, 10.1, 10.2, 6.5), ("hy3", "raw", 26.5, 28.7, 40.0, 27.3),
+    ("hy3", "amem", 35.8, 24.8, 29.3, 14.3), ("hy3", "mem0", 43.7, 53.5, 51.6, 36.4),
+    ("hy3", "ours", 52.3, 52.7, 52.1, 40.3),
+    ("gpt-5.5", "nomem", 15.2, 19.4, 13.0, 9.1), ("gpt-5.5", "raw", 39.1, 46.5, 50.7, 33.8),
+    ("gpt-5.5", "amem", 54.3, 52.7, 61.4, 23.4), ("gpt-5.5", "mem0", 54.3, 60.5, 66.0, 42.9),
+    ("gpt-5.5", "ours", 57.6, 61.2, 69.8, 45.5),
+]
+print()
+_hp = os.path.join(ROOT, HORIZON_SRC)
+_hs = json.load(open(_hp)) if os.path.exists(_hp) else None
+for bb, sysname, *want in HORIZON:
+    label = "tab:horizon %-7s %-5s" % (bb, sysname)
+    got = (_hs or {}).get(bb, {}).get(sysname)
+    if got is None:
+        print("MISSING  %s <- %s" % (label, HORIZON_SRC)); miss += 1; continue
+    if all(abs(g - w) <= 0.05 for g, w in zip(got, want)):
+        print("ok       %s  %s" % (label, "/".join("%.1f" % w for w in want))); ok += 1
+    else:
+        print("FAIL     %s  want %s got %s" % (label, want, got)); bad += 1
+
 print("\n%d ok, %d failed, %d missing" % (ok, bad, miss))
 sys.exit(1 if (bad or miss) else 0)
