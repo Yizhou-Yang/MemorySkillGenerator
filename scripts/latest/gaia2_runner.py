@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -490,6 +491,35 @@ def _gaia2_openai_native_sync(scenario_path, task_desc, experience_section, base
 # ─── GAIA2 ARE runner (text protocol fallback + native dispatch) ──────────
 
 
+# A GAIA2 episode occupies its worker thread for the whole ARE loop -- ten
+# minutes at the median. asyncio's DEFAULT executor caps at 32 threads and is
+# also where every LLM call, every judge call and (arm C only) every curation
+# thread lands. At TASK_CONCURRENCY=24 the episodes alone hold 24 of those 32
+# slots for minutes at a time, so the short calls queue behind them; a judge
+# call that waits past its hard timeout returns "" and _judge_action_pair reads
+# `"[[Match]]" in ""` as a NON-match. The score then collapses with no error
+# recorded anywhere -- measured on arm C, whose curation threads push the pool
+# over the edge: wall time per task 149s -> 1555s across one run while the score
+# fell 63.6 -> 9.0, while arm B on the same tasks stayed at 68.2 -> 50.5.
+#
+# Episodes therefore get their own pool, sized to the task concurrency, leaving
+# the default executor entirely to the short calls.
+_EPISODE_POOL = None
+_EPISODE_POOL_LOCK = threading.Lock()
+
+
+def _episode_pool():
+    global _EPISODE_POOL
+    if _EPISODE_POOL is None:
+        with _EPISODE_POOL_LOCK:
+            if _EPISODE_POOL is None:
+                import concurrent.futures
+                n = int(os.environ.get("TASK_CONCURRENCY", "8"))
+                _EPISODE_POOL = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=max(4, n + 2), thread_name_prefix="gaia2-episode")
+    return _EPISODE_POOL
+
+
 async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
                                    group: str = "A", **kwargs) -> dict:
     """Run a GAIA2 task using the real ARE simulation environment.
@@ -549,7 +579,7 @@ async def run_gaia2_task_with_are(task: dict, experience_section: str = "",
             _ctx = _cv.copy_context()
             _max_turns = int(os.environ.get("GAIA2_MAX_TURNS", "40"))
             native = await loop.run_in_executor(
-                None, lambda: _ctx.run(
+                _episode_pool(), lambda: _ctx.run(
                     worker, scenario_path, task_desc, experience_section,
                     dict(result), _max_turns),
             )

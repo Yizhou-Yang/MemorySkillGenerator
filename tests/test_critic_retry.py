@@ -57,4 +57,12 @@ check("empty response retried too", calls3["n"] == 3, f"calls={calls3['n']}")
 check("empty response flagged as failure", v3.get("critic_failed") is True)
 
 print("\n" + ("CRITIC RETRY VERIFIED" if ok else "CHECKS FAILED"))
-sys.exit(0 if ok else 1)
+
+
+def test_critic_retry():
+    """pytest entry point; the checks above run at import and record into `ok`."""
+    assert ok
+
+
+if __name__ == "__main__":
+    sys.exit(0 if ok else 1)

@@ -495,6 +495,15 @@ async def _judge_user_message(
     return "[[Success]]" in content, content
 
 
+# Empty judge verdicts, counted. See _judge_action_pair.
+_JUDGE_EMPTY = {"n": 0}
+
+
+def judge_empty_count() -> int:
+    """Pairs whose verdict came back empty and were scored as non-matches."""
+    return _JUDGE_EMPTY["n"]
+
+
 async def _judge_action_pair(
     llm_call: LLMCallFn,
     *,
@@ -550,6 +559,17 @@ async def _judge_action_pair(
         f"- Agent Action Call:\n{_format_args(agent_action.args)}"
     )
     content = await llm_call(system_prompt, user_prompt)
+    if not (content or "").strip():
+        # An empty verdict is an unreachable judge, not a mismatch. Reading it as
+        # `"[[Match]]" in ""` silently zeroes the pair -- and with it the task's
+        # recall -- while nothing anywhere records a failure. Count it so a run
+        # starved of judge capacity is visible in the log instead of looking like
+        # an agent that stopped working.
+        _JUDGE_EMPTY["n"] += 1
+        if _JUDGE_EMPTY["n"] <= 3 or _JUDGE_EMPTY["n"] % 50 == 0:
+            print("  [gaia2 judge] EMPTY verdict %dx -- pair scored as NO-match; "
+                  "the judge did not answer" % _JUDGE_EMPTY["n"], flush=True)
+        return False, "__judge_unavailable__"
     return "[[Match]]" in content, content
 
 
